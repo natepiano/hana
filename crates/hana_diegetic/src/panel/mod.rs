@@ -102,7 +102,7 @@ pub use sizing::Percent;
 pub use sizing::Pixels;
 pub use sizing::Points;
 
-use crate::cascade::CascadePlugin;
+use crate::cascade;
 use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
@@ -157,14 +157,13 @@ pub struct HeadlessLayoutPlugin;
 impl Plugin for HeadlessLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(DiagnosticsPlugin)
-            .add_plugins(CascadePlugin::<FontUnit>::default())
-            // These live here, not in `RenderPlugin`, because
-            // `seed_panel_overrides` reads their `CascadeDefault<A>` resources
-            // — headless layout apps must have them.
-            .add_plugins(CascadePlugin::<AntiAlias>::default())
-            .add_plugins(CascadePlugin::<HairlineFade>::default())
-            .add_plugins(CascadePlugin::<HdrTextCoverageBias>::default())
-            .add_plugins(CascadePlugin::<ShadowCasting>::default())
+            .add_plugins(cascade::cascade_plugin::<FontUnit>())
+            // `HeadlessLayoutPlugin` registers the attribute cascades because
+            // `DiegeticPanel` participates even when `RenderPlugin` is absent.
+            .add_plugins(cascade::cascade_plugin::<AntiAlias>())
+            .add_plugins(cascade::cascade_plugin::<HairlineFade>())
+            .add_plugins(cascade::cascade_plugin::<HdrTextCoverageBias>())
+            .add_plugins(cascade::cascade_plugin::<ShadowCasting>())
             .add_observer(diegetic_panel::seed_panel_overrides)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
@@ -180,7 +179,8 @@ impl Plugin for HeadlessLayoutPlugin {
                 Update,
                 (
                     PanelSystems::ApplyTreeChanges.before(PanelSystems::ApplyConversions),
-                    PanelSystems::ApplyConversions.before(PanelSystems::ComputeLayout),
+                    PanelSystems::ApplyConversions.before(CascadeSet::Propagate),
+                    CascadeSet::Propagate.before(PanelSystems::ComputeLayout),
                     PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
                 ),
             )
@@ -197,7 +197,6 @@ impl Plugin for HeadlessLayoutPlugin {
                         .in_set(PanelSystems::ApplyConversions),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
-                    diegetic_panel::sync_panel_cascade_overrides.before(CascadeSet::Propagate),
                 ),
             )
             .configure_sets(

@@ -1194,8 +1194,8 @@ mod tests {
 
     use super::*;
     use crate::Mm;
+    use crate::cascade;
     use crate::cascade::CascadeEntityCommandsExt;
-    use crate::cascade::CascadePlugin;
     use crate::cascade::HdrTextCoverageBias;
     use crate::cascade::TextMaterial;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
@@ -1255,11 +1255,11 @@ mod tests {
             .add_plugins(TransformPlugin)
             .insert_resource(monospace_measurer())
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<TextAlpha>::default())
-            .add_plugins(CascadePlugin::<TextMaterial>::default())
-            .add_plugins(CascadePlugin::<Lighting>::default())
-            .add_plugins(CascadePlugin::<Sidedness>::default())
-            .add_plugins(CascadePlugin::<GlyphShadowMode>::default())
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
+            .add_plugins(cascade::cascade_plugin::<TextMaterial>())
+            .add_plugins(cascade::cascade_plugin::<Lighting>())
+            .add_plugins(cascade::cascade_plugin::<Sidedness>())
+            .add_plugins(cascade::cascade_plugin::<GlyphShadowMode>())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
@@ -1454,6 +1454,34 @@ mod tests {
 
         assert_eq!(store_stats(&fully_clipped), (0, 0, 0));
         assert_eq!(frame_material_row_count(&fully_clipped), absent_rows);
+    }
+
+    #[test]
+    fn production_pipeline_routes_panel_alpha_on_first_frame() {
+        let mut app = pipeline_app();
+        assert_eq!(
+            app.world().resource::<CascadeDefault<TextAlpha>>().0.0,
+            AlphaMode::Blend
+        );
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .text_alpha_mode(AlphaMode::Add)
+                .with_tree(one_text_tree())
+                .build()
+                .expect("panel should build"),
+        );
+
+        app.update();
+
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (key, batch) = store.batches().next().expect("one text batch should exist");
+        assert_eq!(batch.run_count(), 1);
+        assert_eq!(
+            key.pipeline_compatibility.alpha,
+            AlphaMode::Add.into(),
+            "the first routed batch should use the panel override"
+        );
     }
 
     #[test]

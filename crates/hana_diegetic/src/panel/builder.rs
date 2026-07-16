@@ -177,6 +177,11 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     pub(super) fn new_screen() -> Self {
         Self {
             data:   BuilderData {
+                // Screen overlays remain legible when an application changes
+                // its world-text alpha default for demonstration or rendering
+                // purposes. Authors can opt back into the global cascade with
+                // `inherit_text_alpha` after spawning the panel.
+                text_alpha_mode: Cascade::Override(AlphaMode::Blend),
                 coordinate_space: CoordinateSpace::Screen {
                     position:      ScreenPosition::default(),
                     // Placeholder — `.size()` overwrites both axes before build().
@@ -826,9 +831,13 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
 
 #[cfg(test)]
 mod tests {
+    use bevy::prelude::AlphaMode;
+    use bevy_kana::Cascade;
+
     use super::PanelBuildError;
     use crate::DiegeticPanel;
     use crate::El;
+    use crate::Fit;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
@@ -841,6 +850,17 @@ mod tests {
 
     fn field_spec() -> ImeEditableFieldSpec {
         ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text))
+    }
+
+    #[test]
+    fn screen_panel_authors_stable_text_alpha() {
+        let result = DiegeticPanel::screen().size(Fit, Fit).build();
+
+        assert!(matches!(
+            result,
+            Ok(panel)
+                if panel.text_alpha_mode == Cascade::Override(AlphaMode::Blend)
+        ));
     }
 
     #[test]

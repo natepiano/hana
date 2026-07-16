@@ -453,7 +453,7 @@ impl LayoutTree {
 
     /// Returns the PBR material authoring for the element at `index`.
     #[must_use]
-    pub fn element_material(&self, index: usize) -> Cascade<&Handle<StandardMaterial>> {
+    pub(crate) fn element_material(&self, index: usize) -> Cascade<&Handle<StandardMaterial>> {
         self.elements
             .get(index)
             .map_or(Cascade::Inherit, |element| element.material.as_ref())
@@ -482,7 +482,7 @@ impl LayoutTree {
 
     /// Returns the anti-alias authoring for the element at `index`.
     #[must_use]
-    pub fn element_anti_alias(&self, index: usize) -> Cascade<AntiAlias> {
+    pub(crate) fn element_anti_alias(&self, index: usize) -> Cascade<AntiAlias> {
         self.elements
             .get(index)
             .map_or(Cascade::Inherit, |element| element.anti_alias)
@@ -490,7 +490,7 @@ impl LayoutTree {
 
     /// Returns the hairline fade authoring for the element at `index`.
     #[must_use]
-    pub fn element_hairline_fade(&self, index: usize) -> Cascade<HairlineFade> {
+    pub(crate) fn element_hairline_fade(&self, index: usize) -> Cascade<HairlineFade> {
         self.elements
             .get(index)
             .map_or(Cascade::Inherit, |element| element.hairline_fade)
@@ -498,7 +498,7 @@ impl LayoutTree {
 
     /// Returns the shadow-casting authoring for the element at `index`.
     #[must_use]
-    pub fn element_shadow_casting(&self, index: usize) -> Cascade<ShadowCasting> {
+    pub(crate) fn element_shadow_casting(&self, index: usize) -> Cascade<ShadowCasting> {
         self.elements
             .get(index)
             .map_or(Cascade::Inherit, |element| element.shadow_casting)
@@ -1045,12 +1045,12 @@ mod tests {
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
     use crate::CalloutCap;
-    use crate::Cascade;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelElementId;
+    use crate::cascade::Cascade;
     use crate::layout::AlignX;
     use crate::layout::AlignY;
     use crate::layout::Border;

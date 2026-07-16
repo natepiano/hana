@@ -2071,14 +2071,14 @@ mod tests {
     fn assert_fade_exempt_marks(lines: &[PanelLine], major_marks: &[i32]) {
         let (spine, ticks) = lines.split_last().expect("ruler lines should not be empty");
         assert_eq!(
-            spine.line_style().hairline_fade_value(),
+            spine.line_style().hairline_fade_override(),
             Some(HairlineFade::Full),
             "spine must pin HairlineFade::Full"
         );
         for (mark, tick) in (0_i32..).zip(ticks) {
             let expected = major_marks.contains(&mark).then_some(HairlineFade::Full);
             assert_eq!(
-                tick.line_style().hairline_fade_value(),
+                tick.line_style().hairline_fade_override(),
                 expected,
                 "tick at mark {mark} has the wrong fade override"
             );

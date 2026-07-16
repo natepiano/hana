@@ -525,17 +525,19 @@ impl PanelCircle {
 
     /// Returns the shape-local source material authoring.
     #[must_use]
-    pub const fn material_handle(&self) -> Cascade<&Handle<StandardMaterial>> {
+    pub(crate) const fn material_handle(&self) -> Cascade<&Handle<StandardMaterial>> {
         self.material.as_ref()
     }
 
     /// Returns the hairline fade authoring.
     #[must_use]
-    pub const fn hairline_fade_value(&self) -> Cascade<HairlineFade> { self.hairline_fade }
+    pub(crate) const fn hairline_fade_value(&self) -> Cascade<HairlineFade> { self.hairline_fade }
 
     /// Returns the shadow-casting authoring.
     #[must_use]
-    pub const fn shadow_casting_value(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
+    pub(crate) const fn shadow_casting_value(&self) -> Cascade<ShadowCasting> {
+        self.shadow_casting
+    }
 
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         Self {
@@ -627,17 +629,13 @@ impl ResolvedPanelShape {
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
 
-    /// Returns the source material authoring resolved for this shape.
-    #[must_use]
-    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
-
     /// Returns the authored hairline fade policy.
     #[must_use]
-    pub const fn hairline_fade(&self) -> Cascade<HairlineFade> { self.hairline_fade }
+    pub(crate) const fn hairline_fade(&self) -> Cascade<HairlineFade> { self.hairline_fade }
 
     /// Returns the authored shadow-casting policy.
     #[must_use]
-    pub const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
+    pub(crate) const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
 
     /// Returns shaft and cap primitives in stable part order.
     #[must_use]
@@ -663,7 +661,9 @@ impl ResolvedPanelShapePrimitive {
 
     /// Returns the source material authoring resolved for this primitive.
     #[must_use]
-    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
+    pub(crate) const fn material(&self) -> Cascade<&Handle<StandardMaterial>> {
+        self.material.as_ref()
+    }
 
     /// Returns this primitive's visual bounds.
     #[must_use]
@@ -1232,7 +1232,7 @@ impl LineStyle {
 
     /// Returns the source material authoring for this line style.
     #[must_use]
-    pub const fn material_handle(&self) -> Cascade<&Handle<StandardMaterial>> {
+    pub(crate) const fn material_handle(&self) -> Cascade<&Handle<StandardMaterial>> {
         self.material.as_ref()
     }
 
@@ -1262,13 +1262,19 @@ impl LineStyle {
         self
     }
 
-    /// Returns the hairline fade authoring.
+    /// Returns the authored hairline fade override, if present.
     #[must_use]
-    pub const fn hairline_fade_value(&self) -> Cascade<HairlineFade> { self.hairline_fade }
+    pub const fn hairline_fade_override(&self) -> Option<HairlineFade> {
+        self.hairline_fade.as_override().copied()
+    }
+
+    pub(crate) const fn hairline_fade_value(&self) -> Cascade<HairlineFade> { self.hairline_fade }
 
     /// Returns the shadow-casting authoring.
     #[must_use]
-    pub const fn shadow_casting_value(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
+    pub(crate) const fn shadow_casting_value(&self) -> Cascade<ShadowCasting> {
+        self.shadow_casting
+    }
 
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         Self {

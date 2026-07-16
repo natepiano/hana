@@ -35,8 +35,8 @@ use super::material_table::MaterialTableAppendReady;
 use super::precompose;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
+use crate::cascade;
 use crate::cascade::Cascade;
-use crate::cascade::CascadePlugin;
 use crate::cascade::TextAlpha;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
@@ -82,10 +82,10 @@ pub(super) struct TextRenderPlugin;
 
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(CascadePlugin::<TextAlpha>::default());
-        app.add_plugins(CascadePlugin::<GlyphShadowMode>::default());
-        app.add_plugins(CascadePlugin::<Lighting>::default());
-        app.add_plugins(CascadePlugin::<Sidedness>::default());
+        app.add_plugins(cascade::cascade_plugin::<TextAlpha>());
+        app.add_plugins(cascade::cascade_plugin::<GlyphShadowMode>());
+        app.add_plugins(cascade::cascade_plugin::<Lighting>());
+        app.add_plugins(cascade::cascade_plugin::<Sidedness>());
         app.add_observer(seed_panel_text_child_alpha);
         app.add_observer(seed_panel_text_child_glyph);
         app.init_resource::<TextShapingContext>();

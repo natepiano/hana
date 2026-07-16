@@ -69,6 +69,15 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 
 ## Capability rules
 
+### Owning-crate examples
+
+An owning crate may use `fairy_dust` as a dev-dependency for its examples.
+Fairy Dust supplies presentation, camera, and controls; the demonstrated
+behavior must use the owning crate's API directly. For example,
+`crates/bevy_kana/examples/cascade.rs` uses Fairy Dust to present cubes and
+status panels while `Cascade`, `CascadeFrom`, and `Resolved` remain the
+demonstrated API.
+
 ### Always include
 
 - `.with_brp_extras()` — BRP remote control + port in window title.

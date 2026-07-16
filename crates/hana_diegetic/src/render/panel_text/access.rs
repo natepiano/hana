@@ -4,9 +4,9 @@
 //! - **By user marker** — [`DiegeticTextMut`] retexts standalone
 //!   [`DiegeticText`](crate::DiegeticText) labels: name a marker `M`, call `set`/`for_each_mut`. It
 //!   traverses the panel→run relationship internally, the ergonomic path for "retext my labels".
-//! - **By [`PanelElementId`]** — [`PanelText`] is the read-write `SystemParam` for a named run on a
-//!   multi-run panel; [`PanelTextReader`] is the read-only variant a reader system uses so it does
-//!   not serialize on the `&mut DiegeticPanel` write claim.
+//! - **By [`PanelElementId`]** — [`PanelText`] is the read-write `SystemParam` for a named run's
+//!   text or authored style on a multi-run panel; [`PanelTextReader`] is the read-only variant a
+//!   reader system uses so it does not serialize on the `&mut DiegeticPanel` write claim.
 //!
 //! The id-addressed pair resolve a run through the panel's `id → Entity` index
 //! ([`DiegeticPanel::text_child`]) and validate liveness via their
@@ -107,10 +107,10 @@ impl PanelTextReader<'_, '_> {
 /// Read-write access to panel text runs by [`PanelElementId`].
 ///
 /// `set_text` writes the run's string into the panel's authoritative `El.text`
-/// cache (via `DiegeticPanel::sync_run_text_cache`) and bumps the tree
-/// revision, so the next layout re-wraps it and reconcile re-derives the child —
-/// passing the whole string works for both single-line and wrapped runs. Reads
-/// also come from the `El.text` cache. Both go through a single
+/// cache, while `set_style` writes its authored `El.config`. Either edit bumps
+/// the tree revision, so the next layout and reconcile derive the run child
+/// from the same source. Passing the whole string works for both single-line
+/// and wrapped runs. Reads also come from the `El.text` cache. Both go through a single
 /// `&mut DiegeticPanel` query, so this cannot embed a [`PanelTextReader`] (its
 /// `&DiegeticPanel` query would conflict); the resolution helpers are shared as
 /// free functions instead.
@@ -195,6 +195,29 @@ impl PanelText<'_, '_> {
             element_idx,
         }
         .set_text(text);
+        true
+    }
+
+    /// Sets a named run's authored style, returning whether a run was found.
+    ///
+    /// The panel tree's `El.config` is authoritative for both measurement and
+    /// rendering; the materialized run child is derived output. `set_style`
+    /// writes the tree config and lets the next layout and reconcile apply the
+    /// style, so a font change also refits the panel and a cascade-authoring
+    /// change remains in force after later text edits. An unchanged style does
+    /// not dirty the panel.
+    pub fn set_style(&mut self, panel: Entity, id: &PanelElementId, style: TextStyle) -> bool {
+        let Some(child) = self.entity(panel, id) else {
+            return false;
+        };
+        let Ok(layout) = self.layouts.get(child) else {
+            return false;
+        };
+        let element_idx = layout.element_idx;
+        let Ok((mut data, _, _)) = self.panels.get_mut(panel) else {
+            return false;
+        };
+        data.restyle_run(element_idx, style);
         true
     }
 
@@ -749,6 +772,31 @@ mod tests {
             })
             .expect("system runs");
         assert_eq!(still.as_deref(), Some("Hi"), "the run text is unchanged");
+    }
+
+    #[test]
+    fn set_style_through_panel_text_refits_the_panel() {
+        let mut app = app_with_measurer(font_id_height_measurer());
+        let id = PanelElementId::named("title");
+        let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
+        let before = content_height(&app, panel);
+
+        let target = id;
+        let wrote = app
+            .world_mut()
+            .run_system_once(move |mut text: PanelText| {
+                text.set_style(panel, &target, TextStyle::new(10.0).with_font(1))
+            })
+            .expect("system runs");
+        assert!(wrote, "a named run should accept the restyle");
+        app.update();
+
+        let after = content_height(&app, panel);
+        assert!(
+            after > before,
+            "a named restyle must update the authoritative tree and refit the panel: \
+             height {before} -> {after}",
+        );
     }
 
     #[test]

@@ -1,36 +1,32 @@
 use bevy::prelude::*;
 
-use crate::cascade;
-use crate::cascade::CascadeDefault;
-use crate::cascade::Override;
-use crate::cascade::Resolved;
+use crate::cascade::Cascade;
+use crate::cascade::CascadeFrom;
 use crate::cascade::TextAlpha;
 use crate::render::world_text::TextContent;
 
-/// Spawn-time cascade seed for a panel label's text alpha.
+/// Connects a panel label to its panel's text-alpha cascade.
 ///
 /// A panel label (a `TextContent` run) is depth-2 under its panel. This
-/// observer fires when a label first gains [`TextContent`] and seeds its
-/// [`Resolved<TextAlpha>`] via [`resolve_walk`](cascade::resolve_walk), which
-/// `update_panel_text_batches` reads as a batch-key field. The walk honors the
-/// label's own `Override<TextAlpha>` first — `reconcile_panel_text_children`
-/// inserts one when the label authored its alpha
-/// (`TextStyle::with_alpha_mode`), in the same bundle as the run's
-/// [`TextContent`] so it is present here — then climbs `ChildOf` to the panel's
-/// `Override<TextAlpha>`, else the global default. The standalone
+/// observer fires when a label first gains [`TextContent`] and queues explicit
+/// [`CascadeFrom`] construction. After the surrounding construction commands
+/// apply, it inserts inheriting `Cascade<TextAlpha>` only when the label still
+/// has no authored value, so `TextStyle::with_alpha_mode` always wins. The standalone
 /// `seed_world_text_overrides` bridge skips labels (its `Without<TextContent>`
-/// filter), so they are seeded only here. Later alpha changes flow through the
-/// propagation pass, not this observer.
-pub(super) fn seed_panel_text_child_alpha(
-    trigger: On<Add, TextContent>,
-    overrides: Query<&Override<TextAlpha>>,
-    parents: Query<&ChildOf>,
-    default: Res<CascadeDefault<TextAlpha>>,
-    mut commands: Commands,
-) {
+/// filter), so labels participate only through this bridge.
+pub(super) fn seed_panel_text_child_alpha(trigger: On<Add, TextContent>, mut commands: Commands) {
     let entity = trigger.event_target();
-    let resolved = cascade::resolve_walk::<TextAlpha>(entity, &overrides, &parents, default.0);
-    commands.entity(entity).insert(Resolved(resolved));
+    commands.queue(move |world: &mut World| {
+        let Some(panel) = world.get::<ChildOf>(entity).map(ChildOf::parent) else {
+            return;
+        };
+        world.entity_mut(entity).insert(CascadeFrom::new(panel));
+        if world.get::<Cascade<TextAlpha>>(entity).is_none() {
+            world
+                .entity_mut(entity)
+                .insert(Cascade::<TextAlpha>::Inherit);
+        }
+    });
 }
 
 #[cfg(test)]
@@ -42,11 +38,16 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::CascadeEntityCommandsExt as _;
+    use crate::Fit;
     use crate::LayoutBuilder;
     use crate::Mm;
     use crate::TextContent;
     use crate::TextStyle;
-    use crate::cascade::CascadePlugin;
+    use crate::cascade;
+    use crate::cascade::CascadeDefault;
+    use crate::cascade::CascadeSet;
+    use crate::cascade::Resolved;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
@@ -77,10 +78,10 @@ mod tests {
 
     /// Stand-in for `reconcile_panel_text_children`: parents one label under
     /// the panel during a command flush, once the panel carries its
-    /// `Override<TextAlpha>`.
+    /// `Cascade<TextAlpha>`.
     fn spawn_label_once(
         panel: Res<TestPanel>,
-        ready: Query<(), (With<DiegeticPanel>, With<Override<TextAlpha>>)>,
+        ready: Query<(), (With<DiegeticPanel>, With<Cascade<TextAlpha>>)>,
         labels: Query<(), With<TextContent>>,
         mut commands: Commands,
     ) {
@@ -120,7 +121,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .add_observer(seed_panel_text_child_alpha)
             .init_resource::<SeenLabelAlpha>();
 
@@ -139,16 +140,18 @@ mod tests {
         app.insert_resource(TestPanel(panel_entity));
         app.add_systems(
             Update,
-            (spawn_label_once, read_label_alpha.after(spawn_label_once)),
+            (
+                spawn_label_once.before(CascadeSet::Propagate),
+                read_label_alpha.after(CascadeSet::Propagate),
+            ),
         );
 
         for _ in 0..5 {
             app.update();
         }
 
-        // The label's `Resolved<TextAlpha>` was seeded by `seed_panel_child_alpha`
-        // during the same flush that spawned the label, so the reader saw the
-        // panel's overridden `Add` — not the `Blend` fallback.
+        // `spawn_label_once` runs before `CascadeSet::Propagate`, so the reader
+        // sees the panel's overridden `Add`, not the `Blend` fallback.
         assert_eq!(
             app.world().resource::<SeenLabelAlpha>().0,
             Some(AlphaMode::Add)
@@ -156,17 +159,94 @@ mod tests {
     }
 
     #[test]
+    fn panel_inheritance_survives_layout_tree_replacement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(measurer())
+            .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
+            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Blend)))
+            .add_observer(seed_panel_text_child_alpha)
+            .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
+
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(50.0), Mm(30.0))
+                    .text_alpha_mode(AlphaMode::Add)
+                    .with_tree(alpha_panel_tree("initial"))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        for _ in 0..3 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world()
+                .get::<Cascade<TextAlpha>>(panel)
+                .expect("panel should carry authored text alpha"),
+            &Cascade::Override(TextAlpha(AlphaMode::Add))
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<TextAlpha>>(panel)
+                .expect("panel should resolve its construction seed")
+                .0
+                .0,
+            AlphaMode::Add
+        );
+        assert_eq!(single_label_alpha(&mut app), AlphaMode::Add);
+
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::AlphaToCoverage);
+        {
+            let mut commands = app.world_mut().commands();
+            commands.entity(panel).inherit_text_alpha();
+            commands.set_tree(panel, alpha_panel_tree("replacement"));
+        }
+        for _ in 0..2 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world()
+                .get::<Cascade<TextAlpha>>(panel)
+                .expect("panel should retain runtime inheritance"),
+            &Cascade::Inherit
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<TextAlpha>>(panel)
+                .expect("panel should resolve the changed global default")
+                .0
+                .0,
+            AlphaMode::AlphaToCoverage
+        );
+        let label = single_label_entity(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<Cascade<TextAlpha>>(label)
+                .expect("label should retain authored inheritance"),
+            &Cascade::Inherit
+        );
+        assert_eq!(single_label_alpha(&mut app), AlphaMode::AlphaToCoverage);
+    }
+
+    #[test]
     fn label_resolves_to_global_default_when_panel_has_no_override() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(measurer())
-            // Set the global default before `HeadlessLayoutPlugin` init-defaults it.
-            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Multiply)))
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
+            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Multiply)))
             .add_observer(seed_panel_text_child_alpha);
 
-        // Panel authors no `text_alpha_mode`, so it carries no `Override<TextAlpha>`.
+        // Panel authors no `text_alpha_mode`, so it carries no `Cascade<TextAlpha>`.
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|b| {
@@ -176,9 +256,9 @@ mod tests {
             .expect("test panel should build");
         let panel_entity = app.world_mut().spawn(panel).id();
 
-        // The label climbs `ChildOf` past the panel (no override there) to the
-        // root, resolving to the global default — the designed tree-following
-        // rule, not a stop-at-panel boundary.
+        // `seed_panel_text_child_alpha` inserts `CascadeFrom(panel)`. Because
+        // the panel has no override, `CascadePlugin<TextAlpha>` uses
+        // `CascadeDefault<TextAlpha>`.
         let label = app
             .world_mut()
             .spawn((TextContent::new("label"), ChildOf(panel_entity)))
@@ -196,18 +276,58 @@ mod tests {
     }
 
     #[test]
+    fn screen_panel_labels_keep_the_screen_alpha_default() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(measurer())
+            .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
+            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::AlphaToCoverage)))
+            .add_observer(seed_panel_text_child_alpha);
+
+        let panel = DiegeticPanel::screen()
+            .size(Fit, Fit)
+            .build()
+            .expect("screen panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        let label = app
+            .world_mut()
+            .spawn((TextContent::new("label"), ChildOf(panel)))
+            .id();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<Resolved<TextAlpha>>(panel)
+                .expect("screen panel should resolve text alpha")
+                .0
+                .0,
+            AlphaMode::Blend
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<TextAlpha>>(label)
+                .expect("screen label should resolve text alpha")
+                .0
+                .0,
+            AlphaMode::Blend
+        );
+    }
+
+    #[test]
     fn label_with_own_alpha_overrides_inherited_panel_alpha() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .add_observer(seed_panel_text_child_alpha)
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
 
         // Panel sets `Add` for its labels; the one label authors its own
         // `Multiply` via `TextStyle::with_alpha_mode`. `reconcile` inserts
-        // the label's `Override<TextAlpha>`, which the walk resolves ahead of
+        // the label's `Cascade<TextAlpha>`, which the walk resolves ahead of
         // the panel's inherited alpha.
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
@@ -245,7 +365,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .add_observer(seed_panel_text_child_alpha)
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
 
@@ -264,7 +384,7 @@ mod tests {
         assert_eq!(single_label_alpha(&mut app), AlphaMode::Multiply);
 
         // The label drops its own alpha. `reconcile` removes the label's
-        // `Override<TextAlpha>` (its update arm), and the propagation pass
+        // `Cascade<TextAlpha>` (its update arm), and the propagation pass
         // re-inherits the panel's `Add`.
         app.world_mut()
             .commands()
@@ -275,13 +395,28 @@ mod tests {
         assert_eq!(single_label_alpha(&mut app), AlphaMode::Add);
     }
 
-    /// Resolved alpha of the scene's single panel label.
-    fn single_label_alpha(app: &mut App) -> AlphaMode {
+    fn alpha_panel_tree(text: &str) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text((text, TextStyle::new(13.0)));
+        builder.build()
+    }
+
+    fn single_label_entity(app: &mut App) -> Entity {
         let mut query = app
             .world_mut()
-            .query_filtered::<&Resolved<TextAlpha>, With<TextContent>>();
-        let resolved: Vec<AlphaMode> = query.iter(app.world()).map(|r| r.0.0).collect();
-        assert_eq!(resolved.len(), 1, "expected exactly one panel label");
-        resolved[0]
+            .query_filtered::<Entity, With<TextContent>>();
+        let labels: Vec<Entity> = query.iter(app.world()).collect();
+        assert_eq!(labels.len(), 1, "expected exactly one panel label");
+        labels[0]
+    }
+
+    /// Resolved alpha of the scene's single panel label.
+    fn single_label_alpha(app: &mut App) -> AlphaMode {
+        let label = single_label_entity(app);
+        app.world()
+            .get::<Resolved<TextAlpha>>(label)
+            .expect("label should resolve text alpha")
+            .0
+            .0
     }
 }

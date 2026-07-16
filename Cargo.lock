@@ -1132,6 +1132,9 @@ version = "0.2.0-dev"
 dependencies = [
  "bevy",
  "bevy_enhanced_input",
+ "bevy_lagrange",
+ "fairy_dust",
+ "hana_diegetic",
 ]
 
 [[package]]

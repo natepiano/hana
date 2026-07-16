@@ -1,132 +1,12 @@
-//! One parent-walking cascade with per-entity `Resolved<A>` caches.
+//! Diegetic cascade attributes and typed public commands.
 //!
-//! Some text and material attributes inherit through the entity tree: text
-//! alpha mode, HDR coverage bias, font unit, and source material handles today.
-//! The rule is one sentence, applied by following `ChildOf`:
-//! *my own override, else my parent's, else the global default at the root.*
-//! A standalone text is depth-1 off the root, a panel is depth-1, and a panel
-//! label is depth-2; deeper nesting needs no new type.
-//!
-//! # Using the cascade
-//!
-//! Entity-local authoring goes through typed
-//! [`EntityCommands`](bevy::ecs::system::EntityCommands) extension methods from
-//! [`CascadeEntityCommandsExt`]:
-//!
-//! ```ignore
-//! commands
-//!     .spawn(TextContent::new("hi"))
-//!     .override_text_alpha(AlphaMode::Add)
-//!     .override_font_unit(Unit::Millimeters);
-//!
-//! commands.entity(text).inherit_text_alpha();
-//! let alpha = resolved_text_alpha(world, text);
-//! ```
-//!
-//! `override_*` and `inherit_*` are command methods, not `TextProps` setters.
-//! Use the same `override_*` verb at spawn and at runtime. A write scheduled
-//! before [`CascadeSet::Propagate`] is visible to readers scheduled after that
-//! set in the same `Update`; readers before it see the prior frame. If a write
-//! runs after [`CascadeSet::Propagate`], descendants update on the next frame.
-//! The directly overridden entity is self-healed when the command flushes so a
-//! same-frame spawn override has the authored value available immediately.
-//!
-//! Global cascade defaults are per attribute:
-//!
-//! ```ignore
-//! app.insert_resource(CascadeDefault(TextAlpha(AlphaMode::Add)));
-//! ```
-//!
-//! # The mechanism is attribute-agnostic
-//!
-//! [`CascadeProperty`], the internal [`CascadeAttr`] reflection contract,
-//! [`Override<A>`], [`Resolved<A>`], the parent-walk ([`resolve_walk`]), and
-//! the propagation pass are all generic over the attribute. Any value that
-//! should resolve *my override, else my parent's, else a global default* plugs
-//! in as a `cascade_attr!` declaration plus one
-//! [`CascadeDefault<A>`](CascadeDefault) resource, one plugin line, and typed
-//! `override_*` / `inherit_*` / `resolved_*` wrappers.
-//!
-//! | Attribute | Global default | Public verbs |
-//! | --- | --- | --- |
-//! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `override_text_alpha`, `inherit_text_alpha`, [`resolved_text_alpha`] |
-//! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
-//! | [`HdrTextCoverageBias`] | `CascadeDefault<HdrTextCoverageBias>` | `override_hdr_text_coverage_bias`, `inherit_hdr_text_coverage_bias`, [`resolved_hdr_text_coverage_bias`] |
-//! | [`SdfMaterial`] | `CascadeDefault<SdfMaterial>` | `override_sdf_material`, `inherit_sdf_material`, [`resolved_sdf_material`] |
-//! | [`TextMaterial`] | `CascadeDefault<TextMaterial>` | `override_text_material`, `inherit_text_material`, [`resolved_text_material`] |
-//! | [`ShapeMaterial`] | `CascadeDefault<ShapeMaterial>` | `override_shape_material`, `inherit_shape_material`, [`resolved_shape_material`] |
-//! | [`Lighting`](crate::Lighting) | `CascadeDefault<Lighting>` | `override_lighting`, `inherit_lighting`, [`resolved_lighting`] |
-//! | [`Sidedness`](crate::Sidedness) | `CascadeDefault<Sidedness>` | `override_sidedness`, `inherit_sidedness`, [`resolved_sidedness`] |
-//! | [`AntiAlias`](crate::AntiAlias) | `CascadeDefault<AntiAlias>`, mirrored from the `AntiAlias` resource | `override_anti_alias`, `inherit_anti_alias`, [`resolved_anti_alias`] |
-//! | [`HairlineFade`](crate::HairlineFade) | `CascadeDefault<HairlineFade>`, mirrored from [`HairlineWidth::fade`](crate::HairlineWidth) | `override_hairline_fade`, `inherit_hairline_fade`, [`resolved_hairline_fade`] |
-//!
-//! `Lighting`, `Sidedness`, `AntiAlias`, and `HairlineFade` are existing value
-//! types joined to the cascade with `cascade_attr!(existing ...)` — the
-//! attribute *is* the value type, with no wrapper struct. `Lighting` and
-//! `Sidedness` resolve once per panel and feed both glyph runs and panel
-//! lines. Panel line elements additionally override anti-alias and hairline
-//! fade per element through the layout tree
-//! ([`El::anti_alias`](crate::El::anti_alias) /
-//! [`El::hairline_fade`](crate::El::hairline_fade)), resolved as element
-//! override else the panel entity's cascade value.
-//!
-//! # Membership is a property of the tree, not of a shared component
-//!
-//! A node declares an override by carrying [`Override<A>`] — one generic
-//! component per attribute. An entity holds at most one of any component, so
-//! "two sources for one attribute on one node" has no representation and no
-//! exclusion marker is needed. Node *kind* (standalone / panel / label) is
-//! carried by the `TextContent` / `DiegeticPanel` markers and
-//! selects which render system draws the entity — orthogonal to the cascade.
-//!
-//! # Write paths
-//!
-//! - **Spawn.** The node-kind authoring bridges seed each participant's initial `Resolved<A>`
-//!   during command flush. Standalone text and panels seed their own participating attributes;
-//!   panel labels seed glyph-facing attributes such as text alpha and HDR coverage bias. Bridges
-//!   that author a per-node override use the same helper as the public verbs; standalone text only
-//!   seeds global defaults and relies on explicit `override_*` commands for non-default entity
-//!   values.
-//! - **Change.** [`CascadePlugin`]'s propagation system, in [`CascadeSet::Propagate`], re-resolves
-//!   a node when its own `Override<A>` changes or is removed, its `ChildOf` changes, or
-//!   `CascadeDefault<A>` changes — fanning ancestor changes down through `Children`. It runs every
-//!   frame so a frame's `RemovedComponents<Override<A>>` is never cleared unread.
-//!
-//! Internal render systems query `&Resolved<A>` directly and filter on
-//! `Changed<Resolved<A>>`; public callers should use the typed `resolved_*`
-//! readers when they need the computed value.
-//!
-//! # Adding a cascade attribute
-//!
-//! For a new attribute with no existing plain field, add one
-//! `cascade_attr!(Name(Ty), default = value)` declaration in `cascade/resolved.rs`,
-//! three typed wrappers in `cascade/attributes.rs`
-//! (`override_name`, `inherit_name`, `resolved_name`), one
-//! `.add_plugins(CascadePlugin::<Name>::default())` line, and a render read site
-//! that uses `Resolved<Name>` or `resolved_name`. The value type only needs to be
-//! `Clone + PartialEq`, and should stay cheap to clone. A
-//! `Handle<StandardMaterial>` wrapper is acceptable; an owned
-//! `StandardMaterial` is not.
-//!
-//! Promoting an existing plain field is a migration, not just a declaration.
-//! Add the attribute, then inventory every consumer before editing: standalone
-//! render reads, panel-label shaping/render reads, spawn-seed bridges, label
-//! authoring capture before `for_shaping()`, examples, README/docs, and the
-//! first-frame tests that prove `Resolved<A>` and rendered materials agree. Each
-//! promoted attribute may participate in a different subset of consumers: text
-//! alpha affects standalone text and panel labels, while font unit is seeded for
-//! standalone text and panels but panel labels inherit it from the panel. Decide
-//! whether the old plain accessors are deleted or kept as typed-verb sugar, and
-//! migrate callers. Text alpha is the worked example: standalone entities use
-//! `override_text_alpha`, while panel labels capture
-//! `TextStyle::with_alpha_mode` and insert `Override<TextAlpha>`.
+//! `bevy_kana` owns authored [`Cascade`], the explicit [`CascadeFrom`]
+//! relationship, propagation, and [`Resolved`] caches. This module chooses
+//! diegetic attributes and exposes domain-specific command and reader names.
 
 mod attributes;
-mod authoring;
-mod cascade_set;
 mod constants;
 mod defaults;
-mod plugin;
 mod resolved;
 
 pub use attributes::CascadeEntityCommandsExt;
@@ -150,13 +30,16 @@ pub use attributes::resolved_shape_material;
 pub use attributes::resolved_sidedness;
 pub use attributes::resolved_text_alpha;
 pub use attributes::resolved_text_material;
-pub use authoring::Cascade;
-pub use cascade_set::CascadeSet;
-pub use defaults::CascadeDefault;
+pub(crate) use bevy_kana::Cascade;
+pub(crate) use bevy_kana::CascadeAttribute;
+pub use bevy_kana::CascadeDefault;
+pub(crate) use bevy_kana::CascadeFrom;
+pub(crate) use bevy_kana::CascadePlugin;
+pub use bevy_kana::CascadeSet;
+pub(crate) use bevy_kana::Resolved;
 pub use defaults::PanelDefaults;
-pub(crate) use plugin::CascadePlugin;
-pub(crate) use resolved::CascadeAttr;
-pub use resolved::CascadeProperty;
-pub(crate) use resolved::Override;
-pub(crate) use resolved::Resolved;
-pub(crate) use resolved::resolve_walk;
+pub(crate) use resolved::CascadeRoot;
+
+pub(crate) fn cascade_plugin<A: CascadeRoot>() -> CascadePlugin<A> {
+    CascadePlugin::new(A::root_default())
+}

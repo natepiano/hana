@@ -20,5 +20,11 @@ input   = ["dep:bevy_enhanced_input"]
 math    = []
 
 [dependencies]
-bevy                = { workspace = true }
+bevy                = { workspace = true, features = ["bevy_log"] }
 bevy_enhanced_input = { workspace = true, optional = true }
+
+[dev-dependencies]
+bevy           = { workspace = true, features = ["3d"] }
+bevy_lagrange  = { workspace = true }
+fairy_dust     = { workspace = true }
+hana_diegetic  = { workspace = true }

@@ -262,19 +262,14 @@ type.
 Name the pure `FoldRecipe` calculation method `hinge_assignments()`. It returns
 the values to be considered and does not mutate ECS; the deferred
 `apply_fold_recipe()` operation (`Commands` extension method name TBD) performs
-validation and application later.
+validation and application later. Hana resolves the `Member` entities in each
+supplied `FoldGroup` to topology-compatible `Connection` values before calling
+the recipe. A9.2.4 decides the exact resolved recipe-input type and error
+contract.
 
-```rust
-pub trait FoldRecipe {
-    fn hinge_assignments(
-        &self,
-        fold_groups: &/* retained fold-group type TBD */,
-    ) -> Result<Vec<HingeAssignment>, FoldRecipeError>; // error type TBD
-}
-```
-
-**Status:** Decided. The retained fold-group input and error contract remain
-pending.
+**Status:** Pure `hinge_assignments()` calculation and
+`Vec<HingeAssignment>` output decided. `FoldGroup` membership is decided by
+A9.2.2.1; the topology-resolved input type and error contract remain pending.
 
 ### Confirmed automatic recipe validation
 
@@ -283,7 +278,8 @@ The application invokes one public `Commands` extension method:
 ```rust
 // Application code: queues the operation during a system.
 commands.apply_fold_recipe( // method name TBD
-    arrangement_entity,
+    &topology,
+    selected_fold_groups,
     Accordion::default(),
 );
 ```
@@ -306,19 +302,20 @@ self.queue(move |world: &mut World| -> Result {
 });
 ```
 
-`prepare_hinge_assignments()` reads the controller's retained fold-group data,
-calls `FoldRecipe::hinge_assignments()`, and validates the complete returned
-vector before `apply_hinge_assignments()` performs the first ECS write. The
-validation always runs for Hana's built-ins and application-defined recipes;
-there is no public unchecked bypass and no validation call the application must
-remember.
+`prepare_hinge_assignments()` resolves the supplied `FoldGroup` member entities
+through the caller-owned `Topology`, calls `FoldRecipe::hinge_assignments()`,
+and validates the complete returned vector before
+`apply_hinge_assignments()` performs the first ECS write. The validation always
+runs for Hana's built-ins and application-defined recipes; there is no public
+unchecked bypass and no validation call the application must remember. The
+exact owned values captured by the deferred command remain part of A9.2.7.
 
 Validation owns structural and runtime consistency: current entity existence,
 `Member` ownership by the target `Arrangement`, eligibility in the retained
-fold groups, duplicate or conflicting assignments, the coverage contract
-still to be defined with the fold-group input, and finite endpoint and pivot
-values. It does not judge artistic intent, collisions, polyhedral closure, or
-finite multi-turn angles.
+fold groups, exact assignment coverage for the groups supplied to the recipe,
+duplicate or conflicting assignments, and finite endpoint and pivot values. It
+does not judge artistic intent, collisions, polyhedral closure, or finite
+multi-turn angles.
 
 Because the operation is deferred, its exact diagnostic and error-reporting
 surface remains pending; the public call cannot return the later validation
@@ -326,51 +323,169 @@ result synchronously.
 
 **Status:** Decided.
 
+### Confirmed exact recipe-assignment coverage
+
+One recipe invocation must return exactly one `HingeAssignment` for every
+`Connection` resolved from the `Member` entities in the `FoldGroup` values
+supplied to that invocation. The assignment and connection are paired by
+`member_entity`.
+
+`HingeAssignment` is not a field on `Connection`. The provider creates and
+Hana retains `Connection`; the transient recipe creates `HingeAssignment`; Hana
+validates the complete assignment vector and combines each pair into the
+durable `Hinge` component.
+
+```text
+Connection + HingeAssignment -> Hinge
+```
+
+Hana rejects a group member that cannot resolve to exactly one compatible
+`Connection`. It also rejects a recipe result that omits a resolved connection,
+assigns one member more than once, assigns a member outside the supplied
+groups, or is based on supplied groups that contain the same member more than
+once. A recipe that wants a connection to remain fixed returns equal unfolded
+and folded angles rather than omitting its assignment.
+
+Only the connections in the groups supplied to this invocation receive
+recipe-authored `Hinge` replacements. Existing `Hinge` components outside that
+input remain untouched. This coverage rule does not decide the later API for
+selecting a subset of retained groups.
+
+**Status:** Decided.
+
 ### Confirmed fold-group value
 
-`FoldGroup` is a nonempty, ordered collection of the already agreed
-`Connection` values:
+`FoldGroup` is the one reusable, nonempty, ordered grouping of `Member` entity
+values used by both recipe authoring and playback authoring. It contains no
+`Connection`, recipe, timing, or ECS state:
 
 ```rust
 pub struct FoldGroup {
-    connections: Vec<Connection>,
+    members: Vec<Entity>,
 }
 
 impl FoldGroup {
-    pub fn iter(&self) -> impl Iterator<Item = &Connection> {
-        self.connections.iter()
+    pub fn new(
+        first: Entity,
+        remaining: impl IntoIterator<Item = Entity>,
+    ) -> Self {
+        let mut members = vec![first];
+        members.extend(remaining);
+        Self { members }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
+        self.members.iter()
     }
 }
 ```
 
-It is an ordinary public authoring value, not an ECS component. Grouped
-`Connection` values remain available inside the controller's retained folding
-data instead of being discarded after `AnchoredTo` materialization. The
-fallible public constructor, orientation contract, and API that supplies one
-or more groups to arrangement construction remain pending.
+The infallible constructor makes the ordinary path nonempty by construction
+and preserves `first` followed by the iteration order of `remaining`. When a
+provider generates a complete vector dynamically, use the standard fallible
+conversion:
 
-**Status:** Core value structure decided; construction and collection-transfer
-API pending.
+```rust
+let group = FoldGroup::try_from(generated_member_entities)?;
+```
+
+`TryFrom<Vec<Entity>>` rejects an empty vector and otherwise preserves it
+unchanged. Its concrete named error type remains part of the later error and
+diagnostic decision.
+
+The member order is semantic. A topology provider or application orders members
+within the group, and a recipe or playback author may use that position to
+alternate values, produce a wave, or calculate other position-dependent
+behavior. Members in one group therefore need not receive identical endpoint
+or timing values. The author defines what increasing member position means;
+provider documentation should describe that meaning when the group comes from
+a provider, but Hana does not store or validate a universal geometric
+direction.
+
+The member index is implicit in the underlying vector position. Do not add
+a duplicate index field or index type. Hana preserves provider order, and a
+recipe obtains the topology-local `usize` position through `enumerate()`.
+
+It is an ordinary public authoring value, not an ECS component. `Topology`
+separately retains the `MemberTopology` / `Connection` data used to resolve a
+group for compatible recipe application. The confirmed
+`Topology::fold_groups` field supplies provider-authored groups; applications
+may also construct groups directly.
+
+**Status:** Nonempty ordered grouping, semantic order, provider-defined
+direction, implicit positional index, member-entity storage, and construction
+behavior decided. The fallible conversion's error type remains pending with
+diagnostics.
+
+### Confirmed A9.2.2.1: one group, separate operations
+
+`FoldGroup` is the shared grouping value. Do not add `MemberSelection` or
+`SharedFoldStage` as a second wrapper around the same `Member` entity list.
+
+Recipe authoring and playback authoring remain separate operations over that
+one value:
+
+```text
+FoldGroup + Topology + FoldRecipe -> HingeAssignment values
+FoldGroup + playback timing       -> FoldStage
+```
+
+A topology-provided `FoldGroup` does not have to be played. Conversely, an
+application-defined group may become a playback stage without being compatible
+with Accordion or any other particular `FoldRecipe`. Recipe application first
+resolves the group's members through `Topology` and validates the recipe's
+topology contract.
+
+`FoldStage` is the coordinated-playback use of a `FoldGroup`, not another
+member-group collection. The same group may be used with multiple recipes or
+multiple timing arrangements, and recipe grouping need not match playback
+grouping. Four box walls may form one recipe group but four rapid stages; many
+Accordion groups may instead be combined into one simultaneous stage.
+
+```rust
+let walls = FoldGroup::new(wall_1, [wall_2, wall_3, wall_4]);
+
+let stage = walls.clone().with_timing(snap_timing); // method/type names TBD
+apply_recipe(&topology, stage.group(), BoxFold::new())?; // method name TBD
+```
+
+Complex recipes may require several role-bearing `FoldGroup` values, such as
+box walls plus a lid, rather than pretending that one flat group encodes every
+topology contract.
+
+This decision supersedes the proposed `SharedFoldStage` type. A9.3.1.1 further
+decides that `FoldSequence` owns complete `FoldStage` values and each
+`FoldStage` owns one `FoldGroup`; remove the public numeric `FoldStage(usize)`
+component from each `Member`. A9.3.1.2 decides the coordinated timing stored by
+the stage, and A9.3.2 decides the functional group-to-stage authoring API.
+A9.2.4 decides the exact topology-resolved recipe input.
+
+**Status:** Decided: use one reusable `FoldGroup` of ordered `Member` entities;
+keep recipe interpretation and coordinated playback as separate operations;
+remove `SharedFoldStage`; use sequence-owned `FoldStage` values that each own a
+`FoldGroup`; remove the public per-member numeric stage component.
 
 ### Confirmed topology-provider and recipe separation
 
 `TopologyProvider` owns the basic spatial layout. It creates the physical
-`Connection` values and identifies which ordered connections form each
-`FoldGroup`. A compatible `FoldRecipe` consumes those groups and calculates
-`HingeAssignment` values; it does not rediscover or redefine the layout.
+`Connection` values and identifies which ordered `Member` entities form each
+`FoldGroup`. A compatible `FoldRecipe` consumes topology-resolved groups and
+calculates `HingeAssignment` values; it does not rediscover or redefine the
+layout.
 
 The relationship is many-to-many. One provider's groups may support several
 recipes, and one recipe may operate on groups created by many providers. Hana
 built-ins and application-defined implementations may be mixed independently:
 
 ```text
-TopologyProvider -> FoldGroup -> FoldRecipe -> HingeAssignment
+TopologyProvider -> Topology { Connections, FoldGroups }
+FoldGroup + Topology + FoldRecipe -> HingeAssignment
 ```
 
 `FoldGroup` is therefore publicly constructible. Hana's built-in providers,
 application-defined providers, and direct topology authors may all create it.
-The exact API that transfers the provider's connections and groups together is
-the next decision.
+`TopologyProvider::generate_topology()` transfers the provider's member
+connections and fold groups together in the confirmed `Topology` value below.
 
 **Status:** Decided.
 
@@ -414,7 +529,12 @@ This restores the previously planned `Topology` name only for the value that
 actually describes topology; it does not restore the rejected caller-owned
 spawn-result wrapper.
 
-**Status:** Decided.
+The confirmed alternative-groupings requirement below reopens only the exact
+type of the singular `fold_groups` field shown above. Returning one `Topology`
+that keeps member topology and folding capabilities together remains decided.
+
+**Status:** `Topology` output and responsibility decided; exact folding-
+capability field representation reopened for alternative `FoldGroups`.
 
 ### Confirmed fold-group capability collection
 
@@ -430,6 +550,31 @@ pub enum FoldGroups {
     Provided(Vec<FoldGroup>),
 }
 ```
+
+The outer vector order is also semantic: it locates each `FoldGroup` within the
+provider-defined progression across groups. Together, the outer group index and
+inner member index give recipes two independent positions without assuming
+that every group has the same length or that the topology is a rectangular
+grid. The provider likewise defines what increasing group position means, and
+its documentation should describe that meaning.
+
+The group index is also implicit in its vector position. Hana preserves the
+order and recipes obtain the topology-local `usize` position through
+`enumerate()`. Neither implicit index is a persistent identity across topology
+replacement.
+
+```rust
+// FoldRecipe implementation
+for (group_index, group) in fold_groups.iter().enumerate() {
+    for (member_index, member_entity) in group.iter().enumerate() {
+        // Hana resolves member_entity to Connection before recipe calculation.
+        // A recipe may use either semantic position.
+    }
+}
+```
+
+This ordered authoring capability can support position-dependent recipes. It
+does not itself introduce cloth simulation state or runtime constraints.
 
 The normal constructor requires the first group separately, making its output
 nonempty by construction. Whole-`Topology` validation still rejects a directly
@@ -475,26 +620,66 @@ for group in &topology.fold_groups {
 }
 ```
 
-**Status:** Decided.
+**Status:** The semantic absence distinction, nonempty provided collection,
+ordering, and read-only access are decided. Whether this exact enum is also the
+outer container for every alternative supported by a topology is reopened by
+the requirement below.
+
+### Confirmed requirement for A9.2.3.1: alternative fold-groupings
+
+A `TopologyProvider` may expose multiple alternative `FoldGroups` for the same
+physical topology. Rows and columns of a sheet are the current concrete
+example:
+
+```text
+rows    -> FoldGroups
+columns -> FoldGroups
+```
+
+Rows and columns are examples rather than Hana-defined variants. The domain may
+later reveal diagonal, radial, concentric, irregular, or other provider-defined
+alternatives, so Hana must not hard-code a taxonomy before those requirements
+are understood.
+
+Do not concatenate alternatives into one `FoldGroups` merely to fit the current
+singular `Topology::fold_groups` field. The exact assignment-coverage rule
+continues to apply to whichever `FoldGroups` are ultimately supplied to a
+recipe invocation. It does not decide how an alternative is stored, named,
+selected, or supplied.
+
+The current singular field and the use of `FoldGroups` as both one ordered
+recipe input and the topology's complete capability container are therefore
+provisional. The representation and selection API remain deferred until
+built-in provider and recipe examples give the domain model enough evidence.
+
+**Status:** Ability to expose alternative `FoldGroups` decided; taxonomy,
+storage, identity, selection, and application API deferred to A9.2.3.1.
 
 ### Confirmed recipe capability boundary
 
-Hana matches `Topology::fold_groups` before invoking a recipe. A
+After obtaining one `FoldGroups` alternative through the still-pending
+selection mechanism, Hana matches that value before invoking a recipe. A
 `FoldGroups::NotProvided` value is an application-time compatibility failure;
 the recipe is not called and no `Hinge` values change. For
-`FoldGroups::Provided`, Hana passes the contained groups to
-`FoldRecipe::hinge_assignments()` as a validated, nonempty `&[FoldGroup]`.
+`FoldGroups::Provided`, Hana preserves the validated, nonempty
+`&[FoldGroup]`, resolves each member through the same `Topology`, and supplies
+the resulting topology-qualified input to `FoldRecipe::hinge_assignments()`.
+The exact resolved input type remains A9.2.4.
 
 ```rust
-// Hana implementation
-let fold_groups = match &topology.fold_groups {
+// Hana implementation, after selecting an alternative (mechanism TBD)
+let fold_groups = match selected_fold_groups {
     FoldGroups::NotProvided => {
         return Err(/* fold groups not provided; error type TBD */);
     }
     FoldGroups::Provided(groups) => groups.as_slice(),
 };
 
-let assignments = recipe.hinge_assignments(fold_groups)?;
+let resolved_groups = resolve_recipe_groups( // function/type names TBD
+    topology,
+    fold_groups,
+)?;
+let assignments = recipe.hinge_assignments(&resolved_groups)?;
 ```
 
 The read-only `Deref` still treats `NotProvided` as an empty slice for ordinary
@@ -502,6 +687,379 @@ inspection and iteration, but recipe application preserves the semantic sum
 distinction. Custom recipes never check absence or interpret an empty input.
 
 **Status:** Decided.
+
+### Confirmed A9.2.5.1: Accordion alternation position
+
+The built-in `Accordion` recipe alternates physical mountain-or-valley fold
+sense by the outer `FoldGroup` position. Every member-resolved `Connection`
+within one group receives the same physical sense, while the next group
+receives the opposite sense. Exact `HingeAssignment` values may still differ
+per connection when geometry calibration requires it.
+
+`Accordion` does not use the inner member position to choose fold sense.
+That semantic position remains available to custom or future recipes that
+alternate, wave, or otherwise vary values along one group. A strip is the
+degenerate case in which each `FoldGroup` contains one foldable `Member`.
+
+The confirmed borrowed collection APIs support a functional implementation;
+no imperative assignment-builder API is required:
+
+```rust
+// FoldRecipe implementation. `configured_offset: Angle` is recipe input;
+// its public field name and exact endpoint/pivot mapping remain TBD.
+let assignments = resolved_groups // topology-resolved view; type name TBD
+    .iter()
+    .enumerate()
+    .flat_map(|(group_index, group)| {
+        let group_offset = if group_index.is_multiple_of(2) {
+            configured_offset
+        } else {
+            -configured_offset
+        };
+
+        group.iter().map(move |connection| {
+            hinge_assignment(connection, group_offset)
+            // Recipe-local helper returning HingeAssignment; exact mapping TBD.
+        })
+    })
+    .collect::<Vec<HingeAssignment>>();
+```
+
+`FoldRecipe::hinge_assignments()` returns that vector for Hana's automatic
+whole-result validation. Endpoint mapping and pivot calibration remain pending
+within A9.2.5-A9.2.6.
+
+**Status:** Decided.
+
+### Confirmed A9.2.5.2: signed Accordion offset
+
+The transient `Accordion` recipe contains one signed `Angle` (`field name TBD`).
+Its magnitude is the alternating fold offset, and its sign chooses the physical
+fold sense of the first `FoldGroup`. Each following group negates that value.
+Negating the configured `Angle` reverses the complete Accordion pattern without
+a separate direction enum or boolean.
+
+```rust
+pub struct Accordion {
+    pub fold_offset: Angle, // field name TBD
+}
+
+// Application code; constructor name TBD.
+commands.apply_fold_recipe(
+    arrangement_entity,
+    Accordion::new(first_group_offset), // first_group_offset: Angle
+);
+```
+
+`Accordion` contains no live progress field. The confirmed `FoldSequence` and
+`FoldSequenceState` path owns transport, and finite multi-turn `Angle` values
+remain valid.
+
+**Status:** Behavior decided; public field and constructor names pending.
+
+### Confirmed A9.2.5.2.1: default Accordion offset
+
+`Accordion::default()` uses a signed positive half-turn (`+pi` radians) as its
+fold offset. This preserves the current convenient behavior: ideal
+zero-thickness panels fold back 180 degrees onto their neighbors.
+
+The half-turn is a default, not an invariant. Explicit Accordion construction
+accepts any finite signed `Angle`: smaller magnitudes create shallower pleats,
+and negating the value reverses the first group's physical fold sense. This
+remains Accordion behavior rather than Wrap behavior because the offset still
+alternates between successive `FoldGroup` values.
+
+```rust
+Accordion::default();          // signed fold offset = +pi
+Accordion::new(custom_offset); // custom_offset: Angle; constructor name TBD
+```
+
+The concrete `bevy_kana::Angle` constructor and constant spellings remain
+pending because that planned semantic type is not implemented yet.
+
+**Status:** Default and configurability decided; exact `Angle` and Accordion
+constructor spellings pending.
+
+### Confirmed requirement for A9.3.1: interchangeable playback timing
+
+One set of recipe-authored `Hinge` endpoints must support multiple playback
+arrangements without rerunning or changing the `FoldRecipe`:
+
+- all affected `Member` entities moving simultaneously;
+- successive `FoldGroup` values moving strictly one at a time; and
+- overlapping stagger or wave timing, where a later group begins before an
+  earlier group finishes.
+
+`FoldRecipe` continues to answer what each `Hinge` endpoint and pivot value is.
+Playback authoring answers when each participating `Member` travels between
+those endpoints. The same Accordion, Coil, Wrap, or custom recipe output may
+therefore be paired with different playback authoring.
+
+The existing implementation's numeric `FoldStage` model covers the first two
+cases. Assigning
+every member the same numeric stage moves them simultaneously; assigning
+successive groups consecutive values moves them one at a time. It does not
+cover overlapping waves because each integer stage currently owns one
+consecutive non-overlapping interval, and per-member easing changes only the
+curve within that shared interval. A9.3.1.1 supersedes that representation:
+the public `FoldStage` is now a sequence-owned value containing its reusable
+`FoldGroup`, with no public numeric stage component on each member.
+
+```rust
+// Playback authoring over the same FoldGroups; exact API remains A9.3.1.
+simultaneous(fold_groups); // combine groups into one coordinated FoldStage
+sequential(fold_groups);   // map each FoldGroup to a successive FoldStage
+wave(fold_groups);         // overlapping timing is required but not yet modeled
+```
+
+A9.3.1.2.1 keeps successive `FoldStage` values as consecutive,
+non-overlapping sequence steps. Every overlapping stagger or wave belongs to
+the member timing inside one stage. This retains unambiguous stage boundaries
+for `Step(FoldDirection)` without merging endpoint generation back into
+playback.
+
+Additional artistic timing cases refine that requirement:
+
+- four box sides may occupy four successive `FoldStage` values with short
+  durations and snap-like easing, producing a rapid one-two-three-four motion;
+- one complete `FoldGroup` may become one timed `FoldStage`;
+- selected members from a `FoldGroup`, such as alternating or contiguous
+  subsets, may form new groups that become separate stages with independently
+  authored timing; and
+- sequence defaults, stage overrides, and supported member-level overrides may
+  be combined without changing the underlying `Hinge` endpoints.
+
+`FoldGroup` is the ordered member grouping shared by recipe and playback
+authoring. `FoldStage` adds coordinated-playback semantics and timing to such a
+group. The existing A9.3 timing decision already associates a
+duration-and-easing value (`type name TBD`) with a stage; A9.3.1.2 now decides
+how intra-stage timing represents simultaneous and staggered motion.
+
+A9.3.2 separately decides the functional API that transforms, combines, or
+subdivides timing-free `FoldGroup` values into timed `FoldStage` values. It does
+not reopen the decision that `FoldGroup` itself stores no timing.
+
+**Status:** Playback-variation requirement decided; overlapping timing
+is confined to one stage by A9.3.1.2.1, resolved member timing is decided by
+A9.3.1.2.2, and its whole-value cascade is decided by A9.3.1.2.3.
+Group-to-stage functional authoring remains A9.3.2.
+
+### Confirmed A9.3.1.1: sequence-owned stages
+
+`FoldSequence` owns the complete authored stage collection, and every
+`FoldStage` owns exactly one `FoldGroup`:
+
+```rust
+pub struct FoldSequence {
+    stages: Vec<FoldStage>,
+    // Sequence defaults and other authored fields.
+}
+
+pub struct FoldStage {
+    group: FoldGroup,
+    // Coordinated timing representation: A9.3.1.2.
+}
+```
+
+Remove the public numeric `FoldStage(usize)` component from `Member` entities.
+It is an implementation-oriented label rather than the domain stage: it does
+not contain the participants or their timing, and it duplicates membership
+already owned by the authored sequence.
+
+`FoldSequence` is the one source of truth for playback membership, ordering,
+and timing. `Member` / `Members` remains the one Bevy relationship for assembly
+membership. A `Member` omitted from every sequence-owned stage is fixed for
+that sequence.
+
+Runtime systems resolve a member's stage from `FoldSequence`. Hana may add a
+private derived lookup or cache if profiling requires one, but no public
+per-member stage component or second relationship is part of the authoring
+model.
+
+Because `FoldStage` owns its `FoldGroup`, it can expose that same group for
+later compatible recipe application without reconstructing a second member
+collection. The exact accessor and lookup method names remain pending.
+
+**Status:** Decided. A9.3.1.2 defines coordinated timing within a stage;
+A9.3.2 defines functional `FoldGroup`-to-`FoldStage` construction.
+
+A9.3.1.2 is reviewed through three atomic decisions:
+
+1. **A9.3.1.2.1 — Stage boundaries:** Decide whether successive `FoldStage`
+   values are non-overlapping sequence steps and every overlap belongs to
+   intra-stage member timing.
+2. **A9.3.1.2.2 — Member timing value:** Define the value that locates one
+   member's start, duration, and easing within its stage.
+3. **A9.3.1.2.3 — Timing cascade:** Decide how sequence defaults, stage timing,
+   and member timing compose and which scopes reuse the same value type.
+
+A9.3.1.2.3.1 separately decides where the generic `Cascade<T>` authoring value
+lives. That ownership question does not reopen the timing-cascade behavior.
+
+### Confirmed A9.3.1.2.1: non-overlapping stage boundaries
+
+Successive `FoldStage` values are non-overlapping sequence steps. A stage
+boundary is a position where `Step(FoldDirection)` may stop. Every simultaneous,
+staggered, or wave motion that overlaps in time belongs to the member timing
+inside one stage.
+
+Recipe grouping and playback grouping remain independent. For a pleated
+curtain, Accordion may consume one original `FoldGroup` per pleat while playback
+functionally combines pairs of those groups into successive stage-owned groups:
+
+```text
+Accordion groups:  [g0] [g1] [g2] [g3]
+Playback stages:   [g0 + g1] [g2 + g3]
+```
+
+The combination preserves the original groups and concatenates their member
+order into a new `FoldGroup`. The first two pleats may therefore move together,
+then the next two, without changing Accordion's alternating endpoint
+calculation.
+
+```rust
+for pair in pleat_groups.chunks(2) {
+    sequence.stage_with_timing( // method name TBD
+        FoldGroup::combine(pair)?, // method name TBD
+        simultaneous_timing,       // type/name TBD
+    );
+}
+```
+
+Use multiple stages when `Step` must stop between actions. Use one stage with
+staggered member timing when those actions form one coordinated flourish.
+Introduce overlapping stages only after a demonstrated example cannot be
+represented this way.
+
+**Status:** Decided. A9.3.1.2.2 now defines the resolved timing of one member
+inside its stage.
+
+### Confirmed A9.3.1.2.2: resolved member timing
+
+One complete ordinary value (`FoldTiming`, name TBD) represents a member's
+resolved timing relative to the beginning of its `FoldStage`:
+
+```rust
+pub struct FoldTiming { // type and field names TBD
+    pub start_offset: Duration,
+    pub duration: Duration,
+    pub easing: EaseFunction,
+}
+```
+
+Simultaneous members use the same zero offset, duration, and easing. Staggered
+members use different offsets. A wave uses offsets whose separation is shorter
+than the member duration, so their motion overlaps inside the stage. Members
+may also use different durations and easing.
+
+```rust
+FoldTiming {
+    start_offset: index * Duration::from_millis(40),
+    duration: Duration::from_millis(160),
+    easing: wave_easing,
+}
+```
+
+The stage finishes at the greatest `start_offset + duration` among its members.
+Pause and reverse operate on the one stage clock; each member derives raw local
+progress from that clock and applies its easing once. Exact zero-duration,
+overflow, and other validation policy remains with the later validation and
+diagnostic decisions.
+
+This decision defines the complete resolved value, not how authors avoid
+repeating it. A9.3.1.2.3 resolves sequence and stage defaults to one value per
+member through whole-value `Cascade<FoldTiming>` inheritance and replacement.
+
+**Status:** Decided; type and field names remain pending.
+
+### Confirmed A9.3.1.2.3: whole-value timing cascade
+
+`FoldSequence` supplies one complete default `FoldTiming`. A `FoldStage` either
+inherits that value or replaces it completely. Each member entry within that
+stage either inherits the resolved stage value or replaces it completely:
+
+```text
+member Cascade<FoldTiming>
+    > stage Cascade<FoldTiming>
+    > sequence FoldTiming default
+```
+
+The root sequence value cannot inherit, so resolution always produces one
+complete `FoldTiming` for every participating member. `FoldTiming` is reused at
+all three scopes; no separate sequence-timing, stage-timing, or member-timing
+value types are introduced.
+
+```rust
+pub struct FoldSequence {
+    stages: Vec<FoldStage>,
+    default_timing: FoldTiming, // field and type names TBD
+}
+
+pub struct FoldStage {
+    group: FoldGroup,
+    timing: Cascade<FoldTiming>, // field name and Cascade type home TBD
+    // Per-member entries use Cascade<FoldTiming>; exact storage is A9.3.2.
+}
+```
+
+`Cascade<T>` has the two named states already used by `hana_diegetic`:
+
+```rust
+pub enum Cascade<T> {
+    Inherit,
+    Override(T),
+}
+```
+
+This is whole-value replacement, not a field-by-field patch. An override must
+therefore provide a complete start offset, duration, and easing. Functional
+authoring helpers may derive a complete override from an inherited value, but
+the stored result remains unambiguous. Member overrides are stage-owned
+authoring data, not components on the `Member` entities.
+
+The fold cascade follows authored containment (`FoldSequence` to `FoldStage`
+to a member entry), so it uses the storage-independent `Cascade<T>` helpers.
+When an ECS cascade is needed, `bevy_kana` also provides the shared explicit
+`CascadeFrom` relationship and propagation engine; it never infers
+inheritance from `ChildOf`.
+
+**Status:** Cascade behavior decided. Exact timing names, member-entry storage,
+and functional construction remain separate decisions.
+
+### Confirmed A9.3.1.2.3.1: shared cascade core and ECS engine
+
+`bevy_kana` owns `Cascade<T>` and the operations that depend only on its two
+states: inspection, borrowing, value transformation, single-layer resolution,
+and ordered multi-layer resolution against a required root value. The shared
+API does not convert to or from `Option<T>`; `Cascade::Inherit` and
+`Cascade::Override(value)` remain explicit authored states.
+
+`bevy_kana` also owns `CascadeFrom` / `CascadeChildren`,
+`CascadeDefault<A>`, `Resolved<A>`, `CascadePlugin<A>`, `CascadeSet`, generic
+commands and readers, dirty-subtree propagation, and lifecycle handling.
+`hana_diegetic` chooses participating attributes, inserts `CascadeFrom` where
+inheritance is intended, retains typed domain verbs, and consumes resolved
+values. `ChildOf` remains limited to transform and despawn ownership.
+
+Rust requires a cross-crate shared type to be public in its owning crate, so
+`Cascade<T>` is public from `bevy_kana`. It remains an internal dependency of
+`hana_diegetic` and `hana_valence`: neither crate re-exports it nor exposes it
+in public fields, arguments, or return types. Domain APIs expose named
+authoring verbs such as override and inherit instead.
+
+This extraction was completed before the planned `hana_diegetic` widget work,
+whose new inheriting properties can now use the shared ECS machinery. The
+implementation:
+
+- defines and exports the pure type and resolution helpers from
+  `crates/bevy_kana/src/cascade.rs`;
+- removes the former `hana_diegetic/src/cascade/authoring.rs` copy;
+- keeps `Cascade<T>` crate-private throughout `hana_diegetic` and replaces
+  public raw-state access with domain-specific authoring verbs;
+- removes `hana_diegetic`'s generic hierarchy walk and propagation pass;
+- updates the current cascade and shadow-casting as-built documents.
+
+**Status:** Decided and implemented 2026-07-15.
 
 ## Cohesion overview status
 
@@ -605,8 +1163,10 @@ and recipes converge on the same resolved components.
 
 One controller and one `Member` / `Members` relationship replaces
 `FoldMember` / `FoldMembers`: the controller carries the optional
-`FoldSequence`, and participating `Member` entities carry `FoldStage` as a
-component. A fixed face remains a `Member` without `FoldStage`. This deliberately
+`FoldSequence`, while its authored `FoldStage` values coordinate reusable
+`FoldGroup` values. A fixed face remains a `Member` omitted from the active
+stages. A9.3.1.1 removes the public numeric per-member stage marker; Hana may
+derive a private lookup cache only if profiling requires one. This deliberately
 supports one active sequence per arrangement; a separate sequence-membership
 relationship should return only if a demonstrated feature needs independent
 sequence controllers over the same arrangement.
@@ -622,21 +1182,20 @@ arrangement identity.
 readiness, progress, target, direction, and motion. `AnchorPose` is a
 per-member geometric output containing rotation and translation. One
 `FoldSequenceState` can therefore produce many different `AnchorPose` values
-through each member's `FoldStage` and `Hinge` endpoints.
+through the active stages' `FoldGroup` values and each member's `Hinge`
+endpoints.
 
 Easing is authored as a cascade but is applied only once, while
-`hinge_to_pose()` derives a `Member`'s angle. `FoldSequence` supplies the
-sequence default and stores any override for one `FoldStage`; an optional
-component on one `Member` (`name TBD`) supplies the most-specific override.
-The precedence is member override, then `FoldStage` override, then
-`FoldSequence` default. `FoldSequenceState` retains raw transport progress and
-does not copy or store authored easing. Members with the same `FoldStage` may
-therefore use different curves while retaining the same start and end time.
-The sequence default and each `FoldStage` may use one plain timing value
-(`name TBD`) containing `Duration` and `EaseFunction`. `FoldStage` owns the
-shared clock: an individual fold receives distinct timing by occupying a
-one-member `FoldStage`, while a `Member` inside a shared stage may override
-only easing. Exact type and builder method names remain open under A9.3.
+`hinge_to_pose()` derives a `Member`'s angle. `FoldSequenceState` retains raw
+stage-clock progress and does not copy or store authored easing. A9.3.1.2.2
+defines one complete resolved member timing (`FoldTiming`, name TBD) containing
+a stage-relative start offset, duration, and easing. Members in the same
+`FoldStage` may therefore overlap while using different durations and curves.
+The stage ends at the latest resolved member end, and easing is applied once to
+each member's raw local progress. A9.3.1.2.3 resolves that complete value by
+whole-value cascade: member override, then stage override, then the required
+sequence default. Both override scopes use `Cascade<FoldTiming>`; no
+field-by-field timing patches or per-member ECS timing components are added.
 
 `FoldSequenceState` remains Hana's canonical fold transport. Playback is
 initiated and controlled through `FoldCommandEvent`, so an application or an
@@ -669,16 +1228,16 @@ the lifecycle-observer mutex machinery. Its narrow scope would not claim to
 enumerate custom or polyhedral endpoint generation, which can materialize the
 same `Hinge` data directly.
 
-**Settled constraint:** Keep `FoldStage` as a named newtype because the value
-means a playback stage rather than a member position, and equal values express
-simultaneous motion. Under the proposed unified membership model it becomes a
-component on participating `Member` entities.
+**Settled A9.3.1.1 constraint:** Keep `FoldStage` as the named domain stage, but
+replace the existing numeric newtype with a sequence-owned value that owns one
+`FoldGroup`. Do not put a public stage component on participating `Member`
+entities.
 
-**Decided within A9.3:** Resolve easing in this order: optional per-`Member`
-override (`name TBD`), per-`FoldStage` override stored once in `FoldSequence`,
-then the `FoldSequence` default. Keep raw progress, rather than easing, in
-`FoldSequenceState`; `hinge_to_pose()` applies the resolved curve when deriving
-the current angle.
+**Decided within A9.3:** Resolve one complete `FoldTiming` in this order:
+member entry `Cascade::Override`, stage `Cascade::Override`, then the required
+`FoldSequence` default. `Cascade::Inherit` advances to the next scope. Keep raw
+progress, rather than resolved timing, in `FoldSequenceState`;
+`hinge_to_pose()` applies the resolved curve when deriving the current angle.
 
 **Decided within A9.3:** Keep `FoldSequenceState` as Hana's canonical
 transport and use `FoldCommandEvent` as its request path. Other systems may
@@ -686,12 +1245,13 @@ initiate that transport by triggering commands. Defer continuous
 `bevy_tween` progress driving to an adapter that selects one progress writer
 and supplies raw progress for Hana's easing cascade.
 
-**Decided within A9.3:** A plain stage-timing value (`name TBD`) contains
-`Duration` and `EaseFunction`. `FoldSequence` supplies the default, and one
-`FoldStage` may override it. A fold needing its own duration occupies a
-one-member `FoldStage`; a `Member` within a shared stage may override only
-easing. The authoring API must expose those valid scopes rather than accept and
-reject per-member durations at runtime.
+**Superseded part of the earlier A9.3 timing decision:** A member no longer
+needs a one-member `FoldStage` merely to use a distinct duration, and a member
+override is no longer limited to easing. A9.3.1.2.2 permits each member in one
+stage to resolve a complete start offset, duration, and easing. The earlier
+requirement to apply easing exactly once remains. A9.3.1.2.3 settles the
+sequence/stage/member cascade as whole-value inheritance and replacement using
+`Cascade<FoldTiming>` at the stage and member-entry scopes.
 
 **Decided within A9.3:** Replace the context-sensitive directionless
 `FoldCommand::Play` with `PlayTo(FoldEndpoint)`. Keep
@@ -730,26 +1290,28 @@ pub struct Hinge {
 }
 ```
 
-`hinge_to_pose()` reads `Hinge` plus the member's optional `FoldStage` and the
-`FoldSequenceState` on the controller targeted by `Member::root_entity`. It
-calculates the current angle without storing it:
+`hinge_to_pose()` reads `Hinge`, the stage participation resolved from the
+controller's `FoldSequence`, and the `FoldSequenceState` on the controller
+targeted by `Member::root_entity`. It calculates the current angle without
+storing it. The exact lookup API remains A9.3.1:
 
 ```rust
-let fraction = fold_stage
-    .and_then(|stage| sequence_states.get(member.root_entity).ok()
-        .map(|state| state.stage_progress(*stage))) // method name TBD
+let fraction = sequence
+    .stage_for(member_entity) // method name TBD
+    .map(|stage| state.member_progress(stage, member_entity)) // method name TBD
     .unwrap_or(0.0);
 
 let angle = hinge.unfolded_angle
     + (hinge.folded_angle - hinge.unfolded_angle) * fraction;
 ```
 
-A `Hinge` on a `Member` without `FoldStage` remains at its unfolded endpoint. A
-fixed hinge, including `Strip`, uses equal endpoints. Simultaneous `Accordion`
-and `Coil` motion assigns every controlled member `FoldStage(0)`; staged motion
-assigns different or repeated stages. `FoldCommandEvent` controls ordinary
-playback through `FoldSequenceState`; A9.3 defers continuous external scalar
-control to a future single-writer raw-progress adapter.
+A `Hinge` on a `Member` omitted from every active `FoldStage` remains at its
+unfolded endpoint. A fixed hinge, including `Strip`, uses equal endpoints.
+Simultaneous Accordion or Coil playback places all controlled members in one
+stage; staged playback derives several `FoldStage` values from the same recipe-
+authored groups. `FoldCommandEvent` controls ordinary playback through
+`FoldSequenceState`; A9.3 defers continuous external scalar control to a future
+single-writer raw-progress adapter.
 
 The resulting built-in data flow is:
 
@@ -758,7 +1320,7 @@ TopologyProvider + folding recipe
     -> AnchoredTo + Hinge { edge, unfolded angle, folded angle }
 
 FoldCommand -> FoldSequenceState position
-Member FoldStage + FoldSequenceState position + Hinge
+FoldStage { FoldGroup + timing } + FoldSequenceState position + Hinge
     -> hinge_to_pose() -> AnchorPose
     -> resolve_anchors() -> Transform
 ```
@@ -816,11 +1378,12 @@ reconfiguration. A9.4 later folds the one-field `HingePivot` component into
   define its offset at the unfolded `Hinge` endpoint, then merge the remaining
   offset into `Hinge::pivot_offset` and remove `HingePivot`. Declare
   `AnchorPose` as a required component of `Hinge`. Remove the unused
-  `AnchorPoseLens` and the resulting empty tween integration. Add the nonempty,
-  authoring-only `SharedFoldStage` value. This removes eleven public types and
-  adds one, for a net reduction of ten public types; it also removes one public
-  system-set variant, one public method, and one unused optional integration,
-  without adding a runtime ECS component or relationship. **Status: decided.**
+  `AnchorPoseLens` and the resulting empty tween integration. A9.2.2.1
+  supersedes the proposed `SharedFoldStage` addition by reusing `FoldGroup`.
+  A9.3.1.1 makes `FoldStage` a sequence-owned struct without adding a numeric
+  member component. The local audit therefore removes eleven public types and
+  adds none; the complete A9 concept count remains a closure-gate calculation.
+  **Status: partial.**
 
 ## Current arrangement model
 
@@ -879,8 +1442,9 @@ Under A9.4, `Hinge` declares `AnchorPose` as a Bevy required component. Insertin
 `Hinge` therefore inserts `AnchorPose::default()` only when the entity does not
 already carry an explicit pose. Ordinary removal of `Hinge` leaves
 `AnchorPose` available for another animation writer. `AnchoredTo`,
-`ResolvedAnchorGeometry`, `Member`, and `FoldStage` are not required components
-of `Hinge`; those capabilities may be absent or arrive later.
+`ResolvedAnchorGeometry`, and `Member` are not required components of `Hinge`;
+those capabilities may be absent or arrive later. `FoldStage` is not an ECS
+component under A9.3.1.1, and a hinged member may be omitted from every stage.
 
 `AnchorPoseLens` and `HingeAngleLens` are both removed under A9.4 and A9.1.
 No shipped code uses `AnchorPoseLens`, and it cannot safely share an entity with
@@ -928,33 +1492,39 @@ arrangement controller, and Bevy maintains `Members` on that controller.
 connections are separate `AnchoredTo` relationships and may form branching
 acyclic trees. One or more `Member` entities may have no `AnchoredTo`.
 
-`FoldSequence` is the existing authored timing and easing component and is
-colocated with `Arrangement` under A9.3. `FoldStage` is the existing zero-based
-stage value; under A9.5 it becomes an optional component on a `Member`, and
-members with the same value move simultaneously. `FoldSequenceState` remains
-the derived runtime state on the controller. The currently implemented
-`FoldMember` / `FoldMembers` relationship and `FoldFromArrangement` request are
-removed by A9.5 and A9.4 respectively.
+`FoldGroup` is the confirmed ordinary authoring value containing one nonempty,
+ordered group of `Member` entities. It stores neither topology data nor timing.
+`Topology` resolves a supplied group to compatible `Connection` values for a
+`FoldRecipe`; playback authoring combines the same value with timing to form a
+`FoldStage`. Do not add a duplicate `MemberSelection` or `SharedFoldStage`.
 
-`SharedFoldStage` is the planned nonempty, authoring-only collection of
-`Member` entities that should receive one shared `FoldStage`; it is not an ECS
-component. `FoldSequenceBuilder::stage()` consumes any value implementing
-`Into<SharedFoldStage>`, while fallible construction from runtime collections
-rejects emptiness. `finish()` detects duplicate `Entity` values before queuing
-any `FoldStage` insertions.
+`FoldSequence` is the existing authored timing and easing component and is
+colocated with `Arrangement` under A9.3. `FoldSequenceState` remains the derived
+runtime state on the controller. The currently implemented `FoldMember` /
+`FoldMembers` relationship and `FoldFromArrangement` request are removed by
+A9.5 and A9.4 respectively. Under A9.3.1.1, `FoldSequence` owns complete
+`FoldStage` values and each stage owns one `FoldGroup`. Remove the public
+numeric per-member stage component; any lookup cache remains private derived
+implementation data. Successive stages are non-overlapping. Each participating
+member resolves one `FoldTiming` value (`name TBD`) containing a stage-relative
+start offset, duration, and easing; the stage ends at the latest member end.
+Resolution uses a required sequence default, then whole-value
+`Cascade<FoldTiming>` overrides at the stage and member-entry scopes.
 
 ## Review status
 
-- Foundational API review items: 47
+- Foundational API review items: 48
 - Feature candidates: 15
 - Mutual-exclusion decisions: 6, recorded in
   [`mutex_arrangements.md`](mutex_arrangements.md)
-- Complete confirmed decisions: 29
+- Complete confirmed decisions: 35
 - Reopened decision: A4.2; `Arrangement` identity and optional built-in recipe
   cardinality are settled, while the complete validity contract remains open
-- Active work: foundational ledger paused; public arrangement-result API active
-- A9.2 fold-recipe authoring: decomposed into A9.2.1-A9.2.7; its A6 dependency
-  is resolved
+- Shared `bevy_kana` cascade extraction: implemented before widget work
+- Active review: foundational arrangement-result review remains paused under
+  the public API ergonomics reset
+- A9.2 fold-recipe authoring: decomposed into A9.2.1-A9.2.7 plus A9.2.3.1;
+  its A6 dependency is resolved
 - F1, arrangement activation and suspension: paused until the
   foundational arrangement API is settled
 - Scope selection: pending review completion
@@ -1039,15 +1609,29 @@ explaining one decision cannot silently expand its scope.
 | A9.1 | Should `Hinge` store unfolded and folded endpoints while `hinge_to_pose()` derives the current angle instead of storing `Hinge::angle`? | Decided: yes; remove `FoldAngles` and stored current-angle state; endpoint field names remain pending |
 | A9.2 | How do folding recipes obtain compatible topology, materialize complete `Hinge` data, and support both initial authoring and runtime re-authoring? | Pending; decomposed into A9.2.1-A9.2.7; A6 dependency resolved |
 | A9.2.1 | Are folding recipes transient authoring operations whose durable result is complete `Hinge` data rather than a recipe ECS component? | Pending |
-| A9.2.2 | What authoring value (`name TBD`) represents ordered, consistently oriented groups of connections that fold together? | Pending |
+| A9.2.2 | What authoring value represents ordered groups of `Member` entities reusable by topology-aware recipes and coordinated playback? | Decided through A9.2.2.1: `FoldGroup` |
+| A9.2.2.1 | Should one reusable `FoldGroup` hold the nonempty ordered `Member` selection while recipe interpretation and coordinated playback remain separate operations over it? | Decided: yes; `FoldGroup` stores ordered `Member` entities and no `Connection`, recipe, timing, or ECS state; `Topology` resolves it for compatible `FoldRecipe` use; `FoldStage` adds coordinated-playback semantics; remove proposed `MemberSelection` and `SharedFoldStage`; A9.3.1.1 makes each sequence-owned `FoldStage` own one `FoldGroup` and removes the public numeric member component |
 | A9.2.3 | What optional topology-provider capability (`name TBD`) returns those fold groups, and what must remain available for runtime re-authoring? | Pending |
+| A9.2.3.1 | What structure lets a `TopologyProvider` expose alternative `FoldGroups` without hard-coding a domain taxonomy, including whatever identity or selection information the domain proves necessary? | |
 | A9.2.4 | Which compatibility invariants and failures govern applying a folding recipe to returned fold groups? | Pending |
 | A9.2.5 | What geometry-independent behavior defines Accordion across strips, grids, sheets, and other compatible topologies? | Pending |
+| A9.2.5.1 | Which implicit `FoldGroups` position determines the built-in Accordion recipe's alternating physical fold sense? | Decided: alternate by outer `FoldGroup` position only; every member-resolved connection in one group shares the same physical fold sense, while inner member position remains available to other recipes; the iterator API supports functional `enumerate()` / `flat_map()` / `collect()` authoring |
+| A9.2.5.2 | Should one signed `Angle` on the transient Accordion recipe encode both the first group's physical fold sense and the alternating fold magnitude? | Decided: yes; negate the configured `Angle` for each following group, negating the recipe value reverses the pattern, and live progress remains exclusively in `FoldSequence` / `FoldSequenceState`; field and constructor names remain pending |
+| A9.2.5.2.1 | Should `Accordion::default()` use a signed half-turn offset while explicit construction accepts any finite signed `Angle`? | Decided: yes; default to `+pi` radians for the convenient ideal flat-fold, accept any finite signed `Angle` explicitly, and retain alternating Accordion behavior rather than treating the half-turn as a Wrap rule; exact `Angle` API spelling remains pending |
+| A9.2.5.3 | Should `Connection::connection_angle` supply one complete `Hinge` endpoint while Accordion adds its alternating signed offset to produce the other endpoint? | |
 | A9.2.6 | What distinct behaviors define Coil and Wrap, and what clearance or pivot calibration must a provider guarantee? | Pending |
 | A9.2.7 | How do initial recipe application and runtime replacement commit atomically and interact with neutral-state travel? | Pending; coordinated with F9 and A10 |
-| A9.3 | How should `FoldSequence`, `FoldSequenceState`, `FoldMember`, and `FoldStage` jointly represent simultaneous, staged, and externally controlled progress, and can any be combined or removed? | Partial; decided within item: keep `FoldSequence` as a separate optional component colocated with `Arrangement`; keep `FoldStage`; use one duration-plus-easing value (`name TBD`) for the sequence default and stage overrides; a distinct-duration fold occupies a one-member stage; only easing may vary per member; keep raw progress and canonical transport in `FoldSequenceState`; use `FoldCommandEvent` carrying `Step(FoldDirection)`, `PlayTo(FoldEndpoint)`, `Pause`, `Resume`, or `Reverse`; defer continuous external driving to a single-writer raw-progress adapter; exact names and remaining questions pending |
-| A9.4 | Which existing fold types, fields, and systems can the A9 pipeline combine or remove, and what is its net concept count? | Decided: remove `MemberPlacement`, `ArrangementPlacement`, `FoldFromArrangement`, both obsolete diagnostic families, `FoldSystems::Actuate`, public `Hinge::rotation()`, `HingePivot`, and `AnchorPoseLens` plus its empty tween integration; retain `FoldPlugin`, `FoldSystems::Advance`, `FoldSequenceBuilder`, and `FoldAuthorError`; require `AnchorPose` with `Hinge`; add nonempty authoring-only `SharedFoldStage` and accept it through `Into`; F13 owns replacement diagnostic policy; net ten fewer public types, one fewer public system-set variant, one fewer public method, and one fewer optional integration, with no new runtime ECS component or relationship |
-| A9.5 | Is sequence membership distinct from arrangement membership, and if so, what should `FoldMember` / `FoldMembers` be called? | Decided: use only `Member` / `Members`; put optional `FoldStage` directly on participating `Member` entities; remove `FoldMember` / `FoldMembers` |
+| A9.3 | How should `FoldSequence`, `FoldSequenceState`, and `FoldStage` jointly represent simultaneous, staged, and externally controlled progress, and can any be combined or removed? | Partial; keep `FoldSequence` as a separate optional component colocated with `Arrangement`; it owns complete `FoldStage` values, each owning one `FoldGroup`; remove the public numeric per-member stage component; successive stages do not overlap; each resolved member timing contains a stage-relative offset, duration, and easing; resolve timing through member override, stage override, then the required sequence default using whole-value `Cascade<FoldTiming>`; keep raw progress and canonical transport in `FoldSequenceState`; use `FoldCommandEvent` carrying `Step(FoldDirection)`, `PlayTo(FoldEndpoint)`, `Pause`, `Resume`, or `Reverse`; continuous external driving remains pending |
+| A9.3.1 | What authored stage and timing representation lets the same recipe-authored `Hinge` endpoints play simultaneously, strictly sequentially, or with overlapping stagger or wave timing? | Decided through A9.3.1.1-A9.3.1.2; `FoldSequence` owns non-overlapping `FoldStage` values over `FoldGroup` selections, while whole-value timing cascades produce simultaneous, staggered, or wave motion within each stage |
+| A9.3.1.1 | Does `FoldSequence` own complete `FoldStage` values, each owning one `FoldGroup`, instead of distributing numeric stage components across `Member` entities? | Decided: yes; `FoldSequence` is the authored schedule and owns `Vec<FoldStage>`; each `FoldStage` owns one `FoldGroup`; remove the public numeric per-member stage component; a private derived lookup or cache may be added only if implementation evidence requires it |
+| A9.3.1.2 | How does one `FoldStage` represent simultaneous, staggered, wave, duration, and easing timing for the members in its `FoldGroup`? | Decided through A9.3.1.2.1-A9.3.1.2.3; each non-overlapping stage resolves one complete timing per member through whole-value sequence, stage, and member-entry scopes |
+| A9.3.1.2.1 | Are successive `FoldStage` values non-overlapping sequence steps, with every overlapping stagger or wave represented as intra-stage member timing? | Decided: yes; a stage boundary is a possible `Step(FoldDirection)` stop; overlapping motion belongs inside one stage; functionally combine any number of recipe-authored `FoldGroup` values into the playback group for that stage without changing the originals; add overlapping stages only if a demonstrated example cannot fit this model |
+| A9.3.1.2.2 | What value represents one member's start, duration, and easing within its `FoldStage`? | Decided: one complete ordinary value (`FoldTiming`, name TBD) contains a stage-relative `start_offset: Duration`, `duration: Duration`, and `easing: EaseFunction`; simultaneous members share zero offset and timing, stagger and wave vary offsets, and the stage ends at the maximum member offset plus duration; exact names and validation policy remain pending |
+| A9.3.1.2.3 | How do sequence defaults, stage timing, and member timing cascade, and which scopes can reuse the same timing value type? | Decided: `FoldSequence` owns one complete default `FoldTiming`; `FoldStage` and each stage-owned member entry use whole-value `Cascade<FoldTiming>` inheritance or replacement; precedence is member, stage, sequence; no field-level patches, per-scope timing types, or per-member ECS timing components |
+| A9.3.1.2.3.1 | Where should the generic authoring-only `Cascade<T>` type live so `hana_valence` and `hana_diegetic` can share it without reversing their dependency direction? | Decided and implemented: `bevy_kana` owns `Cascade<T>` plus the shared ECS engine, including explicit relationships, authored and resolved generic storage, lifecycle handling, commands, propagation, and scheduling; `hana_diegetic` retains its domain attributes, explicit relationship choices, typed verbs and readers, and consumers; `Option<T>` conversions are absent; `Cascade<T>` is public only from its owning crate and is not re-exported or exposed through `hana_diegetic` or `hana_valence` public APIs; completed before widget work |
+| A9.3.2 | What functional API transforms, combines, or subdivides timing-free `FoldGroup` values into timed `FoldStage` values? | |
+| A9.4 | Which existing fold types, fields, and systems can the A9 pipeline combine or remove, and what is its net concept count? | Partial: all listed removals, retained plugin/system/builder/error types, required `AnchorPose`, and F13 diagnostic ownership remain decided; the proposed `SharedFoldStage` addition is removed in favor of `FoldGroup`; the local simplification audit removes eleven public types and adds none, while the complete A9 public-concept count remains a closure-gate calculation after A9.2 and A9.3 finish |
+| A9.5 | Is sequence membership distinct from arrangement membership, and if so, what should `FoldMember` / `FoldMembers` be called? | Decided: use only `Member` / `Members`; remove `FoldMember` / `FoldMembers`; `FoldSequence` owns its `FoldStage` values and their `FoldGroup` selections, so no public per-member stage component or second membership relationship remains |
 | A10 | How are connection topology and fold sequencing validated together? | Pending |
 
 ### A1. Arrangement membership storage
@@ -2012,7 +2596,8 @@ pub struct Hinge {
     pub folded_angle: Angle,   // field name TBD
 }
 
-let fraction = sequence_state.stage_progress(*fold_stage); // method name TBD
+let stage = fold_sequence.stage_for(member_entity); // method name TBD
+let fraction = sequence_state.member_progress(stage, member_entity); // name TBD
 let angle = hinge.unfolded_angle
     + (hinge.folded_angle - hinge.unfolded_angle) * fraction;
 ```
@@ -2024,7 +2609,8 @@ sequence model before its replacement is specified. Keep `AnchorPose`,
 `FoldSequence`, `FoldStage`, and `FoldSequenceState`; they have separate
 responsibilities pending their collective review under A9.3. A9.4 subsequently
 merges the demonstrated `HingePivot` data into `Hinge::pivot_offset`, while A9.5
-removes `FoldMember` / `FoldMembers` and puts `FoldStage` directly on
+removes `FoldMember` / `FoldMembers`; A9.3.1.1 stores complete `FoldStage`
+values in `FoldSequence` instead of putting numeric stage components on
 participating `Member` entities.
 
 The endpoint field names remain undecided. A9.2 decides how compatible,
@@ -2042,17 +2628,44 @@ these decisions in order:
 
 1. **A9.2.1 — Durable result:** Decide whether a folding recipe is transient
    authoring input whose durable ECS result is complete `Hinge` data.
-2. **A9.2.2 — Fold-group value:** Define the authoring-only value (`name TBD`)
-   containing ordered, consistently oriented groups of connections that fold
-   together. These spatial groups are not `FoldStage` timing groups.
+2. **A9.2.2 — Fold-group value:** Use `FoldGroup` as the ordinary,
+   authoring-only, nonempty ordered collection of `Member` entity values. It
+   stores no `Connection`, recipe, timing, or ECS state.
+   - **A9.2.2.1 — One reusable group:** **Decision:** use `FoldGroup` itself as
+     the member selection shared by topology-aware recipe application and
+     coordinated playback. Remove proposed `MemberSelection` and
+     `SharedFoldStage`; `Topology` resolves group members to `Connection`
+     values for a compatible recipe, while A9.3 decides how timing turns a
+     group into `FoldStage`.
 3. **A9.2.3 — Provider capability:** Define the optional topology-provider
    capability (`name TBD`) that returns fold groups and what provider data must
    remain available for runtime re-authoring.
+   - **A9.2.3.1 — Alternative groupings:** Decide the structure through which a
+     provider exposes alternative `FoldGroups`, including only the identity or
+     selection information supported by concrete domain examples.
 4. **A9.2.4 — Compatibility:** Define nonempty, membership, connectivity,
    orientation, uniqueness, finite-calibration, overlap, and failure
    invariants.
 5. **A9.2.5 — Accordion:** Define alternating physical fold sense without
    reducing it to raw local-angle sign parity.
+   - **A9.2.5.1 — Alternation position:** Decide whether Accordion alternates
+     between outer `FoldGroup` positions, inner member positions, or a
+     combination. **Decision:** alternate by outer group position only; inner
+     position remains available to other recipes, and recipe authoring remains
+     a pure iterator-to-`Vec<HingeAssignment>` calculation.
+   - **A9.2.5.2 — Signed fold offset:** Decide whether one signed `Angle` on
+     Accordion supplies both the first group's physical fold sense and the
+     magnitude negated for each following group. **Decision:** yes; negating
+     the recipe value reverses the pattern, while live transport remains in
+     `FoldSequence` / `FoldSequenceState`.
+     - **A9.2.5.2.1 — Default offset:** Decide whether
+       `Accordion::default()` supplies a signed half-turn while explicit
+       construction accepts any finite signed `Angle`. **Decision:** yes;
+       default to `+pi` radians while keeping every finite signed offset
+       explicitly authorable.
+   - **A9.2.5.3 — Endpoint calculation:** Decide whether
+     `Connection::connection_angle` supplies one complete `Hinge` endpoint and
+     Accordion's alternating signed offset produces the other.
 6. **A9.2.6 — Coil and Wrap:** Separate cumulative turning from physically
    exterior wrapping and define required clearance or pivot calibration.
 7. **A9.2.7 — Application lifecycle:** Define initial application, runtime
@@ -2071,44 +2684,36 @@ authoring-only values and report the net public-type cost.
 
 **Existing types:** `FoldSequence` contains authored step duration, easing, and
 initial endpoint. `FoldSequenceState` contains validated runtime transport
-state and currently copies the authored easing. `FoldStage` is the zero-based
-stage value used to calculate simultaneous member progress. `FoldCommand` is
-carried by the entity-targeted `FoldCommandEvent` and changes
+state and currently copies the authored easing. `FoldStage` is currently the
+zero-based value used to calculate simultaneous member progress. `FoldCommand`
+is carried by the entity-targeted `FoldCommandEvent` and changes
 `FoldSequenceState`.
 
-**Decisions within this active item:** Keep `FoldStage` as a named newtype.
-Keep one raw controller-level position in `FoldSequenceState`. Apply easing
-only while `hinge_to_pose()` derives a member's angle, using this precedence:
+**Decisions within this active item:** Keep the `FoldStage` domain concept as
+coordinated playback over a `FoldGroup`. Under A9.3.1.1, `FoldSequence` owns
+complete `FoldStage` values, each stage owns one `FoldGroup`, and the public
+numeric per-member stage component is removed. Keep one raw controller-level
+position in `FoldSequenceState`. Remove the copied easing field from
+`FoldSequenceState`; runtime transport remains raw.
 
-```text
-optional easing component on this Member (name TBD)
-    > override for this FoldStage stored once in FoldSequence
-    > FoldSequence default easing
-```
-
-The per-member override changes the curve but not the shared stage clock, so
-members with equal `FoldStage` values still start and finish together. Remove
-the copied easing field from `FoldSequenceState`; its stage-progress accessor
-(`name TBD`) returns raw progress in `0.0..=1.0`.
+A9.3.1.2.2 defines one complete resolved timing value (`FoldTiming`, name TBD)
+per participating member. It contains a stage-relative start offset, duration,
+and easing. `hinge_to_pose()` derives raw member progress from the stage clock,
+then applies that member's easing exactly once:
 
 ```rust
-let progress = state.stage_progress(stage); // name TBD
-let easing = member_easing
-    .map(|easing| easing.0)
-    .unwrap_or_else(|| sequence.easing_for(stage)); // name TBD
-let fraction = easing.sample_clamped(progress);
+let local_progress = timing.progress_at(state.stage_elapsed()); // names TBD
+let fraction = timing.easing.sample_clamped(local_progress);
 ```
 
-**Stage timing decision:** Use one plain value (`name TBD`) containing
-`Duration` and `EaseFunction` for the `FoldSequence` default and for a
-`FoldStage` override. `FoldStage` owns that clock. A fold needing distinct
-duration occupies a one-member `FoldStage`; a `Member` inside a shared stage
-may override only easing. The builder must make the distinction structural—for
-example, by accepting timing when adding a stage—rather than accepting an
-invalid per-member duration. Exact type, field, and builder method names remain
-pending. Advancement must consume elapsed time stage by stage, including
-crossing multiple differently timed stages in one frame; it can no longer
-divide the entire frame delta by one sequence-wide `step_seconds` value.
+A stage ends at the greatest member `start_offset + duration`. Successive
+stages remain non-overlapping, so advancement consumes elapsed time stage by
+stage, including crossing multiple differently timed stages in one frame. It
+can no longer divide the entire frame delta by one sequence-wide
+`step_seconds` value. A9.3.1.2.3 resolves the complete per-member value through
+whole-value precedence: member `Cascade::Override`, stage
+`Cascade::Override`, then the required sequence default. `Cascade::Inherit`
+falls through to the next scope. Exact member-entry storage remains A9.3.2.
 
 **Command decision:** Keep all playback requests in the existing
 entity-targeted `FoldCommandEvent`, carrying this command surface:
@@ -2155,7 +2760,7 @@ revision semantics rather than replacing them with
 control path. A `bevy_tween` timeline can trigger a command without an adapter;
 continuously driving progress remains a future adapter concern. Such an
 adapter must select external ownership even while paused and must supply raw
-progress if Hana retains the easing cascade.
+progress because Hana retains the timing cascade and applies easing once.
 
 **Status:** Partial; stage timing, easing ownership and precedence, component
 boundaries, commands, and canonical transport decided. Exact names,
@@ -2168,20 +2773,24 @@ pending.
 retained-request marker, snapshot system, snapshot diagnostic types, and the
 validation exception that waits for the request. Its existing job is to copy
 all arrangement members into the duplicate `FoldMember` relationship with one
-member per consecutive `FoldStage`; A9.5 removes that relationship, and
-optional `FoldStage` means not every `Member` participates in playback.
+member per consecutive numeric stage; A9.5 removes that relationship, and not
+every `Member` must participate in playback.
 
 Keep `FoldSequenceBuilder`, retargeted to the `Arrangement` controller, and
-have it insert `FoldStage` directly on the explicitly selected `Member`
-entities. The triangle example collects its moving members and authors one
-single-member stage per member. A newly added `Member` remains fixed until an
-author explicitly assigns `FoldStage`; member insertion must not silently
-renumber existing stages.
+have it accept explicit `FoldGroup` values for stage authoring. The triangle
+example collects its moving members and authors one single-member group per
+stage. A newly added `Member` remains fixed until an author includes it in a
+playback stage; member insertion must not silently renumber existing stages.
+The exact builder method and stored `FoldStage` representation remain A9.3.1
+and A9.3.2.
 
 ```rust
 let mut builder = FoldSequenceBuilder::new(&mut commands, controller);
 for member in folding_members {
-    builder = builder.stage(member);
+    builder = builder.stage_with_timing( // method name TBD
+        FoldGroup::from(member),
+        stage_timing, // type name TBD
+    );
 }
 builder.finish()?;
 ```
@@ -2208,9 +2817,9 @@ pending.
 `FoldSystems::Actuate` system-set variant. Its only system is
 `actuate_fold_hinges()`, which A9.1 removes together with `FoldAngles` and
 mutable `Hinge::angle`. The redesigned `hinge_to_pose()` directly reads the
-member's `FoldStage`, the controller's `FoldSequenceState`, and the member's
-endpoint-bearing `Hinge`, then writes `AnchorPose`; no separate actuation phase
-remains.
+member's stage participation from the controller's `FoldSequence`, the
+controller's `FoldSequenceState`, and the member's endpoint-bearing `Hinge`,
+then writes `AnchorPose`; no separate actuation phase remains.
 
 Retain `FoldSystems::Advance` as the public boundary after controller transport
 advancement. Existing consumers use it to read the newly advanced
@@ -2263,7 +2872,7 @@ let rotation = Quat::from_axis_angle(*axis, angle.as_radians());
 method without replacement. The current method has one unambiguous result only
 because the implemented `Hinge` stores one mutable current angle. Under A9.1,
 `Hinge` instead stores two endpoint `Angle` values, so selecting a current
-rotation requires the member's `FoldStage`, the controller's
+rotation requires the member's participation in a `FoldStage`, the controller's
 `FoldSequenceState`, and resolved easing.
 
 Do not add `rotation_at()` or `rotation_at_progress()`: either would recreate a
@@ -2275,13 +2884,17 @@ available for non-fold geometry use.
 ```rust
 commands.entity(lid).insert((
     Member::of(box_arrangement),
-    FoldStage(0),
     Hinge {
         edge: lid_edge,
         unfolded_angle: Angle::ZERO,             // field name TBD
         folded_angle: Angle::from_degrees(90.0), // field name TBD
     },
 ));
+
+sequence.stage_with_timing( // method name TBD
+    FoldGroup::from(lid),
+    lid_timing, // type name TBD
+);
 
 commands.trigger(FoldCommandEvent::new(
     box_arrangement,
@@ -2343,9 +2956,9 @@ can use Bevy's required-component removal operation. This insertion guarantee
 does not prevent a caller from explicitly removing `AnchorPose` later, so F13
 and A10 still own diagnostics and broader validity policy.
 
-Do not require `AnchoredTo`, `ResolvedAnchorGeometry`, `Member`, or `FoldStage`:
-physical connection roots, directly authored or fixed hinges, and geometry that
-arrives later remain valid.
+Do not require `AnchoredTo`, `ResolvedAnchorGeometry`, or `Member`: physical
+connection roots, directly authored or fixed hinges, and geometry that arrives
+later remain valid. `FoldStage` is sequence-owned rather than an ECS component.
 
 **Decision within this active item:** Merge the remaining `HingePivot::offset`
 into `Hinge::pivot_offset` and remove the `HingePivot` component. `Vec3::ZERO`
@@ -2394,53 +3007,48 @@ require capture, coordinated relationship commits, or continuous multi-turn
 composition that the generic lens does not provide. A9.3 retains the future
 single-writer raw-progress adapter as the correct continuous fold integration.
 
-**Decision within this active item:** Keep `FoldStage(usize)` as the ECS
-component stored on each participating `Member`. Add `SharedFoldStage` as one
-plain, authoring-only value containing a nonempty collection of `Entity` values
-that will all receive the same `FoldStage`. It is not a component or
-relationship.
-
-`FoldSequenceBuilder::stage()` accepts `impl Into<SharedFoldStage>`. Implement
-`From<Entity>` for a one-member stage and `From<(Entity, I)>` for a required
-first member plus any `IntoIterator<Item = Entity>` remainder; Rust supplies
-the corresponding `Into` implementations automatically.
+**Superseding A9.2.2.1 decision:** Do not add `SharedFoldStage`. `FoldGroup` is
+the one plain authoring value containing a nonempty ordered collection of
+`Member` entity values. Preserve the already approved ergonomic construction
+and nonempty invariant on that shared type:
 
 ```rust
-pub struct SharedFoldStage(Vec<Entity>);
+pub struct FoldGroup {
+    members: Vec<Entity>,
+}
 
-impl From<Entity> for SharedFoldStage {
+impl From<Entity> for FoldGroup {
     fn from(member: Entity) -> Self {
-        Self(vec![member])
+        Self {
+            members: vec![member],
+        }
     }
 }
 
-impl<I> From<(Entity, I)> for SharedFoldStage
+impl<I> From<(Entity, I)> for FoldGroup
 where
     I: IntoIterator<Item = Entity>,
 {
     fn from((first, remaining): (Entity, I)) -> Self {
         let mut members = vec![first];
         members.extend(remaining);
-        Self(members)
+        Self { members }
     }
-}
-
-pub fn stage(mut self, stage: impl Into<SharedFoldStage>) -> Self {
-    self.stages.push(stage.into());
-    self
 }
 ```
 
-Runtime collections use `SharedFoldStage::try_from_iter()` or
+Runtime collections use `FoldGroup::try_from_iter()` or
 `TryFrom<Vec<Entity>>`; an empty collection returns
-`FoldAuthorError::EmptyStage` before a stage can enter the builder. Do not
+`FoldAuthorError::EmptyStage` before a group can enter the builder. Do not
 implement infallible `From<Vec<Entity>>` or `FromIterator<Entity>`, because both
 can receive zero entities.
 
 ```rust
+let walls = FoldGroup::new(north, [south, east, west]);
+
 FoldSequenceBuilder::new(&mut commands, arrangement)
-    .stage(lid)
-    .stage((north, [south, east, west]))
+    .stage_with_timing(FoldGroup::from(lid), lid_timing) // names TBD
+    .stage_with_timing(walls, wall_timing)               // names TBD
     .finish()?;
 ```
 
@@ -2449,44 +3057,53 @@ data and cannot be proven by typestate. `finish()` validates all stages before
 queuing any command, so a duplicate never creates partial ECS state. A
 zero-stage builder remains valid so an arrangement may receive stages later.
 No typestate markers or secondary stage builder are added. A9.3 may later add
-stage-level timing to `SharedFoldStage` without changing its nonempty invariant.
+stage-level timing around `FoldGroup` without changing its nonempty invariant.
 
 The retained public concepts now each have one responsibility: `FoldPlugin`
 installs validation, command handling, and playback; `FoldSystems::Advance`
 marks the controller-transport scheduling boundary; `FoldSequenceBuilder` and
-`FoldAuthorError` provide transactional stage authoring; and
-`SharedFoldStage` names a nonempty authoring group without becoming ECS state.
+`FoldAuthorError` provide transactional stage authoring; and `FoldGroup` names
+the one reusable nonempty member group without becoming ECS state.
 
-The final reduction removes eleven public types and adds one authoring-only
-public type, for a net reduction of ten public types. It additionally removes
-one public system-set variant, one public method, and one optional feature,
-module, and dependency. It adds no runtime ECS component or relationship.
-Direct purpose-built `AnchorPose` writers remain supported, and F13 owns the
-replacement diagnostic policy.
+The eleven previously approved public-type removals, one public system-set
+variant removal, one public method removal, and optional tween integration
+removal remain decided. Eliminating the proposed `SharedFoldStage` addition and
+retaining `FoldStage` as a sequence-owned struct means this local
+simplification audit removes eleven public types and adds none. The complete A9
+concept count remains a closure-gate calculation after A9.2 and A9.3 settle all
+new authoring values. Direct purpose-built `AnchorPose` writers remain
+supported, and F13 owns the replacement diagnostic policy.
 
-**Status:** Decided.
+**Status:** Removals and transactional validation decided; `SharedFoldStage`
+superseded by `FoldGroup`; local net reduction is eleven public types; complete
+A9 concept count remains pending the A9 closure gate.
 
 ### A9.5. Sequence participation and arrangement membership
 
 **Decision:** Remove the `FoldMember` / `FoldMembers` relationship. Every
 physical entity carries the one `Member` relationship targeting its
-`Arrangement` controller. A folding member additionally carries `FoldStage`;
-a fixed member does not.
+`Arrangement` controller. Do not create a second relationship merely to record
+sequence participation.
 
 ```rust
 commands.entity(fixed_face).insert(Member::of(controller));
 
-commands.entity(wall).insert((
-    Member::of(controller),
-    FoldStage(0),
-));
+let walls = FoldGroup::new(north, [south, east, west]);
+sequence.stage_with_timing(walls, wall_timing); // names TBD
 ```
 
 The optional `FoldSequence` is colocated with `Arrangement` on that controller.
-Sequence validation iterates the Bevy-maintained `Members` collection and
-selects entities carrying `FoldStage`. This removes a duplicate membership
-graph while retaining independent physical topology through `AnchoredTo` and
-independent animation order through `FoldStage`.
+The Bevy-maintained `Members` collection remains the authoritative arrangement
+membership. `FoldGroup` selects members for recipe or playback authoring
+without becoming another ECS relationship. This retains independent physical
+topology through `AnchoredTo` and independent animation order through
+`FoldStage`.
+
+A9.2.2.1 supersedes the earlier decision to put the existing numeric
+`FoldStage` directly on participating `Member` entities. A9.3.1.1 decides that
+`FoldSequence` owns the complete stage collection and each `FoldStage` owns its
+`FoldGroup`. No public numeric marker remains. A fixed member is a `Member`
+omitted from every active playback stage.
 
 This model supports one active `FoldSequence` per `Arrangement`. The existing
 `FoldMember` already permits only one sequence assignment per entity, so the
@@ -2497,7 +3114,9 @@ independent sequences.
 `FoldFromArrangement` depended on the duplicate relationship and is removed
 under A9.4. `FoldSequenceBuilder` remains the explicit authoring helper.
 
-**Status:** Decided.
+**Status:** `FoldMember` / `FoldMembers` removal and single `Member` / `Members`
+relationship decided; stage participation is stored in sequence-owned
+`FoldStage` / `FoldGroup` values.
 
 The boundary used here is:
 
@@ -2797,11 +3416,12 @@ setup. Authors should be able to intelligently apply or "paste" reusable
 patterns over an explicit member selection.
 
 **Candidate:** Review builder and arrangement-authoring features for materializing
-common patterns such as serial `FoldStage` assignment, simultaneous stage
-groups, fixed-member exclusions, repeated connection layouts, and reusable
-endpoint recipes. These helpers must produce the same ordinary `Member`,
-`AnchoredTo`, `Hinge`, and `FoldStage` data as direct authoring rather than
-create a parallel runtime model.
+common patterns such as serial `FoldStage` construction, simultaneous or
+staggered `FoldGroup` timing, fixed-member exclusions, repeated connection
+layouts, and reusable endpoint recipes. These helpers must produce the same
+ordinary `Member`, `AnchoredTo`, `Hinge`, `FoldGroup`, and sequence-owned
+`FoldStage` data as direct authoring rather than create a parallel runtime
+model.
 
 **Scheduling:** Review this only after the primary A1-A10 decisions are
 complete, so the convenience API is built over the final concepts instead of
@@ -3003,12 +3623,16 @@ new members once the example inserted `ArrangedPanel` in tile order.
   stored current-angle state and `FoldAngles`, and derive the current angle in
   `hinge_to_pose()`. Remove the two built-in angle writers; decide external
   progress under A9.3. Endpoint field names remain pending.
-- **A9.3 (partial):** Keep `FoldStage` as the named simultaneous-playback
-  stage. Use one duration-plus-easing value (`name TBD`) for sequence defaults
-  and stage overrides; represent a distinct-duration fold as a one-member
-  stage, and allow only easing to vary within a shared stage. Resolve easing
-  per member with member override, then `FoldStage` override stored in
-  `FoldSequence`, then sequence default. Keep only raw progress in
+- **A9.3 (partial):** Keep `FoldStage` as the named coordinated-playback
+  concept over a `FoldGroup`. `FoldSequence` owns `Vec<FoldStage>`, every stage
+  owns one group, and no public numeric per-member stage component remains.
+  Successive stages are non-overlapping `Step` boundaries; simultaneous,
+  staggered, and wave overlap belongs inside one stage. Each resolved member
+  timing contains a stage-relative start offset, duration, and easing; the
+  stage ends at the latest member end. Resolve that complete value through a
+  required sequence default and whole-value `Cascade<FoldTiming>` overrides at
+  the stage and member-entry scopes.
+  Keep only raw progress in
   `FoldSequenceState` and apply the selected curve in `hinge_to_pose()`. Keep
   `FoldSequenceState` as the canonical transport and `FoldCommandEvent` as its
   request path. Give `FoldCommand` the variants `Step(FoldDirection)`,
@@ -3019,9 +3643,9 @@ new members once the example inserted `ArrangedPanel` in tile order.
   driving to a single-writer raw-progress adapter.
 - **A9.4:** Remove `FoldFromArrangement` and its snapshot request,
   diagnostic, system, and validation machinery. Retarget
-  `FoldSequenceBuilder` to assign `FoldStage` directly to explicitly selected
-  `Member` entities. Do not infer sequence participation from membership or
-  renumber stages when members change. Remove `MemberPlacement`, whose only
+  `FoldSequenceBuilder` to accept explicit `FoldGroup` values. Do not infer
+  sequence participation from membership or renumber stages when members
+  change. Remove `MemberPlacement`, whose only
   additional value was the live hinge angle eliminated by A9.1. Replace
   `ArrangementPlacement` with the connected payload of the named A6 result;
   keep `AnchoredTo`, `Edge`, and one fixed connection `Angle` together and
@@ -3039,16 +3663,17 @@ new members once the example inserted `ArrangedPanel` in tile order.
   as a required component of `Hinge`; ordinary `Hinge` removal leaves the pose
   available for another writer. Remove unused `AnchorPoseLens` and the
   resulting empty tween integration; retain direct purpose-built `AnchorPose`
-  writers and the future raw fold-progress adapter. Add nonempty,
-  authoring-only `SharedFoldStage`; accept it through
-  `FoldSequenceBuilder::stage(impl Into<SharedFoldStage>)`, retain fallible
-  runtime collection conversion and duplicate-member validation, and queue no
-  commands before validation succeeds.
+  writers and the future raw fold-progress adapter. Reuse nonempty,
+  authoring-only `FoldGroup` instead of adding `SharedFoldStage`; retain
+  fallible runtime collection conversion and duplicate-member validation, and
+  queue no commands before validation succeeds. The local simplification audit
+  removes eleven public types and adds none; calculate the complete A9 concept
+  count at its closure gate.
 - **A9.5:** Remove `FoldMember` / `FoldMembers`. Use `Member` / `Members` as
-  the one arrangement-membership relationship, put `FoldStage` directly on
-  participating members, and represent a fixed member by the absence of
-  `FoldStage`. Support one active `FoldSequence` per `Arrangement` until a
-  demonstrated feature requires overlapping sequence assignments.
+  the one arrangement-membership relationship. Store stage participation in
+  the `FoldGroup` owned by each sequence-owned `FoldStage`, with no public
+  per-member stage component. Support one active `FoldSequence` per `Arrangement`
+  until a demonstrated feature requires overlapping sequence assignments.
 - **F6:** Use `PlayTo(FoldEndpoint)` for explicit, idempotent terminal travel.
 - **F7:** Add pause and resume commands plus
   `FoldSequenceState::is_paused()`.

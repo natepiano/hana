@@ -16,58 +16,64 @@ entity either casts shadows or carries `NotShadowCaster`, never both.
 Three layers, matching the cascade machinery already used for font unit,
 materials, text alpha, anti-alias, and hairline fade.
 
-### Authoring layer — `Cascade<T>` on public structs
+### Authoring layer — explicit private state, domain-specific public verbs
 
-`Cascade<T>` (`crates/hana_diegetic/src/cascade/authoring.rs`) is the authored slot:
+`bevy_kana::Cascade<T>` (`crates/bevy_kana/src/cascade.rs`) is the private
+authored slot:
 
 ```rust
 pub enum Cascade<T> { Inherit, Override(T) }   // #[default] Inherit
 ```
 
-It carries the usual combinators (`is_inherit`, `as_override`, `resolve_or`,
-`map`, `copied`, `From<Option<T>>`). Public structs store `Cascade<T>` fields,
-all defaulting to `Cascade::Inherit`:
+It provides storage-independent inspection, borrowing, transformation, and
+ordered resolution. It deliberately has no `Option<T>` conversions because
+`Inherit` is authored state, not a generic missing value. `hana_diegetic` does
+not re-export this type or return it from public methods. Public callers use
+domain verbs; the corresponding structs privately store authored slots that
+default to `Cascade::Inherit`:
 
-- `DiegeticPanel` (`crates/hana_diegetic/src/panel/diegetic_panel.rs`):
-  `font_unit: Cascade<Unit>`, `shadow_casting: Cascade<ShadowCasting>`,
-  `material` / `text_material` / `shape_material: Cascade<Handle<StandardMaterial>>`,
-  `text_alpha_mode: Cascade<AlphaMode>`, `hdr_text_coverage_bias: Cascade<f32>`.
+- `DiegeticPanel` (`crates/hana_diegetic/src/panel/diegetic_panel.rs`) exposes
+  construction builders such as `shadow_casting` and `material`. Runtime
+  panel changes use typed entity commands such as `override_shadow_casting`,
+  `inherit_shadow_casting`, `override_sdf_material`, and
+  `inherit_sdf_material`.
 - `El` builder (`crates/hana_diegetic/src/layout/builder.rs`):
-  `Cascade<Handle<StandardMaterial>>`, `Cascade<AntiAlias>`,
-  `Cascade<HairlineFade>`, `Cascade<ShadowCasting>`. (`Element`, in
-  `layout/element.rs`, is the internal element representation; `El` is the public
-  builder — the authoring verb is `El::shadow_casting`.)
+  `El::shadow_casting`, `El::material`, `El::anti_alias`, and
+  `El::hairline_fade` author private element slots. (`Element`, in
+  `layout/element.rs`, is the internal element representation.)
 - `TextStyle` (`crates/hana_diegetic/src/layout/text_props.rs`):
-  `shadow_mode: Cascade<GlyphShadowMode>`, `shadow_casting: Cascade<ShadowCasting>`,
-  `material: Cascade<Handle<StandardMaterial>>`, `hdr_text_coverage_bias: Cascade<f32>`.
+  `with_shadow_mode`, `with_shadow_casting`, `with_material`, and the other
+  `with_*` / `set_*` methods author private text slots.
 - `PanelLine` / `LineStyle` / `PanelCircle` (`crates/hana_diegetic/src/layout/line.rs`):
-  `shadow_casting: Cascade<ShadowCasting>`, plus material and hairline-fade
-  cascades. The public authoring entry point is `PanelLine::shadow_casting(...)`.
+  builders such as `shadow_casting`, `material`, and `hairline_fade` author
+  private primitive slots.
 
-### Runtime ECS propagation — `Override<T>` -> `CascadePlugin<T>` -> `Resolved<T>`
+### Runtime ECS propagation — `Cascade<T>` -> `CascadePlugin<T>` -> `Resolved<T>`
 
-Defined in `crates/hana_diegetic/src/cascade/`. `ShadowCasting` and
-`GlyphShadowMode` join the cascade in `resolved.rs` via
-`cascade_attr!(existing ShadowCasting, default = ShadowCasting::On)` and
-`cascade_attr!(existing GlyphShadowMode, default = GlyphShadowMode::Cast)` — the
-value type *is* the attribute, no wrapper struct.
+`bevy_kana` owns the generic ECS engine in
+`crates/bevy_kana/src/cascade.rs`. `ShadowCasting` and `GlyphShadowMode` remain
+domain values chosen by `hana_diegetic`, with roots `ShadowCasting::On` and
+`GlyphShadowMode::Cast`.
 
-- `Override<A>(pub A)` is the authored input component (present = overrides,
-  absent = inherit); `Resolved<A>(pub A)` is the per-entity cached output. Both
-  are `pub(crate)`.
-- `CascadePlugin<A>` (`plugin.rs`) registers reflection and runs
-  `propagate_cascade::<A>` in `CascadeSet::Propagate` every frame. It re-resolves
-  any node whose own `Override<A>` changed/was removed, whose `ChildOf` changed,
-  or (sentinel-gated) whenever `CascadeDefault<A>` changed, fanning subtree
-  dirtiness down `Children`.
-- Resolution is `resolve_walk` (`resolved.rs`): first ancestor with an
-  `Override<A>` wins, else the global default; bounded by `CASCADE_DEPTH_CAP` with
-  cycle detection.
+- `Cascade<A>` is the authored input component. Absence means the entity does
+  not participate, `Inherit` follows `CascadeFrom`, and `Override(value)`
+  authors the winning local value.
+- `CascadeFrom` is independent of `ChildOf`. Panel text runs carry both because
+  transform/despawn ownership and cascade inheritance are separate facts.
+  Bevy maintains `CascadeChildren` without linked despawn.
+- Shared `CascadePlugin<A>` runs propagation in `CascadeSet::Propagate`. It
+  reacts to authored changes/removal, relationship insertion/retargeting/
+  removal, and root-default changes, then updates affected descendants.
+- Resolution follows `CascadeFrom` until it finds an override, otherwise it
+  uses `CascadeDefault<A>`. Cycles and excessive depth use the root default.
+  `Resolved<A>` is written only when the effective value changes.
 
-Panel construction seeds `Override<ShadowCasting>` from the authored `Cascade`
-via `apply_cascade_override` (`diegetic_panel.rs`); text-label bridges do the same
-for `GlyphShadowMode` / `ShadowCasting`. Render systems query `&Resolved<T>` and
-filter on `Changed<Resolved<T>>`.
+Panel construction conditionally seeds its private authored slot as
+`Cascade<ShadowCasting>` through `seed_panel_value` (`diegetic_panel.rs`); an
+explicit cascade command queued with the spawn takes precedence. Text-label
+bridges likewise seed `GlyphShadowMode` and `ShadowCasting` only when no
+explicit authored component is present, and insert `CascadeFrom(panel)`.
+Render systems query `&Resolved<T>` and filter on `Changed<Resolved<T>>`.
 
 ### Render routing — `ShadowCasting` -> `VisualShadow` in batch keys
 
@@ -88,24 +94,24 @@ therefore produces distinct keys and separate draws.
 
 ### Applied cascades
 
-The cascade model is not text-only. These authored values preserve inheritance
-with `Cascade<T>`:
+The cascade model is not text-only. These domain APIs preserve inheritance in
+private authored slots:
 
-| Area | Authored field | Runtime use |
+| Area | Public authoring | Runtime use |
 | --- | --- | --- |
-| Panel font unit | `DiegeticPanel::font_unit: Cascade<Unit>` | seeds `Override<FontUnit>` when authored |
-| Panel materials | `material` / `text_material` / `shape_material: Cascade<Handle<StandardMaterial>>` | seed material overrides |
-| Panel text alpha | `text_alpha_mode: Cascade<AlphaMode>` | inherited by text children |
-| Panel HDR text bias | `hdr_text_coverage_bias: Cascade<f32>` | inherited by text children |
-| Element material | `El::material: Cascade<Handle<StandardMaterial>>` | resolves before SDF/path material rows |
-| Element antialias | `El::anti_alias: Cascade<AntiAlias>` | resolves for SDF records |
-| Element hairline fade | `El::hairline_fade: Cascade<HairlineFade>` | resolves for SDF and path records |
-| Panel shadow casting | `DiegeticPanel::shadow_casting: Cascade<ShadowCasting>` | seeds `Resolved<ShadowCasting>` |
-| Element shadow casting | `El::shadow_casting: Cascade<ShadowCasting>` | inherited by element-owned content |
-| Text shadow casting | `TextStyle::shadow_casting: Cascade<ShadowCasting>` | combines with glyph shadow mode |
-| Text glyph shadow mode | `TextStyle::shadow_mode: Cascade<GlyphShadowMode>` | controls text silhouette contribution |
-| Panel-line shadow casting | `PanelLine`/`LineStyle::shadow_casting: Cascade<ShadowCasting>` | local line override |
-| Panel-circle shadow casting | `PanelCircle::shadow_casting: Cascade<ShadowCasting>` | local primitive override |
+| Panel font unit | `DiegeticPanel` font-unit builder; typed runtime entity commands | seed once, then author `Cascade<FontUnit>` directly |
+| Panel materials | `material` / `text_material` / `shape_material` builders; typed `override_*_material` / `inherit_*_material` entity commands | seed once, then author live material components directly |
+| Panel text alpha | `text_alpha_mode` builder | inherited by text children |
+| Panel HDR text bias | `hdr_text_coverage_bias` builder | inherited by text children |
+| Element material | `El::material` | resolves before SDF/path material rows |
+| Element antialias | `El::anti_alias` | resolves for SDF records |
+| Element hairline fade | `El::hairline_fade` | resolves for SDF and path records |
+| Panel shadow casting | `DiegeticPanel::shadow_casting` | authors `Cascade<ShadowCasting>` |
+| Element shadow casting | `El::shadow_casting` | inherited by element-owned content |
+| Text shadow casting | `TextStyle::with_shadow_casting` | combines with glyph shadow mode |
+| Text glyph shadow mode | `TextStyle::with_shadow_mode` | controls text silhouette contribution |
+| Panel-line shadow casting | `PanelLine::shadow_casting` | local line override |
+| Panel-circle shadow casting | `PanelCircle::shadow_casting` | local primitive override |
 
 ### Public API
 
@@ -146,8 +152,8 @@ match shadow_casting {
 ### Panel-shape resolution ordering
 
 `effective_shape_shadow` (`render/panel_shapes/batching.rs`):
-shape-local `line.shadow_casting().resolve_or(element_shadow)`, where
-`element_shadow = element_shadow_casting(...).resolve_or(panel_shadow_casting)`,
+primitive-local `line.shadow_casting().resolve(element_shadow)`, where
+`element_shadow = element_shadow_casting(...).resolve(panel_shadow_casting)`,
 and `panel_shadow_casting` falls back to `ShadowCasting::On`. So the order is
 shape -> element -> panel -> global default.
 
@@ -183,17 +189,20 @@ batches.
 
 ### Precompose
 
-Helper panels (`render/precompose.rs`) copy authored `Cascade::Override` values
-from the source panel and leave `Cascade::Inherit` alone:
+Helper panels (`render/precompose.rs`) carry `CascadeFrom::new(source_panel)`.
+Their inheriting cascade components therefore follow the source panel's live
+authored values and later runtime changes. The helper authors only the values
+required by precomposition itself:
 
 ```rust
-if let Cascade::Override(shadow_casting) = source.shadow_casting() {
-    builder = builder.shadow_casting(shadow_casting);
-}
+Cascade::Override(FontUnit(Unit::Points))
+Cascade::Override(Lighting::Unlit)
+Cascade::Override(HdrTextCoverageBias::NO_BIAS)
 ```
 
-Likewise for `material` / `text_material` / `shape_material` / `text_alpha_mode`.
-It never freezes a resolved value into an override.
+Tree refreshes replace only the helper's structural panel data; they do not
+copy builder material, alpha, or shadow seeds over the helper's live cascade
+components.
 
 ## Invariants
 
@@ -206,11 +215,13 @@ It never freezes a resolved value into an override.
 - **For text, both policies must independently allow a shadow.**
   `ShadowCasting::Off` short-circuits to `VisualShadow::None`; only `On` + `Cast`
   casts.
-- **Precompose copies authored `Cascade` values and preserves `Inherit`.** It must
-  never freeze a `Resolved` shadow value into a local override (that would block
-  later parent/global changes on the helper).
-- **Authored public fields default to `Cascade::Inherit`, never `Override(On)`**,
-  so inheritance stays live.
+- **Precompose inherits from the live source panel.** Its dedicated
+  `CascadeFrom` relationship preserves later panel and global changes; only
+  font unit, lighting, and HDR coverage bias are intentional helper-local
+  overrides.
+- **Private authored slots default to `Cascade::Inherit`, never
+  `Override(On)`,** so inheritance stays live. Public APIs express this through
+  domain verbs and do not expose `Cascade<T>`.
 - **Shadow changes are visual/render changes only.** Invalidation runs off
   `Changed<Resolved<ShadowCasting>>` (SDF, shape, text routing) and
   `Changed<Resolved<GlyphShadowMode>>` (text); the image router rebuilds per
@@ -241,19 +252,19 @@ It never freezes a resolved value into an override.
 - **`SurfaceShadow`** (`crates/hana_diegetic/src/panel/coordinate_space.rs`,
   `enum SurfaceShadow { Off, On }`) still exists but is compatibility-only:
   bidirectional `From<SurfaceShadow>` / `From<ShadowCasting>`,
-  `From<SurfaceShadow> for VisualShadow`, and `DiegeticPanel::surface_shadow()` /
-  builder `surface_shadow()` adapters. New code should use `ShadowCasting`.
-- **`Resolved<A>` / `Override<A>` are `pub(crate)`** — external inspectors/tests
-  cannot name them; use the `resolved_*` readers (`resolved_shadow_casting`,
+  `From<SurfaceShadow> for VisualShadow`, and the panel builder
+  `surface_shadow()` adapter. New code should use `ShadowCasting`.
+- **Raw shared components are not re-exported by `hana_diegetic`** — use the
+  typed authoring verbs and `resolved_*` readers (`resolved_shadow_casting`,
   `resolved_glyph_shadow_mode`, etc.).
 
 ## Why
 
-- **`Cascade<T>` distinguishes `Inherit` from `Override(On)` deliberately.** If
-  every node stored a concrete `ShadowCasting::On`, a later change to a parent's
-  or the global default would be silently blocked, because each descendant would
-  already carry a winning local value. `Inherit` keeps resolution live so
-  parent/global changes still propagate.
+- **The private authored state distinguishes `Inherit` from `Override(On)`
+  deliberately.** If every node stored a concrete `ShadowCasting::On`, a later
+  change to a parent's or the global default would be silently blocked because
+  each descendant would already carry a winning local value. `Inherit` keeps
+  resolution live so parent/global changes still propagate.
 - **`VisualShadow` lives in the batch key** because shadow participation is a
   pipeline/routing fact, not a scalar material value: a batch entity is a single
   draw that either casts or wears `NotShadowCaster`, so two nodes with different

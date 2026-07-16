@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `Cascade<T>` with explicit `Inherit` / `Override(T)` authoring states and
+  storage-independent single-layer and ordered resolution helpers
+- Add the reusable ECS cascade engine: `CascadeFrom` / `CascadeChildren`,
+  `CascadeAttribute`, `CascadeDefault<A>`, `Resolved<A>`, `CascadePlugin<A>`,
+  `CascadeSet`, generic entity commands, and cached-value readers
+
 ## [0.1.0] - 2026-06-20
 
 ### Changed

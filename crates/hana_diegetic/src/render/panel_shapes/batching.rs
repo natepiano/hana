@@ -990,7 +990,7 @@ fn build_panel_line_group(
         .panel
         .tree()
         .element_hairline_fade(first.element_index)
-        .resolve_or(context.panel_hairline_fade);
+        .resolve(context.panel_hairline_fade);
     let path_members = panel_shape_path_members(&members, element_hairline_fade);
     let path = path::build_panel_shape_path(
         &path_members,
@@ -1053,7 +1053,7 @@ fn build_panel_line_group(
         .panel
         .tree()
         .element_anti_alias(first.element_index)
-        .resolve_or(context.panel_anti_alias);
+        .resolve(context.panel_anti_alias);
     let run = PathRenderRecord {
         transform: context.panel_transform,
         material: appended.slot.into(),
@@ -1120,12 +1120,8 @@ fn effective_shape_shadow(
         .panel
         .tree()
         .element_shadow_casting(source.element_index)
-        .resolve_or(context.panel_shadow_casting);
-    source
-        .line
-        .shadow_casting()
-        .resolve_or(element_shadow)
-        .into()
+        .resolve(context.panel_shadow_casting);
+    source.line.shadow_casting().resolve(element_shadow).into()
 }
 
 fn panel_shape_path_members<'a>(
@@ -1139,7 +1135,7 @@ fn panel_shape_path_members<'a>(
             fade_exponent: source
                 .line
                 .hairline_fade()
-                .resolve_or(element_hairline_fade)
+                .resolve(element_hairline_fade)
                 .fade_exponent(),
         })
         .collect()
@@ -1560,10 +1556,10 @@ mod tests {
 
     use super::*;
     use crate::CalloutCap;
-    use crate::Cascade;
     use crate::El;
     use crate::Mm;
-    use crate::cascade::CascadePlugin;
+    use crate::cascade;
+    use crate::cascade::Cascade;
     use crate::cascade::CascadeSet;
     use crate::cascade::ShapeMaterial;
     use crate::layout::DrawZIndex;
@@ -1605,9 +1601,9 @@ mod tests {
                 }),
             })
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<ShapeMaterial>::default())
-            .add_plugins(CascadePlugin::<Lighting>::default())
-            .add_plugins(CascadePlugin::<Sidedness>::default())
+            .add_plugins(cascade::cascade_plugin::<ShapeMaterial>())
+            .add_plugins(cascade::cascade_plugin::<Lighting>())
+            .add_plugins(cascade::cascade_plugin::<Sidedness>())
             .init_resource::<AntiAlias>()
             .init_resource::<HairlineWidth>()
             .init_resource::<ShapeBatchStore>()

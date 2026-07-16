@@ -7,7 +7,6 @@ use super::PanelWorldConversion;
 use super::PanelWorldProjection;
 use super::PanelWorldTarget;
 use super::SavedWorldRestoreMode;
-use crate::cascade::Cascade;
 use crate::layout::Anchor;
 use crate::layout::LayoutTree;
 use crate::layout::Lighting;
@@ -29,8 +28,6 @@ pub struct SavedPanelWorldState {
     pub height:             f32,
     /// Original panel layout unit.
     pub layout_unit:        Unit,
-    /// Original panel font unit authoring.
-    pub font_unit:          Cascade<Unit>,
     /// Original resolved font unit.
     pub resolved_font_unit: Unit,
     /// Original resolved lighting.
@@ -64,7 +61,6 @@ impl SavedPanelWorldState {
             width: panel.width(),
             height: panel.height(),
             layout_unit: panel.layout_unit(),
-            font_unit: panel.font_unit(),
             resolved_font_unit,
             resolved_lighting,
             resolved_sidedness,
@@ -154,7 +150,6 @@ impl SavedPanelWorldState {
         panel.width = conversion.panel_size.x;
         panel.height = conversion.panel_size.y;
         panel.layout_unit = conversion.layout_unit;
-        panel.font_unit = self.font_unit;
         panel.anchor = conversion.anchor.unwrap_or(self.anchor);
         panel.world_width = conversion.world_width;
         panel.world_height = conversion.world_height;

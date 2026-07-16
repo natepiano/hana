@@ -11,10 +11,8 @@ use super::layout::PanelTextDrawZIndexRank;
 use crate::PanelElementId;
 use crate::cascade;
 use crate::cascade::Cascade;
-use crate::cascade::CascadeAttr;
-use crate::cascade::CascadeDefault;
+use crate::cascade::CascadeAttribute;
 use crate::cascade::HdrTextCoverageBias;
-use crate::cascade::Override;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -46,13 +44,13 @@ struct ReusableChild<'a> {
     layout:                 &'a PanelTextLayout,
     z_index:                &'a PanelTextDrawZIndex,
     z_index_rank:           &'a PanelTextDrawZIndexRank,
-    alpha:                  Option<&'a Override<TextAlpha>>,
-    material:               Option<&'a Override<TextMaterial>>,
-    lighting:               Option<&'a Override<Lighting>>,
-    sidedness:              Option<&'a Override<Sidedness>>,
-    shadow_casting:         Option<&'a Override<ShadowCasting>>,
-    glyph_shadow_mode:      Option<&'a Override<GlyphShadowMode>>,
-    hdr_text_coverage_bias: Option<&'a Override<HdrTextCoverageBias>>,
+    alpha:                  Option<&'a Cascade<TextAlpha>>,
+    material:               Option<&'a Cascade<TextMaterial>>,
+    lighting:               Option<&'a Cascade<Lighting>>,
+    sidedness:              Option<&'a Cascade<Sidedness>>,
+    shadow_casting:         Option<&'a Cascade<ShadowCasting>>,
+    glyph_shadow_mode:      Option<&'a Cascade<GlyphShadowMode>>,
+    hdr_text_coverage_bias: Option<&'a Cascade<HdrTextCoverageBias>>,
 }
 
 /// One text render command resolved to its reconcile inputs: source element,
@@ -123,13 +121,13 @@ fn collect_existing_text_children<'a>(
         &PanelTextLayout,
         &PanelTextDrawZIndex,
         &PanelTextDrawZIndexRank,
-        Option<&Override<TextAlpha>>,
-        Option<&Override<TextMaterial>>,
-        Option<&Override<Lighting>>,
-        Option<&Override<Sidedness>>,
-        Option<&Override<ShadowCasting>>,
-        Option<&Override<GlyphShadowMode>>,
-        Option<&Override<HdrTextCoverageBias>>,
+        Option<&Cascade<TextAlpha>>,
+        Option<&Cascade<TextMaterial>>,
+        Option<&Cascade<Lighting>>,
+        Option<&Cascade<Sidedness>>,
+        Option<&Cascade<ShadowCasting>>,
+        Option<&Cascade<GlyphShadowMode>>,
+        Option<&Cascade<HdrTextCoverageBias>>,
     )>,
 ) -> HashMap<(PanelElementId, usize), ReusableChild<'a>> {
     let mut existing_by_key = HashMap::new();
@@ -194,13 +192,13 @@ pub(super) fn reconcile_panel_text_children(
         &PanelTextLayout,
         &PanelTextDrawZIndex,
         &PanelTextDrawZIndexRank,
-        Option<&Override<TextAlpha>>,
-        Option<&Override<TextMaterial>>,
-        Option<&Override<Lighting>>,
-        Option<&Override<Sidedness>>,
-        Option<&Override<ShadowCasting>>,
-        Option<&Override<GlyphShadowMode>>,
-        Option<&Override<HdrTextCoverageBias>>,
+        Option<&Cascade<TextAlpha>>,
+        Option<&Cascade<TextMaterial>>,
+        Option<&Cascade<Lighting>>,
+        Option<&Cascade<Sidedness>>,
+        Option<&Cascade<ShadowCasting>>,
+        Option<&Cascade<GlyphShadowMode>>,
+        Option<&Cascade<HdrTextCoverageBias>>,
     )>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -244,7 +242,7 @@ pub(super) fn reconcile_panel_text_children(
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
             // `with_material` / `with_lighting` / `with_sidedness`) are
             // captured before `for_shaping()` clears them, then inserted as
-            // `Override<A>` on the label. `None` means the label inherits the
+            // `Cascade<A>` on the label. `None` means the label inherits the
             // panel value.
             let label_cascades = TextLabelCascadeOverrides::from_style(config);
             let style = config.for_shaping(Anchor::TopLeft);
@@ -493,19 +491,18 @@ fn sync_label_cascade_overrides(
 fn sync_cascade_override<A>(
     child: &mut EntityCommands<'_>,
     incoming: Cascade<A>,
-    current: Option<&Override<A>>,
+    current: Option<&Cascade<A>>,
 ) where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
+    A: CascadeAttribute,
 {
     match incoming {
         Cascade::Override(value) => {
-            if current.map(|node_override| &node_override.0) != Some(&value) {
+            if current.and_then(Cascade::as_override) != Some(&value) {
                 cascade::apply_cascade_override(child, value);
             }
         },
         Cascade::Inherit => {
-            if current.is_some() {
+            if !current.is_some_and(Cascade::is_inherit) {
                 cascade::remove_cascade_override::<A>(child);
             }
         },
@@ -531,12 +528,15 @@ mod tests {
     use crate::Mm;
     use crate::PanelElementId;
     use crate::PanelText;
-    use crate::cascade::Override;
+    use crate::cascade;
+    use crate::cascade::Cascade;
+    use crate::cascade::Resolved;
     use crate::cascade::TextAlpha;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::BoundingBox;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
+    use crate::layout::Lighting;
     use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
@@ -548,6 +548,8 @@ mod tests {
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
+    use crate::render::panel_text::alpha;
+    use crate::render::panel_text::glyph_cascade;
     use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
 
@@ -571,7 +573,7 @@ mod tests {
             Ref<TextContent>,
             Ref<TextStyle>,
             Ref<PanelTextLayout>,
-            Option<Ref<Override<TextAlpha>>>,
+            Option<Ref<Cascade<TextAlpha>>>,
         )>,
     ) {
         probe.text.clear();
@@ -645,6 +647,17 @@ mod tests {
         builder.build()
     }
 
+    fn explicit_cascade_text_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text((
+            "Glow",
+            TextStyle::new(10.0)
+                .with_alpha_mode(AlphaMode::Add)
+                .with_lighting(Lighting::Unlit),
+        ));
+        builder.build()
+    }
+
     fn spawn_panel(app: &mut App, tree: LayoutTree) -> Entity {
         app.world_mut()
             .spawn(
@@ -706,8 +719,8 @@ mod tests {
 
         let label = labels_by_text(&mut app)["Glow"];
         assert!(
-            app.world().get::<Override<TextAlpha>>(label).is_some(),
-            "explicit-alpha label should carry Override<TextAlpha> after the first pass"
+            app.world().get::<Cascade<TextAlpha>>(label).is_some(),
+            "explicit-alpha label should carry Cascade<TextAlpha> after the first pass"
         );
 
         // Recolor only; alpha stays AlphaMode::Add.
@@ -721,6 +734,40 @@ mod tests {
         assert!(probe.style.contains(&label));
         // The unchanged alpha override is not re-touched.
         assert!(!probe.alpha.contains(&label));
+    }
+
+    #[test]
+    fn first_spawn_preserves_explicit_label_cascades() {
+        let mut app = reconcile_app();
+        app.add_plugins(cascade::cascade_plugin::<TextAlpha>())
+            .add_plugins(cascade::cascade_plugin::<Lighting>())
+            .add_observer(alpha::seed_panel_text_child_alpha)
+            .add_observer(glyph_cascade::seed_panel_text_child_glyph);
+        spawn_panel(&mut app, explicit_cascade_text_tree());
+
+        app.update();
+
+        let label = labels_by_text(&mut app)["Glow"];
+        assert_eq!(
+            app.world().get::<Cascade<TextAlpha>>(label),
+            Some(&Cascade::Override(TextAlpha(AlphaMode::Add)))
+        );
+        assert_eq!(
+            app.world().get::<Cascade<Lighting>>(label),
+            Some(&Cascade::Override(Lighting::Unlit))
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<TextAlpha>>(label)
+                .map(|value| value.0),
+            Some(TextAlpha(AlphaMode::Add))
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<Lighting>>(label)
+                .map(|value| value.0),
+            Some(Lighting::Unlit)
+        );
     }
 
     #[test]

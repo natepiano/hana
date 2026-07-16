@@ -889,8 +889,8 @@ mod tests {
 
     use super::*;
     use crate::Mm;
+    use crate::cascade;
     use crate::cascade::CascadeEntityCommandsExt;
-    use crate::cascade::CascadePlugin;
     use crate::cascade::SdfMaterial;
     use crate::layout::CornerRadius;
     use crate::layout::El;
@@ -926,7 +926,7 @@ mod tests {
         app.init_resource::<ResolvedSdfSurfaceRegistry>();
         app.insert_resource(zero_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_plugins(CascadePlugin::<SdfMaterial>::default());
+        app.add_plugins(cascade::cascade_plugin::<SdfMaterial>());
         app.add_systems(PostUpdate, build_panel_geometry);
         app
     }

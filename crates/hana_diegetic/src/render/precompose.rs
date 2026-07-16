@@ -17,10 +17,10 @@ use bevy::render::render_resource::TextureFormat;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
-use crate::Cascade;
+use crate::cascade::Cascade;
+use crate::cascade::CascadeFrom;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
-use crate::cascade::Override;
 use crate::cascade::PanelDefaults;
 use crate::cascade::Resolved;
 use crate::layout::Anchor;
@@ -84,7 +84,7 @@ pub(super) fn ensure_panel_precompose_caches(
                 continue;
             };
             let pixel_size = precompose_pixel_size(bounds);
-            let Some(helper_panel) = helper_panel_for_subtree(panel, subtree, bounds) else {
+            let Some(helper_panel) = helper_panel_for_subtree(subtree, bounds) else {
                 continue;
             };
             sync_entry(SyncEntry {
@@ -175,34 +175,16 @@ fn precompose_axis_pixels(points: f32) -> u32 {
         .to_u32()
 }
 
-fn helper_panel_for_subtree(
-    source: &DiegeticPanel,
-    subtree: LayoutTree,
-    bounds: BoundingBox,
-) -> Option<DiegeticPanel> {
-    let mut builder = DiegeticPanel::world()
+fn helper_panel_for_subtree(subtree: LayoutTree, bounds: BoundingBox) -> Option<DiegeticPanel> {
+    DiegeticPanel::world()
         .size(Pt(bounds.width), Pt(bounds.height))
         .world_height(bounds.height.max(MIN_PRECOMPOSE_PIXELS.to_f32()))
         .anchor(Anchor::Center)
         .font_unit(Unit::Points)
         .hdr_text_coverage_bias(PRECOMPOSE_TEXT_COVERAGE_BIAS.0)
-        .with_tree(subtree);
-    if let Cascade::Override(shadow_casting) = source.shadow_casting() {
-        builder = builder.shadow_casting(shadow_casting);
-    }
-    if let Cascade::Override(material) = source.material().cloned() {
-        builder = builder.material(material);
-    }
-    if let Cascade::Override(material) = source.text_material().cloned() {
-        builder = builder.text_material(material);
-    }
-    if let Cascade::Override(material) = source.shape_material().cloned() {
-        builder = builder.shape_material(material);
-    }
-    if let Cascade::Override(alpha_mode) = source.text_alpha_mode() {
-        builder = builder.text_alpha_mode(alpha_mode);
-    }
-    builder.build().ok()
+        .with_tree(subtree)
+        .build()
+        .ok()
 }
 
 struct SyncEntry<'a, 'w, 's> {
@@ -235,6 +217,7 @@ fn sync_entry(input: SyncEntry<'_, '_, '_>) {
             commands,
             cache,
             update,
+            panel_entity,
             helper_panel,
             bounds,
             layer,
@@ -291,6 +274,7 @@ struct ExistingEntrySync<'a, 'w, 's> {
     commands:     &'a mut Commands<'w, 's>,
     cache:        &'a mut PanelPrecomposeCache,
     update:       ExistingEntryUpdate,
+    panel_entity: Entity,
     helper_panel: DiegeticPanel,
     bounds:       BoundingBox,
     layer:        RenderLayers,
@@ -302,6 +286,7 @@ fn sync_existing_entry(input: ExistingEntrySync<'_, '_, '_>) {
         commands,
         cache,
         update,
+        panel_entity,
         helper_panel,
         bounds,
         layer,
@@ -317,10 +302,9 @@ fn sync_existing_entry(input: ExistingEntrySync<'_, '_, '_>) {
     commands.entity(update.helper_panel).insert((
         PrecomposeHelper,
         Transform::from_translation(origin),
-        Override(Lighting::Unlit),
-        Resolved(Lighting::Unlit),
-        Override(PRECOMPOSE_TEXT_COVERAGE_BIAS),
-        Resolved(PRECOMPOSE_TEXT_COVERAGE_BIAS),
+        CascadeFrom::new(panel_entity),
+        Cascade::Override(Lighting::Unlit),
+        Cascade::Override(PRECOMPOSE_TEXT_COVERAGE_BIAS),
         layer.clone(),
     ));
     if update.image_changed {
@@ -378,10 +362,9 @@ fn spawn_precompose_entry(input: SpawnEntry<'_, '_, '_>) {
                 PrecomposeHelper,
                 helper_panel,
                 Transform::from_translation(origin),
-                Override(Lighting::Unlit),
-                Resolved(Lighting::Unlit),
-                Override(PRECOMPOSE_TEXT_COVERAGE_BIAS),
-                Resolved(PRECOMPOSE_TEXT_COVERAGE_BIAS),
+                CascadeFrom::new(panel_entity),
+                Cascade::Override(Lighting::Unlit),
+                Cascade::Override(PRECOMPOSE_TEXT_COVERAGE_BIAS),
                 layer.clone(),
             ))
             .id();
@@ -504,6 +487,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::cascade;
     use crate::layout::El;
     use crate::layout::LayoutEngine;
     use crate::layout::MeasureTextFn;
@@ -530,6 +514,8 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>();
         app.init_resource::<PanelDefaults>();
+        app.add_plugins(cascade::cascade_plugin::<Lighting>());
+        app.add_plugins(cascade::cascade_plugin::<HdrTextCoverageBias>());
         app.add_systems(Update, ensure_panel_precompose_caches);
 
         let panel = DiegeticPanel::world()
@@ -583,13 +569,12 @@ mod tests {
                 .get::<DiegeticPanel>(entry.helper_panel)
                 .is_some()
         );
-        let helper_panel = app
-            .world()
-            .get::<DiegeticPanel>(entry.helper_panel)
-            .expect("helper panel should exist");
         assert_eq!(
-            helper_panel.hdr_text_coverage_bias(),
-            Cascade::Override(PRECOMPOSE_TEXT_COVERAGE_BIAS.0)
+            app.world()
+                .get::<CascadeFrom>(entry.helper_panel)
+                .expect("helper panel should inherit from its source panel")
+                .target(),
+            panel_entity
         );
         assert!(app.world().get::<Camera>(entry.camera).is_some());
         let lighting = app
@@ -599,9 +584,12 @@ mod tests {
         assert!(matches!(lighting.0, Lighting::Unlit));
         let coverage_override = app
             .world()
-            .get::<Override<HdrTextCoverageBias>>(entry.helper_panel)
+            .get::<Cascade<HdrTextCoverageBias>>(entry.helper_panel)
             .expect("helper panel coverage bias is overridden");
-        assert_eq!(coverage_override.0, PRECOMPOSE_TEXT_COVERAGE_BIAS);
+        assert_eq!(
+            coverage_override,
+            &Cascade::Override(PRECOMPOSE_TEXT_COVERAGE_BIAS)
+        );
         let coverage_resolved = app
             .world()
             .get::<Resolved<HdrTextCoverageBias>>(entry.helper_panel)

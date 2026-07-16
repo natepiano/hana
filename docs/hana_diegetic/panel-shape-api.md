@@ -493,7 +493,7 @@ Deliverables:
   finite) at one site; the resource is Reflect/BRP-mutable, so arbitrary
   values can arrive at runtime.
 - Declare `AntiAlias` and `HairlineFade` as cascade attributes through
-  the existing `cascade_attr!` infrastructure (`TextAlpha` is the template):
+  the existing `cascade_attribute!` infrastructure (`TextAlpha` is the template):
   `Override<A>` / `Resolved<A>` components, cascade plugin registration, and
   attribute verbs. The global resources stay as the cascade root defaults.
 - Carry the resolved AA mode and fade policy in `PathRenderRecord` instead of
@@ -552,7 +552,7 @@ Acceptance:
 
 **What worked:**
 
-- `cascade_attr!(existing Ty, default = ...)` — a new macro arm in
+- `cascade_attribute!(existing Ty, default = ...)` — a new macro arm in
   `cascade/resolved.rs` — joins an already-named render value type to the
   cascade without minting a wrapper struct, so the attributes are literally
   `AntiAlias` and `HairlineFade` (`Override<AntiAlias>`,
@@ -657,8 +657,8 @@ winding level, inside one record.
 As built:
 
 - **Per-line authoring**: `PanelLine::hairline_fade(HairlineFade)` /
-  `LineStyle::hairline_fade` (`Cascade<HairlineFade>`,
-  `Cascade::Inherit` inherits the element -> panel -> global resolution).
+  `LineStyle::hairline_fade` authors a line override; omitting it inherits the
+  element -> panel -> global resolution.
   Carried through
   `ResolvedPanelShape::hairline_fade`; resolved per member in
   `build_panel_line_group` and passed to `build_panel_shape_path` as

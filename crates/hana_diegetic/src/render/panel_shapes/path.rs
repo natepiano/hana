@@ -458,7 +458,7 @@ mod tests {
     use bevy_kana::ToF32;
 
     use super::*;
-    use crate::Cascade;
+    use crate::cascade::Cascade;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutEngine;

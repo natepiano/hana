@@ -21,7 +21,7 @@ use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
-use hana_diegetic::Cascade;
+use hana_diegetic::CascadeEntityCommandsExt as _;
 use hana_diegetic::ChildDivider;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
@@ -258,9 +258,10 @@ fn cycle_lighting_preset(
     mut requested: ResMut<RequestedPreset>,
     mut preset: ResMut<LightingPreset>,
     material_handles: Res<PanelMaterialHandles>,
-    mut panels: Query<&mut DiegeticPanel, With<RenderPanel>>,
+    panels: Query<Entity, With<RenderPanel>>,
     mut lights: Query<(&mut DirectionalLight, &SceneLight)>,
     mut point_lights: Query<(&mut PointLight, &ScenePointLight)>,
+    mut commands: Commands,
 ) {
     let Some(idx) = requested.0.take() else {
         return;
@@ -281,9 +282,11 @@ fn cycle_lighting_preset(
         material_handles.lit.clone()
     };
 
-    for mut panel in &mut panels {
-        *panel.material_mut() = Cascade::Override(source_material.clone());
-        *panel.text_material_mut() = Cascade::Override(source_material.clone());
+    for panel in &panels {
+        commands
+            .entity(panel)
+            .override_sdf_material(source_material.clone())
+            .override_text_material(source_material.clone());
     }
 
     // Restore saved illuminance for lights-on, zero for lights-off.

@@ -1,14 +1,11 @@
-use bevy::ecs::world::EntityWorldMut;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
+use bevy_kana::CascadeAttribute;
+use bevy_kana::CascadeEntityCommandsExt as _;
 
-use super::CascadeDefault;
-use super::resolved;
-use super::resolved::CascadeAttr;
+use super::CascadeRoot;
 pub use super::resolved::FontUnit;
 pub use super::resolved::HdrTextCoverageBias;
-use super::resolved::Override;
-use super::resolved::Resolved;
 pub use super::resolved::SdfMaterial;
 pub use super::resolved::ShapeMaterial;
 pub use super::resolved::TextAlpha;
@@ -23,23 +20,23 @@ use crate::render::HairlineFade;
 
 /// Typed cascade commands for entity-local authored values.
 ///
-/// `override_*` writes this entity's authored value. `inherit_*` removes that
-/// authored value so the entity resolves from its parent or the global
-/// [`CascadeDefault<A>`](CascadeDefault). Schedule writes before
+/// `override_*` writes this entity's authored value. `inherit_*` writes
+/// `Cascade::Inherit` so the entity remains participating and resolves through
+/// `CascadeFrom` or the global
+/// [`CascadeDefault<A>`](bevy_kana::CascadeDefault). Schedule writes before
 /// [`CascadeSet::Propagate`](super::CascadeSet::Propagate) and reads after it
-/// for same-frame descendant observation; direct entities are self-healed when
-/// the command flushes.
+/// for same-frame observation.
 pub trait CascadeEntityCommandsExt {
     /// Author this entity's text alpha mode.
     fn override_text_alpha(&mut self, alpha_mode: AlphaMode) -> &mut Self;
 
-    /// Remove this entity's authored text alpha mode.
+    /// Make this entity inherit text alpha mode.
     fn inherit_text_alpha(&mut self) -> &mut Self;
 
     /// Author this entity's font unit.
     fn override_font_unit(&mut self, unit: Unit) -> &mut Self;
 
-    /// Remove this entity's authored font unit.
+    /// Make this entity inherit font unit.
     fn inherit_font_unit(&mut self) -> &mut Self;
 
     /// Author this entity's HDR text coverage bias.
@@ -49,61 +46,61 @@ pub trait CascadeEntityCommandsExt {
     /// looks too thin under HDR. Negative values make edges thinner.
     fn override_hdr_text_coverage_bias(&mut self, bias: f32) -> &mut Self;
 
-    /// Remove this entity's authored HDR text coverage bias.
+    /// Make this entity inherit HDR text coverage bias.
     fn inherit_hdr_text_coverage_bias(&mut self) -> &mut Self;
 
     /// Author this entity's lighting mode.
     fn override_lighting(&mut self, lighting: Lighting) -> &mut Self;
 
-    /// Remove this entity's authored lighting mode.
+    /// Make this entity inherit lighting mode.
     fn inherit_lighting(&mut self) -> &mut Self;
 
     /// Author this entity's shadow-casting policy.
     fn override_shadow_casting(&mut self, shadow_casting: ShadowCasting) -> &mut Self;
 
-    /// Remove this entity's authored shadow-casting policy.
+    /// Make this entity inherit shadow-casting policy.
     fn inherit_shadow_casting(&mut self) -> &mut Self;
 
     /// Author this entity's glyph shadow mode.
     fn override_glyph_shadow_mode(&mut self, mode: GlyphShadowMode) -> &mut Self;
 
-    /// Remove this entity's authored glyph shadow mode.
+    /// Make this entity inherit glyph shadow mode.
     fn inherit_glyph_shadow_mode(&mut self) -> &mut Self;
 
     /// Author this entity's sidedness.
     fn override_sidedness(&mut self, sidedness: Sidedness) -> &mut Self;
 
-    /// Remove this entity's authored sidedness.
+    /// Make this entity inherit sidedness.
     fn inherit_sidedness(&mut self) -> &mut Self;
 
     /// Author this entity's anti-alias mode.
     fn override_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self;
 
-    /// Remove this entity's authored anti-alias mode.
+    /// Make this entity inherit anti-alias mode.
     fn inherit_anti_alias(&mut self) -> &mut Self;
 
     /// Author this entity's hairline fade policy.
     fn override_hairline_fade(&mut self, fade: HairlineFade) -> &mut Self;
 
-    /// Remove this entity's authored hairline fade policy.
+    /// Make this entity inherit hairline fade policy.
     fn inherit_hairline_fade(&mut self) -> &mut Self;
 
     /// Author this entity's SDF surface material source handle.
     fn override_sdf_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self;
 
-    /// Remove this entity's authored SDF surface material source handle.
+    /// Make this entity inherit SDF surface material source handle.
     fn inherit_sdf_material(&mut self) -> &mut Self;
 
     /// Author this entity's text material source handle.
     fn override_text_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self;
 
-    /// Remove this entity's authored text material source handle.
+    /// Make this entity inherit text material source handle.
     fn inherit_text_material(&mut self) -> &mut Self;
 
     /// Author this entity's panel-shape material source handle.
     fn override_shape_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self;
 
-    /// Remove this entity's authored panel-shape material source handle.
+    /// Make this entity inherit panel primitive material source handle.
     fn inherit_shape_material(&mut self) -> &mut Self;
 }
 
@@ -195,8 +192,8 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
 /// Resolve an entity's current text alpha mode.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_text_alpha(world: &World, entity: Entity) -> AlphaMode {
     resolved_cascade::<TextAlpha>(world, entity).0
@@ -204,8 +201,8 @@ pub fn resolved_text_alpha(world: &World, entity: Entity) -> AlphaMode {
 
 /// Resolve an entity's current font unit.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_font_unit(world: &World, entity: Entity) -> Unit {
     resolved_cascade::<FontUnit>(world, entity).0
@@ -213,8 +210,8 @@ pub fn resolved_font_unit(world: &World, entity: Entity) -> Unit {
 
 /// Resolve an entity's current HDR text coverage bias.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_hdr_text_coverage_bias(world: &World, entity: Entity) -> f32 {
     resolved_cascade::<HdrTextCoverageBias>(world, entity).0
@@ -222,8 +219,8 @@ pub fn resolved_hdr_text_coverage_bias(world: &World, entity: Entity) -> f32 {
 
 /// Resolve an entity's current lighting mode.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_lighting(world: &World, entity: Entity) -> Lighting {
     resolved_cascade::<Lighting>(world, entity)
@@ -231,8 +228,8 @@ pub fn resolved_lighting(world: &World, entity: Entity) -> Lighting {
 
 /// Resolve an entity's current shadow-casting policy.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_shadow_casting(world: &World, entity: Entity) -> ShadowCasting {
     resolved_cascade::<ShadowCasting>(world, entity)
@@ -240,8 +237,8 @@ pub fn resolved_shadow_casting(world: &World, entity: Entity) -> ShadowCasting {
 
 /// Resolve an entity's current glyph shadow mode.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_glyph_shadow_mode(world: &World, entity: Entity) -> GlyphShadowMode {
     resolved_cascade::<GlyphShadowMode>(world, entity)
@@ -249,8 +246,8 @@ pub fn resolved_glyph_shadow_mode(world: &World, entity: Entity) -> GlyphShadowM
 
 /// Resolve an entity's current sidedness.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_sidedness(world: &World, entity: Entity) -> Sidedness {
     resolved_cascade::<Sidedness>(world, entity)
@@ -258,8 +255,8 @@ pub fn resolved_sidedness(world: &World, entity: Entity) -> Sidedness {
 
 /// Resolve an entity's current anti-alias mode.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_anti_alias(world: &World, entity: Entity) -> AntiAlias {
     resolved_cascade::<AntiAlias>(world, entity)
@@ -267,8 +264,8 @@ pub fn resolved_anti_alias(world: &World, entity: Entity) -> AntiAlias {
 
 /// Resolve an entity's current hairline fade policy.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_hairline_fade(world: &World, entity: Entity) -> HairlineFade {
     resolved_cascade::<HairlineFade>(world, entity)
@@ -276,8 +273,8 @@ pub fn resolved_hairline_fade(world: &World, entity: Entity) -> HairlineFade {
 
 /// Resolve an entity's current SDF surface material handle.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_sdf_material(world: &World, entity: Entity) -> Handle<StandardMaterial> {
     resolved_cascade::<SdfMaterial>(world, entity).0
@@ -285,8 +282,8 @@ pub fn resolved_sdf_material(world: &World, entity: Entity) -> Handle<StandardMa
 
 /// Resolve an entity's current text material handle.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_text_material(world: &World, entity: Entity) -> Handle<StandardMaterial> {
     resolved_cascade::<TextMaterial>(world, entity).0
@@ -294,8 +291,8 @@ pub fn resolved_text_material(world: &World, entity: Entity) -> Handle<StandardM
 
 /// Resolve an entity's current panel-shape material handle.
 ///
-/// Reads the cached resolved value when present. If the entity has not been
-/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Reads the cached resolved value when present. Before propagation seeds the cache,
+/// this resolves through the shared `CascadeFrom` relationship walk.
 #[must_use]
 pub fn resolved_shape_material(world: &World, entity: Entity) -> Handle<StandardMaterial> {
     resolved_cascade::<ShapeMaterial>(world, entity).0
@@ -306,83 +303,26 @@ pub(crate) fn apply_cascade_override<'a, 'w, A>(
     value: A,
 ) -> &'a mut EntityCommands<'w>
 where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
+    A: CascadeAttribute,
 {
-    entity.queue(move |mut entity: EntityWorldMut| {
-        apply_cascade_override_now(&mut entity, value);
-    })
+    entity.override_cascade(value)
 }
 
 pub(crate) fn remove_cascade_override<'a, 'w, A>(
     entity: &'a mut EntityCommands<'w>,
 ) -> &'a mut EntityCommands<'w>
 where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
+    A: CascadeAttribute,
 {
-    entity.queue(move |mut entity: EntityWorldMut| {
-        if entity.get::<Override<A>>().is_none() {
-            return;
-        }
-        entity.remove::<Override<A>>();
-        heal_resolved(&mut entity);
-    })
-}
-
-fn apply_cascade_override_now<A>(entity: &mut EntityWorldMut<'_>, value: A)
-where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
-{
-    if entity
-        .get::<Override<A>>()
-        .is_some_and(|node_override| node_override.0 == value)
-    {
-        heal_resolved(entity);
-        return;
-    }
-    entity.insert(Override(value));
-    heal_resolved(entity);
-}
-
-fn heal_resolved<A>(entity: &mut EntityWorldMut<'_>)
-where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
-{
-    let entity_id = entity.id();
-    let default = cascade_default(entity.world());
-    let resolved = resolved::resolve::<A>(entity.world(), entity_id, default);
-    if entity
-        .get::<Resolved<A>>()
-        .is_some_and(|current| current.0 == resolved)
-    {
-        return;
-    }
-    entity.insert(Resolved(resolved));
+    entity.inherit_cascade::<A>()
 }
 
 pub(crate) fn resolved_cascade<A>(world: &World, entity: Entity) -> A
 where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
+    A: CascadeAttribute + CascadeRoot,
 {
-    if let Some(resolved) = world.get::<Resolved<A>>(entity) {
-        return resolved.0.clone();
+    if let Some(value) = bevy_kana::resolved_cascade::<A>(world, entity) {
+        return value.clone();
     }
-    let default = cascade_default(world);
-    resolved::resolve::<A>(world, entity, default)
-}
-
-fn cascade_default<A>(world: &World) -> A
-where
-    A: CascadeAttr,
-    CascadeDefault<A>: Default + Resource,
-{
-    world
-        .get_resource::<CascadeDefault<A>>()
-        .cloned()
-        .unwrap_or_default()
-        .0
+    bevy_kana::resolve_entity_cascade::<A>(world, entity).unwrap_or_else(A::root_default)
 }

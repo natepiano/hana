@@ -1,6 +1,6 @@
-//! [`compute_panel_layouts`] — recomputes layout for changed panels, plus
-//! [`resolve_world_panel_fit`] — shrinks `Fit`-axis world panels to their
-//! content bounds after layout runs.
+//! [`compute_panel_layouts`] — recomputes layout for changed panels, layout
+//! trees, and resolved font units, plus [`resolve_world_panel_fit`] — shrinks
+//! `Fit`-axis world panels to their content bounds after layout runs.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -33,7 +33,8 @@ use crate::layout::Sizing;
 use crate::layout::TextMeasure;
 use crate::text::DiegeticTextMeasurer;
 
-/// Recomputes layout for panels whose [`DiegeticPanel`] component has changed.
+/// Recomputes layout after a panel, its layout tree, or its resolved font unit
+/// changes.
 ///
 /// Uses the [`ShapedTextCache`] for measurement: if a text string has already
 /// been shaped (by a previous layout or render pass), its dimensions are
@@ -48,7 +49,7 @@ pub(super) fn compute_panel_layouts(
     )>,
     mut computed_panels: Query<&mut ComputedDiegeticPanel>,
     mut commands: Commands,
-    panel_font_units: Query<&Resolved<FontUnit>>,
+    panel_font_units: Query<Ref<Resolved<FontUnit>>>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -68,7 +69,11 @@ pub(super) fn compute_panel_layouts(
     for (entity, panel_ref, mut tree_change, mut scaled_tree_cache) in &mut panels {
         let panel_changed = panel_ref.is_changed();
         let pending_some = tree_change.pending().is_some();
-        if !panel_changed && !pending_some {
+        let resolved_font_unit = panel_font_units.get(entity).ok();
+        let font_unit_changed = resolved_font_unit
+            .as_ref()
+            .is_some_and(DetectChanges::is_changed);
+        if !panel_changed && !pending_some && !font_unit_changed {
             continue;
         }
         if *trace_remaining > 0 {
@@ -84,12 +89,11 @@ pub(super) fn compute_panel_layouts(
         };
 
         let layout_unit = panel_ref.layout_unit();
-        // Every panel carries a seeded `Override<FontUnit>`, so `Resolved` is
+        // Every panel carries a seeded `Cascade<FontUnit>`, so `Resolved` is
         // always present; the fallback to the construction-time
         // `panel_font_unit` seed only guards a missing-component edge.
-        let font_unit = panel_font_units
-            .get(entity)
-            .map_or(defaults.panel_font_unit, |resolved| resolved.0.0);
+        let font_unit =
+            resolved_font_unit.map_or(defaults.panel_font_unit, |resolved| resolved.0.0);
         let layout_to_points = layout_unit.to_points();
         let font_to_points = font_unit.to_points();
 
@@ -97,6 +101,7 @@ pub(super) fn compute_panel_layouts(
             tree_change.take_with_tree_visual_geometry_stable();
         if matches!(pending_change, Some(LayoutTreeChange::Identical))
             && computed.result().is_some()
+            && !font_unit_changed
         {
             continue;
         }
@@ -112,20 +117,22 @@ pub(super) fn compute_panel_layouts(
         let viewport_height = panel_ref.height() * layout_to_points;
 
         // Geometry-stable skip: regenerate render commands from cached positions
-        // without re-running the layout solve. Safe only when a text-only edit
-        // (`VisualOnly`) leaves every leaf's box unchanged — verified by
-        // `can_reuse_geometry`, which re-measures the leaves and rejects anything
-        // the reuse would render wrong.
-        let can_reuse_geometry = tree_visual_geometry_stable
-            || computed.result().is_some_and(|result| {
-                result.can_reuse_geometry(
-                    scaled_tree,
-                    &cached_measure,
-                    viewport_width,
-                    viewport_height,
-                    1.0,
-                )
-            });
+        // without re-running the layout solve. Safe only when
+        // `Resolved<FontUnit>` is unchanged and a text-only edit (`VisualOnly`)
+        // leaves every leaf's box unchanged — verified by `can_reuse_geometry`,
+        // which re-measures the leaves and rejects anything the reuse would
+        // render wrong.
+        let can_reuse_geometry = !font_unit_changed
+            && (tree_visual_geometry_stable
+                || computed.result().is_some_and(|result| {
+                    result.can_reuse_geometry(
+                        scaled_tree,
+                        &cached_measure,
+                        viewport_width,
+                        viewport_height,
+                        1.0,
+                    )
+                }));
         if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
             && can_reuse_geometry
             && computed.regenerate_commands(scaled_tree)
@@ -139,10 +146,13 @@ pub(super) fn compute_panel_layouts(
         let result = engine.compute(scaled_tree, viewport_width, viewport_height, 1.0);
 
         commit_layout_result(&mut computed, &panel_ref, scaled_tree, result, entity);
+        let layout_change = font_unit_changed
+            .then_some(LayoutTreeChange::LayoutAffecting)
+            .or(pending_change);
         events::trigger_panel_changed(
             &mut commands,
             entity,
-            PanelChangeKind::from_layout_change(pending_change, had_result),
+            PanelChangeKind::from_layout_change(layout_change, had_result),
         );
         panel_count += 1;
     }
@@ -286,6 +296,8 @@ mod tests {
     use super::panel_surface_bounds;
     use crate::Anchor;
     use crate::Border;
+    use crate::BoundingBox;
+    use crate::CascadeEntityCommandsExt as _;
     use crate::El;
     use crate::Fit;
     use crate::FitMax;
@@ -314,6 +326,10 @@ mod tests {
     use crate::panel::diegetic_panel::ScaledLayoutTreeCache;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
+
+    const FONT_RELAYOUT_PANEL_HEIGHT_MM: f32 = 30.0;
+    const FONT_RELAYOUT_PANEL_WIDTH_MM: f32 = 50.0;
+    const FONT_RELAYOUT_TEXT_SIZE: f32 = 6.0;
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -371,6 +387,17 @@ mod tests {
                 } else {
                     None
                 }
+            })
+            .expect("panel should produce a text command")
+    }
+
+    fn first_text_bounds(computed: &ComputedDiegeticPanel) -> BoundingBox {
+        let result = computed.result().expect("layout result should exist");
+        result
+            .commands
+            .iter()
+            .find_map(|command| {
+                matches!(command.kind, RenderCommandKind::Text { .. }).then_some(command.bounds)
             })
             .expect("panel should produce a text command")
     }
@@ -529,6 +556,91 @@ mod tests {
         assert!(
             app.world().resource::<DimensionEventLog>().0.is_empty(),
             "color-only edits refresh computed output without changing dimensions",
+        );
+    }
+
+    #[test]
+    fn visual_only_tree_change_with_font_unit_override_recomputes_text_geometry() {
+        let mut app = make_app();
+        app.init_resource::<PanelChangeEventLog>();
+        app.add_observer(record_panel_changed_event);
+
+        let entity = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(
+                        Mm(FONT_RELAYOUT_PANEL_WIDTH_MM),
+                        Mm(FONT_RELAYOUT_PANEL_HEIGHT_MM),
+                    )
+                    .font_unit(Unit::Points)
+                    .with_tree(colored_text_tree("Hello", Color::WHITE))
+                    .build()
+                    .expect("font relayout panel should build"),
+            )
+            .id();
+        app.update();
+
+        let initial_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(entity)
+                .expect("panel should complete its initial layout"),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<FontUnit>>(entity)
+                .expect("panel should resolve its initial font unit")
+                .0
+                .0,
+            Unit::Points
+        );
+        assert_eq!(
+            first_text_color(
+                app.world()
+                    .get::<ComputedDiegeticPanel>(entity)
+                    .expect("computed panel should exist")
+            ),
+            Color::WHITE
+        );
+        app.world_mut()
+            .resource_mut::<PanelChangeEventLog>()
+            .0
+            .clear();
+
+        {
+            let mut commands = app.world_mut().commands();
+            commands.set_tree(entity, colored_text_tree("Hello", Color::BLACK));
+            commands
+                .entity(entity)
+                .override_font_unit(Unit::Millimeters);
+        }
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("panel should recompute after the combined update");
+        let updated_bounds = first_text_bounds(computed);
+        assert_eq!(first_text_color(computed), Color::BLACK);
+        assert_eq!(
+            app.world()
+                .get::<Resolved<FontUnit>>(entity)
+                .expect("panel should resolve its runtime font unit")
+                .0
+                .0,
+            Unit::Millimeters
+        );
+        assert!(
+            updated_bounds.height > initial_bounds.height,
+            "millimeter text should be taller than point text after the combined update"
+        );
+
+        let panel_change_events = &app.world().resource::<PanelChangeEventLog>().0;
+        assert_eq!(panel_change_events.len(), 1);
+        assert_eq!(panel_change_events[0].entity, entity);
+        assert_eq!(
+            panel_change_events[0].kind,
+            PanelChangeKind::LayoutAffecting
         );
     }
 
@@ -1047,6 +1159,171 @@ mod tests {
 
         assert_eq!(panel.width(), 50.0);
         assert_eq!(panel.height(), 30.0);
+    }
+
+    #[test]
+    fn chained_font_unit_override_wins_on_initial_layout() {
+        let mut app = make_app();
+        let (builder_unit, chained_override) = {
+            let mut commands = app.world_mut().commands();
+            let builder_unit = commands
+                .spawn(
+                    DiegeticPanel::world()
+                        .size(Mm(50.0), Mm(30.0))
+                        .font_unit(Unit::Millimeters)
+                        .layout(|builder| {
+                            builder.text(("Hi", TextStyle::new(6.0)));
+                        })
+                        .build()
+                        .expect("builder-unit panel should build"),
+                )
+                .id();
+            let chained_override = commands
+                .spawn(
+                    DiegeticPanel::world()
+                        .size(Mm(50.0), Mm(30.0))
+                        .font_unit(Unit::Millimeters)
+                        .layout(|builder| {
+                            builder.text(("Hi", TextStyle::new(6.0)));
+                        })
+                        .build()
+                        .expect("chained-override panel should build"),
+                )
+                .override_font_unit(Unit::Points)
+                .id();
+            (builder_unit, chained_override)
+        };
+
+        app.update();
+
+        let builder_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(builder_unit)
+                .expect("builder-unit panel should be computed"),
+        );
+        let override_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(chained_override)
+                .expect("chained-override panel should be computed"),
+        );
+        assert!(
+            builder_bounds.height > override_bounds.height,
+            "millimeter builder text should be taller than point override text on the first layout"
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<FontUnit>>(chained_override)
+                .expect("chained-override panel should resolve its font unit")
+                .0
+                .0,
+            Unit::Points
+        );
+    }
+
+    #[test]
+    fn runtime_font_unit_override_recomputes_text_geometry() {
+        let mut app = make_app();
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(
+                        Mm(FONT_RELAYOUT_PANEL_WIDTH_MM),
+                        Mm(FONT_RELAYOUT_PANEL_HEIGHT_MM),
+                    )
+                    .font_unit(Unit::Points)
+                    .layout(|builder| {
+                        builder.text(("Hi", TextStyle::new(FONT_RELAYOUT_TEXT_SIZE)));
+                    })
+                    .build()
+                    .expect("font relayout panel should build"),
+            )
+            .id();
+
+        app.update();
+
+        let initial_unit = app
+            .world()
+            .get::<Resolved<FontUnit>>(panel)
+            .expect("panel should resolve its initial font unit")
+            .0
+            .0;
+        let initial_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(panel)
+                .expect("panel should complete its initial layout"),
+        );
+        assert_eq!(initial_unit, Unit::Points);
+
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .override_font_unit(Unit::Millimeters);
+        app.update();
+
+        let updated_unit = app
+            .world()
+            .get::<Resolved<FontUnit>>(panel)
+            .expect("panel should resolve its runtime font unit")
+            .0
+            .0;
+        let updated_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(panel)
+                .expect("panel should recompute after its font unit changes"),
+        );
+        assert_eq!(updated_unit, Unit::Millimeters);
+        assert!(
+            updated_bounds.height > initial_bounds.height,
+            "millimeter text should be taller than point text after a live font-unit override"
+        );
+    }
+
+    #[test]
+    fn explicit_panel_font_unit_affects_initial_layout() {
+        let mut app = make_app();
+        let default_unit = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(50.0), Mm(30.0))
+                    .layout(|builder| {
+                        builder.text(("Hi", TextStyle::new(6.0)));
+                    })
+                    .build()
+                    .expect("default-unit panel should build"),
+            )
+            .id();
+        let explicit_unit = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(50.0), Mm(30.0))
+                    .font_unit(Unit::Millimeters)
+                    .layout(|builder| {
+                        builder.text(("Hi", TextStyle::new(6.0)));
+                    })
+                    .build()
+                    .expect("explicit-unit panel should build"),
+            )
+            .id();
+
+        app.update();
+
+        let default_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(default_unit)
+                .expect("default-unit panel should be computed"),
+        );
+        let explicit_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(explicit_unit)
+                .expect("explicit-unit panel should be computed"),
+        );
+        assert!(
+            explicit_bounds.height > default_bounds.height,
+            "millimeter-authored text should be taller than point-default text on the first layout"
+        );
     }
 
     #[test]

@@ -1740,6 +1740,7 @@ mod tests {
             .init_asset::<StandardMaterial>()
             .init_asset::<PathExtendedMaterial>()
             .init_asset::<SdfExtendedMaterial>()
+            .add_plugins(crate::cascade::cascade_plugin::<SdfMaterial>())
             .add_plugins((MaterialTablePlugin, FillBatchPlugin, PanelGeometryPlugin));
         let default_material = app
             .world_mut()

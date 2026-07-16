@@ -319,7 +319,7 @@ impl TextStyle {
             lighting:               Cascade::Inherit,
             material:               Cascade::Inherit,
             font_features:          FontFeatures::NONE,
-            unit:                   Cascade::from(font_size.unit),
+            unit:                   font_size.unit.map_or(Cascade::Inherit, Cascade::Override),
             alpha_mode:             Cascade::Inherit,
             hdr_text_coverage_bias: Cascade::Inherit,
         }
@@ -365,23 +365,25 @@ impl TextStyle {
 
     /// Returns the glyph shadow mode authoring.
     #[must_use]
-    pub const fn shadow_mode(&self) -> Cascade<GlyphShadowMode> { self.shadow_mode }
+    pub(crate) const fn shadow_mode(&self) -> Cascade<GlyphShadowMode> { self.shadow_mode }
 
     /// Returns the shadow-casting authoring.
     #[must_use]
-    pub const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
+    pub(crate) const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
 
     /// Returns the per-label sidedness authoring.
     #[must_use]
-    pub const fn sidedness(&self) -> Cascade<Sidedness> { self.sidedness }
+    pub(crate) const fn sidedness(&self) -> Cascade<Sidedness> { self.sidedness }
 
     /// Returns the per-label lighting authoring.
     #[must_use]
-    pub const fn lighting(&self) -> Cascade<Lighting> { self.lighting }
+    pub(crate) const fn lighting(&self) -> Cascade<Lighting> { self.lighting }
 
     /// Returns the text-run source material authoring.
     #[must_use]
-    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
+    pub(crate) const fn material(&self) -> Cascade<&Handle<StandardMaterial>> {
+        self.material.as_ref()
+    }
 
     /// Returns the font feature overrides.
     #[must_use]
@@ -389,7 +391,7 @@ impl TextStyle {
 
     /// Returns the per-label unit authoring.
     #[must_use]
-    pub const fn unit(&self) -> Cascade<Unit> { self.unit }
+    pub(crate) const fn unit(&self) -> Cascade<Unit> { self.unit }
 
     /// Returns the text alignment.
     #[must_use]
@@ -401,11 +403,13 @@ impl TextStyle {
 
     /// Returns the per-label alpha-mode authoring.
     #[must_use]
-    pub const fn alpha_mode(&self) -> Cascade<AlphaMode> { self.alpha_mode }
+    pub(crate) const fn alpha_mode(&self) -> Cascade<AlphaMode> { self.alpha_mode }
 
     /// Returns the per-label HDR text coverage-bias authoring.
     #[must_use]
-    pub const fn hdr_text_coverage_bias(&self) -> Cascade<f32> { self.hdr_text_coverage_bias }
+    pub(crate) const fn hdr_text_coverage_bias(&self) -> Cascade<f32> {
+        self.hdr_text_coverage_bias
+    }
 
     // ── Chained (with_*) setters ──────────────────────────────────────────
 
@@ -578,7 +582,7 @@ impl TextStyle {
     /// Sets the per-label text [`AlphaMode`] override.
     ///
     /// The panel-text reconciler captures this value before converting via
-    /// [`for_shaping`](Self::for_shaping) and inserts `Override<TextAlpha>`
+    /// [`for_shaping`](Self::for_shaping) and inserts `Cascade<TextAlpha>`
     /// on the label.
     #[must_use]
     pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
@@ -684,7 +688,7 @@ impl TextStyle {
     pub fn set_dimension(&mut self, size: impl Into<Dimension>) {
         let dimension = size.into();
         self.size = dimension.value;
-        self.unit = Cascade::from(dimension.unit);
+        self.unit = dimension.unit.map_or(Cascade::Inherit, Cascade::Override);
     }
 
     /// Sets the per-label [`AlphaMode`] override.
@@ -862,7 +866,7 @@ impl TextStyle {
     /// overrides, `PathRenderRecord`, and the frame material table own those
     /// updates without changing glyph geometry.
     /// Excludes `unit` (measurement context, not a mesh input) and
-    /// `alpha_mode` (gated separately through `Override<TextAlpha>`).
+    /// `alpha_mode` (gated separately through `Cascade<TextAlpha>`).
     pub(crate) fn gating_eq(&self, other: &Self) -> bool {
         let Self {
             font_id,

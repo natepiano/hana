@@ -11,6 +11,8 @@
 //!   accidental mixing at compile time.
 //! - **`input`** (default) — macros and utilities for wiring keyboard actions to commands through
 //!   `bevy_enhanced_input`.
+//! - [`Cascade`] — explicit inherited/overridden authoring values plus optional relationship-backed
+//!   ECS propagation through [`CascadePlugin`].
 //!
 //! Disable defaults to pick only what you need:
 //!
@@ -18,6 +20,7 @@
 //! bevy_kana = { version = "0.0.1", default-features = false, features = ["math"] }
 //! ```
 
+mod cascade;
 #[cfg(feature = "input")]
 mod input;
 #[cfg(feature = "math")]
@@ -25,6 +28,20 @@ mod math;
 /// Convenience re-exports for glob imports.
 pub mod prelude;
 
+pub use cascade::CASCADE_DEPTH_LIMIT;
+pub use cascade::Cascade;
+pub use cascade::CascadeAttribute;
+pub use cascade::CascadeChildren;
+pub use cascade::CascadeDefault;
+pub use cascade::CascadeEntityCommandsExt;
+pub use cascade::CascadeFrom;
+pub use cascade::CascadePlugin;
+pub use cascade::CascadeSet;
+pub use cascade::Resolved;
+pub use cascade::resolve_cascade;
+pub use cascade::resolve_cascade_ref;
+pub use cascade::resolve_entity_cascade;
+pub use cascade::resolved_cascade;
 #[cfg(feature = "input")]
 pub use input::Keybindings;
 #[cfg(feature = "math")]

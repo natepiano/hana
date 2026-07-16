@@ -84,6 +84,68 @@ let angle = (j.to_f32() / sides.to_f32()) * std::f32::consts::TAU;
 let index = positions.len().to_u32();
 ```
 
+### Shared cascades
+
+`Cascade<T>` represents an authored value that either inherits from the next
+lower-precedence scope or overrides it. Ordinary structs can resolve authored
+layers without ECS storage:
+
+```rust
+use bevy_kana::Cascade;
+use bevy_kana::resolve_cascade;
+
+let member = Cascade::Inherit;
+let stage = Cascade::Override(0.25_f32);
+let sequence_default = 1.0;
+
+assert_eq!(
+    resolve_cascade([member, stage], sequence_default),
+    0.25,
+);
+```
+
+Resolution examines layers from highest to lowest precedence and uses the first
+override. A required root value completes the cascade. There are deliberately
+no conversions to or from `Option<T>`: `Inherit` is explicit authored state,
+not a generic missing value.
+
+For ECS attributes, `CascadePlugin<A>` propagates the same authored component
+over an explicit `CascadeFrom` relationship.
+
+```rust
+use bevy::prelude::*;
+use bevy_kana::Cascade;
+use bevy_kana::CascadeEntityCommandsExt;
+use bevy_kana::CascadeFrom;
+use bevy_kana::CascadePlugin;
+
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+struct Opacity(f32);
+
+fn register(app: &mut App) {
+    app.add_plugins(CascadePlugin::new(Opacity(1.0)));
+}
+
+fn author(commands: &mut Commands, parent: Entity, child: Entity) {
+    commands.entity(parent).override_cascade(Opacity(0.5));
+    commands
+        .entity(child)
+        .insert(CascadeFrom::new(parent))
+        .set_cascade(Cascade::<Opacity>::Inherit);
+}
+```
+
+The engine maintains `Resolved<A>` only on entities carrying `Cascade<A>`.
+It handles root-default changes, local authoring changes, relationship
+retargeting and removal, participant removal, multi-level propagation, cycle
+and depth termination, and change-guarded cache writes.
+
+Run the interactive generic cascade example:
+
+```bash
+cargo run --example cascade
+```
+
 ### More to come
 
 `bevy_kana` will grow to include other convenience macros and generic utilities that are broadly useful across Bevy projects.

@@ -107,8 +107,8 @@ pub use world_text::WorldTextReady;
 #[cfg(feature = "typography_overlay")]
 pub(crate) use world_text::emit_computed_world_text;
 
+use crate::cascade;
 use crate::cascade::CascadeDefault;
-use crate::cascade::CascadePlugin;
 use crate::cascade::CascadeSet;
 use crate::cascade::SdfMaterial;
 use crate::cascade::ShapeMaterial;
@@ -396,9 +396,9 @@ impl Plugin for RenderPlugin {
         seed_default_material_cascades(app);
 
         app.add_plugins((
-            CascadePlugin::<SdfMaterial>::default(),
-            CascadePlugin::<TextMaterial>::default(),
-            CascadePlugin::<ShapeMaterial>::default(),
+            cascade::cascade_plugin::<SdfMaterial>(),
+            cascade::cascade_plugin::<TextMaterial>(),
+            cascade::cascade_plugin::<ShapeMaterial>(),
         ));
 
         app.add_plugins((

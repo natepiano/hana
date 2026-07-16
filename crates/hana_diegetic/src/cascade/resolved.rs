@@ -1,5 +1,4 @@
-//! The cascade's value-type traits, matched [`Override<A>`] / [`Resolved<A>`]
-//! component pair, and bounded parent-walk resolvers.
+//! Diegetic cascade attribute value types and their root defaults.
 
 use core::mem::size_of;
 
@@ -7,13 +6,8 @@ use bevy::asset::Handle;
 use bevy::log::warn_once;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
-use bevy::reflect::GetTypeRegistration;
-use bevy::reflect::Typed;
-use private::Sealed;
 
 use super::constants::CASCADE_ATTRIBUTE_BYTES;
-use super::constants::CASCADE_DEPTH_CAP;
-use super::defaults::CascadeDefault;
 use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
 use crate::layout::ShadowCasting;
@@ -22,24 +16,14 @@ use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
-mod private {
-    pub trait Sealed {}
-}
-
-macro_rules! cascade_attr {
+macro_rules! cascade_attribute {
     // Joins an already-declared value type (one whose own name is the
     // attribute, e.g. `AntiAlias`) to the cascade instead of minting a
     // wrapper struct. The type must derive `Clone`, `PartialEq`, `Debug`, and
     // `Reflect`.
     (existing $name:ty, default = $default:expr) => {
-        impl $crate::cascade::resolved::private::Sealed for $name {}
-
-        impl $crate::cascade::resolved::CascadeProperty for $name {}
-
-        impl $crate::cascade::resolved::CascadeAttr for $name {}
-
-        impl Default for $crate::cascade::defaults::CascadeDefault<$name> {
-            fn default() -> Self { Self($default) }
+        impl $crate::cascade::resolved::CascadeRoot for $name {
+            fn root_default() -> Self { $default }
         }
     };
 
@@ -48,14 +32,8 @@ macro_rules! cascade_attr {
         #[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
         pub struct $name(pub $value);
 
-        impl $crate::cascade::resolved::private::Sealed for $name {}
-
-        impl $crate::cascade::resolved::CascadeProperty for $name {}
-
-        impl $crate::cascade::resolved::CascadeAttr for $name {}
-
-        impl Default for $crate::cascade::defaults::CascadeDefault<$name> {
-            fn default() -> Self { Self($name($default)) }
+        impl $crate::cascade::resolved::CascadeRoot for $name {
+            fn root_default() -> Self { $name($default) }
         }
     };
 
@@ -64,30 +42,24 @@ macro_rules! cascade_attr {
         #[derive(Clone, Copy, PartialEq, Debug, Reflect)]
         pub struct $name(pub $value);
 
-        impl $crate::cascade::resolved::private::Sealed for $name {}
-
-        impl $crate::cascade::resolved::CascadeProperty for $name {}
-
-        impl $crate::cascade::resolved::CascadeAttr for $name {}
-
-        impl Default for $crate::cascade::defaults::CascadeDefault<$name> {
-            fn default() -> Self { Self($name($default)) }
+        impl $crate::cascade::resolved::CascadeRoot for $name {
+            fn root_default() -> Self { $name($default) }
         }
     };
 }
 
-cascade_attr!(
+cascade_attribute!(
     /// Text alpha-mode cascade attribute.
     TextAlpha(AlphaMode),
     default = AlphaMode::Blend,
     eq
 );
-cascade_attr!(
+cascade_attribute!(
     /// Font-unit cascade attribute.
     FontUnit(Unit),
     default = Unit::Meters
 );
-cascade_attr!(
+cascade_attribute!(
     /// HDR text coverage-bias cascade attribute.
     ///
     /// `0.0` leaves analytic glyph coverage unchanged. Positive values make
@@ -138,14 +110,8 @@ impl HdrTextCoverageBias {
 #[derive(Clone, PartialEq, Eq, Debug, Reflect)]
 pub struct SdfMaterial(pub Handle<StandardMaterial>);
 
-impl Sealed for SdfMaterial {}
-
-impl CascadeProperty for SdfMaterial {}
-
-impl CascadeAttr for SdfMaterial {}
-
-impl Default for CascadeDefault<SdfMaterial> {
-    fn default() -> Self { Self(SdfMaterial(Handle::default())) }
+impl CascadeRoot for SdfMaterial {
+    fn root_default() -> Self { Self(Handle::default()) }
 }
 
 const _: () = assert!(size_of::<SdfMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
@@ -157,14 +123,8 @@ const _: () = assert!(size_of::<SdfMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
 #[derive(Clone, PartialEq, Eq, Debug, Reflect)]
 pub struct TextMaterial(pub Handle<StandardMaterial>);
 
-impl Sealed for TextMaterial {}
-
-impl CascadeProperty for TextMaterial {}
-
-impl CascadeAttr for TextMaterial {}
-
-impl Default for CascadeDefault<TextMaterial> {
-    fn default() -> Self { Self(TextMaterial(Handle::default())) }
+impl CascadeRoot for TextMaterial {
+    fn root_default() -> Self { Self(Handle::default()) }
 }
 
 const _: () = assert!(size_of::<TextMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
@@ -176,14 +136,8 @@ const _: () = assert!(size_of::<TextMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
 #[derive(Clone, PartialEq, Eq, Debug, Reflect)]
 pub struct ShapeMaterial(pub Handle<StandardMaterial>);
 
-impl Sealed for ShapeMaterial {}
-
-impl CascadeProperty for ShapeMaterial {}
-
-impl CascadeAttr for ShapeMaterial {}
-
-impl Default for CascadeDefault<ShapeMaterial> {
-    fn default() -> Self { Self(ShapeMaterial(Handle::default())) }
+impl CascadeRoot for ShapeMaterial {
+    fn root_default() -> Self { Self(Handle::default()) }
 }
 
 const _: () = assert!(size_of::<ShapeMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
@@ -191,143 +145,26 @@ const _: () = assert!(size_of::<ShapeMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
 // Lighting cascade attribute. Global default is `Lit` (world text); the
 // screen-panel construction bridge overrides it to `Unlit`. Consumed by both
 // glyph runs and panel lines.
-cascade_attr!(existing Lighting, default = Lighting::Lit);
+cascade_attribute!(existing Lighting, default = Lighting::Lit);
 // Diegetic shadow-casting cascade attribute. Global default follows Bevy mesh
 // behavior: rendered content casts shadows unless a local override opts out.
-cascade_attr!(existing ShadowCasting, default = ShadowCasting::On);
+cascade_attribute!(existing ShadowCasting, default = ShadowCasting::On);
 // Glyph-shadow silhouette cascade attribute. Text casts its glyph silhouette
 // when shadow casting is enabled unless a local override opts out.
-cascade_attr!(existing GlyphShadowMode, default = GlyphShadowMode::Cast);
+cascade_attribute!(existing GlyphShadowMode, default = GlyphShadowMode::Cast);
 // Sidedness cascade attribute. Global default is `BothSides` (world text);
 // the screen-panel construction bridge overrides it to `FrontOnly`. Consumed by
 // both glyph runs and panel lines.
-cascade_attr!(existing Sidedness, default = Sidedness::BothSides);
+cascade_attribute!(existing Sidedness, default = Sidedness::BothSides);
 // Anti-alias mode cascade attribute. The `AntiAlias` resource is the
 // authored global; `sync_anti_alias` mirrors it into
 // `CascadeDefault<AntiAlias>` as the cascade root default.
-cascade_attr!(existing AntiAlias, default = AntiAlias::Both);
+cascade_attribute!(existing AntiAlias, default = AntiAlias::Both);
 // Hairline-fade cascade attribute. `HairlineWidth::fade` is the authored
 // global; `sync_hairline_fade` mirrors it into `CascadeDefault<HairlineFade>`
 // as the cascade root default.
-cascade_attr!(existing HairlineFade, default = HairlineFade::Full);
+cascade_attribute!(existing HairlineFade, default = HairlineFade::Full);
 
-#[cfg(test)]
-cascade_attr!(TestUnit(Unit), default = Unit::Meters);
-
-/// Public marker for a cascading property value.
-///
-/// This is deliberately smaller than the crate-internal reflection contract
-/// used by the ECS components. Public command/read APIs can name
-/// `CascadeProperty` without leaking Bevy reflection bounds.
-///
-/// Cascaded values must stay cheap to clone because propagation clones them
-/// when resolving and writing `Resolved<A>`. Small value wrappers and
-/// `Handle<StandardMaterial>` are acceptable; owned `StandardMaterial` values
-/// are not cascade attributes.
-pub trait CascadeProperty: private::Sealed + Clone + PartialEq + Send + Sync + 'static {}
-
-/// A cascading attribute — a pure value type that resolves *my own override,
-/// else my parent's, else a global default*.
-///
-/// Wrapped in [`Override<A>`] (input) and [`Resolved<A>`] (cached output); the
-/// value type itself is never a `Component`. The reflection supertraits are
-/// what `register_type::<Override<A>>()` / `register_type::<Resolved<A>>()`
-/// require; `FromReflect: Reflect`, so an explicit `Reflect` bound is
-/// redundant.
-pub(crate) trait CascadeAttr:
-    CascadeProperty + FromReflect + TypePath + Typed + GetTypeRegistration
-{
-}
-
-/// A node's own override for attribute `A` — the cascade input.
-///
-/// Presence on an entity means "this node overrides `A`"; absence means
-/// "inherit." There is exactly one override component type per attribute, and
-/// an entity holds at most one of any component, so "two sources for one
-/// attribute" cannot be written down — which is why the cascade needs no
-/// exclusion marker.
-///
-/// This component is `pub(crate)` and cannot be named by external
-/// inspectors/tests. Revisit that boundary only if external tooling needs to
-/// inspect authored cascade state directly.
-#[derive(Component, Reflect, Clone, Debug)]
-#[reflect(Component)]
-pub(crate) struct Override<A: CascadeAttr>(pub A);
-
-/// Per-entity cache of a resolved cascading attribute.
-///
-/// Maintained by [`CascadePlugin`](super::CascadePlugin): seeded at spawn by
-/// the node-kind authoring bridges, kept current by the propagation pass.
-/// Crate-internal; readers query `&Resolved<A>` and filter on
-/// `Changed<Resolved<A>>`. `Resolved<A>` is a read-only cache maintained by
-/// cascade propagation; author values through `Override<A>`.
-///
-/// This component is `pub(crate)` and cannot be named by external
-/// inspectors/tests. Revisit that boundary only if external tooling needs to
-/// inspect computed cascade state directly.
-#[derive(Component, Reflect, Clone, Debug)]
-#[reflect(Component)]
-pub(crate) struct Resolved<A: CascadeAttr>(pub A);
-
-/// Resolve attribute `A` for `entity` from [`World`] by walking up `ChildOf`.
-#[allow(
-    dead_code,
-    reason = "World-based resolver not yet called; retained for command self-heal"
-)]
-pub(crate) fn resolve<A: CascadeAttr>(world: &World, entity: Entity, default: A) -> A {
-    #[cfg(debug_assertions)]
-    let mut visited = bevy::platform::collections::HashSet::new();
-    let mut current = entity;
-    for _ in 0..CASCADE_DEPTH_CAP {
-        #[cfg(debug_assertions)]
-        if !visited.insert(current) {
-            warn!("cascade walk hit a ChildOf cycle at {current:?}; using global default");
-            return default;
-        }
-        if let Some(node_override) = world.get::<Override<A>>(current) {
-            return node_override.0.clone();
-        }
-        let Some(child_of) = world.get::<ChildOf>(current) else {
-            return default;
-        };
-        current = child_of.parent();
-    }
-    warn!("cascade walk exceeded depth cap from {entity:?}; using global default");
-    default
-}
-
-/// Resolve attribute `A` for `entity` by walking up `ChildOf`: the first
-/// ancestor (starting with `entity` itself) that carries an `Override<A>`
-/// wins; a node with no override and no parent resolves to the global default.
-///
-/// The walk is bounded by [`CASCADE_DEPTH_CAP`] and tracks visited entities in
-/// debug builds. A self-parent, a `ChildOf` cycle, a parentless node, or a
-/// dangling `ChildOf` after a parent despawn all terminate at the global
-/// default — never a hang. Exceeding the cap `warn!`-logs in both debug and
-/// release so a malformed hierarchy is visible.
-pub(crate) fn resolve_walk<A: CascadeAttr>(
-    entity: Entity,
-    overrides: &Query<&Override<A>>,
-    parents: &Query<&ChildOf>,
-    default: A,
-) -> A {
-    #[cfg(debug_assertions)]
-    let mut visited = bevy::platform::collections::HashSet::new();
-    let mut current = entity;
-    for _ in 0..CASCADE_DEPTH_CAP {
-        #[cfg(debug_assertions)]
-        if !visited.insert(current) {
-            warn!("cascade walk hit a ChildOf cycle at {current:?}; using global default");
-            return default;
-        }
-        if let Ok(node_override) = overrides.get(current) {
-            return node_override.0.clone();
-        }
-        let Ok(child_of) = parents.get(current) else {
-            return default;
-        };
-        current = child_of.parent();
-    }
-    warn!("cascade walk exceeded depth cap from {entity:?}; using global default");
-    default
+pub(crate) trait CascadeRoot: bevy_kana::CascadeAttribute {
+    fn root_default() -> Self;
 }
