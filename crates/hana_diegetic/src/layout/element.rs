@@ -525,7 +525,7 @@ impl LayoutTree {
     }
 
     /// Overwrites the cached run string at `index`, returning whether it
-    /// changed. `TextContent` on the materialized child is the single source;
+    /// changed. `TextContent` on the reified child is the single source;
     /// this keeps the `El.text` layout cache (which the engine measures and
     /// word-wraps) current after an out-of-flow edit. Returns `false` (no write)
     /// when `index` is not a text leaf or the string already matches, so the
@@ -561,7 +561,7 @@ impl LayoutTree {
 
     /// Overwrites the authored run style at `index`, returning whether it
     /// changed. The tree config is the single source the layout engine measures
-    /// and reconcile re-derives the run from; writing it here is how a font /
+    /// and reification re-derives the run from; writing it here is how a font /
     /// size restyle reaches both measurement and rendering. Returns `false` (no
     /// write) when `index` is not a text leaf or the style already matches, so
     /// the caller can skip dirtying the panel.
@@ -588,7 +588,7 @@ impl LayoutTree {
     }
 
     /// Returns the panel-local id of the text element at `index`, if that
-    /// element is a text leaf. Reconcile reads this to key a child by its id instead of
+    /// element is a text leaf. Reification reads this to key a child by its id instead of
     /// the former positional `(element_idx, command_index)` pair.
     #[must_use]
     pub(crate) fn text_element_id(&self, index: usize) -> Option<&PanelElementId> {
@@ -601,9 +601,9 @@ impl LayoutTree {
     /// Whether any text element in the tree carries `id`.
     ///
     /// The tree is the authoritative list of valid run ids at build time,
-    /// independent of reconcile timing, so a lookup that misses the panel's
+    /// independent of reification timing, so a lookup that misses the panel's
     /// `text_index` consults this to tell a genuine typo (`id` absent here) from a
-    /// run not yet materialized into an entity (`id` present here, index just not
+    /// run not yet reified into an entity (`id` present here, index just not
     /// rebuilt). See [`PanelText`](crate::PanelText).
     // The runtime caller is the `#[cfg(debug_assertions)]` typo-warn path in
     // `PanelTextReader::resolve`; test harnesses also compile this for coverage.

@@ -33,9 +33,9 @@ use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrder;
 use crate::render::world_text::TextContent;
 
-/// A reused panel-text child plus the components reconcile compares incoming
+/// A reused panel-text child plus the components reification compares incoming
 /// values against before deciding whether to write. The references borrow the
-/// `existing_children` query for one reconcile pass.
+/// `existing_children` query for one reification pass.
 #[derive(Clone, Copy)]
 struct ReusableChild<'a> {
     entity:                 Entity,
@@ -53,7 +53,7 @@ struct ReusableChild<'a> {
     hdr_text_coverage_bias: Option<&'a Cascade<HdrTextCoverageBias>>,
 }
 
-/// One text render command resolved to its reconcile inputs: source element,
+/// One text render command resolved to its reification inputs: source element,
 /// command depth, run `id`, per-run `line_index`, the string, its style,
 /// layout bounds, and the effective clip rect.
 type PendingTextChild = (
@@ -67,7 +67,7 @@ type PendingTextChild = (
     BoundingBox,
 );
 
-/// Resolves the panel's text render commands into per-child reconcile inputs,
+/// Resolves the panel's text render commands into per-child reification inputs,
 /// assigning each its run `id` (from the tree, auto fallback when absent) and a
 /// per-run `line_index` so the reuse key is the content-stable `(id, line_index)`
 /// rather than the former positional `(element_idx, command_index)`.
@@ -171,12 +171,12 @@ fn collect_existing_text_children<'a>(
     existing_by_key
 }
 
-/// Reconciles [`TextContent`] children for each changed [`ComputedDiegeticPanel`].
+/// Reifies [`TextContent`] entities for each changed [`ComputedDiegeticPanel`].
 ///
-/// Writes [`DiegeticPerfStats::reconcile_ms`] with this pass's wall time.
+/// Writes [`DiegeticPerfStats::reify_ms`] with this pass's wall time.
 /// `route_image_batch_records` owns image command routing and does not add to
 /// this text-child timing.
-pub(super) fn reconcile_panel_text_children(
+pub(super) fn reify_text_entities(
     mut changed_panels: Query<
         (
             Entity,
@@ -203,7 +203,7 @@ pub(super) fn reconcile_panel_text_children(
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
-    let reconcile_start = Instant::now();
+    let reify_start = Instant::now();
     for (panel_entity, mut panel, computed, panel_runs) in &mut changed_panels {
         let Some(result) = computed.result() else {
             continue;
@@ -310,13 +310,13 @@ pub(super) fn reconcile_panel_text_children(
 
         // Rebuilt from scratch each pass. Write it without tripping
         // `Changed<DiegeticPanel>`, or this `&mut DiegeticPanel` write would
-        // re-dirty the panel and loop layout → reconcile every frame.
+        // re-dirty the panel and loop layout → reification every frame.
         panel.bypass_change_detection().text_index = text_index;
     }
-    perf.reconcile_ms = reconcile_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.reify_ms = reify_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
 }
 
-/// Inputs to [`spawn_panel_text_child`]. Grouped into a struct because reconcile
+/// Inputs to [`spawn_panel_text_child`]. Grouped into a struct because reification
 /// threads text, style, layout, and captured cascade overrides through to a
 /// freshly spawned child.
 struct SpawnPanelTextChild<'a, 'w, 's> {
@@ -365,7 +365,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
 }
 
 /// Inputs to [`update_reused_panel_text_child`]. Grouped into a struct because
-/// reconcile threads text, style, layout, and captured cascade overrides through
+/// reification threads text, style, layout, and captured cascade overrides through
 /// to a reused child.
 struct UpdateReusedChild<'a, 'w, 's> {
     commands:       &'a mut Commands<'w, 's>,
@@ -524,7 +524,7 @@ mod tests {
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
-    use super::reconcile_panel_text_children;
+    use super::reify_text_entities;
     use crate::Mm;
     use crate::PanelElementId;
     use crate::PanelText;
@@ -554,7 +554,7 @@ mod tests {
     use crate::text::DiegeticTextMeasurer;
 
     /// Records which reused children had each gated component rewritten in the
-    /// most recent reconcile pass, so a test can assert an unchanged run stays
+    /// most recent reification pass, so a test can assert an unchanged run stays
     /// un-`Changed`.
     #[derive(Resource, Default)]
     struct ChangedProbe {
@@ -565,7 +565,7 @@ mod tests {
     }
 
     /// Captures, each frame, the labels whose gated components changed since the
-    /// probe last ran. Runs after reconcile + its command flush.
+    /// probe last ran. Runs after reification + its command flush.
     fn probe_changed(
         mut probe: ResMut<ChangedProbe>,
         labels: Query<(
@@ -614,9 +614,9 @@ mod tests {
         }
     }
 
-    /// App with headless layout plus the gated reconcile and a change probe
+    /// App with headless layout plus gated reification and a change probe
     /// chained after the command flush.
-    fn reconcile_app() -> App {
+    fn reify_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(monospace_measurer());
@@ -624,7 +624,7 @@ mod tests {
         app.init_resource::<ChangedProbe>();
         app.add_systems(
             PostUpdate,
-            (reconcile_panel_text_children, ApplyDeferred, probe_changed).chain(),
+            (reify_text_entities, ApplyDeferred, probe_changed).chain(),
         );
         app
     }
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn unchanged_run_is_not_rewritten_across_a_visual_only_rebuild() {
-        let mut app = reconcile_app();
+        let mut app = reify_app();
         let panel = spawn_panel(&mut app, two_text_tree(Color::WHITE, Color::WHITE));
         app.update();
 
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn alpha_unchanged_reused_child_keeps_its_override() {
-        let mut app = reconcile_app();
+        let mut app = reify_app();
         let panel = spawn_panel(
             &mut app,
             single_alpha_text_tree(Color::WHITE, AlphaMode::Add),
@@ -730,7 +730,7 @@ mod tests {
         app.update();
 
         let probe = app.world().resource::<ChangedProbe>();
-        // The color change rewrites the style, proving reconcile ran on this run.
+        // The color change rewrites the style, proving reification ran on this run.
         assert!(probe.style.contains(&label));
         // The unchanged alpha override is not re-touched.
         assert!(!probe.alpha.contains(&label));
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn first_spawn_preserves_explicit_label_cascades() {
-        let mut app = reconcile_app();
+        let mut app = reify_app();
         app.add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .add_plugins(cascade::cascade_plugin::<Lighting>())
             .add_observer(alpha::seed_panel_text_child_alpha)
@@ -771,10 +771,10 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_keys_by_run_id_and_line_index() {
+    fn reification_keys_by_run_id_and_line_index() {
         // One wrapped run (shared id) across three lines: the `(id, line_index)`
         // key distinguishes the three children, while keying by id alone would
-        // collapse them — the property reconcile relies on to reuse each line.
+        // collapse them — the property reification relies on to reuse each line.
         let id = PanelElementId::named("run");
         let existing: Vec<(Entity, PanelTextLayout)> = (0..3)
             .map(|line| {
@@ -823,15 +823,15 @@ mod tests {
         builder.build()
     }
 
-    /// App with headless layout and the gated reconcile (`PostUpdate`), so a test
+    /// App with headless layout and gated reification (`PostUpdate`), so a test
     /// can edit the authoritative tree and watch the layout pipeline relayout and
-    /// reconcile re-derive the run child end to end.
+    /// reification re-derive the run child end to end.
     fn text_source_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(monospace_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_systems(PostUpdate, reconcile_panel_text_children);
+        app.add_systems(PostUpdate, reify_text_entities);
         app
     }
 
@@ -885,7 +885,7 @@ mod tests {
                 .element_text(element_idx),
             Some("Hello World"),
         );
-        // ... reconcile re-derived the run child from it ...
+        // ... reification re-derived the run child from it ...
         let child = first_text_child(&mut app);
         assert_eq!(
             app.world()
@@ -905,7 +905,7 @@ mod tests {
     // ── Panel↔run relationship lifecycle (`TextRunOf`/`PanelTextRuns`) ──
 
     /// Records whether any panel's [`PanelTextRuns`] changed since the probe last
-    /// ran, so a test can assert a reuse-only reconcile leaves the set untouched.
+    /// ran, so a test can assert reuse-only reification leaves the set untouched.
     #[derive(Resource, Default)]
     struct RunsChangedProbe {
         changed: bool,
@@ -918,7 +918,7 @@ mod tests {
         probe.changed = !changed.is_empty();
     }
 
-    /// Like [`reconcile_app`], but probes [`PanelTextRuns`] change detection
+    /// Like [`reify_app`], but probes [`PanelTextRuns`] change detection
     /// instead of the per-component change probe.
     fn relationship_app() -> App {
         let mut app = App::new();
@@ -928,12 +928,7 @@ mod tests {
         app.init_resource::<RunsChangedProbe>();
         app.add_systems(
             PostUpdate,
-            (
-                reconcile_panel_text_children,
-                ApplyDeferred,
-                probe_runs_changed,
-            )
-                .chain(),
+            (reify_text_entities, ApplyDeferred, probe_runs_changed).chain(),
         );
         app
     }
@@ -948,7 +943,7 @@ mod tests {
     }
 
     #[test]
-    fn two_no_op_reconcile_passes_leave_panel_text_runs_unchanged() {
+    fn two_no_op_reification_passes_leave_panel_text_runs_unchanged() {
         let mut app = relationship_app();
         let panel = spawn_panel(&mut app, two_text_tree(Color::WHITE, Color::WHITE));
 
@@ -962,7 +957,7 @@ mod tests {
         app.update();
 
         // Two further visual-only rebuilds: recolor only, same auto ids, so
-        // reconcile reuses every run entity. `TextRunOf` is never re-inserted, so
+        // Reification reuses every run entity. `TextRunOf` is never re-inserted, so
         // the relationship set must not register a change on either pass.
         for color in [Color::BLACK, Color::srgb(0.5, 0.5, 0.5)] {
             app.world_mut()
@@ -971,13 +966,13 @@ mod tests {
             app.update();
             assert!(
                 !app.world().resource::<RunsChangedProbe>().changed,
-                "a reuse-only reconcile must not mutate PanelTextRuns",
+                "reuse-only reification must not mutate PanelTextRuns",
             );
         }
     }
 
     #[test]
-    fn set_tree_empties_the_run_set_then_reconcile_repopulates_it() {
+    fn set_tree_empties_the_run_set_then_reification_repopulates_it() {
         let mut app = relationship_app();
         let panel = spawn_panel(&mut app, two_named_tree("Alpha", "Beta"));
         app.update();
@@ -989,7 +984,7 @@ mod tests {
             "two named runs spawn under the panel",
         );
 
-        // Swap to a text-less tree: every run is unvisited this pass, so reconcile
+        // Swap to a text-less tree: every run is unvisited this pass, so reification
         // despawns them and the relationship set empties.
         app.world_mut().commands().set_tree(panel, empty_tree());
         app.update();
@@ -999,7 +994,7 @@ mod tests {
             .map_or(0, RelationshipTarget::len);
         assert_eq!(emptied, 0, "set_tree to an empty tree drops every run");
 
-        // Swap back to a multi-run tree: reconcile repopulates the set and the
+        // Swap back to a multi-run tree: reification repopulates the set and the
         // named index resolves each run by a single O(1) `text_child` lookup.
         app.world_mut()
             .commands()
@@ -1034,7 +1029,7 @@ mod tests {
         let runs: Vec<Entity> = app
             .world()
             .get::<PanelTextRuns>(panel)
-            .expect("a reconciled panel carries its runs")
+            .expect("a reified panel carries its runs")
             .iter()
             .collect();
         assert_eq!(runs.len(), 2, "both runs are tracked before despawn");
@@ -1072,7 +1067,7 @@ mod tests {
 
     #[test]
     fn a_structural_edit_keeps_named_runs_but_repositions_auto_runs() {
-        let mut app = reconcile_app();
+        let mut app = reify_app();
         // One auto run ("first") and one named run ("keep").
         let panel = spawn_panel(&mut app, autos_then_named_tree(&["first"], "keep"));
         app.update();
@@ -1130,7 +1125,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(counting_measurer(counter));
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_systems(PostUpdate, reconcile_panel_text_children);
+        app.add_systems(PostUpdate, reify_text_entities);
         app
     }
 

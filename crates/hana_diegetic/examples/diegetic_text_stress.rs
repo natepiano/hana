@@ -21,7 +21,7 @@
 //! A left screen overlay, anchored above the bottom-left GPU pipeline
 //! visualization, reports the frame as additive main/render blocks, each row
 //! with a 5-second peak column.
-//! Main thread: `ms/frame` is the sum of `layout`, `reconcile`, `shaping`,
+//! Main thread: `ms/frame` is the sum of `layout`, `reify`, `shaping`,
 //! `mesh`, `other`, `wait for render`, `extract`, and `frame slack`. Render
 //! thread: `render cycle` is the end-to-end frame N cycle from one render
 //! schedule start to the next: `assets`, `prep`, `wait for GPU`, `render graph`,
@@ -1024,7 +1024,7 @@ impl MetricRow {
 
 /// Diagnostic table rows, in display order — two additive CPU blocks.
 ///
-/// Main thread: `ms` (frame wall time) = `layout` + `reconcile` + `shaping` +
+/// Main thread: `ms` (frame wall time) = `layout` + `reify` + `shaping` +
 /// `mesh` (the measured diegetic spans) + `other` (the rest of the main
 /// schedules: cascade, transform propagation, every other system) +
 /// `wait for render` (blocked in `renderer_extract` waiting for the render
@@ -1049,7 +1049,7 @@ const METRIC_ROWS: [MetricRow; 21] = [
     MetricRow::new("fps", RowIndent::None),
     MetricRow::new("ms/frame", RowIndent::None),
     MetricRow::accented("layout", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
-    MetricRow::accented("reconcile", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("reify", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
     MetricRow::accented("shaping", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
     MetricRow::accented("mesh", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
     MetricRow::accented("other", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
@@ -1105,7 +1105,7 @@ struct PerfSnapshot {
     fps:                f32,
     frame_ms:           f32,
     layout_ms:          f32,
-    reconcile_ms:       f32,
+    reify_ms:           f32,
     shaping_ms:         f32,
     mesh_ms:            f32,
     other_ms:           f32,
@@ -1131,7 +1131,7 @@ impl PerfSnapshot {
         fps:                0.0,
         frame_ms:           0.0,
         layout_ms:          0.0,
-        reconcile_ms:       0.0,
+        reify_ms:           0.0,
         shaping_ms:         0.0,
         mesh_ms:            0.0,
         other_ms:           0.0,
@@ -1498,7 +1498,7 @@ fn update_status_panel(
     // are per-frame exact; the displayed `now` column is window-meaned anyway.
     let frame_ms = time.delta_secs() * MILLISECONDS_PER_SECOND;
     let layout_ms = diegetic_perf.compute_ms;
-    let reconcile_ms = diegetic_perf.reconcile_ms;
+    let reify_ms = diegetic_perf.reify_ms;
     let shaping_ms = diegetic_perf.panel_text.shape_ms;
     let mesh_ms = diegetic_perf.panel_text.mesh_build_ms;
     // other = main-schedule wall time minus the four measured diegetic spans:
@@ -1509,7 +1509,7 @@ fn update_status_panel(
     // spans are sampled one frame apart, so a hitch can momentarily invert
     // them.
     let main_span_ms = main_thread.ms();
-    let other_ms = (main_span_ms - layout_ms - reconcile_ms - shaping_ms - mesh_ms).max(0.0);
+    let other_ms = (main_span_ms - layout_ms - reify_ms - shaping_ms - mesh_ms).max(0.0);
     let outside_main_ms = (frame_ms - main_span_ms).max(0.0);
     let wait_for_render_ms = render_spans.recv_ms().clamp(0.0, outside_main_ms);
     let return_ms = render_spans.return_gap_ms();
@@ -1531,7 +1531,7 @@ fn update_status_panel(
         fps: frames_per_second.unwrap_or(0.0).to_f32(),
         frame_ms,
         layout_ms,
-        reconcile_ms,
+        reify_ms,
         shaping_ms,
         mesh_ms,
         other_ms,
@@ -1589,7 +1589,7 @@ fn format_perf_snapshot(snapshot: PerfSnapshot) -> [String; METRIC_COUNT] {
         format!("{:.0}", snapshot.fps),
         format!("{:.1}", snapshot.frame_ms),
         format!("{:.2}", snapshot.layout_ms),
-        format!("{:.2}", snapshot.reconcile_ms),
+        format!("{:.2}", snapshot.reify_ms),
         format!("{:.2}", snapshot.shaping_ms),
         format!("{:.2}", snapshot.mesh_ms),
         format!("{:.2}", snapshot.other_ms),
@@ -1796,7 +1796,7 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         sum.fps += sample.fps;
         sum.frame_ms += sample.frame_ms;
         sum.layout_ms += sample.layout_ms;
-        sum.reconcile_ms += sample.reconcile_ms;
+        sum.reify_ms += sample.reify_ms;
         sum.shaping_ms += sample.shaping_ms;
         sum.mesh_ms += sample.mesh_ms;
         sum.other_ms += sample.other_ms;
@@ -1820,7 +1820,7 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         fps:                sum.fps / count,
         frame_ms:           sum.frame_ms / count,
         layout_ms:          sum.layout_ms / count,
-        reconcile_ms:       sum.reconcile_ms / count,
+        reify_ms:           sum.reify_ms / count,
         shaping_ms:         sum.shaping_ms / count,
         mesh_ms:            sum.mesh_ms / count,
         other_ms:           sum.other_ms / count,
@@ -1848,7 +1848,7 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         peak.fps = peak.fps.max(sample.fps);
         peak.frame_ms = peak.frame_ms.max(sample.frame_ms);
         peak.layout_ms = peak.layout_ms.max(sample.layout_ms);
-        peak.reconcile_ms = peak.reconcile_ms.max(sample.reconcile_ms);
+        peak.reify_ms = peak.reify_ms.max(sample.reify_ms);
         peak.shaping_ms = peak.shaping_ms.max(sample.shaping_ms);
         peak.mesh_ms = peak.mesh_ms.max(sample.mesh_ms);
         peak.other_ms = peak.other_ms.max(sample.other_ms);

@@ -13,7 +13,7 @@ use crate::render::draw_order::DrawZIndexRank;
 #[derive(Component, Clone, Debug)]
 pub struct PanelTextLayout {
     /// Panel-local id of the source text run, plus the line ordinal within that
-    /// run (`0` for an unwrapped run). Together they form the reconcile reuse
+    /// run (`0` for an unwrapped run). Together they form the reification reuse
     /// key, replacing the former positional `(element_idx, command_index)` pair
     /// so a named run survives a sibling reorder.
     pub id:               PanelElementId,
