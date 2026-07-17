@@ -39,6 +39,7 @@ hana_valence = { workspace = true }
 image = { workspace = true }
 parley = { workspace = true }
 smallvec = { workspace = true }
+thiserror = { workspace = true }
 ttf-parser = { workspace = true }
 
 [dev-dependencies]

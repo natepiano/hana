@@ -5,7 +5,7 @@
 ## Delegation Context
 
 - **Project** — `hana_diegetic` (workspace member at `crates/hana_diegetic`). Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm. This plan adds a headless `widgets` module that reifies widgets as panel child entities.
-- **Stack** — Rust (edition 2024). Bevy `0.19.0` (workspace pin, `crates/hana_diegetic/Cargo.toml:14`). `bevy_picking` + `mesh_picking` features are already enabled; widget presentation reads the all-pointer `bevy_picking::PickingInteraction` aggregate, and one diegetic picking backend owns the ordered panel+widget hit group. `bevy_enhanced_input` `0.26.0` is a workspace dependency and becomes a direct `hana_diegetic` dependency in Phase 5. `hana_valence` is a workspace path dep (`Cargo.toml:43`). No bevy_ui.
+- **Stack** — Rust (edition 2024). Bevy `0.19.0` is pinned in the root `Cargo.toml`. `thiserror` `2.0.18` is a workspace dependency and direct `hana_diegetic` dependency. `bevy_picking` + `mesh_picking` features are already enabled; widget presentation reads the all-pointer `bevy_picking::PickingInteraction` aggregate, and one diegetic picking backend owns the ordered panel+widget hit group. `bevy_enhanced_input` `0.26.0` is a workspace dependency and becomes a direct `hana_diegetic` dependency in Phase 5. `hana_valence` is a workspace path dependency declared in the root `Cargo.toml`. No bevy_ui.
 - **Layout** (only phase-touched paths):
   - `crates/hana_diegetic/src/widgets/` — NEW module: `mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `id.rs`, `relationship.rs`, `interactivity.rs`, `focus.rs`, `input.rs`, `picking.rs`, `reify.rs`, `visual.rs`, `presets/` (`mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `style.rs`).
   - `crates/hana_diegetic/src/layout/` — `builder.rs`, `element.rs`, and the engine output that produces widget records and visual-slot references.
@@ -17,30 +17,31 @@
   - `crates/bevy_kana/src/cascade.rs` — read-only shared `Cascade<T>` authoring, `CascadeFrom` relationship, propagation, and `Resolved<T>` cache.
   - `crates/hana_diegetic/src/lib.rs` — curated public re-exports.
 - **Key files:**
+  - `Cargo.toml` + `crates/hana_diegetic/Cargo.toml` — workspace and crate dependency declarations; Phase 0.5 added `thiserror` before widget validation expands `PanelBuildError`.
   - `src/layout/builder.rs` + `src/layout/element.rs` — `El`, `CommonEl`, `Element`, `LayoutTree`, exhaustive tree-change classification, element-id traversal, clipping, precomposition, and the actual homes of `.button`/`.slider` authoring data.
-  - `src/panel/builder.rs` — panel builder and `PanelBuildError`; `build()` calls `tree.duplicate_named_element_id()`. Widget ids reuse this validation path, while runtime tree replacement calls the same validator before accepting a tree.
+  - `src/panel/builder.rs` — panel builder and the `thiserror`-derived `PanelBuildError`; `build()` calls `tree.duplicate_named_element_id()`. Widget ids reuse this validation path, while runtime tree replacement calls the same validator before accepting a tree.
   - `src/render/panel_text/reify.rs` — text reify: `reify_text_entities` (`:179`) and `update_reused_panel_text_child` (`:417`, the reuse-on-diff pattern widget reify mirrors).
   - `src/render/panel_text/relationship.rs` — `TextRunOf` / `PanelTextRuns` (template for `WidgetOf`/`PanelWidgets`; no `linked_spawn`).
   - `src/render/panel_text/mod.rs` — text-child ordering in `PanelChildSystems::Build`; widget semantic reify does **not** copy that `PostUpdate` schedule because screen attachment resolution needs widget entities and rects during `Update`.
   - `src/ime/activation.rs` — IME double-click activation observer: `On<Pointer<Click>>` gated `click.count < 2` (`:28`); calls `computed.field_at_local_position(panel_local)` (`:39`).
-  - `src/panel/diegetic_panel.rs` — `field_at_local_position(&self, panel_local: Vec2) -> Option<&PanelFieldRecord>` (`:1591`); panel-local record-lookup pattern for the picking backend.
-  - `src/ime/ids.rs` — id types; `PanelElementId::auto` (`:64`). Widget ids land in this element-id namespace; no new `WidgetId` newtype.
+  - `src/panel/diegetic_panel.rs` — `field_at_local_position(&self, panel_local: Vec2) -> Option<&PanelFieldRecord>`; panel-local record-lookup pattern for the picking backend.
+  - `src/ime/ids.rs` — id types and `PanelElementId::auto`. Widget ids land in this element-id namespace; no new `WidgetId` newtype.
   - `src/ime/mod.rs` — `ImePlugin` (`pub(crate)` `:70`, `impl Plugin` `:89`); mirror for `WidgetsPlugin`.
   - `crates/bevy_kana/src/cascade.rs` — `Cascade<A>`, `CascadeFrom` / `CascadeChildren`, `CascadeDefault<A>`, `CascadePlugin<A>`, `Resolved<A>`, and `CascadeSet::Propagate`. `ChildOf` is deliberately unrelated to cascade inheritance.
   - `src/cascade/mod.rs`, `attributes.rs`, and `resolved.rs` — private shared-engine imports plus diegetic attribute root defaults, typed `override_*` / `inherit_*` commands, and resolved readers. `hana_diegetic` does not re-export raw `Cascade<T>`.
-  - `src/panel/anchor_geometry.rs` — read-only panel geometry API: `PanelAnchorGeometryParam`, `PanelScreenBounds`, `PanelPlane`, and `ResolvedPanelAnchorGeometry`. `src/panel/valence_provider.rs` is the world-panel provider for the `hana_valence::ResolvedAnchorGeometry` component that widgets also publish (see `../hana_valence/as-built/anchoring-and-arrangements.md`).
+  - `src/panel/anchor_geometry.rs` — read-only panel geometry API: `PanelAnchorGeometryParam`, `PanelScreenBounds`, `PanelPlane`, and `ResolvedPanelAnchorGeometry`. `src/panel/valence_provider.rs` is the world-panel provider for the `hana_valence::ResolvedAnchorGeometry` component that widgets also publish (see `docs/hana_valence/as-built/anchoring-and-arrangements.md`).
   - `src/panel/anchoring.rs` — insert-only `AnchoredToPanel` authoring, private `PanelAttachmentAuthored`, world-only lowering to `hana_valence::AnchoredTo`, offset lowering, and `PanelSpace` reconciliation. Screen panels keep the shared authoring without the world relation.
   - `src/render/panel_geometry.rs` — current flat `PanelInteractionMesh`; Phase 3 moves it out of the generic mesh backend and makes the diegetic backend emit the panel and widget hits together.
   - `src/screen_space/anchoring/candidate.rs` + `resolve.rs` — screen placement builds candidates from private `PanelAttachmentAuthored` and delegates ordering and diagnostics to `hana_valence::resolve_attachments`; it accepts panel targets only today, and Phase 11 teaches it widget targets.
   - `src/panel/perf.rs` + `src/panel/constants.rs` — `DiegeticPerfStats` (`perf.rs:45`), `pub reify_ms: f32` (`perf.rs:54`), and `DIAG_PANEL_REIFY_MS` (`constants.rs:35`, published at `perf.rs:258`).
   - `src/render/mod.rs` — `PanelChildSystems` set enum (`:128`); `TextRunOf`/`PanelTextRuns` re-exports.
-  - `src/lib.rs` — curated re-exports (`PanelBuildError` `:255`); widget public types re-export here.
+  - `src/lib.rs` — curated re-exports, including `PanelBuildError`; widget public types re-export here.
 - **Build:** `cargo build && cargo +nightly fmt` after changes.
 - **Test:** `cargo nextest run` (never `cargo test`).
 - **Lint:** the `clippy` skill. Workspace lints are strict: `all`/`cargo`/`nursery`/`pedantic` denied, `unwrap_used`/`expect_used`/`panic`/`unreachable` denied, `missing_docs = "deny"`, `self_named_module_files` denied (use `module/mod.rs` directory form).
 - **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/hana_diegetic_widgets`
 - **Invariants:**
-  - **Valence gate:** `hana_valence` exists at `crates/hana_valence`; its resolver, panel bridge, and screen-adapter integration are described in `../hana_valence/as-built/anchoring-and-arrangements.md`. Hana Valence types stay out of diegetic's public widget signatures. Diegetic authoring lowers to `hana_valence::AnchoredTo` only for world sources; screen sources retain `PanelAttachmentAuthored` and use the shared attachment graph without carrying the world relation.
+  - **Valence gate:** `hana_valence` exists at `crates/hana_valence`; its resolver, panel bridge, and screen-adapter integration are described in `docs/hana_valence/as-built/anchoring-and-arrangements.md`. Hana Valence types stay out of diegetic's public widget signatures. Diegetic authoring lowers to `hana_valence::AnchoredTo` only for world sources; screen sources retain `PanelAttachmentAuthored` and use the shared attachment graph without carrying the world relation.
   - No bevy_ui / bevy_a11y dependency. `WidgetDisabled`, `WidgetFocused`, and pointer-capture state stay bespoke; `PickingInteraction` supplies all-pointer hover/press presentation and `bevy_enhanced_input` supplies the opt-in semantic-action adapter.
   - Widgets reify as panel child entities under `ChildOf(panel)`; the `WidgetOf`/`PanelWidgets` relationship is a traversal index only, no `linked_spawn` — `ChildOf` owns despawn.
   - Behavior modules never construct layout/render primitives (`El`, `LayoutTree`, `PanelDraw`, materials, `TextStyle`, `DrawZIndex`). Presets depend on behavior, never the reverse.
@@ -50,12 +51,13 @@
   - Widget ids reuse `PanelElementId` and its `duplicate_named_element_id` → `DuplicateElementId` validation; event-emitting widgets require `Named` ids (auto ids reposition on structural edits and would fire spurious cancels).
   - Widget interactivity uses `bevy_kana::Cascade<WidgetInteractivity>` and `Resolved<WidgetInteractivity>`. `Cascade::Inherit` participates and follows explicit `CascadeFrom`; an absent `Cascade<A>` means non-participation. `WidgetInteractivity` itself has no inherited variant. Hana exposes typed domain verbs and does not re-export raw cascade storage.
   - Widget events derive `EntityEvent` targeting the widget entity; the panel-local id is a payload convenience only, never the routing key. Owning panel resolves through `WidgetOf`, never duplicated on components or events.
+  - Exported `hana_diegetic` error types derive `thiserror::Error`, declare messages beside their variants, and have exhaustive stable-message tests. Converting sources and intentionally lossy normalization mappings stay explicit.
   - Widget picking geometry stays in **panel-local space**. The first implementation uses the current flat interaction-mesh hit conversion. Curved-panel support is gated on Phase 5 of `surface-panels.md`, which replaces that one boundary with `PanelSurface::project()`; widget rectangle tests remain unchanged and never place geometry independently in world space.
   - The first API rejects interactive descendants inside a widget and widgets inside precomposed subtrees. Arbitrary non-interactive child layout remains valid; nested/precomposed interaction needs a later ownership and hit-order design.
   - Tooltip authoring is separate from `Button`/`Slider` authoring. Reify creates a lightweight tooltip entity with `TooltipFor(target)`; first eligibility materializes that same entity into a hidden anchored panel. The semantic relationship exists before the placement relationship and does not itself create anchor-geometry demand.
 - **Public contract ledger (fixed before delegation):**
   - Authoring methods are `El::button(self, id: impl Into<PanelElementId>, button: Button) -> Self` and `El::slider(self, id: impl Into<PanelElementId>, slider: Slider) -> Self`. Both assign the element id and crate-private widget variant atomically. `Button` is a private-field `Clone + Debug + PartialEq + Default` authoring builder with `new()` and Phase 7's `on_click(...)`; `Slider` is a private-field `Clone + Debug + PartialEq` validated authoring builder with no `Default` because range and initial value are required. Neither is an ECS component. Crate-private `WidgetSpec` is exactly `Button(Button) | Slider(Slider)`, while runtime slider data lives in `SliderState`, so no public `Spec` suffix is needed.
-  - New validation variants are `PanelBuildError::WidgetRequiresNamedId(PanelElementId)`, `WidgetContainsInteractiveDescendant(PanelElementId)`, and `WidgetInsidePrecomposedSubtree(PanelElementId)`.
+  - New validation variants are `PanelBuildError::WidgetRequiresNamedId(PanelElementId)`, `WidgetContainsInteractiveDescendant(PanelElementId)`, and `WidgetInsidePrecomposedSubtree(PanelElementId)`. Phase 1 adds them to the `thiserror::Error` enum established in Phase 0.5, with direct `#[error(...)]` messages and stable-message tests.
   - Identity exports are `PanelWidget`, `PanelWidgetReader`, `WidgetOf`, and `PanelWidgets`. `PanelWidget` exposes only `id()`, and `WidgetOf` exposes only `panel()`; relationship mutation remains internal.
   - Interactivity/focus exports are `WidgetInteractivity`, `WidgetDisabled`, `WidgetFocusable`, `WidgetFocused`, `RequestWidgetFocus`, `ClearWidgetFocus`, `WidgetFocusChanged`, and `WidgetFocusChangeCause`. Element authoring is `El::widget_interactivity(self, value: WidgetInteractivity) -> Self`. The existing `CascadeEntityCommandsExt` gains `override_widget_interactivity(value)` and `inherit_widget_interactivity()` for panel- or widget-entity authoring; `Cascade<T>` remains owned by `bevy_kana` and is not re-exported. The focus request payload is `{ window, widget }`, clear is `{ window }`, and change is `{ window, previous, current, cause }`. Cause variants are `Pointer`, `Traversal`, `Semantic`, `Application`, `ExplicitClear`, `WidgetRemoved`, `FocusabilityRemoved`, and `ScopeLost`; disable is intentionally absent.
   - The six exported semantic action types are `FocusNextWidget`, `FocusPreviousWidget`, `FocusFirstWidget`, `FocusLastWidget`, `ActivateFocusedWidget`, and `CancelFocusedWidget`. The adapter exports `WidgetInputPlugin`, `WidgetInputBindings`, and `WidgetControlSummary`; a complete install is `app.add_plugins(WidgetInputPlugin::new(WidgetInputBindings::default()))`, after which the plugin owns one context entity per window and reconciles install/rebind/remove idempotently.
@@ -103,6 +105,58 @@
 - Updated computed-widget entity-creation wording in Phases 1 and 5 to `reify`; tooltip panel materialization retains its distinct term.
 - Reviewed Phases 1–12; no remaining phase needs scope, ordering, file, constraint, or acceptance-gate changes because of Phase 0.
 
+### Phase 0.5 — Adopt `thiserror` for diegetic errors  · status: done (`25ce5f2f`)
+
+#### Work Order
+
+**Goal:** Put `hana_diegetic` error declarations on the same `thiserror` convention as `hana_catalyst` before widget validation expands `PanelBuildError`.
+
+**Spec:**
+- Add `thiserror = "2.0.18"` to the root workspace dependencies and `thiserror.workspace = true` to `crates/hana_diegetic/Cargo.toml`. Let Cargo update `Cargo.lock` if the resolved lockfile changes.
+- Convert these seven public error types from handwritten `Display` / `Error` implementations to `#[derive(thiserror::Error, ...)]`: `PanelBuildError`, `PanelAnchorGeometryError`, `PanelProjectionError`, `FontLoaderError`, `OutlineError`, `InvalidSize`, and `InvalidPanelScalar`. Preserve their existing non-error derives and every current display string exactly.
+- Use direct `#[error("...")]` declarations for leaf variants and value-bearing messages. `FontLoaderError::Io` remains a converting source with the existing `failed to read font file: {error}` message. Make `PanelBuildError::InvalidSize` a transparent `#[from]` wrapper so callers retain the current display text and can now discover the underlying `InvalidSize` through `Error::source`; this source-chain addition is the phase's only intentional behavior change.
+- Keep normalization conversions handwritten where the source error is deliberately collapsed or mapped: `ComputeGlobalTransformError` → `PanelAnchorGeometryError`, `ComputeGlobalTransformError` → `PanelProjectionError`, and `PanelAnchorGeometryError` → `PanelProjectionError`. Do not annotate those conversions as sources or carry their original values.
+- Remove only imports and handwritten implementations made obsolete by the derives. Leave the crate-private `MaterialSlotIdError` unchanged: it is an internal validation enum, not part of this public error convention.
+- Add focused unit tests following the `hana_catalyst` pattern: exhaustively pin enum variant messages, pin value-bearing struct/variant messages, verify the I/O and invalid-size conversion/source chains, and verify the lossy transform/anchor mappings still produce the same normalized variants.
+
+**Files:**
+- `Cargo.toml`, `Cargo.lock`, `crates/hana_diegetic/Cargo.toml` — dependency declaration and resolution
+- `crates/hana_diegetic/src/panel/builder.rs` — `PanelBuildError`
+- `crates/hana_diegetic/src/panel/anchor_geometry.rs` — `PanelAnchorGeometryError`
+- `crates/hana_diegetic/src/panel/conversion/error.rs` — `PanelProjectionError`
+- `crates/hana_diegetic/src/text/font/loader.rs` — `FontLoaderError`
+- `crates/hana_diegetic/src/text/slug/glyph/outline.rs` — `OutlineError`
+- `crates/hana_diegetic/src/layout/units/invalid_size.rs` — `InvalidSize`
+- `crates/hana_diegetic/src/layout/line.rs` — `InvalidPanelScalar`
+- Read-only reference: `../hana_tool_graph/crates/hana_catalyst/src/error.rs`
+
+**Constraints from prior phases:** Phase 0's reify rename is complete and does not overlap this migration. Do not add widget-specific errors yet; Phase 1 owns those variants and their validation behavior.
+
+**Acceptance gate:** `cargo build && cargo +nightly fmt` clean; `cargo nextest run` green; full workspace clippy green through the `clippy` skill; all seven public error types derive `thiserror::Error` with stable-message coverage; `FontLoaderError::Io` and `PanelBuildError::InvalidSize` expose their wrapped sources; normalized transform/anchor conversions remain unchanged; `MaterialSlotIdError` remains internal and untouched. Live smoke the `font_loading` example and shut it down through BRP without a panic or fatal error.
+
+#### Retrospective
+
+**What worked:**
+- All seven public errors moved to `thiserror::Error` with their existing messages pinned by tests; converting sources and lossy normalization mappings remained explicit.
+- Build, nightly formatting, 1,232 tests, full workspace clippy, rustdoc, and the BRP-driven `font_loading` smoke all passed.
+
+**What deviated from the plan:**
+- `PanelBuildError::InvalidSize` uses `#[error("{0}")] InvalidSize(#[from] InvalidSize)` rather than `#[error(transparent)]` so `Error::source` returns the wrapped leaf error while display output remains unchanged.
+
+**Surprises:**
+- A `thiserror` transparent wrapper forwards to the wrapped error's own source; because `InvalidSize` is a leaf, that would produce no source instead of exposing `InvalidSize`.
+
+**Implications for remaining phases:**
+- Phase 1 extends the shipped `thiserror`-derived `PanelBuildError` with direct `#[error(...)]` declarations and stable-message tests; it must not restore handwritten formatting or error implementations.
+
+#### Phase 0.5 Review
+
+- Updated the shared Delegation Context to the shipped `thiserror` dependency and stable-message convention, and corrected drifted symbol/document references.
+- Phase 1 now owns both button and slider authoring/configuration, matching its existing computed-record and acceptance contracts; Phases 6 and 8 extend those modules with runtime behavior and lifecycle finalization.
+- Phase 8 now consumes the Phase 1 slider construction and `SliderConfigError` contract instead of redefining it.
+- Deferred the caller-visible runtime tree-replacement error channel to Phase 1 as a pending owner decision; the recommended API is fallible `try_set_tree` plus compatibility `set_tree` logging.
+- Reviewed Phases 2–5, 7, and 9–12; Phase 0.5 does not otherwise change their scope, ordering, files, constraints, or acceptance gates.
+
 ### Phase 1 — Widget identity, authoring, relationship, reify, plugin skeleton  · status: todo
 
 #### Work Order
@@ -114,27 +168,43 @@ world-panel provider, `AnchoredToPanel` lowering, and screen attachment adapter
 still match the Valence gate invariant. If that contract has changed, reconcile
 this plan before implementing widgets.
 
+**Pending decision: Runtime tree-replacement error delivery**
+
+Actual problem:
+Phase 1 requires invalid runtime replacement to preserve the current tree and report a typed `PanelBuildError`, but `DiegeticPanelCommands::set_tree` currently returns `()` and only queues a deferred replacement. The caller-visible failure contract is not fixed.
+
+What exists now:
+- `DiegeticPanelBuilder::build` returns `Result<DiegeticPanel, PanelBuildError>`, while `DiegeticPanelCommands::set_tree(entity, tree)` has no result channel.
+
+What should change:
+- Add `DiegeticPanelCommands::try_set_tree(entity, tree) -> Result<(), PanelBuildError>` that validates synchronously and queues only a valid tree. Keep `set_tree` as the compatibility convenience: delegate to `try_set_tree`, log a rejected tree, and leave the current tree unchanged.
+
+Recommendation:
+Adopt `try_set_tree` as the explicit application-facing path and retain non-fallible `set_tree` for existing callers; document both rejection behaviors and test that neither path replaces the current tree on failure.
+
 **Spec:**
-- **Ids and validation** (`widgets/id.rs` + `layout/element.rs`): widget ids ARE `PanelElementId` — no newtype. Event-emitting widgets require `Named` ids; the exact `PanelBuildError` variants are fixed in the public contract ledger. Duplicate rejection reuses `duplicate_named_element_id` → `PanelBuildError::DuplicateElementId`. A single tree validator runs from both `DiegeticPanelBuilder::build` and runtime tree replacement, and also rejects interactive descendants of widgets and widgets under `PrecomposeMode`; invalid replacement leaves the current tree intact and reports the typed error.
-- **Authoring** (`layout/builder.rs` + `layout/element.rs`): the exact `El::button` signature and private/public type split are fixed in the public contract ledger; this is a config method mirroring `.editable_field(id, spec)`, NOT an `El::button` constructor and NOT a `LayoutBuilder` leaf. `CommonEl::widget: Option<WidgetSpec>` is carried onto `Element` parallel to `editable`, through every constructor/clone/destructure path. `LayoutTree::classify_change` treats a widget-record-only edit as `VisualOnly`, and the visual-only commit path refreshes computed widget records. Phase 10 adds a separate tooltip declaration field; it is never nested inside `WidgetSpec`.
+- **Ids and validation** (`widgets/id.rs` + `layout/element.rs`): widget ids ARE `PanelElementId` — no newtype. Event-emitting widgets require `Named` ids; the exact `PanelBuildError` variants are fixed in the public contract ledger. Duplicate rejection reuses `duplicate_named_element_id` → `PanelBuildError::DuplicateElementId`. A single tree validator runs from both `DiegeticPanelBuilder::build` and runtime tree replacement, and also rejects interactive descendants of widgets and widgets under `PrecomposeMode`; invalid replacement leaves the current tree intact and reports the typed error. Add direct `#[error(...)]` declarations and exhaustive message tests for all three new variants; update `PanelBuildError`, both public panel-builder `# Errors` sections, and the resolved tree-replacement API's rejection documentation.
+- **Authoring builders** (`widgets/button.rs` + `widgets/slider.rs`): create `Button` as the private-field `Clone + Debug + PartialEq + Default` builder with `new()`. Create the Phase 1 portion of the approved slider contract: `SliderDirection::{LeftToRight, RightToLeft, BottomToTop, TopToBottom}`; `SliderRange::new(start, end) -> Result<SliderRange, SliderConfigError>` for finite strictly ordered endpoints; `SliderStep::new(step) -> Result<SliderStep, SliderConfigError>` for finite positive steps; and `Slider::new(range, initial_value) -> Result<Slider, SliderConfigError>` with private-field `step(SliderStep)` and `direction(SliderDirection)` builders. `SliderConfigError` is exactly `NonFiniteRange | UnorderedRange | NonFiniteValue | NonPositiveStep`, derives `thiserror::Error`, and has exhaustive stable-message tests. These are authoring/configuration types, not ECS components; Phase 8 adds `SliderState`, requests, events, and runtime behavior.
+- **Element authoring** (`layout/builder.rs` + `layout/element.rs`): implement both exact public-contract methods, `El::button` and `El::slider`. They are config methods mirroring `.editable_field(id, spec)`, not `LayoutBuilder` leaves. `CommonEl::widget: Option<WidgetSpec>` is carried onto `Element` parallel to `editable`, through every constructor/clone/destructure path; crate-private `WidgetSpec` is exactly `Button(Button) | Slider(Slider)`. `LayoutTree::classify_change` treats a widget-record-only edit as `VisualOnly`, and the visual-only commit path refreshes computed widget records. Phase 10 adds a separate tooltip declaration field; it is never nested inside `WidgetSpec`.
 - **Computed record:** layout output owns one crate-private `ComputedWidgetRecord` per valid widget: `PanelElementId`, `WidgetKind`, current computed-tree preorder, and the authored `Button` or `Slider` snapshot. Phase 3 adds the panel-local/clipped rect and interaction rank; Phase 7 adds visual-slot references. `ComputedDiegeticPanel` exposes the crate-private record slice consumed by reify even on a visual-only tree update.
 - **Identity and lookup:** each entity carries public read-only `PanelWidget { id: PanelElementId }` plus `WidgetOf(panel)`. `PanelWidgets` remains the Bevy-maintained membership set; a public `PanelWidgetReader::entity(panel, id)` reads a panel-local map rebuilt during reify. Callers disambiguate identical ids on different panels with `(panel, id)` or use the event target entity.
 - **Relationship** (`widgets/relationship.rs`): `WidgetOf` / `PanelWidgets`, modeled on `TextRunOf`/`PanelTextRuns` (`src/render/panel_text/relationship.rs`). No `linked_spawn` — widgets sit under `ChildOf(panel)`, which owns despawn; the relationship is a membership index, not the focus-order source. Phase 2 separately inserts `CascadeFrom(panel)` because `ChildOf` and `WidgetOf` do not imply cascade inheritance.
-- **Reify** (`widgets/reify.rs`): a change-gated system walking `Changed<ComputedDiegeticPanel>`. It reuses entities by panel-local id, writes components only on diff, rebuilds the id map and current preorder, and sweeps every unvisited entity. Same-id/same-kind updates preserve interaction state; a kind change first finalizes/cancels the former lifecycle and removes its complete behavior/callback bundle before installing the new kind while retaining entity identity. Widget removal finalizes live state before despawn.
+- **Reify** (`widgets/reify.rs`): a change-gated system walking `Changed<ComputedDiegeticPanel>`. It reuses entities by panel-local id, writes components only on diff, rebuilds the id map and current preorder, and sweeps every unvisited entity. Same-id/same-kind updates preserve Phase 1 state; a kind change retains entity identity while replacing `WidgetKind` and the complete Phase 1-owned authored snapshot without leaving stale components. Widget removal despawns the reified entity. Phases 6 and 8 extend these kind-change/removal paths with lifecycle finalization once button and slider behavior exists.
 - **Schedule and plugin** (`widgets/mod.rs`): `WidgetsPlugin` (`pub(crate)`, mirror `ImePlugin`) defines `WidgetSystems::Reify` in `Update`, after `PanelSystems::ComputeLayout` and before `bevy_kana::CascadeSet::Propagate` and `PanelSystems::ResolvePanelAttachments`. An explicit `ApplyDeferred` fence between reify and propagation makes newly inserted `Cascade` / `CascadeFrom` state visible to the shared engine. Do not put semantic widget reify in `PanelChildSystems::Build`; that `PostUpdate` timing is too late for same-frame screen targets. Register the plugin where `ImePlugin` is registered.
 - **Module structure:** private `widgets` module next to `ime`; curated public types re-exported from `lib.rs`/`widgets/mod.rs`, never the whole tree.
 
 **Files:**
 - `src/widgets/mod.rs`, `src/widgets/id.rs`, `src/widgets/relationship.rs`, `src/widgets/reify.rs` — new
-- `src/layout/builder.rs`, `src/layout/element.rs` — `.button(id, Button::new())`, `common.widget`, validation, tree diffing
+- `src/widgets/button.rs`, `src/widgets/slider.rs` — new authoring/configuration builders; no behavior yet
+- `src/layout/builder.rs`, `src/layout/element.rs` — `.button(...)`, `.slider(...)`, `common.widget`, validation, tree diffing
 - `src/layout/engine/` + `src/panel/compute_layout.rs` + `src/panel/diegetic_panel.rs` — computed widget records and visual-only refresh
-- `src/panel/builder.rs` — `PanelBuildError` integration and shared validation call
+- `src/panel/builder.rs` — extend the `thiserror`-derived `PanelBuildError` and add the shared validation call
 - `src/lib.rs` — re-exports + plugin registration site
 - Read-only templates: `src/render/panel_text/relationship.rs`, `src/render/panel_text/reify.rs`, `src/ime/mod.rs`
 
-**Constraints from prior phases:** Phase 0 renamed `reconcile_panel_text_children` → `reify_text_entities` and `reconcile.rs` → `reify.rs`.
+**Constraints from prior phases:** Phase 0 renamed `reconcile_panel_text_children` → `reify_text_entities` and `reconcile.rs` → `reify.rs`. Phase 0.5 added the direct `thiserror` dependency and migrated `PanelBuildError`; add the three widget-validation variants with `#[error(...)]` declarations and stable-message tests rather than restoring handwritten formatting/error implementations.
 
-**Acceptance gate:** `cargo nextest run` green with new tests: duplicate widget id rejected via `DuplicateElementId`; auto id, nested interactive content, and precomposed widgets rejected by typed errors at build and runtime replacement; visual-only `Button`/`Slider` authoring changes refresh computed records; reify creates `PanelWidget` entities under `ChildOf(panel)` with relationship and id lookup; structural reorder keeps entities but rebuilds current preorder; removing one widget sweeps it while the panel survives; same-id kind replacement cancels/removes old behavior; panel despawn drops all widgets without double-despawn.
+**Acceptance gate:** `cargo nextest run` green with new tests: duplicate widget id rejected via `DuplicateElementId`; auto id, nested interactive content, and precomposed widgets rejected by typed errors at build and runtime replacement; all new error messages are pinned; invalid slider range/value/step construction is rejected; visual-only `Button`/`Slider` authoring changes refresh computed records; reify creates `PanelWidget` entities under `ChildOf(panel)` with relationship and id lookup; structural reorder keeps entities but rebuilds current preorder; removing one widget sweeps it while the panel survives; same-id kind replacement retains the entity and swaps every Phase 1-owned kind/authored component without stale state; panel despawn drops all widgets without double-despawn.
 
 ### Phase 2 — Interactivity resolution  · status: todo
 
@@ -212,7 +282,7 @@ this plan before implementing widgets.
 - `src/widgets/reify.rs`, `src/widgets/relationship.rs` — rect ownership and demand transitions
 - `src/widgets/mod.rs` — `AnchorSystems::FillGeometry` set membership
 - `src/panel/anchoring.rs` — widget-aware offset lowering
-- Read-only: `src/panel/valence_provider.rs` (centered provider convention), `crates/hana_valence` (contract types), `../hana_valence/as-built/anchoring-and-arrangements.md`
+- Read-only: `src/panel/valence_provider.rs` (centered provider convention), `crates/hana_valence` (contract types), `docs/hana_valence/as-built/anchoring-and-arrangements.md`
 
 **Constraints from prior phases:** Phase 3 built the single panel-local rect source and gave widgets a real panel-local `Transform`. Phase 1 reify runs during `Update` and flushes before either screen or world attachment work.
 
@@ -269,12 +339,12 @@ this plan before implementing widgets.
 - Presentation state comes from `PickingInteraction`; no bespoke hover events in the first API.
 
 **Files:**
-- `src/widgets/button.rs` — new
+- `src/widgets/button.rs` — extend the Phase 1 authoring module with button behavior
 - `src/widgets/mod.rs` — observers + systems registration
 - `src/ime/editor.rs` — shared widget-aware blur classification
 - Read-only: `src/ime/activation.rs`, `/Users/natemccoy/rust/bevy/crates/bevy_ui_widgets/src/button.rs`
 
-**Constraints from prior phases:** Phase 1 reuses same-kind entities and finalizes removals/kind changes. Phase 2 supplies `WidgetDisabled`; Phase 3 supplies ordered hits and `PickingInteraction`; Phase 5 supplies activate-focused routing.
+**Constraints from prior phases:** Phase 1 owns `Button` authoring, same-kind entity reuse, and Phase 1-owned kind replacement/removal. Extend those transitions here so button behavior is finalized before a kind change or removal. Phase 2 supplies `WidgetDisabled`; Phase 3 supplies ordered hits and `PickingInteraction`; Phase 5 supplies activate-focused routing.
 
 **Acceptance gate:** `cargo nextest run` green with new tests: press→release→click and release-without-click; pointer ids match every terminal path; a second pointer cannot terminate the first; cancel over empty space, raw pointer removal, drag-off release, disable-while-pressed, widget removal/despawn, same-id kind change, and explicit cancel each emit exactly one `ButtonCanceled`; semantic activation emits `ButtonClicked` alone; same-panel and other-panel button clicks classify IME blur correctly while a button over a field blocks field activation.
 
@@ -309,9 +379,9 @@ this plan before implementing widgets.
 **Goal:** Headless slider: grab, drag, value change, release, cancel, disabled, optional snapping, with correct out-of-bounds drag mapping.
 
 **Spec:**
-- `widgets/slider.rs`; extend `WidgetSpec` with the slider kind and add `.slider(id, Slider::new(...))` authoring mirroring `.button(id, Button::new())`.
-- `SliderDirection` is fixed independently of PD1 as `LeftToRight | RightToLeft | BottomToTop | TopToBottom`.
-- **Approved value contract (PD1):** `SliderRange::new(start, end) -> Result<SliderRange, SliderConfigError>` accepts only finite, strictly ordered endpoints. `SliderStep::new(step) -> Result<SliderStep, SliderConfigError>` accepts only finite positive values. Private-field `SliderState` is the public component containing range, applied raw-domain value, optional step, and direction; `SliderState::new(range, value, step, direction) -> Result<Self, SliderConfigError>` and `set_value(value) -> Result<bool, SliderConfigError>` reject non-finite input, snap to the lattice anchored at `range.start()`, then clamp, with the Boolean reporting an applied-value change. It also exposes `range()`, `value()`, `step()`, and `direction()` readers. `Slider::new(range, initial_value) -> Result<Self, SliderConfigError>` validates the spawn value and adds private-field `step(SliderStep)` and `direction(SliderDirection)` builders. `SliderConfigError` is exactly `NonFiniteRange | UnorderedRange | NonFiniteValue | NonPositiveStep`.
+- `widgets/slider.rs`: extend the Phase 1 authoring/configuration module with runtime slider state and behavior. `WidgetSpec::Slider`, `El::slider`, `Slider`, `SliderRange`, `SliderStep`, `SliderDirection`, and `SliderConfigError` already exist and must not be redefined.
+- **Shipped construction contract:** Phase 1 provides `SliderDirection::{LeftToRight, RightToLeft, BottomToTop, TopToBottom}`; finite strictly ordered `SliderRange`; finite positive `SliderStep`; validated `Slider::new(range, initial_value)` plus `step` and `direction` builders; and the `thiserror`-derived `SliderConfigError::{NonFiniteRange, UnorderedRange, NonFiniteValue, NonPositiveStep}` with stable-message tests.
+- **Approved runtime value contract (PD1):** private-field `SliderState` is the public component containing range, applied raw-domain value, optional step, and direction. `SliderState::new(range, value, step, direction) -> Result<Self, SliderConfigError>` and `set_value(value) -> Result<bool, SliderConfigError>` reject non-finite input, snap to the lattice anchored at `range.start()`, then clamp, with the Boolean reporting an applied-value change. It also exposes `range()`, `value()`, `step()`, and `direction()` readers.
 - **App authority and request API:** `SliderChangeRequested` targets the widget and carries `{ id, value, is_final, pointer_id: Option<PointerId> }`; pointer drags send non-final proposals plus a final proposal on release, while semantic/remote requests are final and have no pointer. App code explicitly applies or rejects the proposal with `SliderState::set_value`. The exported `slider_self_update` observer is the opt-in uncontrolled convenience. `RequestSliderAdjustment { entity, adjustment }` computes and emits a proposal without applying it; `SliderAdjustment` is exactly `Absolute(f32) | Relative(f32) | RelativeSteps(f32)`. Every adjustment validates its numeric input; `RelativeSteps` emits no proposal when the state has no step.
 - **Authored/runtime ownership:** `Slider::initial_value` applies only on first spawn. Same-id reuse preserves the live applied value; an authored range/step/direction change updates the configuration and revalidates the preserved value, while an unrelated reify does not rewrite `SliderState`. The preset reads only the applied value, never an unaccepted proposal.
 - **Bevy reference check:** both the project-version `bevy_ui_widgets 0.19.0` source and local `../bevy` at `0.20.0-dev` use raw-domain state, external `ValueChange<f32>` proposals, optional self-update, and absolute/relative/relative-step remote control. Hana adopts those semantics. It intentionally does not copy Bevy's independently insertable tuple components, warn-only invalid ranges, separate `SliderPrecision`, `TrackClick`, auto-orientation, accessibility dependency, or UI-space drag delta; Hana keeps one validated state, one step lattice for pointer and semantic values, four explicit directions, and captured-camera panel-local reprojection.
@@ -319,14 +389,13 @@ this plan before implementing widgets.
 - **Lifecycle:** reuse Phase 6's capture registry, pointer matching, terminal state, raw pointer-loss handling, and finalize-before-despawn rule. `SliderGrabbed`/`SliderReleased` carry `{ entity, id, pointer_id }`; `SliderCanceled` adds `cause`, whose variants are `PointerCanceled | PointerRemoved | CaptureLost | Disabled | ProjectionUnavailable | WidgetRemoved | WidgetKindChanged | Explicit`. `WidgetDisabled` cancels an active drag and blocks pointer or semantic changes.
 
 **Files:**
-- `src/widgets/slider.rs` — new
+- `src/widgets/slider.rs` — extend the Phase 1 authoring/configuration module with runtime state and behavior
 - `src/widgets/picking.rs` (or a shared geometry module) — `panel_local_from_ray` helper
-- `src/layout/builder.rs`, `src/layout/element.rs` — `.slider(id, Slider::new(...))` and retained record
 - `src/widgets/reify.rs` — slider kind reify
 
-**Constraints from prior phases:** Phase 6 owns the shared capture/terminal mechanism; Phase 3 supplies panel-local geometry and the press hit's camera; Phase 2 supplies `WidgetDisabled`; PD1 is accepted and fixed above.
+**Constraints from prior phases:** Phase 1 owns slider authoring, validated construction types, the `thiserror` error contract, computed snapshots, and Phase 1-owned kind replacement/removal. Extend reify here to preserve live `SliderState` on same-id reuse and finalize slider behavior on kind change/removal. Phase 6 owns the shared capture/terminal mechanism; Phase 3 supplies panel-local geometry and the press hit's camera; Phase 2 supplies `WidgetDisabled`; PD1 is accepted and fixed above.
 
-**Acceptance gate:** `cargo nextest run` green with new tests: invalid numeric construction; direction/value mapping for all four directions; lattice anchoring plus snap/clamp order; app accept/reject and opt-in self-update; absolute/relative/relative-step requests; non-final/final proposal ordering; spawn-only initial value and authored range-change clamping; zero-size track; drag beyond panel bounds; captured-camera loss and multi-camera reprojection; every cancel path including pointer loss, kind change, and disable-while-dragging; disabled slider ignores grab and semantic change.
+**Acceptance gate:** `cargo nextest run` green with Phase 1's construction/error tests retained and new tests for: direction/value mapping for all four directions; lattice anchoring plus snap/clamp order; app accept/reject and opt-in self-update; absolute/relative/relative-step requests; non-final/final proposal ordering; spawn-only initial value and authored range-change clamping; zero-size track; drag beyond panel bounds; captured-camera loss and multi-camera reprojection; every cancel path including pointer loss, kind change, and disable-while-dragging; disabled slider ignores grab and semantic change.
 
 ### Phase 9 — Slider overlay preset  · status: todo
 

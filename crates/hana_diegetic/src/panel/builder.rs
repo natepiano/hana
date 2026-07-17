@@ -1,9 +1,6 @@
 //! [`DiegeticPanelBuilder`] with compile-time state machine enforcing call
 //! order on panel construction.
 
-use core::error::Error;
-use core::fmt::Display;
-use core::fmt::Formatter;
 use std::marker::PhantomData;
 
 use bevy::camera::visibility::RenderLayers;
@@ -41,29 +38,16 @@ use crate::layout::Unit;
 /// Either a sizing error or a duplicate author-assigned [`PanelElementId`]: a
 /// build-time `Result` so a repeated id is rejected up front instead of one
 /// element silently replacing another at runtime.
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum PanelBuildError {
     /// A fixed-size axis was zero or negative.
-    InvalidSize(InvalidSize),
+    #[error("{0}")]
+    InvalidSize(#[from] InvalidSize),
     /// Two elements share the same author-assigned [`PanelElementId`]. Element
     /// ids and editable-field ids share one panel-local namespace, so a name
     /// reused across either kind is a build error.
+    #[error("duplicate panel element id `{0}`")]
     DuplicateElementId(PanelElementId),
-}
-
-impl Display for PanelBuildError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::InvalidSize(error) => write!(formatter, "{error}"),
-            Self::DuplicateElementId(id) => write!(formatter, "duplicate panel element id `{id}`"),
-        }
-    }
-}
-
-impl Error for PanelBuildError {}
-
-impl From<InvalidSize> for PanelBuildError {
-    fn from(error: InvalidSize) -> Self { Self::InvalidSize(error) }
 }
 
 // ── Typestate marker types ──────────────────────────────────────────────────
@@ -831,6 +815,8 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use bevy::prelude::AlphaMode;
     use bevy_kana::Cascade;
 
@@ -841,6 +827,7 @@ mod tests {
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
+    use crate::InvalidSize;
     use crate::Mm;
     use crate::PanelElementId;
     use crate::Text;
@@ -850,6 +837,43 @@ mod tests {
 
     fn field_spec() -> ImeEditableFieldSpec {
         ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text))
+    }
+
+    #[test]
+    fn panel_build_error_messages_are_stable() {
+        let cases = [
+            (
+                PanelBuildError::from(InvalidSize {
+                    width:  0.0,
+                    height: 12.0,
+                }),
+                "panel dimensions must be positive, got 0×12",
+            ),
+            (
+                PanelBuildError::DuplicateElementId(PanelElementId::named("title")),
+                "duplicate panel element id `title`",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn invalid_size_conversion_preserves_source() {
+        let error = PanelBuildError::from(InvalidSize {
+            width:  -2.0,
+            height: 4.0,
+        });
+
+        assert!(matches!(
+            error.source(),
+            Some(source)
+                if source.is::<InvalidSize>()
+                    && source.to_string()
+                        == "panel dimensions must be positive, got -2×4"
+        ));
     }
 
     #[test]

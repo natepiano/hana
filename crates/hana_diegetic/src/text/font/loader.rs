@@ -1,7 +1,6 @@
 //! Asset loader for `.ttf` and `.otf` font files.
 
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::io::Error as IoError;
 
 use bevy::asset::AssetLoader;
 use bevy::asset::LoadContext;
@@ -59,32 +58,51 @@ impl AssetLoader for FontLoader {
 }
 
 /// Errors that can occur when loading a font file.
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum FontLoaderError {
     /// I/O error reading the font file.
-    Io(std::io::Error),
+    #[error("failed to read font file: {0}")]
+    Io(#[from] IoError),
     /// The font data could not be parsed.
+    #[error("failed to parse font data")]
     ParseFailed,
 }
 
-impl From<std::io::Error> for FontLoaderError {
-    fn from(err: std::io::Error) -> Self { Self::Io(err) }
-}
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io::Error as IoError;
+    use std::io::ErrorKind;
 
-impl Display for FontLoaderError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(err) => write!(f, "failed to read font file: {err}"),
-            Self::ParseFailed => write!(f, "failed to parse font data"),
+    use super::FontLoaderError;
+
+    #[test]
+    fn font_loader_error_messages_are_stable() {
+        let cases = [
+            (
+                FontLoaderError::from(IoError::other("font device unavailable")),
+                "failed to read font file: font device unavailable",
+            ),
+            (FontLoaderError::ParseFailed, "failed to parse font data"),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
         }
     }
-}
 
-impl std::error::Error for FontLoaderError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(err) => Some(err),
-            Self::ParseFailed => None,
-        }
+    #[test]
+    fn io_conversion_preserves_source() {
+        let error = FontLoaderError::from(IoError::new(
+            ErrorKind::UnexpectedEof,
+            "font data ended early",
+        ));
+
+        assert!(matches!(
+            error.source().and_then(|source| source.downcast_ref::<IoError>()),
+            Some(source)
+                if source.kind() == ErrorKind::UnexpectedEof
+                    && source.to_string() == "font data ended early"
+        ));
     }
 }

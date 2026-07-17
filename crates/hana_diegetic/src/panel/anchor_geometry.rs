@@ -1,10 +1,5 @@
 //! Read-only panel anchor geometry.
 
-use std::error::Error;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
-
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::transform::helper::ComputeGlobalTransformError;
@@ -482,36 +477,27 @@ impl PanelPlane {
 }
 
 /// Why panel anchor geometry could not be resolved.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(thiserror::Error, Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PanelAnchorGeometryError {
     /// The entity has no [`DiegeticPanel`].
+    #[error("panel is missing")]
     PanelMissing,
     /// The target window could not be found.
+    #[error("window is missing")]
     WindowMissing,
     /// The target window has a zero-sized axis.
+    #[error("window is zero-sized")]
     WindowZeroSized,
     /// A world panel transform could not be computed.
+    #[error("transform is unavailable")]
     TransformUnavailable,
     /// Panel dimensions were non-finite or non-positive.
+    #[error("panel size is invalid")]
     InvalidPanelSize,
     /// The world transform did not produce a usable orthonormal panel plane.
+    #[error("panel plane is invalid")]
     InvalidPanelPlane,
 }
-
-impl Display for PanelAnchorGeometryError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PanelMissing => formatter.write_str("panel is missing"),
-            Self::WindowMissing => formatter.write_str("window is missing"),
-            Self::WindowZeroSized => formatter.write_str("window is zero-sized"),
-            Self::TransformUnavailable => formatter.write_str("transform is unavailable"),
-            Self::InvalidPanelSize => formatter.write_str("panel size is invalid"),
-            Self::InvalidPanelPlane => formatter.write_str("panel plane is invalid"),
-        }
-    }
-}
-
-impl Error for PanelAnchorGeometryError {}
 
 impl From<ComputeGlobalTransformError> for PanelAnchorGeometryError {
     fn from(_: ComputeGlobalTransformError) -> Self { Self::TransformUnavailable }
@@ -577,8 +563,11 @@ fn checked_normal(right: Vec3, up: Vec3) -> Result<Vec3, PanelAnchorGeometryErro
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use std::error::Error;
+
     use bevy::ecs::system::SystemState;
     use bevy::prelude::*;
+    use bevy::transform::helper::ComputeGlobalTransformError;
     use bevy::window::PrimaryWindow;
 
     use super::PanelAnchorEdge;
@@ -605,6 +594,44 @@ mod tests {
 
     #[derive(Resource)]
     struct Target(Entity);
+
+    #[test]
+    fn panel_anchor_geometry_error_messages_are_stable() {
+        let cases = [
+            (PanelAnchorGeometryError::PanelMissing, "panel is missing"),
+            (PanelAnchorGeometryError::WindowMissing, "window is missing"),
+            (
+                PanelAnchorGeometryError::WindowZeroSized,
+                "window is zero-sized",
+            ),
+            (
+                PanelAnchorGeometryError::TransformUnavailable,
+                "transform is unavailable",
+            ),
+            (
+                PanelAnchorGeometryError::InvalidPanelSize,
+                "panel size is invalid",
+            ),
+            (
+                PanelAnchorGeometryError::InvalidPanelPlane,
+                "panel plane is invalid",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn transform_error_conversion_is_lossy() {
+        let error = PanelAnchorGeometryError::from(ComputeGlobalTransformError::MissingTransform(
+            Entity::PLACEHOLDER,
+        ));
+
+        assert_eq!(error, PanelAnchorGeometryError::TransformUnavailable);
+        assert!(error.source().is_none());
+    }
 
     fn assert_close_2d(actual: Vec2, expected: Vec2) {
         assert!(

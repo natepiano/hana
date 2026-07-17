@@ -1,10 +1,5 @@
 //! Authored panel-local line primitives.
 
-use std::error::Error;
-use std::fmt::Display;
-use std::fmt::Formatter;
-use std::fmt::{self};
-
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::math::Vec2;
@@ -268,7 +263,8 @@ enum PanelCoordKind {
 }
 
 /// Error returned when a panel-line scalar is not finite.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(thiserror::Error, Clone, Copy, Debug, PartialEq)]
+#[error("panel-line scalar must be finite, got {value}")]
 pub struct InvalidPanelScalar {
     value: f32,
 }
@@ -278,14 +274,6 @@ impl InvalidPanelScalar {
     #[must_use]
     pub const fn value(self) -> f32 { self.value }
 }
-
-impl Display for InvalidPanelScalar {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "panel-line scalar must be finite, got {}", self.value)
-    }
-}
-
-impl Error for InvalidPanelScalar {}
 
 impl PanelLine {
     /// Creates a line from `start` to `end`.
@@ -1475,6 +1463,7 @@ mod tests {
 
     use super::DEFAULT_CAP_SIZE;
     use super::DEFAULT_LINE_WIDTH;
+    use super::InvalidPanelScalar;
     use super::LineStyle;
     use super::PanelCircle;
     use super::PanelCoord;
@@ -1489,6 +1478,18 @@ mod tests {
     use crate::BoundingBox;
     use crate::CalloutCap;
     use crate::Mm;
+
+    #[test]
+    fn invalid_panel_scalar_message_is_stable() {
+        let error = InvalidPanelScalar {
+            value: f32::INFINITY,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "panel-line scalar must be finite, got inf"
+        );
+    }
 
     #[test]
     fn percent_allows_overflow_values() {

@@ -1,6 +1,3 @@
-use core::error::Error;
-use core::fmt::Display;
-use core::fmt::Formatter;
 /// Error returned when panel dimensions are zero or negative.
 ///
 /// Emitted by
@@ -35,7 +32,8 @@ use core::fmt::Formatter;
 /// user-supplied value), validate the float yourself before handing it
 /// to [`Px`](crate::Px) / [`Mm`](crate::Mm) / [`Pt`](crate::Pt) /
 /// [`In`](crate::layout::In).
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
+#[error("panel dimensions must be positive, got {width}×{height}")]
 pub struct InvalidSize {
     /// The invalid width value.
     pub width:  f32,
@@ -43,14 +41,20 @@ pub struct InvalidSize {
     pub height: f32,
 }
 
-impl Display for InvalidSize {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "panel dimensions must be positive, got {}×{}",
-            self.width, self.height
-        )
+#[cfg(test)]
+mod tests {
+    use super::InvalidSize;
+
+    #[test]
+    fn invalid_size_message_is_stable() {
+        let error = InvalidSize {
+            width:  12.5,
+            height: -4.0,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "panel dimensions must be positive, got 12.5×-4"
+        );
     }
 }
-
-impl Error for InvalidSize {}
