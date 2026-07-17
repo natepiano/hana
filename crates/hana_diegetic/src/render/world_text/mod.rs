@@ -78,10 +78,10 @@ pub struct ComputedGlyphMetrics {
 ///
 /// Carried by every panel-text run, including the single run a one-element
 /// [`DiegeticText`](crate::DiegeticText) label spawns. For a panel run this is
-/// derived output: reconcile rewrites it from the panel's authoritative `El.text`
+/// derived output: reification rewrites it from the panel's authoritative `El.text`
 /// tree, and shaping reads it. To change a run's string at runtime, write the
 /// tree through [`PanelText`](crate::PanelText) / [`DiegeticTextMut`](crate::DiegeticTextMut),
-/// not this component — a direct edit is overwritten on the next reconcile pass.
+/// not this component — a direct edit is overwritten on the next reification pass.
 /// Its presence also marks an entity as a panel-text run (`With<TextContent>`).
 /// Style is controlled by the required [`TextStyle`](crate::TextStyle) component
 /// (added with defaults if not specified).

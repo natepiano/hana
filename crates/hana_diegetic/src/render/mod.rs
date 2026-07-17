@@ -120,13 +120,13 @@ use crate::cascade::TextMaterial;
 /// on the child set — notably screen-space
 /// [`RenderLayers`](bevy::camera::visibility::RenderLayers) propagation — must
 /// be ordered `.after` this set. Reading the hierarchy mid-phase observes a
-/// child that a reconcile system is despawning the same frame, which then
+/// child that a reification system is despawning the same frame, which then
 /// queues a command against an already-despawned entity and panics. Ordering
 /// after the set inserts the sync point that applies those despawns (and the
 /// `ChildOf` hooks that prune `Children`) first.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum PanelChildSystems {
-    /// Reconcile and mesh-build of every panel child entity.
+    /// Reification and mesh-build of every panel child entity.
     Build,
 }
 

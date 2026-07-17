@@ -11,7 +11,7 @@ use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
 use super::constants::DIAG_MATERIAL_TABLE_CAPACITY;
 use super::constants::DIAG_MATERIAL_TABLE_ROWS;
 use super::constants::DIAG_MATERIAL_TABLE_UPLOAD_BYTES;
-use super::constants::DIAG_PANEL_RECONCILE_MS;
+use super::constants::DIAG_PANEL_REIFY_MS;
 use super::constants::DIAG_PANEL_SDF_BATCHES;
 use super::constants::DIAG_PANEL_SDF_RECORDS;
 use super::constants::DIAG_PANEL_SDF_UPLOADS;
@@ -48,10 +48,10 @@ pub struct DiegeticPerfStats {
     pub compute_ms:      f32,
     /// Stage 1 — panels processed by the most recent layout run.
     pub compute_panels:  usize,
-    /// Between stages 1 and 2 — `reconcile_panel_text_children` wall time in
+    /// Between stages 1 and 2 — `reify_text_entities` wall time in
     /// milliseconds: re-deriving text child entities from each changed panel's
     /// render commands. `route_image_batch_records` does not add to this timing.
-    pub reconcile_ms:    f32,
+    pub reify_ms:        f32,
     /// Stages 2 & 3 — panel-text shaping + record-build timings and counts.
     pub panel_text:      PanelTextPerfStats,
     /// Glyph-batch counters, written by `commit_batch_buffers`.
@@ -167,8 +167,8 @@ pub struct MaterialTablePerfStats {
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
 ///
-/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`], then
-///    `reconcile_panel_text_children` → [`DiegeticPerfStats::reconcile_ms`]
+/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`], then `reify_text_entities` →
+///    [`DiegeticPerfStats::reify_ms`]
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
 /// 3. `update_panel_text_batches` → [`Self::mesh_build_ms`] (glyphs → batch records)
 ///
@@ -224,7 +224,7 @@ impl Plugin for DiagnosticsPlugin {
         for diagnostic in [
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
-            Diagnostic::new(DIAG_PANEL_RECONCILE_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_PANEL_REIFY_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_MATERIAL_TABLE_ROWS),
             Diagnostic::new(DIAG_MATERIAL_TABLE_UPLOAD_BYTES).with_suffix(" bytes"),
             Diagnostic::new(DIAG_MATERIAL_TABLE_CAPACITY),
@@ -255,7 +255,7 @@ impl Plugin for DiagnosticsPlugin {
 fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagnostics) {
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_MS, || f64::from(perf.compute_ms));
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_PANELS, || perf.compute_panels.to_f64());
-    diagnostics.add_measurement(&DIAG_PANEL_RECONCILE_MS, || f64::from(perf.reconcile_ms));
+    diagnostics.add_measurement(&DIAG_PANEL_REIFY_MS, || f64::from(perf.reify_ms));
     diagnostics.add_measurement(&DIAG_MATERIAL_TABLE_ROWS, || {
         perf.material_table.rows.to_f64()
     });

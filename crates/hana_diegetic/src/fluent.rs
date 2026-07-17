@@ -374,7 +374,7 @@ impl DiegeticTextBuilder {
             TextSpace::Screen => Transform::IDENTITY,
         };
         // The authoritative style is stored in the tree's `El.config` (built
-        // above) and reconcile derives the run from it; the root carries no
+        // above) and reification derives the run from it; the root carries no
         // `TextStyle`, so there is no stale copy a query could mutate to no
         // effect.
         (panel, DiegeticText, transform)

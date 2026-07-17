@@ -581,7 +581,7 @@ impl TextStyle {
 
     /// Sets the per-label text [`AlphaMode`] override.
     ///
-    /// The panel-text reconciler captures this value before converting via
+    /// The panel-text reifier captures this value before converting via
     /// [`for_shaping`](Self::for_shaping) and inserts `Cascade<TextAlpha>`
     /// on the label.
     #[must_use]

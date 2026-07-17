@@ -1,17 +1,17 @@
 # Headless Widgets
 
-> **Status: IMPLEMENTATION PLAN — phased; ready for delegation.** Adds headless widgets (buttons, sliders, tooltips, focus, interactivity) to `hana_diegetic`: widgets own semantic behavior and typed events, visuals stay ordinary layout primitives, widgets materialize as panel child entities targeted by Bevy picking, and anchoring comes from `hana_valence`. Phases 0–11 have fixed contracts and normal prerequisite ordering; Phase 12 remains the required demonstration-design stop.
+> **Status: IMPLEMENTATION PLAN — phased; ready for delegation.** Adds headless widgets (buttons, sliders, tooltips, focus, interactivity) to `hana_diegetic`: widgets own semantic behavior and typed events, visuals stay ordinary layout primitives, widgets reify as panel child entities targeted by Bevy picking, and anchoring comes from `hana_valence`. Phases 0–11 have fixed contracts and normal prerequisite ordering; Phase 12 remains the required demonstration-design stop.
 
 ## Delegation Context
 
-- **Project** — `hana_diegetic` (workspace member at `crates/hana_diegetic`). Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm. This plan adds a headless `widgets` module that materializes widgets as panel child entities.
+- **Project** — `hana_diegetic` (workspace member at `crates/hana_diegetic`). Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm. This plan adds a headless `widgets` module that reifies widgets as panel child entities.
 - **Stack** — Rust (edition 2024). Bevy `0.19.0` (workspace pin, `crates/hana_diegetic/Cargo.toml:14`). `bevy_picking` + `mesh_picking` features are already enabled; widget presentation reads the all-pointer `bevy_picking::PickingInteraction` aggregate, and one diegetic picking backend owns the ordered panel+widget hit group. `bevy_enhanced_input` `0.26.0` is a workspace dependency and becomes a direct `hana_diegetic` dependency in Phase 5. `hana_valence` is a workspace path dep (`Cargo.toml:43`). No bevy_ui.
 - **Layout** (only phase-touched paths):
   - `crates/hana_diegetic/src/widgets/` — NEW module: `mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `id.rs`, `relationship.rs`, `interactivity.rs`, `focus.rs`, `input.rs`, `picking.rs`, `reify.rs`, `visual.rs`, `presets/` (`mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `style.rs`).
   - `crates/hana_diegetic/src/layout/` — `builder.rs`, `element.rs`, and the engine output that produces widget records and visual-slot references.
   - `crates/hana_diegetic/src/ime/` — `activation.rs`, `field.rs`, `ids.rs`, `mod.rs` (`ImePlugin`).
   - `crates/hana_diegetic/src/panel/` — `builder.rs`, `anchoring.rs`, `anchor_geometry.rs`, `arrangement.rs`, `diegetic_panel.rs`, `valence_provider.rs`, `perf.rs`.
-  - `crates/hana_diegetic/src/render/` — `panel_geometry.rs`, the batch-record update paths used by visual overrides, and `panel_text/` (`reconcile.rs`, `relationship.rs`, `mod.rs`).
+  - `crates/hana_diegetic/src/render/` — `panel_geometry.rs`, the batch-record update paths used by visual overrides, and `panel_text/` (`reify.rs`, `relationship.rs`, `mod.rs`).
   - `crates/hana_diegetic/src/screen_space/anchoring/` — `candidate.rs`, `placement.rs`, `projection.rs`, `rect.rs`, `resolve.rs`, `window.rs`, `mod.rs`.
   - `crates/hana_diegetic/src/cascade/` — `attributes.rs`, `resolved.rs`, `mod.rs`; diegetic attribute defaults and typed public verbs over the shared engine.
   - `crates/bevy_kana/src/cascade.rs` — read-only shared `Cascade<T>` authoring, `CascadeFrom` relationship, propagation, and `Resolved<T>` cache.
@@ -19,7 +19,7 @@
 - **Key files:**
   - `src/layout/builder.rs` + `src/layout/element.rs` — `El`, `CommonEl`, `Element`, `LayoutTree`, exhaustive tree-change classification, element-id traversal, clipping, precomposition, and the actual homes of `.button`/`.slider` authoring data.
   - `src/panel/builder.rs` — panel builder and `PanelBuildError`; `build()` calls `tree.duplicate_named_element_id()`. Widget ids reuse this validation path, while runtime tree replacement calls the same validator before accepting a tree.
-  - `src/render/panel_text/reconcile.rs` — text reify: `reconcile_panel_text_children` (rename target), `update_reused_panel_text_child` (`:419`, the reuse-on-diff pattern widget reify mirrors).
+  - `src/render/panel_text/reify.rs` — text reify: `reify_text_entities` (`:179`) and `update_reused_panel_text_child` (`:417`, the reuse-on-diff pattern widget reify mirrors).
   - `src/render/panel_text/relationship.rs` — `TextRunOf` / `PanelTextRuns` (template for `WidgetOf`/`PanelWidgets`; no `linked_spawn`).
   - `src/render/panel_text/mod.rs` — text-child ordering in `PanelChildSystems::Build`; widget semantic reify does **not** copy that `PostUpdate` schedule because screen attachment resolution needs widget entities and rects during `Update`.
   - `src/ime/activation.rs` — IME double-click activation observer: `On<Pointer<Click>>` gated `click.count < 2` (`:28`); calls `computed.field_at_local_position(panel_local)` (`:39`).
@@ -32,7 +32,7 @@
   - `src/panel/anchoring.rs` — insert-only `AnchoredToPanel` authoring, private `PanelAttachmentAuthored`, world-only lowering to `hana_valence::AnchoredTo`, offset lowering, and `PanelSpace` reconciliation. Screen panels keep the shared authoring without the world relation.
   - `src/render/panel_geometry.rs` — current flat `PanelInteractionMesh`; Phase 3 moves it out of the generic mesh backend and makes the diegetic backend emit the panel and widget hits together.
   - `src/screen_space/anchoring/candidate.rs` + `resolve.rs` — screen placement builds candidates from private `PanelAttachmentAuthored` and delegates ordering and diagnostics to `hana_valence::resolve_attachments`; it accepts panel targets only today, and Phase 11 teaches it widget targets.
-  - `src/panel/perf.rs` — `DiegeticPerfStats` (`:45`), `pub reconcile_ms: f32` (`:54`, rename target), `DIAG_PANEL_RECONCILE_MS` (`:258`).
+  - `src/panel/perf.rs` + `src/panel/constants.rs` — `DiegeticPerfStats` (`perf.rs:45`), `pub reify_ms: f32` (`perf.rs:54`), and `DIAG_PANEL_REIFY_MS` (`constants.rs:35`, published at `perf.rs:258`).
   - `src/render/mod.rs` — `PanelChildSystems` set enum (`:128`); `TextRunOf`/`PanelTextRuns` re-exports.
   - `src/lib.rs` — curated re-exports (`PanelBuildError` `:255`); widget public types re-export here.
 - **Build:** `cargo build && cargo +nightly fmt` after changes.
@@ -42,7 +42,7 @@
 - **Invariants:**
   - **Valence gate:** `hana_valence` exists at `crates/hana_valence`; its resolver, panel bridge, and screen-adapter integration are described in `../hana_valence/as-built/anchoring-and-arrangements.md`. Hana Valence types stay out of diegetic's public widget signatures. Diegetic authoring lowers to `hana_valence::AnchoredTo` only for world sources; screen sources retain `PanelAttachmentAuthored` and use the shared attachment graph without carrying the world relation.
   - No bevy_ui / bevy_a11y dependency. `WidgetDisabled`, `WidgetFocused`, and pointer-capture state stay bespoke; `PickingInteraction` supplies all-pointer hover/press presentation and `bevy_enhanced_input` supplies the opt-in semantic-action adapter.
-  - Widgets materialize as panel child entities under `ChildOf(panel)`; the `WidgetOf`/`PanelWidgets` relationship is a traversal index only, no `linked_spawn` — `ChildOf` owns despawn.
+  - Widgets reify as panel child entities under `ChildOf(panel)`; the `WidgetOf`/`PanelWidgets` relationship is a traversal index only, no `linked_spawn` — `ChildOf` owns despawn.
   - Behavior modules never construct layout/render primitives (`El`, `LayoutTree`, `PanelDraw`, materials, `TextStyle`, `DrawZIndex`). Presets depend on behavior, never the reverse.
   - No relayout on hover/press/focus/disabled/value flips. Presets author stable private visual-slot ids; changed widget state patches only those slots' retained batch records through widget-owned override components. It never regenerates the `LayoutTree` or writes `DiegeticPanel`/`ComputedDiegeticPanel` merely to restyle a widget.
   - Widget semantic reify runs in `Update`, after `PanelSystems::ComputeLayout` and before cascade propagation and `PanelSystems::ResolvePanelAttachments`, with an explicit `ApplyDeferred` fence. Render-child batching remains in `PostUpdate`.
@@ -66,7 +66,7 @@
 
 ## Phases
 
-### Phase 0 — `reify` terminology rename  · status: todo
+### Phase 0 — `reify` terminology rename  · status: done (`707b9c3a`)
 
 #### Work Order
 
@@ -87,11 +87,27 @@
 
 **Acceptance gate:** `cargo build && cargo +nightly fmt` clean; `cargo nextest run` green; `rg -n "reconcile" crates/hana_diegetic` shows no remaining uses in the entity-creation sense.
 
+#### Retrospective
+
+**What worked:**
+- `panel_text/reify.rs`, `reify_text_entities`, `DiegeticPerfStats::reify_ms`, and the `panel/reify_ms` diagnostic landed as a behavior-preserving terminology change.
+- Both reviews found no issues; 1,220 tests passed with 4 skipped, and `diegetic_text_stress` exercised sustained text reification plus the renamed timing reader.
+
+**Implications for remaining phases:**
+- Phase 1 can use `src/render/panel_text/reify.rs` and `reify_text_entities` as the shipped entity-reuse template.
+- All future performance readers use `DiegeticPerfStats::reify_ms`; unrelated anchoring and render-batch reconciliation terminology remains unchanged.
+
+#### Phase 0 Review
+
+- Updated the shared Delegation Context to the shipped text-reify module, system, performance field, diagnostic, and line references.
+- Updated computed-widget entity-creation wording in Phases 1 and 5 to `reify`; tooltip panel materialization retains its distinct term.
+- Reviewed Phases 1–12; no remaining phase needs scope, ordering, file, constraint, or acceptance-gate changes because of Phase 0.
+
 ### Phase 1 — Widget identity, authoring, relationship, reify, plugin skeleton  · status: todo
 
 #### Work Order
 
-**Goal:** Widgets can be authored in a panel's element tree, represented in computed output, and materialize as reused, relationship-indexed panel child entities with a stable id lookup.
+**Goal:** Widgets can be authored in a panel's element tree, represented in computed output, and reify as reused, relationship-indexed panel child entities with a stable id lookup.
 
 **Precondition (verify before starting):** the shipped Hana Valence resolver,
 world-panel provider, `AnchoredToPanel` lowering, and screen attachment adapter
@@ -210,7 +226,7 @@ this plan before implementing widgets.
 
 **Spec:**
 - `widgets/focus.rs`. Focus is shared, not button-local. One crate-private authoritative resource maps each window to its active panel and focused widget; marker state is never an independent authority. The exact public request, clear, change, cause, and semantic-action types are fixed in the public contract ledger.
-- `WidgetFocusable` participation component, inserted on materialized widget entities by default; removing it opts a widget out of keyboard traversal without changing pointer picking.
+- `WidgetFocusable` participation component, inserted on reified widget entities by default; removing it opts a widget out of keyboard traversal without changing pointer picking.
 - `WidgetFocused(())` is a public read-only presence marker with a private field, synchronized only by one focus-transition function. Public app control uses typed request/clear events carrying the window and target; `WidgetFocusChanged` reports old/new entities and a cause.
 - Focus is gained by pointer focus, traversal, semantic routing, or app request. It is lost by transfer, despawn/removal, `WidgetFocusable` removal, panel/window input-scope loss, or explicit clear — **not** by disable. Disabled focusable widgets may retain or receive focus and participate in traversal; behavior modules ignore activate/change input while disabled.
 - Traversal order is the current `ComputedWidgetRecord` preorder rebuilt in Phase 1, never `PanelWidgets` relationship insertion order. Next/previous/first/last stay within the active panel for that window and wrap deterministically; focusing a widget on another panel transfers the active panel. Structural reorder changes traversal without respawning entities.

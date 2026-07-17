@@ -32,8 +32,8 @@ pub(super) const DIAG_LAYOUT_COMPUTE_MS: DiagnosticPath =
     DiagnosticPath::const_new("hana_diegetic/layout/compute_ms");
 pub(super) const DIAG_LAYOUT_COMPUTE_PANELS: DiagnosticPath =
     DiagnosticPath::const_new("hana_diegetic/layout/compute_panels");
-pub(super) const DIAG_PANEL_RECONCILE_MS: DiagnosticPath =
-    DiagnosticPath::const_new("hana_diegetic/panel/reconcile_ms");
+pub(super) const DIAG_PANEL_REIFY_MS: DiagnosticPath =
+    DiagnosticPath::const_new("hana_diegetic/panel/reify_ms");
 pub(super) const DIAG_MATERIAL_TABLE_CAPACITY: DiagnosticPath =
     DiagnosticPath::const_new("hana_diegetic/material_table/capacity");
 pub(super) const DIAG_MATERIAL_TABLE_ROWS: DiagnosticPath =

@@ -458,9 +458,9 @@ fn setup_screen_space_view_for_panel(
 /// children that are missing the component.
 ///
 /// Ordered `.after(PanelChildSystems::Build)` so it runs once the panel-child
-/// reconcile/build phase has applied its spawns and despawns. Without that
+/// reification/build phase has applied its spawns and despawns. Without that
 /// ordering it would read a panel's `Children` mid-phase and queue an insert
-/// against a child that a reconcile system is despawning the same frame —
+/// against a child that a reification system is despawning the same frame —
 /// inserting on a despawned entity panics. The ordering also means children
 /// spawned this frame are present, so they pick up the layer without a frame
 /// of delay.

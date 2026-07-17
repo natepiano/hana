@@ -1216,7 +1216,7 @@ mod tests {
     use crate::render::material_table::MaterialTablePlugin;
     use crate::render::panel_text::alpha;
     use crate::render::panel_text::glyph_cascade;
-    use crate::render::panel_text::reconcile;
+    use crate::render::panel_text::reify;
     use crate::render::panel_text::shaping;
     use crate::render::text_shaping::TextShapingContext;
     use crate::text::DiegeticTextMeasurer;
@@ -1272,9 +1272,8 @@ mod tests {
             .add_systems(
                 PostUpdate,
                 (
-                    reconcile::reconcile_panel_text_children,
-                    shaping::shape_panel_text_children
-                        .after(reconcile::reconcile_panel_text_children),
+                    reify::reify_text_entities,
+                    shaping::shape_panel_text_children.after(reify::reify_text_entities),
                     update_panel_text_batches
                         .after(shaping::shape_panel_text_children)
                         .after(MaterialTableAppendReady)

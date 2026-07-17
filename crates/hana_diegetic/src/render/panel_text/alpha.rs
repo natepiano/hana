@@ -54,7 +54,7 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
-    use crate::render::panel_text::reconcile;
+    use crate::render::panel_text::reify;
     use crate::text::DiegeticTextMeasurer;
 
     /// Panel that the label-spawning system parents its label under.
@@ -76,7 +76,7 @@ mod tests {
         }
     }
 
-    /// Stand-in for `reconcile_panel_text_children`: parents one label under
+    /// Stand-in for `reify_text_entities`: parents one label under
     /// the panel during a command flush, once the panel carries its
     /// `Cascade<TextAlpha>`.
     fn spawn_label_once(
@@ -167,7 +167,7 @@ mod tests {
             .add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Blend)))
             .add_observer(seed_panel_text_child_alpha)
-            .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
+            .add_systems(PostUpdate, reify::reify_text_entities);
 
         let panel = app
             .world_mut()
@@ -323,10 +323,10 @@ mod tests {
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .add_observer(seed_panel_text_child_alpha)
-            .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
+            .add_systems(PostUpdate, reify::reify_text_entities);
 
         // Panel sets `Add` for its labels; the one label authors its own
-        // `Multiply` via `TextStyle::with_alpha_mode`. `reconcile` inserts
+        // `Multiply` via `TextStyle::with_alpha_mode`. Reification inserts
         // the label's `Cascade<TextAlpha>`, which the walk resolves ahead of
         // the panel's inherited alpha.
         let panel = DiegeticPanel::world()
@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn label_alpha_change_reinherits_panel_alpha_through_reconcile() {
+    fn label_alpha_change_reinherits_panel_alpha_through_reification() {
         fn label_tree(alpha: Option<AlphaMode>) -> LayoutTree {
             let mut style = TextStyle::new(13.0);
             if let Some(mode) = alpha {
@@ -367,7 +367,7 @@ mod tests {
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(cascade::cascade_plugin::<TextAlpha>())
             .add_observer(seed_panel_text_child_alpha)
-            .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
+            .add_systems(PostUpdate, reify::reify_text_entities);
 
         // Panel inherits `Add`; the label initially authors its own `Multiply`.
         let panel = DiegeticPanel::world()
@@ -383,7 +383,7 @@ mod tests {
         }
         assert_eq!(single_label_alpha(&mut app), AlphaMode::Multiply);
 
-        // The label drops its own alpha. `reconcile` removes the label's
+        // The label drops its own alpha. Reification removes the label's
         // `Cascade<TextAlpha>` (its update arm), and the propagation pass
         // re-inherits the panel's `Add`.
         app.world_mut()

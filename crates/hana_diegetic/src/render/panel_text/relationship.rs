@@ -57,7 +57,7 @@ impl PanelTextRuns {
     /// The lone run of a panel whose set holds exactly one entity, else `None`.
     ///
     /// A single-line [`DiegeticText`](crate::DiegeticText) has exactly one run
-    /// entity, so this returns it with no id. A wrapped run materializes as one
+    /// entity, so this returns it with no id. A wrapped run reifies as one
     /// entity per visual line, so the set holds several and this returns `None`;
     /// the access layer resolves a wrapped run's `line_index == 0` entity
     /// instead (see [`PanelTextReader::sole_text`](super::PanelTextReader)).

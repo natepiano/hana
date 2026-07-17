@@ -214,10 +214,10 @@ pub struct DiegeticPanel {
     /// Whether the panel is world-space or screen-space.
     pub(super) coordinate_space:       CoordinateSpace,
     /// Maps each text run's [`PanelElementId`](crate::PanelElementId) to the entity
-    /// reconcile materialized for it, so
+    /// reification created for it, so
     /// [`text_child`](Self::text_child) resolves a named run in O(1).
     ///
-    /// `reconcile_panel_text_children` rebuilds this from scratch every pass and
+    /// `reify_text_entities` rebuilds this from scratch every pass and
     /// writes it without tripping change detection, so it never re-triggers
     /// layout; [`set_tree`](DiegeticPanelCommands::set_tree) clears it so a stale
     /// id stops resolving immediately.
@@ -302,18 +302,18 @@ impl DiegeticPanel {
     pub(crate) const fn authored_world_height(&self) -> Option<f32> { self.world_height }
 
     /// Resolves a text run's [`PanelElementId`](crate::PanelElementId) to the entity
-    /// reconcile materialized for it (its `line_index == 0` child), or `None` if
+    /// reification created for it (its `line_index == 0` child), or `None` if
     /// no run carries that id.
     ///
     /// This is an **unchecked** index read: it returns the stored `Entity` as-is.
     /// The method takes `&self` with no `World`/`Entities` access, so it cannot
     /// confirm the entity is still alive — an out-of-flow `despawn` would leave a
-    /// stale mapping until the next reconcile rebuilds the index. Liveness is
+    /// stale mapping until the next reification rebuilds the index. Liveness is
     /// validated one layer up by the [`PanelText`](crate::PanelText) `SystemParam`,
     /// whose `Query::get` on the returned entity yields `None` for a dead child.
     ///
     /// A `set_tree` in the same frame clears the index immediately, so a lookup
-    /// before the next reconcile pass returns `None`.
+    /// before the next reification pass returns `None`.
     #[must_use]
     pub fn text_child(&self, id: &crate::PanelElementId) -> Option<Entity> {
         self.text_index.get(id).copied()
@@ -382,7 +382,7 @@ impl DiegeticPanel {
     /// edit-session revision. Returns whether the cache changed.
     ///
     /// `El.text` is the single source for run text; the child
-    /// [`TextContent`](crate::TextContent) is derived output — reconcile overwrites
+    /// [`TextContent`](crate::TextContent) is derived output — reification overwrites
     /// it from the tree each frame. The public edit path (`PanelText` / `DiegeticTextMut`
     /// via `TextEdit`) calls this to change a run's string. Skips the revision bump
     /// when the string is unchanged, avoiding a layout pass and a cache lookup.
@@ -395,10 +395,10 @@ impl DiegeticPanel {
     ///
     /// Like run text (see [`sync_run_text_cache`](Self::sync_run_text_cache)),
     /// the tree is the single authoritative source: `El.config` for style,
-    /// `El.text` for the string, while the run child is derived output reconcile
+    /// `El.text` for the string, while the run child is derived output reification
     /// rewrites. A label restyle (font, size) mutates `El.config` through this
     /// method; the relayout it triggers flows the new config to the run via
-    /// reconcile, so measurement and rendering stay on the same source. Skips the
+    /// reification, so measurement and rendering stay on the same source. Skips the
     /// revision bump (and so the layout) when the style already matches.
     pub(crate) fn restyle_run(&mut self, index: usize, style: TextStyle) -> bool {
         self.tree.set_element_style(index, style)
