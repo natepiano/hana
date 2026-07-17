@@ -1579,7 +1579,9 @@ fn update_status_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(entity, build_overlay_tree(&now, &max));
+            if let Err(error) = commands.set_tree(entity, build_overlay_tree(&now, &max)) {
+                error!("failed to replace text stress overlay tree: {error}");
+            }
         }
     }
 }
@@ -1779,7 +1781,9 @@ fn update_batch_stats_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(entity, diegetic_stats_tree(&rows));
+            if let Err(error) = commands.set_tree(entity, diegetic_stats_tree(&rows)) {
+                error!("failed to replace diegetic stats tree: {error}");
+            }
         }
     }
 }
@@ -2601,7 +2605,9 @@ fn update_gpu_pipeline_panel(
     }
     let displayed = anim.displayed;
     for entity in &panels {
-        commands.set_tree(entity, build_gpu_pipeline_tree(&displayed));
+        if let Err(error) = commands.set_tree(entity, build_gpu_pipeline_tree(&displayed)) {
+            error!("failed to replace GPU pipeline panel tree: {error}");
+        }
     }
 }
 

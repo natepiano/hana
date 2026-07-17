@@ -236,7 +236,9 @@ fn on_font_registered(
     // Update status panel.
     let status = format!("Fonts registered: {}", font_count.0);
     for entity in &panels {
-        commands.set_tree(entity, build_status_panel(&status));
+        if let Err(error) = commands.set_tree(entity, build_status_panel(&status)) {
+            error!("failed to replace font status panel tree: {error}");
+        }
     }
 
     info!(
@@ -255,7 +257,9 @@ fn on_font_load_failed(
 
     let status = format!("FAILED: {}", trigger.path);
     for entity in &panels {
-        commands.set_tree(entity, build_status_panel(&status));
+        if let Err(error) = commands.set_tree(entity, build_status_panel(&status)) {
+            error!("failed to replace font failure panel tree: {error}");
+        }
     }
 }
 

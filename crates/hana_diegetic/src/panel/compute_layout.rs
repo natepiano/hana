@@ -212,7 +212,12 @@ fn commit_layout_result(
             "panel {entity:?} has duplicate editable field ids: {field_id_conflicts:?}"
         );
     }
-    computed.set_result_with_fields(result, field_records, field_id_conflicts);
+    computed.set_result_with_fields(
+        result,
+        field_records,
+        field_id_conflicts,
+        scaled_tree.computed_widget_records(),
+    );
 }
 
 /// Returns the solved root surface, including root padding and border.
@@ -307,6 +312,7 @@ mod tests {
     use crate::Px;
     use crate::Sizing;
     use crate::TextStyle;
+    use crate::cascade::CascadeDefault;
     use crate::cascade::FontUnit;
     use crate::cascade::Resolved;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
@@ -494,9 +500,12 @@ mod tests {
             Color::WHITE
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(entity, colored_text_tree("Hello", Color::BLACK));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(entity, colored_text_tree("Hello", Color::BLACK))
+                .is_ok()
+        );
         app.update();
 
         let computed = app
@@ -544,9 +553,12 @@ mod tests {
             .0
             .clear();
 
-        app.world_mut()
-            .commands()
-            .set_tree(entity, colored_text_tree("Hello", Color::BLACK));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(entity, colored_text_tree("Hello", Color::BLACK))
+                .is_ok()
+        );
         app.update();
 
         let panel_change_events = &app.world().resource::<PanelChangeEventLog>().0;
@@ -609,7 +621,11 @@ mod tests {
 
         {
             let mut commands = app.world_mut().commands();
-            commands.set_tree(entity, colored_text_tree("Hello", Color::BLACK));
+            assert!(
+                commands
+                    .set_tree(entity, colored_text_tree("Hello", Color::BLACK))
+                    .is_ok()
+            );
             commands
                 .entity(entity)
                 .override_font_unit(Unit::Millimeters);
@@ -668,8 +684,16 @@ mod tests {
 
         {
             let mut commands = app.world_mut().commands();
-            commands.set_tree(entity, colored_text_tree("Hi", Color::BLACK));
-            commands.set_tree(entity, colored_text_tree("Hello", Color::BLACK));
+            assert!(
+                commands
+                    .set_tree(entity, colored_text_tree("Hi", Color::BLACK))
+                    .is_ok()
+            );
+            assert!(
+                commands
+                    .set_tree(entity, colored_text_tree("Hello", Color::BLACK))
+                    .is_ok()
+            );
         }
         app.update();
 
@@ -1276,6 +1300,66 @@ mod tests {
         assert!(
             updated_bounds.height > initial_bounds.height,
             "millimeter text should be taller than point text after a live font-unit override"
+        );
+    }
+
+    #[test]
+    fn global_font_unit_change_recomputes_inherited_text_geometry_in_same_update() {
+        let mut app = make_app();
+        app.world_mut().resource_mut::<CascadeDefault<FontUnit>>().0 = FontUnit(Unit::Points);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(
+                        Mm(FONT_RELAYOUT_PANEL_WIDTH_MM),
+                        Mm(FONT_RELAYOUT_PANEL_HEIGHT_MM),
+                    )
+                    .layout(|builder| {
+                        builder.text(("Hi", TextStyle::new(FONT_RELAYOUT_TEXT_SIZE)));
+                    })
+                    .build()
+                    .expect("font relayout panel should build"),
+            )
+            .id();
+        app.update();
+
+        app.world_mut().commands().entity(panel).inherit_font_unit();
+        app.update();
+
+        let initial_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(panel)
+                .expect("panel should complete its inherited-unit layout"),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<FontUnit>>(panel)
+                .expect("panel should resolve the initial global font unit")
+                .0
+                .0,
+            Unit::Points
+        );
+
+        app.world_mut().resource_mut::<CascadeDefault<FontUnit>>().0 = FontUnit(Unit::Millimeters);
+        app.update();
+
+        let updated_bounds = first_text_bounds(
+            app.world()
+                .get::<ComputedDiegeticPanel>(panel)
+                .expect("panel should recompute during the global-unit update"),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<FontUnit>>(panel)
+                .expect("panel should resolve the updated global font unit")
+                .0
+                .0,
+            Unit::Millimeters
+        );
+        assert!(
+            updated_bounds.height > initial_bounds.height,
+            "layout should consume the propagated global font unit in the same update"
         );
     }
 

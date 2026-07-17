@@ -312,11 +312,15 @@ fn refresh_scene(
         return;
     }
 
-    commands.set_tree(*rear_panel, rear_tree(state.filler_count()));
+    if let Err(error) = commands.set_tree(*rear_panel, rear_tree(state.filler_count())) {
+        error!("failed to replace rear panel tree: {error}");
+    }
     commands
         .entity(*front_panel)
         .insert(Transform::from_translation(front_panel_translation(*state)));
-    commands.set_tree(*status_panel, status_tree(*state));
+    if let Err(error) = commands.set_tree(*status_panel, status_tree(*state)) {
+        error!("failed to replace status panel tree: {error}");
+    }
     log_state("updated", *state);
 }
 

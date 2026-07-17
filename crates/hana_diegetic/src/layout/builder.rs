@@ -59,6 +59,9 @@ use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::Button;
+use crate::widgets::Slider;
+use crate::widgets::WidgetSpec;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -286,6 +289,7 @@ struct CommonEl {
     scroll_anchor_y: ScrollAnchor,
     material:        Cascade<Handle<StandardMaterial>>,
     editable:        Option<ImePanelField>,
+    widget:          Option<WidgetSpec>,
     draw:            Option<PanelDraw>,
     z_index:         DrawZIndex,
     anti_alias:      Cascade<AntiAlias>,
@@ -312,6 +316,7 @@ impl Default for CommonEl {
             scroll_anchor_y: ScrollAnchor::Start,
             material:        Cascade::Inherit,
             editable:        None,
+            widget:          None,
             draw:            None,
             z_index:         DrawZIndex::default(),
             anti_alias:      Cascade::Inherit,
@@ -338,6 +343,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         scroll_anchor_y: common.scroll_anchor_y,
         material: common.material,
         editable: common.editable,
+        widget: common.widget,
         draw: common.draw,
         z_index: common.z_index,
         anti_alias: common.anti_alias,
@@ -566,6 +572,26 @@ impl<L> El<L> {
         self
     }
 
+    /// Marks this element as a button with panel-local semantic identity `id`.
+    ///
+    /// The id and button declaration are assigned together so a widget cannot
+    /// be authored without its identity.
+    pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> Self {
+        self.common.id = Some(id.into());
+        self.common.widget = Some(WidgetSpec::Button(button));
+        self
+    }
+
+    /// Marks this element as a slider with panel-local semantic identity `id`.
+    ///
+    /// The id and slider declaration are assigned together so a widget cannot
+    /// be authored without its identity.
+    pub fn slider(mut self, id: impl Into<PanelElementId>, slider: Slider) -> Self {
+        self.common.id = Some(id.into());
+        self.common.widget = Some(WidgetSpec::Slider(slider));
+        self
+    }
+
     /// Sets paint-only draw primitives owned by this element.
     ///
     /// `PanelDraw` does not affect layout measurement. It is stored for later
@@ -653,6 +679,7 @@ impl<L> El<L> {
             scroll_anchor_y: common.scroll_anchor_y,
             material: common.material,
             editable: common.editable,
+            widget: common.widget,
             draw: common.draw,
             z_index: common.z_index,
             anti_alias: common.anti_alias,

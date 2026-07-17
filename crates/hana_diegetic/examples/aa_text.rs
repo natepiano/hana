@@ -741,7 +741,9 @@ fn refresh_aa_panel(
     if !aa.is_changed() && !post.is_changed() {
         return;
     }
-    commands.set_tree(*panel, build_aa_tree(*aa, *post));
+    if let Err(error) = commands.set_tree(*panel, build_aa_tree(*aa, *post)) {
+        error!("failed to replace anti-alias panel tree: {error}");
+    }
 }
 
 /// Swaps the upper-right info copy when OIT or POST changes, so the panel
@@ -755,7 +757,9 @@ fn refresh_demo_panel(
     if !oit.is_changed() && !post.is_changed() {
         return;
     }
-    commands.set_tree(*panel, build_demo_panel_tree(oit.0, *post));
+    if let Err(error) = commands.set_tree(*panel, build_demo_panel_tree(oit.0, *post)) {
+        error!("failed to replace demo panel tree: {error}");
+    }
 }
 
 /// Builds the bottom-left panel tree: two columns, each chip highlighted when it
@@ -1146,9 +1150,11 @@ fn refresh_cube_compatibility_panels(
         return;
     }
     for entity in &panels {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             entity,
             build_cube_compatibility_tree(cube_compatibility_message(oit.0, *post)),
-        );
+        ) {
+            error!("failed to replace cube compatibility panel tree: {error}");
+        }
     }
 }

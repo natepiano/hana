@@ -1014,7 +1014,9 @@ pub(crate) fn reconcile_panels(
                 show.0,
             )
         };
-        commands.set_tree(entity, tree);
+        if let Err(error) = commands.set_tree(entity, tree) {
+            error!("failed to replace anchor demo panel {entity:?} tree: {error}");
+        }
     }
 }
 

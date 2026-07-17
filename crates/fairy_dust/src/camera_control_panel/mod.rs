@@ -230,10 +230,12 @@ fn rebind_panel_on_route_change(
         display_state.restore_home_highlight(home, home_release);
     }
     commands.entity(panel_entity).insert(snapshot.clone());
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         panel_entity,
         build_guidance_tree(&snapshot, display_state.display(), background.0),
-    );
+    ) {
+        warn!("failed to replace camera control panel tree: {error}");
+    }
 }
 
 fn refresh_on_interaction_started(
@@ -422,10 +424,12 @@ fn repaint_panel_display(
     if display.render_state == RenderState::Idle {
         return;
     }
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         panel_entity,
         build_guidance_tree(snapshot, display.display(), background.0),
-    );
+    ) {
+        warn!("failed to replace camera control panel tree: {error}");
+    }
     display.render_state = RenderState::Idle;
 }
 

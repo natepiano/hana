@@ -209,7 +209,9 @@ fn update_panel(
     panel: Single<Entity, With<DrawOrderPanel>>,
 ) {
     sweep.advance(time.delta_secs());
-    commands.set_tree(*panel, draw_order_tree(*state, sweep.x));
+    if let Err(error) = commands.set_tree(*panel, draw_order_tree(*state, sweep.x)) {
+        error!("failed to replace draw-order panel tree: {error}");
+    }
 }
 
 fn set_behind_text(mut state: ResMut<DemoState>) { state.layer = LayerMode::BehindText; }

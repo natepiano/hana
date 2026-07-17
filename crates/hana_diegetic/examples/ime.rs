@@ -342,7 +342,9 @@ fn rebuild_editable_text_panel(
     let Ok(panel) = panels.single() else { return };
     let mut builder = LayoutBuilder::new(Px(FIELD_WIDTH), Px(FIELD_HEIGHT));
     editable_text_tree(&mut builder, state);
-    commands.set_tree(panel, builder.build());
+    if let Err(error) = commands.set_tree(panel, builder.build()) {
+        error!("failed to replace IME demo panel tree: {error}");
+    }
 }
 
 fn set_editable_text_visibility(

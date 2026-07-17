@@ -34,10 +34,13 @@ use super::Unit;
 use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
+use crate::PanelBuildError;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::WidgetSpec;
 
 /// Result of replacing the display text for a panel field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -122,6 +125,8 @@ pub(super) struct Element {
     pub(super) material:        Cascade<Handle<StandardMaterial>>,
     /// Optional editable field contract.
     pub(super) editable:        Option<ImePanelField>,
+    /// Optional authored widget contract.
+    pub(super) widget:          Option<WidgetSpec>,
     /// Optional paint-only draw data.
     pub(super) draw:            Option<PanelDraw>,
     /// `DrawZIndex` stamped onto this element's render commands.
@@ -196,6 +201,7 @@ impl Default for Element {
             scroll_anchor_y: ScrollAnchor::Start,
             material:        Cascade::Inherit,
             editable:        None,
+            widget:          None,
             draw:            None,
             z_index:         DrawZIndex::default(),
             anti_alias:      Cascade::Inherit,
@@ -637,6 +643,77 @@ impl LayoutTree {
         None
     }
 
+    pub(crate) fn validate_widgets(&self) -> Result<(), PanelBuildError> {
+        let Some(root) = self.root else {
+            return Ok(());
+        };
+        let mut stack = vec![(root, Option::<PanelElementId>::None, PrecomposeMode::Direct)];
+        while let Some((index, owning_widget, inherited_precompose)) = stack.pop() {
+            let Some(element) = self.elements.get(index) else {
+                continue;
+            };
+            let precompose = match (inherited_precompose, element.precompose) {
+                (PrecomposeMode::Ldr, _) | (_, PrecomposeMode::Ldr) => PrecomposeMode::Ldr,
+                (PrecomposeMode::Direct, PrecomposeMode::Direct) => PrecomposeMode::Direct,
+            };
+
+            if (element.widget.is_some() || element.editable.is_some())
+                && let Some(widget_id) = owning_widget.as_ref()
+            {
+                return Err(PanelBuildError::WidgetContainsInteractiveDescendant(
+                    widget_id.clone(),
+                ));
+            }
+
+            let next_owning_widget = if element.widget.is_some() {
+                let id = element
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
+                if !id.is_named() {
+                    return Err(PanelBuildError::WidgetRequiresNamedId(id));
+                }
+                if precompose == PrecomposeMode::Ldr {
+                    return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
+                }
+                Some(id)
+            } else {
+                owning_widget
+            };
+
+            for &child in self.children_of(index).iter().rev() {
+                stack.push((child, next_owning_widget.clone(), precompose));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn computed_widget_records(&self) -> Vec<ComputedWidgetRecord> {
+        let Some(root) = self.root else {
+            return Vec::new();
+        };
+        let mut records = Vec::new();
+        let mut stack = vec![root];
+        let mut preorder = 0;
+        while let Some(index) = stack.pop() {
+            let Some(element) = self.elements.get(index) else {
+                continue;
+            };
+            if let (Some(id), Some(widget)) = (&element.id, &element.widget) {
+                records.push(ComputedWidgetRecord::new(
+                    id.clone(),
+                    preorder,
+                    widget.clone(),
+                ));
+            }
+            preorder += 1;
+            for &child in self.children_of(index).iter().rev() {
+                stack.push(child);
+            }
+        }
+        records
+    }
+
     /// Returns the first text string owned by `index` or one of its descendants.
     #[must_use]
     pub(crate) fn field_display_text(&self, index: usize) -> Option<&str> {
@@ -792,6 +869,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         scroll_anchor_y,
         material,
         editable,
+        widget,
         draw,
         z_index,
         anti_alias,
@@ -815,6 +893,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         scroll_anchor_y: n_scroll_anchor_y,
         material: n_material,
         editable: n_editable,
+        widget: n_widget,
         draw: n_draw,
         z_index: n_z_index,
         anti_alias: n_anti_alias,
@@ -848,6 +927,9 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
 
     let mut change = border_change.combine(child_layout_change);
     if id != n_id {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
+    if widget != n_widget {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
     if background != n_background || corner_radius != n_corner_radius {
@@ -1044,12 +1126,15 @@ mod tests {
     use super::LayoutTree;
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
+    use crate::Button;
     use crate::CalloutCap;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelElementId;
+    use crate::Slider;
+    use crate::SliderRange;
     use crate::cascade::Cascade;
     use crate::layout::AlignX;
     use crate::layout::AlignY;
@@ -1357,6 +1442,32 @@ mod tests {
                 .height(Sizing::GROW)
                 .background(Color::srgb(0.2, 0.3, 0.4)),
         );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn button_record_add_remove_classifies_as_visual_only() {
+        let tree = root_tree(El::new());
+        let next = root_tree(El::new().button("action", Button::new()));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+        assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn slider_record_edit_classifies_as_visual_only() {
+        let Ok(range) = SliderRange::new(0.0, 10.0) else {
+            return;
+        };
+        let Ok(slider) = Slider::new(range, 2.0) else {
+            return;
+        };
+        let Ok(next_slider) = Slider::new(range, 8.0) else {
+            return;
+        };
+        let tree = root_tree(El::new().slider("level", slider));
+        let next = root_tree(El::new().slider("level", next_slider));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
     }

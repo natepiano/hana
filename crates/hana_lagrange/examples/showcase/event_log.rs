@@ -120,7 +120,9 @@ pub(crate) fn rebuild_log_panel(
     let Ok(entity) = panels.single() else {
         return;
     };
-    commands.set_tree(entity, build_log_tree(&log));
+    if let Err(error) = commands.set_tree(entity, build_log_tree(&log)) {
+        warn!("failed to replace event-log panel tree: {error}");
+    }
 }
 
 fn build_log_tree(log: &EventLog) -> LayoutTree {

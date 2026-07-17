@@ -183,7 +183,9 @@ fn bench_visual_only_rebuild(group: &mut PanelBenchGroup<'_>, rows: &[StatusRow]
                 Color::srgb(0.0, 0.0, 1.0)
             };
             let tree = build_diegetic_status_tree_with_text_color(rows, color);
-            app.world_mut().commands().set_tree(entity, tree);
+            if let Err(error) = app.world_mut().commands().set_tree(entity, tree) {
+                error!("failed to replace benchmark panel tree: {error}");
+            }
             app.update();
             black_box(app.world().get::<ComputedDiegeticPanel>(entity));
         });

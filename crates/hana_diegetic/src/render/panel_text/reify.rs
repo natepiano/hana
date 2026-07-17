@@ -692,9 +692,12 @@ mod tests {
 
         // Visual-only: only "Alpha" changes color. "Beta" stays byte-identical,
         // so its text/style/layout must not be rewritten.
-        app.world_mut()
-            .commands()
-            .set_tree(panel, two_text_tree(Color::BLACK, Color::WHITE));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, two_text_tree(Color::BLACK, Color::WHITE))
+                .is_ok()
+        );
         app.update();
 
         let probe = app.world().resource::<ChangedProbe>();
@@ -724,9 +727,12 @@ mod tests {
         );
 
         // Recolor only; alpha stays AlphaMode::Add.
-        app.world_mut()
-            .commands()
-            .set_tree(panel, single_alpha_text_tree(Color::BLACK, AlphaMode::Add));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, single_alpha_text_tree(Color::BLACK, AlphaMode::Add))
+                .is_ok()
+        );
         app.update();
 
         let probe = app.world().resource::<ChangedProbe>();
@@ -960,9 +966,12 @@ mod tests {
         // Reification reuses every run entity. `TextRunOf` is never re-inserted, so
         // the relationship set must not register a change on either pass.
         for color in [Color::BLACK, Color::srgb(0.5, 0.5, 0.5)] {
-            app.world_mut()
-                .commands()
-                .set_tree(panel, two_text_tree(color, Color::WHITE));
+            assert!(
+                app.world_mut()
+                    .commands()
+                    .set_tree(panel, two_text_tree(color, Color::WHITE))
+                    .is_ok()
+            );
             app.update();
             assert!(
                 !app.world().resource::<RunsChangedProbe>().changed,
@@ -986,7 +995,12 @@ mod tests {
 
         // Swap to a text-less tree: every run is unvisited this pass, so reification
         // despawns them and the relationship set empties.
-        app.world_mut().commands().set_tree(panel, empty_tree());
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, empty_tree())
+                .is_ok()
+        );
         app.update();
         let emptied = app
             .world()
@@ -996,9 +1010,12 @@ mod tests {
 
         // Swap back to a multi-run tree: reification repopulates the set and the
         // named index resolves each run by a single O(1) `text_child` lookup.
-        app.world_mut()
-            .commands()
-            .set_tree(panel, two_named_tree("Gamma", "Delta"));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, two_named_tree("Gamma", "Delta"))
+                .is_ok()
+        );
         app.update();
         let runs = app
             .world()
@@ -1018,6 +1035,31 @@ mod tests {
             data.text_child(&PanelElementId::named("b")).is_some(),
             "named run 'b' resolves O(1) after repopulate",
         );
+    }
+
+    #[test]
+    fn identical_tree_replacement_preserves_named_text_lookup() {
+        let mut app = relationship_app();
+        let tree = two_named_tree("Alpha", "Beta");
+        let panel = spawn_panel(&mut app, tree.clone());
+        app.update();
+
+        let id = PanelElementId::named("a");
+        let before = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .and_then(|panel| panel.text_child(&id));
+        assert!(before.is_some());
+
+        let result = app.world_mut().commands().set_tree(panel, tree);
+        assert!(result.is_ok());
+        app.update();
+
+        let after = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .and_then(|panel| panel.text_child(&id));
+        assert_eq!(after, before);
     }
 
     #[test]
@@ -1081,9 +1123,12 @@ mod tests {
         // auto ids are positional: "inserted" takes `Auto(0)` and reuses the old
         // entity, so "first" shifts to `Auto(1)` and lands on a fresh entity —
         // content identity does not follow an auto run across the edit.
-        app.world_mut()
-            .commands()
-            .set_tree(panel, autos_then_named_tree(&["inserted", "first"], "keep"));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, autos_then_named_tree(&["inserted", "first"], "keep"))
+                .is_ok()
+        );
         app.update();
 
         let after = labels_by_text(&mut app);

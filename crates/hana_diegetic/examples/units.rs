@@ -296,7 +296,9 @@ fn update_batch_count_panel(
             continue;
         }
         *display = next;
-        commands.set_tree(entity, build_batch_count_panel_tree(next));
+        if let Err(error) = commands.set_tree(entity, build_batch_count_panel_tree(next)) {
+            error!("failed to replace batch-count panel tree: {error}");
+        }
     }
 }
 
@@ -862,13 +864,19 @@ fn toggle_debug_outlines(
     bevy::log::info!("debug outlines: {on}");
 
     for entity in &a4_panels {
-        commands.set_tree(entity, build_a4_page(on));
+        if let Err(error) = commands.set_tree(entity, build_a4_page(on)) {
+            error!("failed to replace A4 panel tree: {error}");
+        }
     }
     for entity in &card_panels {
-        commands.set_tree(entity, build_card(on));
+        if let Err(error) = commands.set_tree(entity, build_card(on)) {
+            error!("failed to replace card panel tree: {error}");
+        }
     }
     for entity in &index_panels {
-        commands.set_tree(entity, build_index_page(on));
+        if let Err(error) = commands.set_tree(entity, build_index_page(on)) {
+            error!("failed to replace index panel tree: {error}");
+        }
     }
 }
 

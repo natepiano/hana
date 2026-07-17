@@ -68,7 +68,14 @@ pub(super) fn apply_builtin_commit(
     }
 
     let value_revision = ImeValueRevision::new(u64::from(panel.next_tree_revision()));
-    commands.set_tree(panel_entity, tree);
+    if let Err(error) = commands.set_tree(panel_entity, tree) {
+        reject(
+            event,
+            ImeRejection::InvalidText(error.to_string()),
+            &mut commands,
+        );
+        return;
+    }
     commands.trigger(ImeAcceptCommit {
         session_id: event.session_id,
         attempt_id: event.attempt_id,

@@ -553,7 +553,10 @@ fn rebuild_diegetic_panel(
     }
     let rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
     for entity in &panels {
-        commands.set_tree(entity, build_diegetic_tree(&rows, sizing.world_size));
+        if let Err(error) = commands.set_tree(entity, build_diegetic_tree(&rows, sizing.world_size))
+        {
+            error!("failed to replace side-by-side panel tree: {error}");
+        }
     }
 }
 
