@@ -17,6 +17,7 @@ use super::apply_screen_root_sizing;
 use super::apply_world_conversion;
 use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
+use super::builder::PanelBuildError;
 use super::builder::Screen;
 use super::builder::World;
 use super::constants::PANEL_RESIZE_EPSILON;
@@ -56,6 +57,8 @@ use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::DrawOrder;
 use crate::render::HairlineFade;
+use crate::widgets;
+use crate::widgets::ComputedWidgetRecord;
 
 /// Source tree plus the revision token used by derived tree caches.
 #[derive(Clone, Default)]
@@ -217,12 +220,15 @@ pub struct DiegeticPanel {
     /// reification created for it, so
     /// [`text_child`](Self::text_child) resolves a named run in O(1).
     ///
-    /// `reify_text_entities` rebuilds this from scratch every pass and
-    /// writes it without tripping change detection, so it never re-triggers
-    /// layout; [`set_tree`](DiegeticPanelCommands::set_tree) clears it so a stale
-    /// id stops resolving immediately.
+    /// `reify_text_entities` rebuilds this from scratch every pass and writes it
+    /// without tripping change detection, so it never re-triggers layout. A
+    /// non-identical [`set_tree`](DiegeticPanelCommands::set_tree) replacement
+    /// clears it so a stale id stops resolving when the replacement applies.
     #[reflect(ignore)]
     pub(crate) text_index:             HashMap<crate::PanelElementId, Entity>,
+    /// Panel-local widget id index rebuilt by widget reification.
+    #[reflect(ignore)]
+    widget_index:                      HashMap<crate::PanelElementId, Entity>,
 }
 
 impl Default for DiegeticPanel {
@@ -244,6 +250,7 @@ impl Default for DiegeticPanel {
             hdr_text_coverage_bias: Cascade::Inherit,
             coordinate_space:       CoordinateSpace::default(),
             text_index:             HashMap::new(),
+            widget_index:           HashMap::new(),
         }
     }
 }
@@ -312,11 +319,24 @@ impl DiegeticPanel {
     /// validated one layer up by the [`PanelText`](crate::PanelText) `SystemParam`,
     /// whose `Query::get` on the returned entity yields `None` for a dead child.
     ///
-    /// A `set_tree` in the same frame clears the index immediately, so a lookup
-    /// before the next reification pass returns `None`.
+    /// A non-identical `set_tree` clears the index when its deferred replacement
+    /// applies, so a lookup before the next reification pass returns `None`.
+    /// Identical replacements retain the index because they schedule no
+    /// reification pass.
     #[must_use]
     pub fn text_child(&self, id: &crate::PanelElementId) -> Option<Entity> {
         self.text_index.get(id).copied()
+    }
+
+    pub(crate) fn widget_entity(&self, id: &crate::PanelElementId) -> Option<Entity> {
+        self.widget_index.get(id).copied()
+    }
+
+    pub(crate) fn replace_widget_index(
+        &mut self,
+        widget_index: HashMap<crate::PanelElementId, Entity>,
+    ) {
+        self.widget_index = widget_index;
     }
 }
 
@@ -353,12 +373,22 @@ impl DiegeticPanel {
     pub(crate) fn replace_tree_full_rebuild(&mut self, tree: LayoutTree) {
         self.tree.replace(tree);
         self.text_index.clear();
+        self.widget_index.clear();
+    }
+
+    fn replace_classified_tree(&mut self, tree: LayoutTree, change: LayoutTreeChange) {
+        if change == LayoutTreeChange::Identical {
+            self.tree.replace(tree);
+        } else {
+            self.replace_tree_full_rebuild(tree);
+        }
     }
 
     fn replace_from_precompose_helper(&mut self, panel: Self) {
         let mut panel = panel;
         panel.tree.use_next_revision_after_replacement(&self.tree);
         panel.text_index.clear();
+        panel.widget_index.clear();
         // `apply_precompose_helper_panel` replaces structural panel data only;
         // the assignments below retain the existing entity's cascade seeds.
         panel.font_unit = self.font_unit;
@@ -572,7 +602,16 @@ pub trait DiegeticPanelCommands {
     ///
     /// The queued setter is deferred. Schedule systems that call this before
     /// panel layout systems when the update must be visible in the same frame.
-    fn set_tree(&mut self, entity: Entity, tree: LayoutTree);
+    ///
+    /// `Ok(())` means the tree passed synchronous validation and its replacement
+    /// was queued. Because [`Commands`] is deferred, it does not guarantee that
+    /// `entity` still exists when the queued replacement applies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PanelBuildError`] when the tree contains a duplicate id or an
+    /// invalid widget declaration. A rejected tree queues no replacement.
+    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) -> Result<(), PanelBuildError>;
 
     /// Starts an animated conversion of an existing world panel to screen space.
     ///
@@ -672,8 +711,10 @@ impl ScreenConversionSource<'_> {
 }
 
 impl DiegeticPanelCommands for Commands<'_, '_> {
-    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) {
+    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) -> Result<(), PanelBuildError> {
+        widgets::validate_tree(&tree)?;
         self.run_system_cached_with(set_tree_command, (entity, tree));
+        Ok(())
     }
 
     fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
@@ -725,7 +766,7 @@ fn set_tree_command(
     };
     let change = panel.tree().classify_change(&next_tree);
     classification.record_tree_change(change);
-    panel.replace_tree_full_rebuild(next_tree);
+    panel.replace_classified_tree(next_tree, change);
 }
 
 pub(crate) fn apply_precompose_helper_panel(
@@ -1307,6 +1348,8 @@ pub struct ComputedDiegeticPanel {
     field_records:      Vec<PanelFieldRecord>,
     #[reflect(ignore)]
     field_id_conflicts: Vec<crate::PanelElementId>,
+    #[reflect(ignore)]
+    widget_records:     Vec<ComputedWidgetRecord>,
     content_width:      f32,
     content_height:     f32,
 }
@@ -1359,6 +1402,8 @@ impl ComputedDiegeticPanel {
     #[must_use]
     pub(crate) const fn draw_order(&self) -> &DrawOrder { &self.draw_order }
 
+    pub(crate) fn widget_records(&self) -> &[ComputedWidgetRecord] { &self.widget_records }
+
     /// Regenerates `LayoutResult::commands` and keeps `DrawOrder` synchronized.
     ///
     /// Returns `false` when the panel has no computed `LayoutResult` yet.
@@ -1369,6 +1414,7 @@ impl ComputedDiegeticPanel {
 
         result.regenerate_commands(tree);
         self.draw_order = DrawOrder::from_commands(&result.commands);
+        self.widget_records = tree.computed_widget_records();
         true
     }
 
@@ -1378,6 +1424,7 @@ impl ComputedDiegeticPanel {
         self.result = Some(result);
         self.field_records.clear();
         self.field_id_conflicts.clear();
+        self.widget_records.clear();
     }
 
     pub(super) fn set_result_with_fields(
@@ -1385,11 +1432,13 @@ impl ComputedDiegeticPanel {
         result: LayoutResult,
         field_records: Vec<PanelFieldRecord>,
         field_id_conflicts: Vec<crate::PanelElementId>,
+        widget_records: Vec<ComputedWidgetRecord>,
     ) {
         self.draw_order = DrawOrder::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;
+        self.widget_records = widget_records;
     }
 
     /// Sets the content dimensions in world units.
@@ -1440,11 +1489,15 @@ mod tests {
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
+    use crate::Button;
     use crate::CascadeEntityCommandsExt as _;
     use crate::DiegeticTextMeasurer;
+    use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::LayoutBuilder;
     use crate::Mm;
+    use crate::PanelBuildError;
+    use crate::PanelElementId;
     use crate::PanelScreenConversion;
     use crate::TextStyle;
     use crate::Unit;
@@ -1457,6 +1510,31 @@ mod tests {
     fn test_tree(text: &str) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text((text, TextStyle::new(10.0)));
+        builder.build()
+    }
+
+    fn auto_widget_tree() -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().button(PanelElementId::auto(7), Button::new()),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn nested_widget_tree() -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::column().button("outer", Button::new()), |builder| {
+            builder.with(El::new().button("inner", Button::new()), |_| {});
+        });
+        builder.build()
+    }
+
+    fn precomposed_widget_tree() -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::column().precompose_ldr(), |builder| {
+            builder.with(El::new().button("action", Button::new()), |_| {});
+        });
         builder.build()
     }
 
@@ -1663,7 +1741,7 @@ mod tests {
             commands
                 .entity(panel)
                 .override_shadow_casting(ShadowCasting::On);
-            commands.set_tree(panel, test_tree("replacement"));
+            assert!(commands.set_tree(panel, test_tree("replacement")).is_ok());
         }
         app.update();
 
@@ -1679,6 +1757,77 @@ mod tests {
                 .expect("panel should retain resolved shadow casting")
                 .0,
             ShadowCasting::On
+        );
+    }
+
+    #[test]
+    fn set_tree_rejects_invalid_widgets_without_queueing_replacement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(DiegeticTextMeasurer::default());
+        app.add_plugins(HeadlessLayoutPlugin);
+        let result = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(test_tree("seed"))
+            .build();
+        assert!(result.is_ok());
+        let Ok(panel_component) = result else {
+            return;
+        };
+        let panel = app.world_mut().spawn(panel_component).id();
+        app.update();
+        let revision = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .map(DiegeticPanel::tree_revision);
+
+        let auto_error = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, auto_widget_tree());
+        assert!(matches!(
+            auto_error,
+            Err(PanelBuildError::WidgetRequiresNamedId(id))
+                if id == PanelElementId::auto(7)
+        ));
+        let nested_error = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, nested_widget_tree());
+        assert!(matches!(
+            nested_error,
+            Err(PanelBuildError::WidgetContainsInteractiveDescendant(id))
+                if id == PanelElementId::named("outer")
+        ));
+        let precompose_error = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, precomposed_widget_tree());
+        assert!(matches!(
+            precompose_error,
+            Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id))
+                if id == PanelElementId::named("action")
+        ));
+        app.update();
+
+        let unchanged = app.world().get::<DiegeticPanel>(panel);
+        assert_eq!(unchanged.map(DiegeticPanel::tree_revision), revision);
+        assert_eq!(
+            unchanged.and_then(|panel| panel.tree().element_text(1)),
+            Some("seed")
+        );
+
+        let valid = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, test_tree("replacement"));
+        assert!(valid.is_ok());
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<DiegeticPanel>(panel)
+                .and_then(|panel| panel.tree().element_text(1)),
+            Some("replacement")
         );
     }
 

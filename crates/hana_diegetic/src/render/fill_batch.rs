@@ -2855,9 +2855,12 @@ mod tests {
             (-crate::render::constants::OIT_DEPTH_STEP).to_bits()
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, text_toggle_tree(TextContentState::Removed));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, text_toggle_tree(TextContentState::Removed))
+                .is_ok()
+        );
         settle_sdf_pipeline(&mut app);
 
         let entity_after = live_sdf_batch_entities(&mut app);
@@ -3237,9 +3240,12 @@ mod tests {
         let entity_before = live_sdf_batch_entities(&mut app);
         assert_eq!(entity_before.len(), 1);
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, single_surface_tree(Color::srgb(0.7, 0.2, 0.1)));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, single_surface_tree(Color::srgb(0.7, 0.2, 0.1)))
+                .is_ok()
+        );
         settle_sdf_pipeline(&mut app);
 
         let entity_after = live_sdf_batch_entities(&mut app);
@@ -3303,14 +3309,19 @@ mod tests {
                 .world_mut()
                 .resource_mut::<Assets<StandardMaterial>>()
                 .add(second_material);
-            app.world_mut().commands().set_tree(
-                panel,
-                two_material_surface_tree(
-                    first_handle,
-                    expected_colors[0],
-                    second_handle,
-                    expected_colors[1],
-                ),
+            assert!(
+                app.world_mut()
+                    .commands()
+                    .set_tree(
+                        panel,
+                        two_material_surface_tree(
+                            first_handle,
+                            expected_colors[0],
+                            second_handle,
+                            expected_colors[1],
+                        ),
+                    )
+                    .is_ok()
             );
             settle_sdf_pipeline(&mut app);
 
@@ -3441,9 +3452,12 @@ mod tests {
             authored_slot_count(&initial)
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, single_surface_tree(Color::srgb(0.9, 0.2, 0.1)));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, single_surface_tree(Color::srgb(0.9, 0.2, 0.1)))
+                .is_ok()
+        );
         settle_sdf_pipeline(&mut app);
 
         let reduced = sdf_records(&app);
@@ -3552,9 +3566,12 @@ mod tests {
         assert_eq!(initial[0].record_key.command_index, CommandIndex::from(0));
         assert_eq!(initial[1].record_key.command_index, CommandIndex::from(1));
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, topology_churn_tree(survivor, added));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, topology_churn_tree(survivor, added))
+                .is_ok()
+        );
         app.update();
 
         let churned = sdf_records(&app);

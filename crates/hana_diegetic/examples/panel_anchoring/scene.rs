@@ -214,10 +214,12 @@ fn arm_mode_morph(
     commands: &mut Commands,
 ) {
     for (entity, tile, _, pose) in tiles {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             entity,
             build_tile_tree(to_index, tile.order, count, selection, show_marker),
-        );
+        ) {
+            error!("failed to replace anchor tile {entity:?} tree: {error}");
+        }
         if tile.order == 0 {
             continue;
         }

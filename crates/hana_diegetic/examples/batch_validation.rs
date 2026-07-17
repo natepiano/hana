@@ -1028,7 +1028,9 @@ fn apply_tonemapping_selection(
         return;
     }
     for entity in &selectors {
-        commands.set_tree(entity, tonemapping_selector_tree(selection.index));
+        if let Err(error) = commands.set_tree(entity, tonemapping_selector_tree(selection.index)) {
+            error!("failed to replace tonemapping selector tree: {error}");
+        }
     }
     for (entity, tonemapping) in &cameras {
         set_tonemapping_component(entity, tonemapping, selection.mode(), &mut commands);
@@ -1109,10 +1111,16 @@ fn apply_alpha_selection(
         return;
     }
     for entity in &selectors {
-        commands.set_tree(entity, alpha_selector_tree(selection.index));
+        if let Err(error) = commands.set_tree(entity, alpha_selector_tree(selection.index)) {
+            error!("failed to replace alpha selector tree: {error}");
+        }
     }
     for entity in &text_panels {
-        commands.set_tree(entity, build_text_panel(&text_materials, selection.mode()));
+        if let Err(error) =
+            commands.set_tree(entity, build_text_panel(&text_materials, selection.mode()))
+        {
+            error!("failed to replace text panel tree: {error}");
+        }
     }
 }
 
@@ -1463,13 +1471,18 @@ fn update_diagnostic_panels(
     }
     last.key = key;
     for panel in &stats_panels {
-        commands.set_tree(panel, diegetic_stats_sections_tree(&stats_sections));
+        if let Err(error) = commands.set_tree(panel, diegetic_stats_sections_tree(&stats_sections))
+        {
+            error!("failed to replace stats panel tree: {error}");
+        }
     }
     for panel in &ledger_panels {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             panel,
             expected_batches_tree(Some(&diegetic_perf), &validation.state),
-        );
+        ) {
+            error!("failed to replace batch ledger panel tree: {error}");
+        }
     }
 }
 

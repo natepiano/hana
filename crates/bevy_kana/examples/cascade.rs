@@ -416,10 +416,12 @@ fn refresh_status_panel(
         return;
     }
     for panel in &panels {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             panel,
             diegetic_stats_sections_tree(&status_sections(snapshot)),
-        );
+        ) {
+            warn!("failed to replace cascade stats panel tree: {error}");
+        }
     }
     *displayed = Some(snapshot);
 }

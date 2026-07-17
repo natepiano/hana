@@ -1124,9 +1124,12 @@ mod tests {
             (-constants::OIT_DEPTH_STEP).to_bits(),
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, text_toggle_tree(TextContentState::Removed));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, text_toggle_tree(TextContentState::Removed))
+                .is_ok()
+        );
         app.update();
         app.update();
 

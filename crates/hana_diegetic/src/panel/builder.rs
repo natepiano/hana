@@ -32,12 +32,11 @@ use crate::layout::Px;
 use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 use crate::layout::Unit;
+use crate::widgets;
 
 /// Error returned by [`DiegeticPanelBuilder::build`].
 ///
-/// Either a sizing error or a duplicate author-assigned [`PanelElementId`]: a
-/// build-time `Result` so a repeated id is rejected up front instead of one
-/// element silently replacing another at runtime.
+/// A sizing or layout-tree validation error returned before a panel is built.
 #[derive(thiserror::Error, Debug)]
 pub enum PanelBuildError {
     /// A fixed-size axis was zero or negative.
@@ -48,6 +47,15 @@ pub enum PanelBuildError {
     /// reused across either kind is a build error.
     #[error("duplicate panel element id `{0}`")]
     DuplicateElementId(PanelElementId),
+    /// A widget used a builder-minted auto id instead of a stable authored id.
+    #[error("widget `{0}` requires a named panel element id")]
+    WidgetRequiresNamedId(PanelElementId),
+    /// A widget contains another interactive element in its descendants.
+    #[error("widget `{0}` contains an interactive descendant")]
+    WidgetContainsInteractiveDescendant(PanelElementId),
+    /// A widget is inside a subtree rendered through precomposition.
+    #[error("widget `{0}` is inside a precomposed subtree")]
+    WidgetInsidePrecomposedSubtree(PanelElementId),
 }
 
 // ── Typestate marker types ──────────────────────────────────────────────────
@@ -610,8 +618,9 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidSize`] if both axes are fixed-size and width or
-    /// height is zero or negative.
+    /// Returns [`PanelBuildError::InvalidSize`] if both axes are fixed-size and
+    /// width or height is zero or negative. Returns a widget validation variant
+    /// when ids or interactive nesting violate the layout-tree contract.
     pub fn build(mut self) -> Result<DiegeticPanel, PanelBuildError> {
         let (w_sizing, h_sizing) = match self.data.coordinate_space {
             CoordinateSpace::World { width, height } => (width, height),
@@ -665,10 +674,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
             }
         }
 
-        if let Some(tree) = self.data.tree.as_ref()
-            && let Some(duplicate) = tree.duplicate_named_element_id()
-        {
-            return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
+        if let Some(tree) = self.data.tree.as_ref() {
+            widgets::validate_tree(tree)?;
         }
 
         Ok(build_panel(self.data))
@@ -690,8 +697,10 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidSize`] if width or height is zero or negative
-    /// and no dynamic sizing will fill it later.
+    /// Returns [`PanelBuildError::InvalidSize`] if width or height is zero or
+    /// negative and no dynamic sizing will fill it later. Returns a widget
+    /// validation variant when ids or interactive nesting violate the
+    /// layout-tree contract.
     pub fn build(mut self) -> Result<DiegeticPanel, PanelBuildError> {
         let CoordinateSpace::Screen {
             width: w_sizing,
@@ -784,10 +793,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         }
         let _ = (has_dynamic_width, has_dynamic_height);
 
-        if let Some(tree) = self.data.tree.as_ref()
-            && let Some(duplicate) = tree.duplicate_named_element_id()
-        {
-            return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
+        if let Some(tree) = self.data.tree.as_ref() {
+            widgets::validate_tree(tree)?;
         }
 
         Ok(build_panel(self.data))
@@ -821,6 +828,7 @@ mod tests {
     use bevy_kana::Cascade;
 
     use super::PanelBuildError;
+    use crate::Button;
     use crate::DiegeticPanel;
     use crate::El;
     use crate::Fit;
@@ -852,6 +860,20 @@ mod tests {
             (
                 PanelBuildError::DuplicateElementId(PanelElementId::named("title")),
                 "duplicate panel element id `title`",
+            ),
+            (
+                PanelBuildError::WidgetRequiresNamedId(PanelElementId::auto(3)),
+                "widget `#auto-3` requires a named panel element id",
+            ),
+            (
+                PanelBuildError::WidgetContainsInteractiveDescendant(PanelElementId::named(
+                    "outer",
+                )),
+                "widget `outer` contains an interactive descendant",
+            ),
+            (
+                PanelBuildError::WidgetInsidePrecomposedSubtree(PanelElementId::named("button")),
+                "widget `button` is inside a precomposed subtree",
             ),
         ];
 
@@ -900,6 +922,75 @@ mod tests {
         assert!(matches!(
             result,
             Err(PanelBuildError::DuplicateElementId(ref id)) if *id == PanelElementId::named("title")
+        ));
+    }
+
+    #[test]
+    fn duplicate_widget_ids_use_panel_element_validation() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().button("action", Button::new()), |_| {});
+                builder.with(El::new().button("action", Button::new()), |_| {});
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::DuplicateElementId(ref id))
+                if *id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn widget_auto_id_errors_at_build() {
+        let auto_id = PanelElementId::auto(4);
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().button(auto_id.clone(), Button::new()), |_| {});
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::WidgetRequiresNamedId(id)) if id == auto_id
+        ));
+    }
+
+    #[test]
+    fn widget_with_interactive_descendant_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::column().button("outer", Button::new()), |builder| {
+                    builder.with(El::new().button("inner", Button::new()), |_| {});
+                });
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::WidgetContainsInteractiveDescendant(id))
+                if id == PanelElementId::named("outer")
+        ));
+    }
+
+    #[test]
+    fn widget_inside_precomposed_subtree_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::column().precompose_ldr(), |builder| {
+                    builder.with(El::new().button("action", Button::new()), |_| {});
+                });
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id))
+                if id == PanelElementId::named("action")
         ));
     }
 

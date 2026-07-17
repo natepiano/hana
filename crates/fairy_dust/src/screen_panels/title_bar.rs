@@ -461,7 +461,9 @@ pub(crate) fn refresh_changed_title_bar(
     >,
 ) {
     for (entity, title_bar, state) in &title_bars {
-        commands.set_tree(entity, build_title_bar_tree(title_bar, state));
+        if let Err(error) = commands.set_tree(entity, build_title_bar_tree(title_bar, state)) {
+            warn!("failed to replace title-bar panel {entity:?} tree: {error}");
+        }
     }
 }
 

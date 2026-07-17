@@ -57,6 +57,7 @@ mod panel;
 mod render;
 mod screen_space;
 mod text;
+mod widgets;
 
 #[cfg(feature = "bench_support")]
 #[doc(hidden)]
@@ -324,6 +325,17 @@ pub use text::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
 use text::TextPlugin;
+pub use widgets::Button;
+pub use widgets::PanelWidget;
+pub use widgets::PanelWidgetReader;
+pub use widgets::PanelWidgets;
+pub use widgets::Slider;
+pub use widgets::SliderConfigError;
+pub use widgets::SliderDirection;
+pub use widgets::SliderRange;
+pub use widgets::SliderStep;
+pub use widgets::WidgetOf;
+use widgets::WidgetsPlugin;
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///
@@ -360,6 +372,7 @@ impl Plugin for DiegeticUiPlugin {
         app.add_plugins((
             TextPlugin,
             PanelPlugin,
+            WidgetsPlugin,
             ImePlugin,
             ScreenSpacePlugin,
             RenderPlugin,

@@ -235,7 +235,9 @@ fn update_game_panels(
     );
 
     for panel in &panels {
-        commands.set_tree(panel, tree.clone());
+        if let Err(error) = commands.set_tree(panel, tree.clone()) {
+            warn!("failed to replace pause panel {panel:?} tree: {error}");
+        }
     }
 }
 

@@ -1124,10 +1124,12 @@ fn update_panel_status_trees(
             || displayed.world_enabled != enabled
             || displayed.world_highlighted != highlighted
         {
-            commands.set_tree(
+            if let Err(error) = commands.set_tree(
                 panels.world,
                 world_panel_tree(space, world_panel_metrics(panel), &enabled, &highlighted),
-            );
+            ) {
+                error!("failed to replace world conversion panel tree: {error}");
+            }
             displayed.world = Some(space);
             displayed.world_enabled = enabled;
             displayed.world_highlighted = highlighted;
@@ -1145,10 +1147,12 @@ fn update_panel_status_trees(
             || displayed.screen_enabled != enabled
             || displayed.screen_highlighted != highlighted
         {
-            commands.set_tree(
+            if let Err(error) = commands.set_tree(
                 panels.screen,
                 screen_panel_tree(space, &enabled, &highlighted),
-            );
+            ) {
+                error!("failed to replace screen conversion panel tree: {error}");
+            }
             displayed.screen = Some(space);
             displayed.screen_enabled = enabled;
             displayed.screen_highlighted = highlighted;

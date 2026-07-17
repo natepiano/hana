@@ -542,7 +542,9 @@ fn refresh_engine_panel(
     if !engine.is_changed() {
         return;
     }
-    commands.set_tree(*panel, build_engine_tree(*engine));
+    if let Err(error) = commands.set_tree(*panel, build_engine_tree(*engine)) {
+        warn!("failed to replace engine panel tree: {error}");
+    }
 }
 
 fn build_engine_tree(selected: Engine) -> LayoutTree {

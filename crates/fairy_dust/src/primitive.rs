@@ -389,7 +389,9 @@ pub fn cube_face_panel_tree(
 
 /// Replaces a cube face panel's layout tree.
 pub fn set_cube_face_panel_tree(commands: &mut Commands, entity: Entity, tree: LayoutTree) {
-    commands.set_tree(entity, tree);
+    if let Err(error) = commands.set_tree(entity, tree) {
+        warn!("failed to replace cube-face panel {entity:?} tree: {error}");
+    }
 }
 
 pub(crate) fn install(app: &mut App, config: PrimitiveConfig, inserts: Vec<PrimitiveInsert>) {

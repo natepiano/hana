@@ -12,7 +12,9 @@ API. It adds no per-frame comparison work to unchanged panels.
 ## Public API
 
 ```rust
-commands.set_tree(panel_entity, next_tree);
+if let Err(error) = commands.set_tree(panel_entity, next_tree) {
+    warn!("panel tree replacement rejected: {error}");
+}
 ```
 
 `set_tree` is a `DiegeticPanelCommands` trait method (`panel/diegetic_panel.rs`)
@@ -21,9 +23,17 @@ implemented on `Commands`. It queues `set_tree_command` via
 respond to the change (layout, screen placement) must run after the deferred
 setter applies — the panel plugin provides that ordering (see Schedule).
 
+Validation runs synchronously before anything is queued. A validation error
+returns `Err(PanelBuildError)` and queues no replacement. `Ok(())` means
+validation succeeded and the deferred replacement was queued; the target entity
+can still disappear before that command applies.
+
 `set_tree_command` classifies `panel.tree().classify_change(&next_tree)`, records
 the result on the sibling `DiegeticPanelChangeClassification` component, then
-replaces the tree via `replace_tree_full_rebuild`.
+replaces the source tree and advances its revision. Non-identical replacements
+clear the reified text and widget indexes for rebuilding. An `Identical`
+replacement retains both indexes because computed output remains unchanged and
+there is no reification pass to rebuild them.
 
 A `bench_support`-gated `DiegeticPanel::set_tree_full_rebuild` component method
 forces the conservative full-layout path for benchmark comparisons. It is not
@@ -75,7 +85,8 @@ Current classification:
 - **VisualOnly**: element id, background (including add/remove), corner radius,
   `draw` / `z_index`, anti-alias / hairline-fade / shadow-casting authoring,
   precompose mode, material handle, border color, divider color, text color and
-  measurement-neutral config, and image handle or tint.
+  measurement-neutral config, image handle or tint, and widget authored-record
+  changes.
 
 Image handle changes are `VisualOnly` because images are not intrinsically
 measured by layout today. If intrinsic image sizing is ever added, image-handle
@@ -121,24 +132,29 @@ per-element `wrapped` text lines, `viewport_width`/`viewport_height`,
   word-wrapped text leaf (cached line breaks belong to the old string), a newline
   in the new text, or a changed measured leaf width.
 
-`ComputedDiegeticPanel::regenerate_commands` wraps the `LayoutResult` method and
-rebuilds `DrawOrder` from the new commands. It returns `false` when no computed
-result exists yet.
+`ComputedDiegeticPanel::regenerate_commands` wraps the `LayoutResult` method,
+rebuilds `DrawOrder` from the new commands, and refreshes computed widget
+records from the replacement tree. It returns `false` when no computed result
+exists yet.
 
 ## System flow
 
-`compute_panel_layouts` (`panel/compute_layout.rs`) processes each panel that is
-`Changed` or has pending classification:
+`compute_panel_layouts` (`panel/compute_layout.rs`) processes each panel whose
+`DiegeticPanel` changed, whose tree has pending classification, or whose
+`Resolved<FontUnit>` changed:
 
-1. Skip entirely if neither changed nor pending.
+1. Skip entirely if none of those inputs changed.
 2. `take` the pending change and geometry-stable flag.
-3. `Identical` with an existing result → continue (no work).
+3. `Identical` with an existing result and an unchanged resolved font unit →
+   continue (no work).
 4. `VisualOnly` and geometry is reusable (`tree_visual_geometry_stable`, or
    `can_reuse_geometry` re-measures and accepts) → `regenerate_commands`, fire a
    `PanelChangeKind::VisualOnly` panel-changed event, continue. Mutating
    `ComputedDiegeticPanel` marks it `Changed`, so render reconciliation
    (`render/panel_text/`) re-emits.
-5. Otherwise run the full `LayoutEngine::compute` solve and commit.
+5. Otherwise run the full `LayoutEngine::compute` solve and commit. A changed
+   resolved font unit always takes this path so text geometry uses the current
+   cascade value.
 
 ## Schedule (invariant)
 
@@ -146,11 +162,13 @@ result exists yet.
 
 ```
 PanelSystems::ApplyTreeChanges  (ApplyDeferred)
-  → ApplyConversions            (before ComputeLayout)
+  → ApplyConversions
+  → CascadeSet::Propagate
   → ComputeLayout               (compute_panel_layouts)
 ```
 
 The `ApplyTreeChanges` `ApplyDeferred` boundary guarantees the deferred
 `set_tree` command has applied — and recorded pending classification — before
-`compute_panel_layouts` consumes it. Layout systems must stay ordered after this
-boundary.
+`compute_panel_layouts` consumes it. Cascade propagation runs after coordinate
+conversion commands and before layout so `compute_panel_layouts` reads current
+`Resolved<FontUnit>` values in the same update.

@@ -1906,9 +1906,12 @@ mod tests {
             material_base_color(red)
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, one_line_tree(horizontal_line_with_color(blue)));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, one_line_tree(horizontal_line_with_color(blue)))
+                .is_ok()
+        );
         settle(&mut app);
 
         assert_eq!(panel_shape_sources(&app, panel), before);
@@ -1941,9 +1944,12 @@ mod tests {
         let before = panel_shape_sources(&app, panel);
         assert_eq!(before.len(), 1);
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, LayoutBuilder::new(100.0, 50.0).build());
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, LayoutBuilder::new(100.0, 50.0).build())
+                .is_ok()
+        );
         settle(&mut app);
 
         assert!(panel_shape_sources(&app, panel).is_empty());

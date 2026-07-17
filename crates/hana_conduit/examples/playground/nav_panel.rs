@@ -117,10 +117,12 @@ pub(crate) fn refresh_nav_panel(
     if !current_section.is_changed() && !selection.is_changed() {
         return;
     }
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         *panel,
         build_nav_tree(current_section.0, selection.direction),
-    );
+    ) {
+        error!("playground: failed to replace nav panel tree: {error}");
+    }
 }
 
 pub(crate) fn request_previous_section(mut requested: ResMut<RequestedNavigation>) {

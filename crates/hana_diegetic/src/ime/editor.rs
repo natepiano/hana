@@ -262,11 +262,13 @@ pub(super) fn update_editor_from_text_changed(
     }
 
     blur_intent.clear_session(event.session_id);
-    if let Some(editor) = editor_state.active() {
-        commands.set_tree(
+    if let Some(editor) = editor_state.active()
+        && let Err(error) = commands.set_tree(
             editor.panel,
             editor_tree(&editor.snapshot, editor.validation.as_deref()),
-        );
+        )
+    {
+        warn!("failed to update IME editor panel: {error}");
     }
 }
 
@@ -284,10 +286,12 @@ pub(super) fn update_editor_validation(
     }
 
     editor.validation = Some(format!("{:?}", event.reason));
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         editor.panel,
         editor_tree(&editor.snapshot, editor.validation.as_deref()),
-    );
+    ) {
+        warn!("failed to update IME editor panel: {error}");
+    }
 }
 
 pub(super) fn close_editor_on_cancel(

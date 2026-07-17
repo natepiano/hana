@@ -343,7 +343,9 @@ fn update_face_labels(
             GamepadFaceLabel::Pan => pan.clone(),
             GamepadFaceLabel::Zoom => zoom.clone(),
         };
-        commands.set_tree(entity, face_tree(*label, active, &guidance.0));
+        if let Err(error) = commands.set_tree(entity, face_tree(*label, active, &guidance.0)) {
+            warn!("failed to replace gamepad panel {entity:?} tree: {error}");
+        }
     }
 }
 

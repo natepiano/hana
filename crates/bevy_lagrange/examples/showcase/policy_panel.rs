@@ -191,7 +191,9 @@ pub(crate) fn rebuild_policy_panel(
     let Ok(entity) = panels.single() else {
         return;
     };
-    commands.set_tree(entity, build_policy_tree(&display, &flash, caps));
+    if let Err(error) = commands.set_tree(entity, build_policy_tree(&display, &flash, caps)) {
+        warn!("failed to replace policy panel tree: {error}");
+    }
 }
 
 /// Advances the key-flash timers and forces one panel rebuild when a highlight

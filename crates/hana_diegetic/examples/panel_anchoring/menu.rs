@@ -54,8 +54,10 @@ pub(crate) fn reconcile_menu(
     if !active.is_changed() {
         return;
     }
-    if let Ok(menu) = menus.single() {
-        commands.set_tree(menu, build_capability_menu_tree(*active));
+    if let Ok(menu) = menus.single()
+        && let Err(error) = commands.set_tree(menu, build_capability_menu_tree(*active))
+    {
+        error!("failed to replace capability menu tree: {error}");
     }
 }
 

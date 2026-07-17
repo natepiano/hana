@@ -1616,7 +1616,12 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(("Alphas", TextStyle::new(10.0)));
         builder.text(("Beta", TextStyle::new(10.0)));
-        app.world_mut().commands().set_tree(panel, builder.build());
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, builder.build())
+                .is_ok()
+        );
         settle(&mut app);
 
         let (batches, runs, glyphs) = store_stats(&app);
@@ -1879,9 +1884,12 @@ mod tests {
             0.31_f32.to_bits()
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, one_text_tree_with_style(second_style.clone()));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, one_text_tree_with_style(second_style.clone()))
+                .is_ok()
+        );
         settle(&mut app);
         let label_after = label_entities(&mut app)[0];
         let resolved = app
@@ -2121,7 +2129,12 @@ mod tests {
             TextStyle::new(10.0).with_color(Color::srgb(1.0, 0.0, 0.0)),
         ));
         builder.text(("Beta", TextStyle::new(10.0)));
-        app.world_mut().commands().set_tree(panel, builder.build());
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, builder.build())
+                .is_ok()
+        );
         settle(&mut app);
 
         assert_eq!(
@@ -2196,7 +2209,12 @@ mod tests {
             TextStyle::new(10.0).with_shadow_mode(GlyphShadowMode::None),
         ));
         builder.text(("Beta", TextStyle::new(10.0)));
-        app.world_mut().commands().set_tree(panel, builder.build());
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, builder.build())
+                .is_ok()
+        );
         settle(&mut app);
 
         let (batches, runs, _) = store_stats(&app);

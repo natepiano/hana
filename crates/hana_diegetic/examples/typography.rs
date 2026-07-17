@@ -685,7 +685,11 @@ fn on_font_registered(
     );
     for entity in &panels {
         info!("Rebuilding fonts panel");
-        commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
+        if let Err(error) =
+            commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0))
+        {
+            error!("failed to replace typography panel tree: {error}");
+        }
     }
 }
 
@@ -937,6 +941,10 @@ fn switch_font(
         .0;
     display_text.for_each_style_mut(|style| style.set_font_id(font_id));
     for entity in &panels {
-        commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
+        if let Err(error) =
+            commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0))
+        {
+            error!("failed to replace typography panel tree: {error}");
+        }
     }
 }

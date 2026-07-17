@@ -526,10 +526,12 @@ fn update_status_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(
+            if let Err(error) = commands.set_tree(
                 entity,
                 build_status_overlay_tree(&now, &max, panels_count, rows),
-            );
+            ) {
+                error!("failed to replace stress status panel tree: {error}");
+            }
         }
     }
 }
@@ -643,7 +645,11 @@ fn update_panels(
             if sp.0 == active_panel_idx {
                 // Active panel — content changed, rebuild tree.
                 let tree_start = Instant::now();
-                commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words));
+                if let Err(error) =
+                    commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words))
+                {
+                    error!("failed to replace stress panel tree: {error}");
+                }
                 tree_build_ms = tree_start
                     .elapsed()
                     .as_secs_f32()
@@ -652,7 +658,11 @@ fn update_panels(
             } else if panel_count_changed {
                 // Panel count changed — rebuild frozen panels once so the
                 // per-row rainbow respaces against the new row_count.
-                commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words));
+                if let Err(error) =
+                    commands.set_tree(entity, build_panel_tree(&state, sp.0, rpp, &words))
+                {
+                    error!("failed to replace frozen stress panel tree: {error}");
+                }
             }
             *transform = panel_transform(sp.0, needed, wh);
         }

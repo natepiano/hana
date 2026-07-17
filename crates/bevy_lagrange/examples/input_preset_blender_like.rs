@@ -232,7 +232,10 @@ fn update_face_labels(
             FaceLabel::Pan => pan.clone(),
             FaceLabel::Zoom => zoom.clone(),
         };
-        commands.set_tree(entity, cube_face_panel_tree(FACE_PANEL_STYLE, next));
+        if let Err(error) = commands.set_tree(entity, cube_face_panel_tree(FACE_PANEL_STYLE, next))
+        {
+            warn!("failed to replace input panel {entity:?} tree: {error}");
+        }
     }
 }
 

@@ -206,7 +206,11 @@ mod tests {
         {
             let mut commands = app.world_mut().commands();
             commands.entity(panel).inherit_text_alpha();
-            commands.set_tree(panel, alpha_panel_tree("replacement"));
+            assert!(
+                commands
+                    .set_tree(panel, alpha_panel_tree("replacement"))
+                    .is_ok()
+            );
         }
         for _ in 0..2 {
             app.update();
@@ -386,9 +390,12 @@ mod tests {
         // The label drops its own alpha. Reification removes the label's
         // `Cascade<TextAlpha>` (its update arm), and the propagation pass
         // re-inherits the panel's `Add`.
-        app.world_mut()
-            .commands()
-            .set_tree(panel_entity, label_tree(None));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel_entity, label_tree(None))
+                .is_ok()
+        );
         for _ in 0..3 {
             app.update();
         }
