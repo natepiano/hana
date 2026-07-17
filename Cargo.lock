@@ -3270,6 +3270,7 @@ dependencies = [
  "image",
  "parley",
  "smallvec",
+ "thiserror 2.0.19",
  "trybuild",
  "ttf-parser",
  "wgpu",
