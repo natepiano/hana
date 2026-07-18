@@ -18,8 +18,8 @@
   to the resulting release.
 - **Layout:**
   - `docs/bevy_clerestory/` — recovery plan and topology contract.
-  - `crates/bevy_clerestory/src/monitors/` — planned monitor identity,
-    topology, and current-window domain replacing the two flat modules.
+  - `crates/bevy_clerestory/src/monitors/` — monitor identity, topology, and
+    current-window domain established in Phase 1.
   - `crates/bevy_clerestory/src/persistence/` — RON format and the planned
     captured-state authority.
   - `crates/bevy_clerestory/src/restore/` — shared startup/runtime target
@@ -46,21 +46,16 @@
   - `crates/bevy_clerestory/src/managed.rs` — canonical
     `ManagedWindowRegistry`, registration deduplication, persistence hooks, and
     managed startup restoration.
-  - `crates/bevy_clerestory/src/monitors.rs` — existing flat monitor
-    topology/identity/events module; removed after migration.
-  - `crates/bevy_clerestory/src/monitor.rs` — existing flat `CurrentMonitor`
-    refresh module; removed after migration.
-  - `crates/bevy_clerestory/src/monitors/mod.rs` — **planned/new** monitor
-    plugin and re-exports.
+  - `crates/bevy_clerestory/src/monitors/mod.rs` — monitor plugin and public
+    domain re-exports established in Phase 1.
   - `crates/bevy_clerestory/src/monitors/current_monitor.rs` —
-    **planned/new** `CurrentMonitor`, live-window detection, effective mode, and
-    refresh.
-  - `crates/bevy_clerestory/src/monitors/identity.rs` — **planned/new**
-    qualified backend evidence, ambiguity tracking, append-only interner,
-    `MonitorId`, and `MonitorIdentity`.
-  - `crates/bevy_clerestory/src/monitors/topology.rs` — **planned/new**
-    `MonitorInfo`, `LiveMonitor`, `Monitors`, instance identity, topology
-    revision, raw events, refresh, and resolution.
+    `CurrentMonitor`, live-window detection, effective mode, and refresh.
+  - `crates/bevy_clerestory/src/monitors/identity.rs` — Phase 1 `MonitorId`
+    baseline; add qualified evidence, ambiguity tracking, the append-only
+    interner, and `MonitorIdentity`.
+  - `crates/bevy_clerestory/src/monitors/topology.rs` — Phase 1 topology/events
+    baseline; add `LiveMonitor`, instance identity, topology revision, refresh,
+    and resolution.
   - `crates/bevy_clerestory/src/persistence/mod.rs` — persistence exports and
     registration.
   - `crates/bevy_clerestory/src/persistence/load.rs` — current RON loading;
@@ -184,7 +179,12 @@
   current-monitor → window-transition → preparation → X11 → application →
   settling → persistence ordering and required deferred flushes. Public
   non-generic events derive `Reflect`/event type data and rely on
-  `reflect_auto_register`; do not add redundant `register_type` calls. Keep
+  `reflect_auto_register`; do not add redundant `register_type` calls. Preserve
+  the exact `bevy_clerestory::monitors::*` `TypePath` values for
+  `CurrentMonitor`, `MonitorId`, `MonitorInfo`, `Monitors`,
+  `MonitorConnected`, and `MonitorDisconnected`; every new public reflected
+  monitor type uses that same namespace and extends the exact-path regression
+  test. Keep
   transition/`App` tests and native physical evidence as separate gates. Keep
   Hana cable routes, capture sessions, rendered content, readiness, and
   re-enable/UI policy in Hana; Clerestory owns only monitor/window metadata,
@@ -195,7 +195,7 @@
 
 ## Phases
 
-### Phase 1 — Establish the monitor module boundary  · status: todo
+### Phase 1 — Establish the monitor module boundary  · status: done (`de62f4eb`)
 
 #### Work Order
 
@@ -237,6 +237,43 @@ without changing observable monitor or restore behavior.
 Delegation Context are green; module/public-path tests remain unchanged; neither
 flat source file remains.
 
+#### Retrospective
+
+**What worked:**
+
+- `monitors/{mod,current_monitor,identity,topology}.rs` now owns the monitor
+  domain while `lib.rs` retains the existing exports and schedule wiring.
+- The existing behavior tests and the `restore_window` example passed unchanged.
+
+**What deviated from the plan:**
+
+- The split required custom Bevy `#[type_path]` attributes and an exact-path
+  regression test to preserve the six existing reflection and BRP names.
+
+**Surprises:**
+
+- Rust re-exports preserve source paths but do not preserve a derived Bevy
+  `TypePath`; the physical declaration module determines that metadata.
+
+**Implications for remaining phases:**
+
+- Monitor-domain refactors must retain the legacy
+  `bevy_clerestory::monitors::*` reflected paths, and new public reflected
+  monitor types must use that same public module path.
+
+### Phase 1 Review
+
+- The Delegation Context and Phases 2–3 now carry the exact reflected monitor
+  namespace contract established by Phase 1.
+- Phase 3 now defers the diagnostic bridge needed for Phase 4 to trace private
+  identity evidence without turning it into a matching API; Phase 4 names both
+  monitor owners that may supply that bridge.
+- Phase 7 now defers the canonical reflected namespace for the new recovery API
+  until that public metadata decision is approved.
+- Phase 11 now includes the topology event owner and exact legacy monitor-path
+  assertions in its reflection gate.
+- Phases 2–21 remain necessary and in their existing order.
+
 ### Phase 2 — Add verified monitor identity and live-entity resolution  · status: todo
 
 #### Work Order
@@ -258,6 +295,11 @@ pub enum MonitorIdentity {
     Unverified,
 }
 ```
+
+- Retain the six existing custom monitor-domain `TypePath` values and their
+  exact-path regression test. Give `MonitorIdentity` the
+  `bevy_clerestory::monitors::MonitorIdentity` reflected path and extend that
+  test.
 
 - `MonitorId` is an opaque process-local token for complete qualified evidence,
   never persistence data. A private, App-lifetime, append-only interner assigns
@@ -319,7 +361,9 @@ impl Monitors {
   instance identity, events, iterator, and resolvers.
 
 **Constraints from prior phases:** Phase 1 established `monitors/` as the only
-owner of monitor-domain code and preserved existing external paths.
+owner of monitor-domain code. Its six existing reflected types retain their
+exact `bevy_clerestory::monitors::*` paths; new public reflected monitor types
+use that namespace and extend the exact-path regression test.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Synthetic tests prove monotonic nonreused tokens, full-evidence equality,
@@ -367,7 +411,33 @@ revisioned topology snapshot with correct same-frame ordering.
 
 **Constraints from prior phases:** Phase 2 provides `MonitorIdentity`, private
 instance identity, entity-free `MonitorInfo`, `LiveMonitor`, and exact
-identity-to-entity resolution.
+identity-to-entity resolution. It preserves the monitor-domain reflected-path
+test; if `MonitorTopologyRevision` derives `Reflect`, give it the same
+`bevy_clerestory::monitors` namespace and extend that test.
+
+**Pending decision: How the physical probe receives private topology diagnostics**
+
+Actual problem:
+Phase 4's external example must place topology revision, private instance
+identity, and raw identity evidence into one causal trace, but Phase 2 keeps the
+latter two private and Phase 3 does not yet define an observable diagnostic
+projection.
+
+What exists now:
+- Phase 2 deliberately prevents consumers from matching on raw evidence or a
+  private monitor lifetime key.
+- Phase 3 creates revisioned topology state, while Phase 4 needs diagnostic
+  records from the monitor domain at the exact production point.
+
+What should change:
+- Define a structured, diagnostic-only projection emitted inside the monitor
+  domain and consumed by the Phase 4 probe without exposing raw evidence as a
+  public matching or resolution input.
+
+Recommendation:
+Have Phase 3 establish the diagnostic projection beside topology production,
+then have Phase 4 merge those emitted records into its sequence; keep all
+identity decisions on `MonitorIdentity` and `MonitorId`.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Small Bevy `App` tests prove immediate observer visibility, same-ID geometry
@@ -413,6 +483,9 @@ relocation from Bevy linked despawn before recovery depends on either path.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — read-only contract
   reference; add diagnostic hooks only if the public/lifecycle surface cannot
   provide required causal facts.
+- `crates/bevy_clerestory/src/monitors/identity.rs` — add diagnostic emission
+  only if the approved projection requires evidence at qualification time;
+  never expose raw evidence as matching input.
 
 **Constraints from prior phases:** Phase 3 guarantees ordered topology events,
 live/former entity resolution, revision metadata, and `CurrentMonitor` refresh.
@@ -677,6 +750,30 @@ pub struct CancelWindowRecovery {
 **Constraints from prior phases:** Phase 5 owns all captured/persisted state;
 Phase 6 owns shared restore preparation and canonical replacement startup
 bypass. Phase 3 supplies topology revisions and event order.
+
+**Pending decision: Canonical reflected paths for the new recovery API**
+
+Actual problem:
+Phase 7 introduces public recovery types across several private files, so
+derived Bevy paths would leak their physical declaration modules and could
+change during later refactors.
+
+What exists now:
+- Existing monitor types preserve `bevy_clerestory::monitors::*` paths, while
+  existing restore result events keep their `bevy_clerestory::events::*` paths.
+- Phase 11 requires remote reflection and event type data but does not name
+  stable paths for Phase 7's new component and events.
+
+What should change:
+- Assign one canonical namespace to every new public recovery component and
+  event, preserve the existing result-event paths, and assert every exact path
+  in Phase 11.
+
+Recommendation:
+Use `bevy_clerestory::recovery::*` for all new recovery types and retain
+`bevy_clerestory::events::*` for existing restore results; add custom
+`TypePath` attributes when the types are introduced and exact assertions in
+Phase 11.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Pure and Bevy `App` tests cover first eligible baseline, same-bundle
@@ -958,6 +1055,8 @@ remotely observable/triggerable, and backed by the completed private lifecycle.
 
 - `crates/bevy_clerestory/src/lib.rs` — public re-exports/plugin assembly.
 - `crates/bevy_clerestory/src/events.rs` — reflected existing result events.
+- `crates/bevy_clerestory/src/monitors/topology.rs` — reflected raw monitor
+  events and preserved monitor-domain paths.
 - `crates/bevy_clerestory/src/recovery/mod.rs` — final public types/re-exports
   and plugin.
 - `crates/bevy_clerestory/src/recovery/registration.rs` — public component
@@ -975,7 +1074,8 @@ exposes that behavior without duplicating state.
 Public API tests cover primary and managed registration, all event payloads,
 entity-derived restore identity, absent-key cancellation, and expected
 `AppTypeRegistry` event type data for every public event with no manual
-registration.
+registration. Exact `TypePath` assertions include `MonitorConnected` and
+`MonitorDisconnected` under `bevy_clerestory::monitors::*`.
 
 ### Phase 12 — Complete the recovery example  · status: todo
 
