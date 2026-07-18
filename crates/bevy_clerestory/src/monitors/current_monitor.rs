@@ -3,6 +3,8 @@
 //! Maintains `CurrentMonitor` on all managed windows using winit detection
 //! with position-based fallback.
 
+use std::ops::Deref;
+
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::MonitorSelection;
@@ -11,14 +13,45 @@ use bevy::window::WindowMode;
 use bevy::winit::WINIT_WINDOWS;
 use bevy_kana::ToI32;
 
-use super::ManagedWindow;
-use super::monitors::CurrentMonitor;
-use super::monitors::MonitorInfo;
-use super::monitors::Monitors;
+use super::MonitorInfo;
+use super::Monitors;
+use crate::ManagedWindow;
 use crate::constants::MONITOR_SOURCE_EXISTING;
 use crate::constants::MONITOR_SOURCE_FALLBACK;
 use crate::constants::MONITOR_SOURCE_POSITION;
 use crate::constants::MONITOR_SOURCE_WINIT;
+
+/// Component storing the current monitor and effective window mode.
+///
+/// This is the single source of truth for which monitor a window is on and its
+/// effective display mode. Updated automatically by the plugin's unified monitor
+/// detection system.
+///
+/// The `effective_window_mode` field reflects what the user actually sees, even when
+/// `window.mode` is stale (e.g., macOS green button fullscreen reports `Windowed`).
+///
+/// Derefs to [`MonitorInfo`] for convenient access to monitor fields:
+/// ```ignore
+/// fn my_system(query: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
+///     let (window, monitor) = query.single();
+///     println!("Monitor {} at scale {}, mode: {:?}", monitor.index, monitor.scale, monitor.effective_window_mode);
+/// }
+/// ```
+#[derive(Component, Clone, Copy, Debug, Reflect)]
+#[reflect(Component)]
+#[type_path = "bevy_clerestory::monitors"]
+pub struct CurrentMonitor {
+    /// The monitor this window is currently on.
+    pub monitor_info:          MonitorInfo,
+    /// The effective window mode, accounting for OS-level fullscreen changes.
+    pub effective_window_mode: WindowMode,
+}
+
+impl Deref for CurrentMonitor {
+    type Target = MonitorInfo;
+
+    fn deref(&self) -> &Self::Target { &self.monitor_info }
+}
 
 /// Unified monitor detection system. Maintains `CurrentMonitor` on all managed windows.
 ///

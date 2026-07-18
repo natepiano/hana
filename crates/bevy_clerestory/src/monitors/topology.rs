@@ -3,49 +3,21 @@
 //! Provides a `Monitors` resource that maintains a sorted list of monitors,
 //! automatically updated when monitors are added or removed.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
-use std::ops::Deref;
-
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
-use bevy::window::WindowMode;
 use bevy::winit::WinitMonitors;
 use bevy_diagnostic::FrameCount;
 use bevy_kana::ToI32;
-use winit::monitor::MonitorHandle;
-#[cfg(target_os = "macos")]
-use winit::platform::macos::MonitorHandleExtMacOS;
-#[cfg(target_os = "windows")]
-use winit::platform::windows::MonitorHandleExtWindows;
-#[cfg(all(unix, not(target_os = "macos")))]
-use winit::platform::x11::MonitorHandleExtX11;
 
-/// Plugin that manages the `Monitors` resource.
-pub(crate) struct MonitorPlugin;
-
-impl Plugin for MonitorPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, init_monitors)
-            .add_systems(Update, update_monitors);
-    }
-}
-
-/// Stable, OS-assigned identifier for a display, uniform across platforms.
-///
-/// Sourced from winit's per-platform native id — `CGDirectDisplayID` on macOS,
-/// the `RandR` / `wl_output` id on X11 / Wayland, and a hash of the GDI device
-/// name on Windows — normalized to one `u64` so the same value keys the
-/// connect/disconnect diff on every platform. Unlike [`MonitorInfo::index`], it
-/// survives display rearrangement.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
-pub struct MonitorId(pub u64);
+use super::CurrentMonitor;
+use super::identity;
+use super::identity::MonitorId;
 
 /// Information about a single monitor.
 #[derive(Clone, Copy, Debug, Reflect)]
+#[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorInfo {
     /// Stable OS display id, unchanged across rearrangement.
     pub id:                MonitorId,
@@ -64,40 +36,10 @@ pub struct MonitorInfo {
 /// `Monitors` are sorted with primary (at 0,0) first, then by position.
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
+#[type_path = "bevy_clerestory::monitors"]
 pub struct Monitors {
     /// Monitors in sort order: primary (at 0,0) first, then by position.
     pub list: Vec<MonitorInfo>,
-}
-
-/// Component storing the current monitor and effective window mode.
-///
-/// This is the single source of truth for which monitor a window is on and its
-/// effective display mode. Updated automatically by the plugin's unified monitor
-/// detection system.
-///
-/// The `effective_window_mode` field reflects what the user actually sees, even when
-/// `window.mode` is stale (e.g., macOS green button fullscreen reports `Windowed`).
-///
-/// Derefs to [`MonitorInfo`] for convenient access to monitor fields:
-/// ```ignore
-/// fn my_system(query: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
-///     let (window, monitor) = query.single();
-///     println!("Monitor {} at scale {}, mode: {:?}", monitor.index, monitor.scale, monitor.effective_window_mode);
-/// }
-/// ```
-#[derive(Component, Clone, Copy, Debug, Reflect)]
-#[reflect(Component)]
-pub struct CurrentMonitor {
-    /// The monitor this window is currently on.
-    pub monitor_info:          MonitorInfo,
-    /// The effective window mode, accounting for OS-level fullscreen changes.
-    pub effective_window_mode: WindowMode,
-}
-
-impl Deref for CurrentMonitor {
-    type Target = MonitorInfo;
-
-    fn deref(&self) -> &Self::Target { &self.monitor_info }
 }
 
 /// A display was connected.
@@ -116,6 +58,7 @@ impl Deref for CurrentMonitor {
 /// A reconnect of the same physical display fires this again, so treat connect
 /// as idempotent (resume, don't duplicate).
 #[derive(Event, Debug, Clone, Reflect)]
+#[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorConnected {
     /// The newly present monitor, as recorded in [`Monitors`].
     pub monitor: MonitorInfo,
@@ -127,6 +70,7 @@ pub struct MonitorConnected {
 /// previous [`Monitors`] snapshot, since the winit `Monitor` entity and its handle
 /// are gone by the time this fires.
 #[derive(Event, Debug, Clone, Reflect)]
+#[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorDisconnected {
     /// Geometry of the monitor as last known, before it vanished.
     pub monitor: MonitorInfo,
@@ -241,28 +185,6 @@ impl Monitors {
     }
 }
 
-/// Stable 64-bit hash used to normalize a platform key into a [`MonitorId`].
-fn hash_monitor_key(key: impl Hash) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    key.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Read winit's per-platform native display id and normalize it to [`MonitorId`].
-fn native_monitor_id(handle: &MonitorHandle) -> MonitorId {
-    #[cfg(target_os = "macos")]
-    let raw = { u64::from(handle.native_id()) };
-    #[cfg(target_os = "windows")]
-    let raw = { hash_monitor_key(handle.native_id()) };
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let raw = {
-        // X11 and Wayland both expose `native_id() -> u32`; winit dispatches to
-        // the active backend, so importing either trait resolves the same value.
-        u64::from(handle.native_id())
-    };
-    MonitorId(raw)
-}
-
 /// Connect/disconnect deltas between two monitor snapshots, keyed on
 /// [`MonitorId`]. Returns `(connected, disconnected)`: displays present only in
 /// `rebuilt`, and displays present only in `previous`.
@@ -302,12 +224,12 @@ fn build_monitors(
                     warn!(
                         "[build_monitors] no winit handle for monitor entity {entity}; keying id on position"
                     );
-                    MonitorId(hash_monitor_key((
+                    MonitorId(identity::hash_monitor_key((
                         monitor.physical_position.x,
                         monitor.physical_position.y,
                     )))
                 },
-                |handle| native_monitor_id(&handle),
+                |handle| identity::native_monitor_id(&handle),
             );
             MonitorInfo {
                 id,
@@ -350,7 +272,7 @@ pub(crate) fn init_monitors(
 
 /// Update `Monitors` resource when monitors are added or removed, and trigger a
 /// [`MonitorConnected`] / [`MonitorDisconnected`] per changed display.
-fn update_monitors(
+pub(super) fn update_monitors(
     mut commands: Commands,
     monitors: Query<(Entity, &Monitor)>,
     winit_monitors: Res<WinitMonitors>,
@@ -399,6 +321,8 @@ fn update_monitors(
 
 #[cfg(test)]
 mod tests {
+    use bevy::reflect::TypePath;
+
     use super::*;
 
     fn monitor(id: u64, position: IVec2) -> MonitorInfo {
@@ -409,6 +333,28 @@ mod tests {
             physical_position: position,
             physical_size:     UVec2::new(2560, 1440),
         }
+    }
+
+    #[test]
+    fn reflected_type_paths_preserve_legacy_monitor_module() {
+        assert_eq!(
+            [
+                <CurrentMonitor as TypePath>::type_path(),
+                <MonitorId as TypePath>::type_path(),
+                <MonitorInfo as TypePath>::type_path(),
+                <Monitors as TypePath>::type_path(),
+                <MonitorConnected as TypePath>::type_path(),
+                <MonitorDisconnected as TypePath>::type_path(),
+            ],
+            [
+                "bevy_clerestory::monitors::CurrentMonitor",
+                "bevy_clerestory::monitors::MonitorId",
+                "bevy_clerestory::monitors::MonitorInfo",
+                "bevy_clerestory::monitors::Monitors",
+                "bevy_clerestory::monitors::MonitorConnected",
+                "bevy_clerestory::monitors::MonitorDisconnected",
+            ]
+        );
     }
 
     #[test]
