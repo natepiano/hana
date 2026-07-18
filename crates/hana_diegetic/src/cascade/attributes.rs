@@ -17,6 +17,7 @@ use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::WidgetInteractivity;
 
 /// Typed cascade commands for entity-local authored values.
 ///
@@ -27,6 +28,22 @@ use crate::render::HairlineFade;
 /// [`CascadeSet::Propagate`](super::CascadeSet::Propagate) and reads after it
 /// for same-frame observation.
 pub trait CascadeEntityCommandsExt {
+    /// Authors this entity's durable widget interactivity.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. Reified widget
+    /// entities are derived from their panel's [`LayoutTree`](crate::LayoutTree);
+    /// use [`PanelWidgetWriter`](crate::PanelWidgetWriter) for durable
+    /// widget-local edits.
+    fn override_widget_interactivity(&mut self, value: WidgetInteractivity) -> &mut Self;
+
+    /// Makes this entity durably inherit widget interactivity.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. Reified widget
+    /// entities are derived from their panel's [`LayoutTree`](crate::LayoutTree);
+    /// use [`PanelWidgetWriter`](crate::PanelWidgetWriter) for durable
+    /// widget-local edits.
+    fn inherit_widget_interactivity(&mut self) -> &mut Self;
+
     /// Author this entity's text alpha mode.
     fn override_text_alpha(&mut self, alpha_mode: AlphaMode) -> &mut Self;
 
@@ -105,6 +122,14 @@ pub trait CascadeEntityCommandsExt {
 }
 
 impl CascadeEntityCommandsExt for EntityCommands<'_> {
+    fn override_widget_interactivity(&mut self, value: WidgetInteractivity) -> &mut Self {
+        apply_cascade_override(self, value)
+    }
+
+    fn inherit_widget_interactivity(&mut self) -> &mut Self {
+        remove_cascade_override::<WidgetInteractivity>(self)
+    }
+
     fn override_text_alpha(&mut self, alpha_mode: AlphaMode) -> &mut Self {
         apply_cascade_override(self, TextAlpha(alpha_mode))
     }

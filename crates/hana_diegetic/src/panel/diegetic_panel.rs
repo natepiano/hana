@@ -59,6 +59,8 @@ use crate::render::DrawOrder;
 use crate::render::HairlineFade;
 use crate::widgets;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::PanelWidgetIndex;
+use crate::widgets::WidgetInteractivity;
 
 /// Source tree plus the revision token used by derived tree caches.
 #[derive(Clone, Default)]
@@ -90,6 +92,22 @@ impl PanelTree {
 
     fn set_element_style(&mut self, index: usize, style: TextStyle) -> bool {
         if self.tree.set_element_style(index, style) {
+            self.revision.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn set_widget_interactivity(
+        &mut self,
+        id: &crate::PanelElementId,
+        authored: Cascade<WidgetInteractivity>,
+    ) -> bool {
+        if self.tree.widget_interactivity(id) == Some(authored) {
+            return false;
+        }
+        if self.tree.set_widget_interactivity(id, authored) {
             self.revision.bump();
             true
         } else {
@@ -157,6 +175,7 @@ impl From<TreeRevision> for u64 {
     DiegeticPanelChangeClassification,
     LastPanelDimensions,
     PanelPrecomposeCache,
+    PanelWidgetIndex,
     ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
     Transform,
@@ -226,9 +245,6 @@ pub struct DiegeticPanel {
     /// clears it so a stale id stops resolving when the replacement applies.
     #[reflect(ignore)]
     pub(crate) text_index:             HashMap<crate::PanelElementId, Entity>,
-    /// Panel-local widget id index rebuilt by widget reification.
-    #[reflect(ignore)]
-    widget_index:                      HashMap<crate::PanelElementId, Entity>,
 }
 
 impl Default for DiegeticPanel {
@@ -250,7 +266,6 @@ impl Default for DiegeticPanel {
             hdr_text_coverage_bias: Cascade::Inherit,
             coordinate_space:       CoordinateSpace::default(),
             text_index:             HashMap::new(),
-            widget_index:           HashMap::new(),
         }
     }
 }
@@ -327,17 +342,6 @@ impl DiegeticPanel {
     pub fn text_child(&self, id: &crate::PanelElementId) -> Option<Entity> {
         self.text_index.get(id).copied()
     }
-
-    pub(crate) fn widget_entity(&self, id: &crate::PanelElementId) -> Option<Entity> {
-        self.widget_index.get(id).copied()
-    }
-
-    pub(crate) fn replace_widget_index(
-        &mut self,
-        widget_index: HashMap<crate::PanelElementId, Entity>,
-    ) {
-        self.widget_index = widget_index;
-    }
 }
 
 // ── Public mutators ─────────────────────────────────────────────────────────
@@ -373,7 +377,6 @@ impl DiegeticPanel {
     pub(crate) fn replace_tree_full_rebuild(&mut self, tree: LayoutTree) {
         self.tree.replace(tree);
         self.text_index.clear();
-        self.widget_index.clear();
     }
 
     fn replace_classified_tree(&mut self, tree: LayoutTree, change: LayoutTreeChange) {
@@ -388,7 +391,6 @@ impl DiegeticPanel {
         let mut panel = panel;
         panel.tree.use_next_revision_after_replacement(&self.tree);
         panel.text_index.clear();
-        panel.widget_index.clear();
         // `apply_precompose_helper_panel` replaces structural panel data only;
         // the assignments below retain the existing entity's cascade seeds.
         panel.font_unit = self.font_unit;
@@ -432,6 +434,14 @@ impl DiegeticPanel {
     /// revision bump (and so the layout) when the style already matches.
     pub(crate) fn restyle_run(&mut self, index: usize, style: TextStyle) -> bool {
         self.tree.set_element_style(index, style)
+    }
+
+    pub(crate) fn set_widget_interactivity(
+        &mut self,
+        id: &crate::PanelElementId,
+        authored: Cascade<WidgetInteractivity>,
+    ) -> bool {
+        self.tree.set_widget_interactivity(id, authored)
     }
 
     /// Sets the panel width directly (in layout units).
@@ -759,25 +769,37 @@ impl DiegeticPanelCommands for Commands<'_, '_> {
 
 fn set_tree_command(
     In((entity, next_tree)): In<(Entity, LayoutTree)>,
-    mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
+    mut panels: Query<(
+        &mut DiegeticPanel,
+        &mut DiegeticPanelChangeClassification,
+        &mut PanelWidgetIndex,
+    )>,
 ) {
-    let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
+    let Ok((mut panel, mut classification, mut widget_index)) = panels.get_mut(entity) else {
         return;
     };
     let change = panel.tree().classify_change(&next_tree);
     classification.record_tree_change(change);
     panel.replace_classified_tree(next_tree, change);
+    if change != LayoutTreeChange::Identical {
+        widget_index.clear();
+    }
 }
 
 pub(crate) fn apply_precompose_helper_panel(
     In((entity, next_panel)): In<(Entity, DiegeticPanel)>,
-    mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
+    mut panels: Query<(
+        &mut DiegeticPanel,
+        &mut DiegeticPanelChangeClassification,
+        &mut PanelWidgetIndex,
+    )>,
 ) {
-    let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
+    let Ok((mut panel, mut classification, mut widget_index)) = panels.get_mut(entity) else {
         return;
     };
     classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
     panel.replace_from_precompose_helper(next_panel);
+    widget_index.clear();
 }
 
 pub(super) fn apply_pending_panel_conversions(
@@ -790,6 +812,7 @@ pub(super) fn apply_pending_panel_conversions(
         Entity,
         &PendingPanelConversion,
         &mut DiegeticPanel,
+        &mut PanelWidgetIndex,
         &mut Transform,
         &mut DiegeticPanelChangeClassification,
         &mut ResolvedScreenPanelPosition,
@@ -805,6 +828,7 @@ pub(super) fn apply_pending_panel_conversions(
         entity,
         pending,
         mut panel,
+        mut widget_index,
         mut transform,
         mut classification,
         mut resolved_position,
@@ -832,6 +856,7 @@ pub(super) fn apply_pending_panel_conversions(
                     &mut commands,
                     &cameras,
                     &mut panel,
+                    &mut widget_index,
                     &transform,
                     &mut classification,
                     saved,
@@ -848,6 +873,7 @@ pub(super) fn apply_pending_panel_conversions(
                     &windows,
                     &cameras,
                     &mut panel,
+                    &mut widget_index,
                     &mut transform,
                     &mut resolved_position,
                     source,
@@ -859,6 +885,7 @@ pub(super) fn apply_pending_panel_conversions(
                 conversion,
                 &mut commands,
                 &mut panel,
+                &mut widget_index,
                 &mut transform,
                 &mut classification,
                 saved,
@@ -882,6 +909,7 @@ fn apply_panel_screen_conversion_now(
     windows: &Query<&Window>,
     cameras: &Query<&GlobalTransform, With<Camera>>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &mut Transform,
     resolved_position: &mut ResolvedScreenPanelPosition,
     source: ScreenConversionSource<'_>,
@@ -905,6 +933,7 @@ fn apply_panel_screen_conversion_now(
             &conversion,
             commands,
             panel,
+            widget_index,
             transform,
             None,
             source,
@@ -952,6 +981,7 @@ fn begin_panel_to_screen_now(
     commands: &mut Commands<'_, '_>,
     cameras: &Query<&GlobalTransform, With<Camera>>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &Transform,
     classification: &mut DiegeticPanelChangeClassification,
     saved: Option<&SavedPanelWorldState>,
@@ -969,6 +999,7 @@ fn begin_panel_to_screen_now(
         &conversion,
         commands,
         panel,
+        widget_index,
         transform,
         saved,
         source,
@@ -987,6 +1018,7 @@ fn prepare_world_panel_for_screen_conversion(
     conversion: &PanelScreenConversion,
     commands: &mut Commands<'_, '_>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &Transform,
     saved: Option<&SavedPanelWorldState>,
     source: ScreenConversionSource<'_>,
@@ -1013,6 +1045,7 @@ fn prepare_world_panel_for_screen_conversion(
     );
     apply_screen_root_sizing(&mut tree, conversion.width, conversion.height);
     panel.replace_tree_full_rebuild(tree);
+    widget_index.clear();
     panel.width = conversion.size.x;
     panel.height = conversion.size.y;
     panel.layout_unit = Unit::Pixels;
@@ -1076,6 +1109,7 @@ fn apply_panel_world_conversion_now(
     conversion: PanelWorldConversion,
     commands: &mut Commands<'_, '_>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &mut Transform,
     classification: &mut DiegeticPanelChangeClassification,
     saved: Option<&SavedPanelWorldState>,
@@ -1103,6 +1137,7 @@ fn apply_panel_world_conversion_now(
             warn!("failed to convert panel {entity:?} to saved world space: {error}");
             return;
         }
+        widget_index.clear();
         classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
     } else if let Err(error) = apply_world_conversion(panel, conversion) {
         warn!("failed to convert panel {entity:?} to world space: {error}");
@@ -1247,6 +1282,10 @@ impl DiegeticPanelChangeClassification {
         self.tree_visual_geometry_stable = false;
     }
 
+    pub(crate) fn note_widget_interactivity_edit(&mut self) {
+        self.record_tree_change(LayoutTreeChange::VisualOnly);
+    }
+
     pub(super) fn take_with_tree_visual_geometry_stable(
         &mut self,
     ) -> (Option<LayoutTreeChange>, bool) {
@@ -1352,6 +1391,9 @@ pub struct ComputedDiegeticPanel {
     widget_records:     Vec<ComputedWidgetRecord>,
     content_width:      f32,
     content_height:     f32,
+    #[cfg(test)]
+    #[reflect(ignore)]
+    layout_solves:      usize,
 }
 
 impl ComputedDiegeticPanel {
@@ -1404,6 +1446,9 @@ impl ComputedDiegeticPanel {
 
     pub(crate) fn widget_records(&self) -> &[ComputedWidgetRecord] { &self.widget_records }
 
+    #[cfg(test)]
+    pub(crate) const fn layout_solves(&self) -> usize { self.layout_solves }
+
     /// Regenerates `LayoutResult::commands` and keeps `DrawOrder` synchronized.
     ///
     /// Returns `false` when the panel has no computed `LayoutResult` yet.
@@ -1439,6 +1484,10 @@ impl ComputedDiegeticPanel {
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;
         self.widget_records = widget_records;
+        #[cfg(test)]
+        {
+            self.layout_solves += 1;
+        }
     }
 
     /// Sets the content dimensions in world units.

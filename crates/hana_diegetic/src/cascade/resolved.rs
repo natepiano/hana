@@ -17,6 +17,7 @@ use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::render::HairlineWidth;
+use crate::widgets::WidgetInteractivity;
 
 /// Implements [`bevy_kana::CascadeRootResource`] for a `Copy` attribute type
 /// that is its own root resource. The type must derive `Resource`.
@@ -245,6 +246,12 @@ cascade_attribute!(existing AntiAlias, default = AntiAlias::Both);
 // the one resource carries both the fade policy and the `logical_px` stroke
 // floor that `sync_hairline_width` sends to `PathUniform::hairline_min_px`.
 cascade_attribute!(existing HairlineFade, root = HairlineWidth, default = HairlineFade::Full);
+// Widget interactivity defaults to enabled when no ECS or layout scope authors
+// an override.
+cascade_attribute!(
+    existing WidgetInteractivity,
+    default = WidgetInteractivity::Enabled
+);
 
 pub(crate) trait CascadeRoot: bevy_kana::CascadeAttribute {
     /// Resource holding this attribute's app-wide root value.

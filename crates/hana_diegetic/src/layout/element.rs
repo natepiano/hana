@@ -40,6 +40,7 @@ use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetSpec;
 
 /// Result of replacing the display text for a panel field.
@@ -123,6 +124,8 @@ pub(super) struct Element {
     /// and global material cascade defaults.
     /// `base_color` is overridden by layout or primitive color when both are set.
     pub(super) material:        Cascade<Handle<StandardMaterial>>,
+    /// Authored widget interactivity for this layout scope.
+    pub(super) interactivity:   Cascade<WidgetInteractivity>,
     /// Optional editable field contract.
     pub(super) editable:        Option<ImePanelField>,
     /// Optional authored widget contract.
@@ -200,6 +203,7 @@ impl Default for Element {
             scroll_anchor_x: ScrollAnchor::Start,
             scroll_anchor_y: ScrollAnchor::Start,
             material:        Cascade::Inherit,
+            interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
             draw:            None,
@@ -593,6 +597,36 @@ impl LayoutTree {
             .and_then(|element| element.id.as_ref())
     }
 
+    pub(crate) fn widget_interactivity(
+        &self,
+        id: &PanelElementId,
+    ) -> Option<Cascade<WidgetInteractivity>> {
+        self.widget_element_index(id)
+            .map(|index| self.elements[index].interactivity)
+    }
+
+    pub(crate) fn set_widget_interactivity(
+        &mut self,
+        id: &PanelElementId,
+        authored: Cascade<WidgetInteractivity>,
+    ) -> bool {
+        let Some(index) = self.widget_element_index(id) else {
+            return false;
+        };
+        self.elements[index].interactivity = authored;
+        true
+    }
+
+    fn widget_element_index(&self, id: &PanelElementId) -> Option<usize> {
+        self.elements.iter().position(|element| {
+            element.widget.is_some()
+                && element
+                    .id
+                    .as_ref()
+                    .is_some_and(|element_id| element_id == id)
+        })
+    }
+
     /// Returns the panel-local id of the text element at `index`, if that
     /// element is a text leaf. Reification reads this to key a child by its id instead of
     /// the former positional `(element_idx, command_index)` pair.
@@ -693,22 +727,27 @@ impl LayoutTree {
             return Vec::new();
         };
         let mut records = Vec::new();
-        let mut stack = vec![root];
+        let mut stack = vec![(root, Cascade::Inherit)];
         let mut preorder = 0;
-        while let Some(index) = stack.pop() {
+        while let Some((index, inherited_interactivity)) = stack.pop() {
             let Some(element) = self.elements.get(index) else {
                 continue;
+            };
+            let interactivity = match element.interactivity {
+                Cascade::Inherit => inherited_interactivity,
+                Cascade::Override(value) => Cascade::Override(value),
             };
             if let (Some(id), Some(widget)) = (&element.id, &element.widget) {
                 records.push(ComputedWidgetRecord::new(
                     id.clone(),
                     preorder,
                     widget.clone(),
+                    interactivity,
                 ));
             }
             preorder += 1;
             for &child in self.children_of(index).iter().rev() {
-                stack.push(child);
+                stack.push((child, interactivity));
             }
         }
         records
@@ -868,6 +907,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         scroll_anchor_x,
         scroll_anchor_y,
         material,
+        interactivity,
         editable,
         widget,
         draw,
@@ -892,6 +932,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         scroll_anchor_x: n_scroll_anchor_x,
         scroll_anchor_y: n_scroll_anchor_y,
         material: n_material,
+        interactivity: n_interactivity,
         editable: n_editable,
         widget: n_widget,
         draw: n_draw,
@@ -930,6 +971,9 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
     if widget != n_widget {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
+    if interactivity != n_interactivity {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
     if background != n_background || corner_radius != n_corner_radius {
@@ -1135,6 +1179,7 @@ mod tests {
     use crate::PanelElementId;
     use crate::Slider;
     use crate::SliderRange;
+    use crate::WidgetInteractivity;
     use crate::cascade::Cascade;
     use crate::layout::AlignX;
     use crate::layout::AlignY;
@@ -1470,6 +1515,48 @@ mod tests {
         let next = root_tree(El::new().slider("level", next_slider));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn interactivity_only_classifies_as_visual_only() {
+        let tree = root_tree(El::new().button("action", Button::new()));
+        let next = root_tree(
+            El::new()
+                .button("action", Button::new())
+                .widget_interactivity(WidgetInteractivity::Disabled),
+        );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn computed_widgets_fold_nearest_layout_interactivity() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::column().widget_interactivity(WidgetInteractivity::Disabled),
+            |builder| {
+                builder.with(El::new().button("disabled", Button::new()), |_| {});
+                builder.with(
+                    El::row().widget_interactivity(WidgetInteractivity::Enabled),
+                    |builder| {
+                        builder.with(El::new().button("enabled", Button::new()), |_| {});
+                    },
+                );
+            },
+        );
+        builder.with(El::new().button("inherited", Button::new()), |_| {});
+        let records = builder.build().computed_widget_records();
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0].interactivity(),
+            Cascade::Override(WidgetInteractivity::Disabled)
+        );
+        assert_eq!(
+            records[1].interactivity(),
+            Cascade::Override(WidgetInteractivity::Enabled)
+        );
+        assert_eq!(records[2].interactivity(), Cascade::Inherit);
     }
 
     #[test]

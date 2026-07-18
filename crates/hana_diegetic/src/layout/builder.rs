@@ -61,6 +61,7 @@ use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::widgets::Button;
 use crate::widgets::Slider;
+use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetSpec;
 
 /// Shorthand element declaration for the builder API.
@@ -288,6 +289,7 @@ struct CommonEl {
     scroll_anchor_x: ScrollAnchor,
     scroll_anchor_y: ScrollAnchor,
     material:        Cascade<Handle<StandardMaterial>>,
+    interactivity:   Cascade<WidgetInteractivity>,
     editable:        Option<ImePanelField>,
     widget:          Option<WidgetSpec>,
     draw:            Option<PanelDraw>,
@@ -315,6 +317,7 @@ impl Default for CommonEl {
             scroll_anchor_x: ScrollAnchor::Start,
             scroll_anchor_y: ScrollAnchor::Start,
             material:        Cascade::Inherit,
+            interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
             draw:            None,
@@ -342,6 +345,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         scroll_anchor_x: common.scroll_anchor_x,
         scroll_anchor_y: common.scroll_anchor_y,
         material: common.material,
+        interactivity: common.interactivity,
         editable: common.editable,
         widget: common.widget,
         draw: common.draw,
@@ -592,6 +596,14 @@ impl<L> El<L> {
         self
     }
 
+    /// Authors widget interactivity for this element and its widget descendants.
+    ///
+    /// A descendant can replace this value with its own override.
+    pub const fn widget_interactivity(mut self, value: WidgetInteractivity) -> Self {
+        self.common.interactivity = Cascade::Override(value);
+        self
+    }
+
     /// Sets paint-only draw primitives owned by this element.
     ///
     /// `PanelDraw` does not affect layout measurement. It is stored for later
@@ -678,6 +690,7 @@ impl<L> El<L> {
             scroll_anchor_x: common.scroll_anchor_x,
             scroll_anchor_y: common.scroll_anchor_y,
             material: common.material,
+            interactivity: common.interactivity,
             editable: common.editable,
             widget: common.widget,
             draw: common.draw,
