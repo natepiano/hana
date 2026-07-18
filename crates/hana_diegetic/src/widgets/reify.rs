@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::PanelWidget;
+use super::PanelWidgetIndex;
 use super::PanelWidgets;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
 use crate::PanelElementId;
+use crate::cascade::Cascade;
+use crate::cascade::CascadeFrom;
 use crate::panel::ComputedDiegeticPanel;
-use crate::panel::DiegeticPanel;
 
 #[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
 pub(super) struct WidgetPreorder(usize);
@@ -19,16 +21,23 @@ pub(super) fn reify_widgets(
     mut changed_panels: Query<
         (
             Entity,
-            &mut DiegeticPanel,
             &ComputedDiegeticPanel,
             Option<&PanelWidgets>,
+            &mut PanelWidgetIndex,
         ),
         Changed<ComputedDiegeticPanel>,
     >,
-    existing_widgets: Query<(&PanelWidget, &WidgetKind, &WidgetSpec, &WidgetPreorder)>,
+    existing_widgets: Query<(
+        &PanelWidget,
+        &WidgetKind,
+        &WidgetSpec,
+        &WidgetPreorder,
+        Option<&Cascade<super::WidgetInteractivity>>,
+        Option<&CascadeFrom>,
+    )>,
     mut commands: Commands,
 ) {
-    for (panel_entity, mut panel, computed, panel_widgets) in &mut changed_panels {
+    for (panel_entity, computed, panel_widgets, mut widget_index) in &mut changed_panels {
         let existing_entities: &[Entity] = panel_widgets.map_or(&[], |widgets| &**widgets);
         let existing_by_id: HashMap<&PanelElementId, Entity> = existing_entities
             .iter()
@@ -36,12 +45,12 @@ pub(super) fn reify_widgets(
                 existing_widgets
                     .get(*entity)
                     .ok()
-                    .map(|(widget, _, _, _)| (widget.id(), *entity))
+                    .map(|(widget, _, _, _, _, _)| (widget.id(), *entity))
             })
             .collect();
 
         let mut visited = Vec::with_capacity(computed.widget_records().len());
-        let mut widget_index = HashMap::with_capacity(computed.widget_records().len());
+        let mut next_widget_index = HashMap::with_capacity(computed.widget_records().len());
         for record in computed.widget_records() {
             let entity = match existing_by_id.get(record.id()).copied() {
                 None => spawn_widget(
@@ -51,6 +60,7 @@ pub(super) fn reify_widgets(
                     record.kind(),
                     record.authored().clone(),
                     record.preorder(),
+                    record.interactivity(),
                 ),
                 Some(entity) => {
                     update_widget(
@@ -59,13 +69,15 @@ pub(super) fn reify_widgets(
                         record.kind(),
                         record.authored(),
                         record.preorder(),
+                        record.interactivity(),
+                        panel_entity,
                         &existing_widgets,
                     );
                     entity
                 },
             };
             visited.push(entity);
-            widget_index.insert(record.id().clone(), entity);
+            next_widget_index.insert(record.id().clone(), entity);
         }
 
         for &entity in existing_entities {
@@ -74,9 +86,7 @@ pub(super) fn reify_widgets(
             }
         }
 
-        panel
-            .bypass_change_detection()
-            .replace_widget_index(widget_index);
+        widget_index.replace(next_widget_index);
     }
 }
 
@@ -87,6 +97,7 @@ fn spawn_widget(
     kind: WidgetKind,
     authored: WidgetSpec,
     preorder: usize,
+    interactivity: Cascade<super::WidgetInteractivity>,
 ) -> Entity {
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel).with_children(|children| {
@@ -97,6 +108,8 @@ fn spawn_widget(
                 kind,
                 authored,
                 WidgetPreorder(preorder),
+                interactivity,
+                CascadeFrom::new(panel),
             ))
             .id();
     });
@@ -109,22 +122,43 @@ fn update_widget(
     kind: WidgetKind,
     authored: &WidgetSpec,
     preorder: usize,
-    existing_widgets: &Query<(&PanelWidget, &WidgetKind, &WidgetSpec, &WidgetPreorder)>,
+    interactivity: Cascade<super::WidgetInteractivity>,
+    panel: Entity,
+    existing_widgets: &Query<(
+        &PanelWidget,
+        &WidgetKind,
+        &WidgetSpec,
+        &WidgetPreorder,
+        Option<&Cascade<super::WidgetInteractivity>>,
+        Option<&CascadeFrom>,
+    )>,
 ) {
-    let Ok((_, existing_kind, existing_authored, existing_preorder)) = existing_widgets.get(entity)
+    let Ok((
+        _,
+        existing_kind,
+        existing_authored,
+        existing_preorder,
+        existing_interactivity,
+        existing_cascade_from,
+    )) = existing_widgets.get(entity)
     else {
         return;
     };
     let mut widget = commands.entity(entity);
     if *existing_kind != kind {
-        widget.insert((kind, authored.clone(), WidgetPreorder(preorder)));
-        return;
+        widget.insert(kind);
     }
     if existing_authored != authored {
         widget.insert(authored.clone());
     }
     if existing_preorder.0 != preorder {
         widget.insert(WidgetPreorder(preorder));
+    }
+    if existing_interactivity != Some(&interactivity) {
+        widget.insert(interactivity);
+    }
+    if existing_cascade_from.is_none_or(|relationship| relationship.target() != panel) {
+        widget.insert(CascadeFrom::new(panel));
     }
 }
 
@@ -148,7 +182,10 @@ mod tests {
     use crate::PanelWidgets;
     use crate::Slider;
     use crate::SliderRange;
+    use crate::WidgetInteractivity;
     use crate::WidgetOf;
+    use crate::cascade::Cascade;
+    use crate::cascade::CascadeFrom;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::WidgetKind;
     use crate::widgets::WidgetSpec;
@@ -343,21 +380,44 @@ mod tests {
     #[test]
     fn kind_replacement_retains_entity_and_replaces_authored_snapshot() {
         let mut app = test_app();
-        let Some(panel) = spawn_panel(&mut app, widget_tree(&["control"])) else {
+        let panel = spawn_panel(&mut app, widget_tree(&["control"]));
+        assert!(panel.is_some());
+        let Some(panel) = panel else {
             return;
         };
         app.update();
         let before = resolve_widget(&mut app, panel, PanelElementId::named("control"));
-        let Some(tree) = slider_tree("control", 4.0) else {
+        assert!(before.is_some());
+        let Some(before) = before else {
             return;
         };
+        let interactivity_tick = app
+            .world()
+            .entity(before)
+            .get_ref::<Cascade<WidgetInteractivity>>()
+            .map(|authored| authored.last_changed());
+        let relationship_tick = app
+            .world()
+            .entity(before)
+            .get_ref::<CascadeFrom>()
+            .map(|relationship| relationship.last_changed());
+        let tree = slider_tree("control", 4.0);
+        assert!(tree.is_some());
+        let Some(tree) = tree else {
+            return;
+        };
+        let expected_authored = tree
+            .computed_widget_records()
+            .into_iter()
+            .next()
+            .map(|record| record.authored().clone());
 
         let result = app.world_mut().commands().set_tree(panel, tree);
         assert!(result.is_ok());
         app.update();
 
         let after = resolve_widget(&mut app, panel, PanelElementId::named("control"));
-        assert_eq!(before, after);
+        assert_eq!(after, Some(before));
         let Some(widget) = after else {
             return;
         };
@@ -365,10 +425,25 @@ mod tests {
             app.world().get::<WidgetKind>(widget),
             Some(&WidgetKind::Slider)
         );
-        assert!(matches!(
+        assert_eq!(
             app.world().get::<WidgetSpec>(widget),
-            Some(WidgetSpec::Slider(_))
-        ));
+            expected_authored.as_ref()
+        );
+        assert!(matches!(expected_authored, Some(WidgetSpec::Slider(_))));
+        assert_eq!(
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetInteractivity>>()
+                .map(|authored| authored.last_changed()),
+            interactivity_tick
+        );
+        assert_eq!(
+            app.world()
+                .entity(widget)
+                .get_ref::<CascadeFrom>()
+                .map(|relationship| relationship.last_changed()),
+            relationship_tick
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@ use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::WidgetInteractivity;
 
 macro_rules! cascade_attribute {
     // Joins an already-declared value type (one whose own name is the
@@ -164,6 +165,12 @@ cascade_attribute!(existing AntiAlias, default = AntiAlias::Both);
 // global; `sync_hairline_fade` mirrors it into `CascadeDefault<HairlineFade>`
 // as the cascade root default.
 cascade_attribute!(existing HairlineFade, default = HairlineFade::Full);
+// Widget interactivity defaults to enabled when no ECS or layout scope authors
+// an override.
+cascade_attribute!(
+    existing WidgetInteractivity,
+    default = WidgetInteractivity::Enabled
+);
 
 pub(crate) trait CascadeRoot: bevy_kana::CascadeAttribute {
     fn root_default() -> Self;
