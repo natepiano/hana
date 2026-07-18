@@ -38,7 +38,6 @@ mod events;
 #[cfg(target_os = "macos")]
 mod macos_tabbing_fix;
 mod managed;
-mod monitor;
 mod monitors;
 mod persistence;
 mod platform;
@@ -231,18 +230,19 @@ impl Plugin for WindowManagerPluginCustomPath {
                 .run_if(|p: Res<Platform>| p.is_x11()),
         );
 
-        // `monitor::update_current_monitor` runs before persistence systems read `CurrentMonitor`.
+        // `monitors::update_current_monitor` runs before persistence systems read
+        // `CurrentMonitor`.
         app.add_systems(
             Update,
             (
-                monitor::update_current_monitor,
+                monitors::update_current_monitor,
                 persistence::save_window_state
                     .run_if(no_restoring_windows)
-                    .after(monitor::update_current_monitor),
+                    .after(monitors::update_current_monitor),
                 on_persistence_changed
                     .run_if(resource_changed::<ManagedWindowPersistence>)
                     .run_if(no_restoring_windows)
-                    .after(monitor::update_current_monitor),
+                    .after(monitors::update_current_monitor),
             ),
         );
     }
