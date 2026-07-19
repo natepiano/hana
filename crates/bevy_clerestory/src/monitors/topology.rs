@@ -1,7 +1,4 @@
-//! Monitor management for window restoration.
-//!
-//! Provides a `Monitors` resource that maintains a sorted list of monitors,
-//! automatically updated when monitors are added or removed.
+//! Monitor topology snapshots and raw lifetime events.
 
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
@@ -13,15 +10,22 @@ use bevy_kana::ToI32;
 
 use super::CurrentMonitor;
 use super::identity;
+use super::identity::MonitorConfiguration;
+use super::identity::MonitorConfigurationState;
 use super::identity::MonitorId;
+use super::identity::MonitorIdentificationError;
+use super::identity::MonitorIdentity;
+use super::identity::MonitorIdentityRegistry;
+use super::identity::MonitorInstanceId;
+use crate::Platform;
 
-/// Information about a single monitor.
-#[derive(Clone, Copy, Debug, Reflect)]
+/// Entity-free information about one live monitor.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorInfo {
-    /// Stable OS display id, unchanged across rearrangement.
-    pub id:                MonitorId,
-    /// Index in the sorted monitor list.
+    /// Verified physical-panel identity, when qualified evidence is available.
+    pub identity:          MonitorIdentity,
+    /// Index in the monitor enumeration order.
     pub index:             usize,
     /// Scale factor (typically 1.0 or 2.0 on macOS).
     pub scale:             f64,
@@ -31,97 +35,124 @@ pub struct MonitorInfo {
     pub physical_size:     UVec2,
 }
 
-/// Sorted monitor list, updated when monitors change.
-///
-/// `Monitors` are sorted with primary (at 0,0) first, then by position.
+/// One current monitor entity and its entity-free metadata.
+#[derive(Clone, Copy, Debug)]
+pub struct LiveMonitor<'a> {
+    /// Bevy monitor entity for the current monitor lifetime.
+    pub entity:       Entity,
+    /// Metadata for the current monitor lifetime.
+    pub monitor_info: &'a MonitorInfo,
+}
+
+/// Current monitor topology in winit enumeration order.
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct Monitors {
-    /// Monitors in sort order: primary (at 0,0) first, then by position.
-    pub list: Vec<MonitorInfo>,
+    #[reflect(ignore)]
+    live: Vec<MonitorSnapshot>,
 }
 
-/// A display was connected.
+/// A monitor entity lifetime started.
 ///
-/// Triggered after [`Monitors`] is rebuilt to include it. Global rather than
-/// entity-targeted because the payload is the identity of the changed display; a
-/// consumer maps [`MonitorInfo::id`] to its own state.
-///
-/// Observe it:
-/// ```ignore
-/// app.add_observer(|connected: On<MonitorConnected>| {
-///     let id = connected.event().monitor.id;
-/// });
-/// ```
-///
-/// A reconnect of the same physical display fires this again, so treat connect
-/// as idempotent (resume, don't duplicate).
+/// The event is emitted for verified and unverified monitors. The `entity`
+/// field is valid only while the monitor remains present in [`Monitors`].
 #[derive(Event, Debug, Clone, Reflect)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorConnected {
-    /// The newly present monitor, as recorded in [`Monitors`].
+    /// Newly-created Bevy monitor entity.
+    pub entity:  Entity,
+    /// Entity-free metadata recorded in [`Monitors`].
     pub monitor: MonitorInfo,
 }
 
-/// A display was disconnected.
+/// A monitor entity lifetime ended.
 ///
-/// Triggered after [`Monitors`] is rebuilt without it. The payload comes from the
-/// previous [`Monitors`] snapshot, since the winit `Monitor` entity and its handle
-/// are gone by the time this fires.
+/// `former_entity` identifies the ended lifetime and must not be retained as a
+/// current monitor target.
 #[derive(Event, Debug, Clone, Reflect)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorDisconnected {
-    /// Geometry of the monitor as last known, before it vanished.
-    pub monitor: MonitorInfo,
+    /// Bevy monitor entity from the ended lifetime.
+    pub former_entity: Entity,
+    /// Last entity-free metadata recorded for the monitor.
+    pub monitor:       MonitorInfo,
 }
 
 impl Monitors {
-    /// Find monitor containing position `(physical_x, physical_y)`.
-    ///
-    /// Coordinates are physical pixels — winit's monitor coordinate space.
+    /// Iterate over all current monitor entities and their metadata.
     #[must_use]
-    pub fn at(&self, physical_x: i32, physical_y: i32) -> Option<&MonitorInfo> {
-        self.list.iter().find(|monitor| {
-            physical_x >= monitor.physical_position.x
-                && physical_x < monitor.physical_position.x + monitor.physical_size.x.to_i32()
-                && physical_y >= monitor.physical_position.y
-                && physical_y < monitor.physical_position.y + monitor.physical_size.y.to_i32()
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = LiveMonitor<'_>> + '_ {
+        self.live.iter().map(|monitor| LiveMonitor {
+            entity:       monitor.entity,
+            monitor_info: &monitor.monitor_info,
         })
     }
 
-    /// Get monitor by index in sorted list.
+    /// Resolve one current monitor by an exact verified physical identity.
     #[must_use]
-    pub fn by_index(&self, index: usize) -> Option<&MonitorInfo> { self.list.get(index) }
+    pub fn by_id(&self, id: MonitorId) -> Option<&MonitorInfo> {
+        self.unique_by_id(id).map(|monitor| &monitor.monitor_info)
+    }
 
-    /// Returns true if no monitors are available.
+    /// Resolve one current monitor entity by an exact verified physical identity.
+    #[must_use]
+    pub fn entity_by_id(&self, id: MonitorId) -> Option<Entity> {
+        self.unique_by_id(id).map(|monitor| monitor.entity)
+    }
+
+    /// Find the monitor containing position `(physical_x, physical_y)`.
     ///
-    /// This can happen when the laptop lid is closed or all displays are disconnected.
+    /// Coordinates are physical pixels in winit's monitor coordinate space.
     #[must_use]
-    pub const fn is_empty(&self) -> bool { self.list.is_empty() }
+    pub fn at(&self, physical_x: i32, physical_y: i32) -> Option<&MonitorInfo> {
+        self.live
+            .iter()
+            .map(|monitor| &monitor.monitor_info)
+            .find(|monitor_info| {
+                physical_x >= monitor_info.physical_position.x
+                    && physical_x
+                        < monitor_info.physical_position.x + monitor_info.physical_size.x.to_i32()
+                    && physical_y >= monitor_info.physical_position.y
+                    && physical_y
+                        < monitor_info.physical_position.y + monitor_info.physical_size.y.to_i32()
+            })
+    }
 
-    /// Get the first monitor (index 0). Used as fallback when no specific monitor is known.
+    /// Get a monitor by its current enumeration index.
+    #[must_use]
+    pub fn by_index(&self, index: usize) -> Option<&MonitorInfo> {
+        self.live
+            .iter()
+            .map(|monitor| &monitor.monitor_info)
+            .find(|monitor_info| monitor_info.index == index)
+    }
+
+    /// Return whether no monitors are available.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool { self.live.is_empty() }
+
+    /// Get the first monitor in current enumeration order.
     ///
     /// # Panics
     ///
-    /// Panics if no monitors exist (should never happen on a real system).
+    /// Panics if no monitors exist.
     #[must_use]
     #[expect(
         clippy::expect_used,
         reason = "fail fast - no monitors means unrecoverable state"
     )]
     pub fn first(&self) -> &MonitorInfo {
-        self.list
+        &self
+            .live
             .first()
             .expect("Monitors::first() requires at least one monitor")
+            .monitor_info
     }
 
-    /// Find the monitor a window is on, using window center for detection.
+    /// Find the monitor a window is on, using the window center.
     ///
-    /// Uses the center point to correctly handle windows spanning monitor boundaries
-    /// and to avoid Windows invisible border offset (winit #4107).
-    ///
-    /// All inputs are physical pixels — winit's monitor coordinate space.
+    /// All inputs are physical pixels in winit's monitor coordinate space.
     #[must_use]
     pub fn monitor_for_window(
         &self,
@@ -134,45 +165,40 @@ impl Monitors {
         self.closest_to(physical_center_x, physical_center_y)
     }
 
-    /// Find the monitor at position, or the closest one if outside all bounds.
-    ///
-    /// Unlike [`at`](Self::at), this always returns a monitor by finding
-    /// the closest monitor when position is outside all bounds.
-    ///
-    /// Coordinates are physical pixels — winit's monitor coordinate space.
+    /// Find the monitor at a position, or the closest monitor to that position.
     ///
     /// # Panics
     ///
-    /// Panics if no monitors exist (should never happen on a real system).
+    /// Panics if no monitors exist.
     #[must_use]
     #[expect(
         clippy::expect_used,
         reason = "fail fast - no monitors means unrecoverable state"
     )]
     pub fn closest_to(&self, physical_x: i32, physical_y: i32) -> &MonitorInfo {
-        if let Some(monitor) = self.at(physical_x, physical_y) {
-            return monitor;
+        if let Some(monitor_info) = self.at(physical_x, physical_y) {
+            return monitor_info;
         }
 
-        // `min_by_key` scores each `MonitorInfo` by squared distance to its
-        // physical bounds.
-        self.list
+        self.live
             .iter()
-            .min_by_key(|monitor| {
-                let physical_right = monitor.physical_position.x + monitor.physical_size.x.to_i32();
+            .map(|monitor| &monitor.monitor_info)
+            .min_by_key(|monitor_info| {
+                let physical_right =
+                    monitor_info.physical_position.x + monitor_info.physical_size.x.to_i32();
                 let physical_bottom =
-                    monitor.physical_position.y + monitor.physical_size.y.to_i32();
+                    monitor_info.physical_position.y + monitor_info.physical_size.y.to_i32();
 
-                let dx = if physical_x < monitor.physical_position.x {
-                    monitor.physical_position.x - physical_x
+                let dx = if physical_x < monitor_info.physical_position.x {
+                    monitor_info.physical_position.x - physical_x
                 } else if physical_x >= physical_right {
                     physical_x - physical_right + 1
                 } else {
                     0
                 };
 
-                let dy = if physical_y < monitor.physical_position.y {
-                    monitor.physical_position.y - physical_y
+                let dy = if physical_y < monitor_info.physical_position.y {
+                    monitor_info.physical_position.y - physical_y
                 } else if physical_y >= physical_bottom {
                     physical_y - physical_bottom + 1
                 } else {
@@ -183,95 +209,155 @@ impl Monitors {
             })
             .expect("Monitors::closest_to() requires at least one monitor")
     }
+
+    fn unique_by_id(&self, id: MonitorId) -> Option<&MonitorSnapshot> {
+        let mut matches = self
+            .live
+            .iter()
+            .filter(|monitor| monitor.monitor_info.identity == MonitorIdentity::Verified(id));
+        let monitor = matches.next()?;
+        matches.next().is_none().then_some(monitor)
+    }
+
+    #[cfg(test)]
+    pub(super) fn from_test_monitors(
+        monitors: impl IntoIterator<Item = (Entity, MonitorInfo)>,
+    ) -> Self {
+        let live = monitors
+            .into_iter()
+            .map(|(entity, monitor_info)| MonitorSnapshot {
+                instance_id: entity.into(),
+                entity,
+                monitor_info,
+            })
+            .collect();
+        Self { live }
+    }
 }
 
-/// Connect/disconnect deltas between two monitor snapshots, keyed on
-/// [`MonitorId`]. Returns `(connected, disconnected)`: displays present only in
-/// `rebuilt`, and displays present only in `previous`.
+#[derive(Clone, Copy, Debug)]
+struct MonitorSnapshot {
+    instance_id:  MonitorInstanceId,
+    entity:       Entity,
+    monitor_info: MonitorInfo,
+}
+
 fn monitor_deltas(
-    previous: &[MonitorInfo],
-    rebuilt: &[MonitorInfo],
-) -> (Vec<MonitorInfo>, Vec<MonitorInfo>) {
+    previous: &Monitors,
+    rebuilt: &Monitors,
+) -> (Vec<MonitorSnapshot>, Vec<MonitorSnapshot>) {
     let connected = rebuilt
+        .live
         .iter()
-        .filter(|monitor| !previous.iter().any(|prev| prev.id == monitor.id))
+        .filter(|monitor| {
+            !previous
+                .live
+                .iter()
+                .any(|previous| previous.instance_id == monitor.instance_id)
+        })
         .copied()
         .collect();
     let disconnected = previous
+        .live
         .iter()
-        .filter(|monitor| !rebuilt.iter().any(|next| next.id == monitor.id))
+        .filter(|monitor| {
+            !rebuilt
+                .live
+                .iter()
+                .any(|rebuilt| rebuilt.instance_id == monitor.instance_id)
+        })
         .copied()
         .collect();
     (connected, disconnected)
 }
 
-/// Build monitor list from query (preserves winit enumeration order).
-///
-/// Each monitor's [`MonitorId`] comes from its winit `MonitorHandle` in
-/// [`WinitMonitors`]; a monitor missing from that map (a broken winit invariant)
-/// falls back to a hash of its physical position so distinct displays keep
-/// distinct ids.
 fn build_monitors(
     monitors: &Query<(Entity, &Monitor)>,
     winit_monitors: &WinitMonitors,
+    identity_registry: &mut MonitorIdentityRegistry,
+    configuration: MonitorConfigurationState,
+    platform: Platform,
 ) -> Monitors {
-    let list: Vec<_> = monitors
+    for (entity, _) in monitors.iter() {
+        let instance_id = entity.into();
+        identity_registry.identity(
+            instance_id,
+            configuration,
+            || {
+                let handle = winit_monitors
+                    .find_entity(entity)
+                    .ok_or(MonitorIdentificationError::MissingMonitorHandle)?;
+                identity::qualified_evidence(&handle, platform)
+            },
+            platform,
+        );
+    }
+    identity_registry.observe_configuration(configuration);
+
+    let live = monitors
         .iter()
         .enumerate()
-        .map(|(idx, (entity, monitor))| {
-            let id = winit_monitors.find_entity(entity).map_or_else(
-                || {
-                    warn!(
-                        "[build_monitors] no winit handle for monitor entity {entity}; keying id on position"
-                    );
-                    MonitorId(identity::hash_monitor_key((
-                        monitor.physical_position.x,
-                        monitor.physical_position.y,
-                    )))
+        .map(|(index, (entity, monitor))| {
+            let instance_id = entity.into();
+            let identity = identity_registry
+                .cached_identity(instance_id)
+                .unwrap_or(MonitorIdentity::Unverified);
+            MonitorSnapshot {
+                instance_id,
+                entity,
+                monitor_info: MonitorInfo {
+                    identity,
+                    index,
+                    scale: monitor.scale_factor,
+                    physical_position: monitor.physical_position,
+                    physical_size: monitor.physical_size(),
                 },
-                |handle| identity::native_monitor_id(&handle),
-            );
-            MonitorInfo {
-                id,
-                index: idx,
-                scale: monitor.scale_factor,
-                physical_position: monitor.physical_position,
-                physical_size: monitor.physical_size(),
             }
         })
         .collect();
 
-    Monitors { list }
+    Monitors { live }
 }
 
-/// Initialize `Monitors` resource at startup.
-pub(crate) fn init_monitors(
+/// Initialize the [`Monitors`] resource at startup.
+pub(super) fn init_monitors(
     mut commands: Commands,
     monitors: Query<(Entity, &Monitor)>,
     winit_monitors: Res<WinitMonitors>,
+    mut identity_registry: ResMut<MonitorIdentityRegistry>,
+    configuration: Res<MonitorConfiguration>,
+    platform: Res<Platform>,
     _: NonSendMarker,
 ) {
-    let monitors_resource = build_monitors(&monitors, &winit_monitors);
+    let monitors_resource = build_monitors(
+        &monitors,
+        &winit_monitors,
+        &mut identity_registry,
+        configuration.state(),
+        *platform,
+    );
     debug!(
         "[init_monitors] Found {} monitors",
-        monitors_resource.list.len()
+        monitors_resource.iter().len()
     );
-    for monitor in &monitors_resource.list {
+    for monitor in monitors_resource.iter() {
         debug!(
-            "[init_monitors] Monitor {}: position=({}, {}) size={}x{} scale={}",
-            monitor.index,
-            monitor.physical_position.x,
-            monitor.physical_position.y,
-            monitor.physical_size.x,
-            monitor.physical_size.y,
-            monitor.scale
+            "[init_monitors] Monitor {}: entity={:?} identity={:?} position=({}, {}) size={}x{} scale={}",
+            monitor.monitor_info.index,
+            monitor.entity,
+            monitor.monitor_info.identity,
+            monitor.monitor_info.physical_position.x,
+            monitor.monitor_info.physical_position.y,
+            monitor.monitor_info.physical_size.x,
+            monitor.monitor_info.physical_size.y,
+            monitor.monitor_info.scale
         );
     }
     commands.insert_resource(monitors_resource);
 }
 
-/// Update `Monitors` resource when monitors are added or removed, and trigger a
-/// [`MonitorConnected`] / [`MonitorDisconnected`] per changed display.
+/// Refresh [`Monitors`] after a native display-configuration notification or a
+/// monitor lifetime change, and emit one raw event per changed lifetime.
 pub(super) fn update_monitors(
     mut commands: Commands,
     monitors: Query<(Entity, &Monitor)>,
@@ -279,33 +365,40 @@ pub(super) fn update_monitors(
     previous: Res<Monitors>,
     added: Query<Entity, Added<Monitor>>,
     mut removed: RemovedComponents<Monitor>,
+    mut identity_registry: ResMut<MonitorIdentityRegistry>,
+    configuration: Res<MonitorConfiguration>,
+    platform: Res<Platform>,
     frame_count: Res<FrameCount>,
     current_monitor_query: Query<Option<&CurrentMonitor>, With<PrimaryWindow>>,
     _: NonSendMarker,
 ) {
-    let has_changes = !added.is_empty() || removed.read().next().is_some();
-    if !has_changes {
+    let configuration = configuration.state();
+    let configuration_changed = identity_registry.configuration_changed(configuration);
+    let monitor_was_removed = removed.read().count() > 0;
+    if added.is_empty() && !monitor_was_removed && !configuration_changed {
         return;
     }
 
-    let rebuilt = build_monitors(&monitors, &winit_monitors);
+    for previous_monitor in &previous.live {
+        if monitors.get(previous_monitor.entity).is_err() {
+            identity_registry.disconnect(previous_monitor.instance_id);
+        }
+    }
 
-    // Diff before overwriting the resource: connect events read the rebuilt list,
-    // disconnect events read the previous snapshot (the vanished monitor is
-    // already gone from `monitors` and `winit_monitors`).
-    let (connected, disconnected) = monitor_deltas(&previous.list, &rebuilt.list);
-    for monitor in connected {
-        commands.trigger(MonitorConnected { monitor });
-    }
-    for monitor in disconnected {
-        commands.trigger(MonitorDisconnected { monitor });
-    }
+    let rebuilt = build_monitors(
+        &monitors,
+        &winit_monitors,
+        &mut identity_registry,
+        configuration,
+        *platform,
+    );
+    let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
 
     if let Some(current_monitor) = current_monitor_query.iter().next().flatten() {
         debug!(
             "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
             frame_count.0,
-            rebuilt.list.len(),
+            rebuilt.iter().len(),
             current_monitor.monitor_info.index,
             current_monitor.monitor_info.scale,
         );
@@ -313,10 +406,23 @@ pub(super) fn update_monitors(
         debug!(
             "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor=None",
             frame_count.0,
-            rebuilt.list.len(),
+            rebuilt.iter().len(),
         );
     }
+
     commands.insert_resource(rebuilt);
+    for monitor in connected {
+        commands.trigger(MonitorConnected {
+            entity:  monitor.entity,
+            monitor: monitor.monitor_info,
+        });
+    }
+    for monitor in disconnected {
+        commands.trigger(MonitorDisconnected {
+            former_entity: monitor.entity,
+            monitor:       monitor.monitor_info,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -325,22 +431,30 @@ mod tests {
 
     use super::*;
 
-    fn monitor(id: u64, position: IVec2) -> MonitorInfo {
+    const ENTITY_1: Entity = Entity::from_bits(1);
+    const ENTITY_2: Entity = Entity::from_bits(2);
+    const ENTITY_3: Entity = Entity::from_bits(3);
+    const ENTITY_4: Entity = Entity::from_bits(4);
+
+    fn monitor(identity: MonitorIdentity, index: usize, position: IVec2) -> MonitorInfo {
         MonitorInfo {
-            id:                MonitorId(id),
-            index:             0,
-            scale:             2.0,
+            identity,
+            index,
+            scale: 2.0,
             physical_position: position,
-            physical_size:     UVec2::new(2560, 1440),
+            physical_size: UVec2::new(2560, 1440),
         }
     }
 
+    fn verified(raw: u64) -> MonitorIdentity { MonitorIdentity::Verified(MonitorId::from_raw(raw)) }
+
     #[test]
-    fn reflected_type_paths_preserve_legacy_monitor_module() {
+    fn reflected_type_paths_preserve_monitor_namespace() {
         assert_eq!(
             [
                 <CurrentMonitor as TypePath>::type_path(),
                 <MonitorId as TypePath>::type_path(),
+                <MonitorIdentity as TypePath>::type_path(),
                 <MonitorInfo as TypePath>::type_path(),
                 <Monitors as TypePath>::type_path(),
                 <MonitorConnected as TypePath>::type_path(),
@@ -349,6 +463,7 @@ mod tests {
             [
                 "bevy_clerestory::monitors::CurrentMonitor",
                 "bevy_clerestory::monitors::MonitorId",
+                "bevy_clerestory::monitors::MonitorIdentity",
                 "bevy_clerestory::monitors::MonitorInfo",
                 "bevy_clerestory::monitors::Monitors",
                 "bevy_clerestory::monitors::MonitorConnected",
@@ -358,52 +473,95 @@ mod tests {
     }
 
     #[test]
-    fn deltas_report_new_display_as_connected() {
-        let previous = vec![monitor(1, IVec2::ZERO)];
-        let rebuilt = vec![monitor(1, IVec2::ZERO), monitor(2, IVec2::new(2560, 0))];
+    fn exact_identity_lookup_returns_metadata_and_entity() {
+        let id = MonitorId::from_raw(7);
+        let monitors = Monitors::from_test_monitors([
+            (ENTITY_1, monitor(verified(7), 0, IVec2::ZERO)),
+            (
+                ENTITY_2,
+                monitor(MonitorIdentity::Unverified, 1, IVec2::new(2560, 0)),
+            ),
+        ]);
 
-        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
-
-        assert_eq!(connected.len(), 1);
-        assert_eq!(connected[0].id, MonitorId(2));
-        assert!(disconnected.is_empty());
+        assert_eq!(monitors.by_id(id), monitors.by_index(0));
+        assert_eq!(monitors.entity_by_id(id), Some(ENTITY_1));
+        assert_eq!(monitors.iter().len(), 2);
     }
 
     #[test]
-    fn deltas_report_vanished_display_as_disconnected() {
-        let previous = vec![monitor(1, IVec2::ZERO), monitor(2, IVec2::new(2560, 0))];
-        let rebuilt = vec![monitor(1, IVec2::ZERO)];
+    fn identity_lookup_never_uses_geometry_index_or_first_monitor() {
+        let monitors = Monitors::from_test_monitors([
+            (
+                ENTITY_1,
+                monitor(MonitorIdentity::Unverified, 0, IVec2::ZERO),
+            ),
+            (ENTITY_2, monitor(verified(8), 1, IVec2::new(2560, 0))),
+        ]);
 
-        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
-
-        assert!(connected.is_empty());
-        assert_eq!(disconnected.len(), 1);
-        assert_eq!(disconnected[0].id, MonitorId(2));
+        assert!(monitors.by_id(MonitorId::from_raw(7)).is_none());
+        assert!(monitors.entity_by_id(MonitorId::from_raw(7)).is_none());
     }
 
     #[test]
-    fn deltas_ignore_rearrangement_of_same_ids() {
-        // Same displays, rearranged: positions differ but ids match, so no
-        // connect/disconnect fires.
-        let previous = vec![monitor(1, IVec2::ZERO), monitor(2, IVec2::new(2560, 0))];
-        let rebuilt = vec![monitor(1, IVec2::new(2560, 0)), monitor(2, IVec2::ZERO)];
+    fn identity_lookup_rejects_multiple_live_exact_matches() {
+        let id = MonitorId::from_raw(7);
+        let monitors = Monitors::from_test_monitors([
+            (ENTITY_1, monitor(verified(7), 0, IVec2::ZERO)),
+            (ENTITY_2, monitor(verified(7), 1, IVec2::new(2560, 0))),
+        ]);
 
-        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
-
-        assert!(connected.is_empty());
-        assert!(disconnected.is_empty());
+        assert!(monitors.by_id(id).is_none());
+        assert!(monitors.entity_by_id(id).is_none());
     }
 
     #[test]
-    fn deltas_report_swap_as_one_each() {
-        let previous = vec![monitor(1, IVec2::ZERO)];
-        let rebuilt = vec![monitor(2, IVec2::ZERO)];
+    fn raw_deltas_include_verified_and_unverified_entities() {
+        let previous = Monitors::from_test_monitors([
+            (ENTITY_1, monitor(verified(1), 0, IVec2::ZERO)),
+            (
+                ENTITY_2,
+                monitor(MonitorIdentity::Unverified, 1, IVec2::new(2560, 0)),
+            ),
+        ]);
+        let rebuilt = Monitors::from_test_monitors([
+            (ENTITY_3, monitor(verified(3), 0, IVec2::ZERO)),
+            (
+                ENTITY_4,
+                monitor(MonitorIdentity::Unverified, 1, IVec2::new(2560, 0)),
+            ),
+        ]);
 
         let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
+        let connected_verified = MonitorConnected {
+            entity:  connected[0].entity,
+            monitor: connected[0].monitor_info,
+        };
+        let connected_unverified = MonitorConnected {
+            entity:  connected[1].entity,
+            monitor: connected[1].monitor_info,
+        };
+        let disconnected_verified = MonitorDisconnected {
+            former_entity: disconnected[0].entity,
+            monitor:       disconnected[0].monitor_info,
+        };
+        let disconnected_unverified = MonitorDisconnected {
+            former_entity: disconnected[1].entity,
+            monitor:       disconnected[1].monitor_info,
+        };
 
-        assert_eq!(connected.len(), 1);
-        assert_eq!(connected[0].id, MonitorId(2));
-        assert_eq!(disconnected.len(), 1);
-        assert_eq!(disconnected[0].id, MonitorId(1));
+        assert_eq!(connected_verified.entity, ENTITY_3);
+        assert_eq!(connected_verified.monitor.identity, verified(3));
+        assert_eq!(connected_unverified.entity, ENTITY_4);
+        assert_eq!(
+            connected_unverified.monitor.identity,
+            MonitorIdentity::Unverified
+        );
+        assert_eq!(disconnected_verified.former_entity, ENTITY_1);
+        assert_eq!(disconnected_verified.monitor.identity, verified(1));
+        assert_eq!(disconnected_unverified.former_entity, ENTITY_2);
+        assert_eq!(
+            disconnected_unverified.monitor.identity,
+            MonitorIdentity::Unverified
+        );
     }
 }

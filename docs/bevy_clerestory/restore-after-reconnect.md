@@ -50,9 +50,10 @@
     domain re-exports established in Phase 1.
   - `crates/bevy_clerestory/src/monitors/current_monitor.rs` —
     `CurrentMonitor`, live-window detection, effective mode, and refresh.
-  - `crates/bevy_clerestory/src/monitors/identity.rs` — Phase 1 `MonitorId`
-    baseline; add qualified evidence, ambiguity tracking, the append-only
-    interner, and `MonitorIdentity`.
+  - `crates/bevy_clerestory/src/monitors/identity/` — verified/unverified
+    identity domain: `mod.rs` exports, `registry.rs` ambiguity/interner policy,
+    `native.rs` qualified evidence, `edid.rs` panel evidence checks, and
+    `configuration/` native generation listeners.
   - `crates/bevy_clerestory/src/monitors/topology.rs` — Phase 1 topology/events
     baseline; add `LiveMonitor`, instance identity, topology revision, refresh,
     and resolution.
@@ -274,7 +275,7 @@ flat source file remains.
   assertions in its reflection gate.
 - Phases 2–21 remain necessary and in their existing order.
 
-### Phase 2 — Add verified monitor identity and live-entity resolution  · status: todo
+### Phase 2 — Add verified monitor identity and live-entity resolution  · status: done (`3311067a`)
 
 #### Work Order
 
@@ -323,6 +324,9 @@ pub enum MonitorIdentity {
 - `MonitorInfo` exposes `identity: MonitorIdentity` and remains entity-free.
   Physical matching never falls back to connector, geometry, index, or first
   monitor.
+- `CurrentMonitor` refresh compares the complete `MonitorInfo`, including an
+  ambiguity downgrade from `Verified` to `Unverified`, rather than only index
+  and window mode. Phase 3 makes that refresh same-frame ordered with topology.
 - Use a separate private `MonitorInstanceId` for unconditional deltas across
   one Bevy monitor-entity lifetime.
 - Raw connect/disconnect events continue for unverified displays. Add
@@ -355,6 +359,8 @@ impl Monitors {
 - `crates/bevy_clerestory/src/platform.rs` — expose only platform capabilities
   needed by identity qualification.
 - `crates/bevy_clerestory/src/monitors/mod.rs` — domain exports.
+- `crates/bevy_clerestory/src/monitors/current_monitor.rs` — propagate complete
+  identity and metadata changes into `CurrentMonitor`.
 - `crates/bevy_clerestory/src/monitors/identity.rs` — evidence qualification,
   ambiguity memory, interner, and identity tests.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — entity-free snapshots,
@@ -369,7 +375,70 @@ use that namespace and extend the exact-path regression test.
 Synthetic tests prove monotonic nonreused tokens, full-evidence equality,
 permanent duplicate ambiguity, no convenience matching, exact `by_id`/
 `entity_by_id` behavior, and entity-bearing raw events for both verified and
-unverified monitors.
+unverified monitors. A `CurrentMonitor` test proves a duplicate-evidence
+ambiguity downgrade cannot leave a stale verified identity.
+
+#### Retrospective
+
+**What worked:**
+
+- `MonitorIdentityRegistry` now assigns nonreused process-local tokens only to
+  complete qualified evidence and permanently remembers ambiguity.
+- `MonitorInfo`, `LiveMonitor`, the exact resolvers, raw entity-bearing events,
+  and `CurrentMonitor` now carry one entity-safe verified/unverified contract.
+- The native configuration listeners keep callbacks minimal, revalidate cached
+  evidence after OS changes, and retain callback state safely through teardown
+  failures.
+
+**What deviated from the plan:**
+
+- `monitors/identity.rs` became an `identity/` module tree so evidence
+  qualification, registry policy, and macOS/Windows/X11 notification ownership
+  have separate maintainers.
+- Reliable cached identity required native configuration-generation listeners,
+  bounded revalidation, private `thiserror` diagnostics, and target-gated
+  shutdown/cleanup tests beyond the originally named evidence extraction.
+
+**Surprises:**
+
+- winit supplies live monitor handles but not the stable physical-panel
+  identity needed here; Core Graphics UUIDs and qualified EDID/display-config
+  evidence remain platform-owned work.
+- Windows notification teardown needs an independently owned waitable event and
+  explicit process-lifetime quarantine when a native cleanup boundary fails.
+- The live macOS smoke run enumerated three verified monitor entities even
+  though no external monitor was expected to be physically connected, so OS
+  enumeration and the physical test setup must be recorded separately.
+
+**Implications for remaining phases:**
+
+- Phase 3 must preserve the generation-aware cache boundary: unchanged scans
+  use cached identity, while a changed configuration revalidates before the
+  revised topology is installed and observed.
+- Phase 3 scheduling must keep native callbacks world-free and make topology,
+  identity, and `CurrentMonitor` changes visible together from Bevy systems.
+- Phase 4 still needs a real connect/disconnect run; the automated tests and
+  startup smoke prove identity and lifecycle safety but not physical hotplug.
+
+### Phase 2 Review
+
+- Delegation Context and Phases 3–4 and 15–19 now name the shipped
+  `monitors/identity/` module owners instead of the deleted flat file.
+- Phase 3 now extends the existing topology builder, instance deltas, events,
+  and resolvers with only complete-snapshot revision and ordering work.
+- Phase 3 now preserves the world-free native generation boundary and tests
+  both generation-driven same-frame identity change and identical rebuilds.
+- Phase 4 now reuses the existing example logging as groundwork while requiring
+  an operator-recorded physical inventory and explicit unplug/replug action.
+- Phase 3's existing diagnostic-projection decision and the Phase 4 trace now
+  include the configuration state/generation used by topology production.
+- Phase 6 now preserves `ClerestoryPreStartupSet::MonitorsInitialized` before
+  shared restore preparation and verifies that startup boundary.
+- Phase 11 now retains the exact reflected paths for the complete public
+  monitor surface introduced through Phases 1–3.
+- Phase 14 and the physical evidence phases now state that `MonitorId` survives
+  entity lifetimes only within one running `App` and is never persisted or
+  compared across runs.
 
 ### Phase 3 — Refresh and order live monitor topology  · status: todo
 
@@ -380,9 +449,13 @@ revisioned topology snapshot with correct same-frame ordering.
 
 **Spec:**
 
-- Poll live `WinitMonitors` handles once per update for geometry, scale,
+- Extend Phase 2's existing `build_monitors`, generation-aware identity cache,
+  private instance-keyed deltas, entity-bearing raw events, and exact resolvers;
+  do not rebuild parallel topology or identity machinery.
+- Scan one live `Query<(Entity, &Monitor)>` per update for geometry, scale,
   ordering, entity association, and cached identity; compare the complete
-  snapshot.
+  snapshot. Use `WinitMonitors::find_entity` only inside the lazy evidence
+  loader when a changed configuration generation requires revalidation.
 - Add `MonitorTopologyRevision`. Increment it whenever identity-to-entity,
   index, origin, scale, or size changes, including same-ID rearrangement.
   Rearrangement refreshes state but emits no connect/disconnect or recovery
@@ -390,10 +463,16 @@ revisioned topology snapshot with correct same-frame ordering.
 - Install `Monitors` and the new revision before triggering raw topology events.
   Observers must immediately resolve the live entity promised by a connect
   event and see the ended lifetime absent after a disconnect.
-- `CurrentMonitor` refresh compares `MonitorIdentity` and live monitor
-  properties rather than only index/mode.
+- Keep the identity-aware `CurrentMonitor` refresh after topology installation
+  so identity and live-property changes become visible in the same frame.
+- Keep `MonitorConfiguration` registered once by `MonitorPlugin`. Native
+  callbacks remain world-free and only advance atomic generation state; a
+  changed generation revalidates all live instances before building and
+  installing the snapshot.
 - Unchanged updates remain one `O(number_of_monitors)` scan with no identity
   extraction/interning or variable-size identity allocation.
+- A configuration-generation change that rebuilds an identical complete
+  snapshot does not increment `MonitorTopologyRevision` or emit raw events.
 - Reconcile [`monitor-events.md`](monitor-events.md) with the implemented
   verified/unverified identity contract, private instance-keyed deltas,
   entity-bearing payloads, current resolver, and event ordering.
@@ -404,45 +483,61 @@ revisioned topology snapshot with correct same-frame ordering.
 - `crates/bevy_clerestory/src/monitors/mod.rs` — plugin registration.
 - `crates/bevy_clerestory/src/monitors/current_monitor.rs` — complete refresh
   comparison.
-- `crates/bevy_clerestory/src/monitors/identity.rs` — cached evidence boundary.
+- `crates/bevy_clerestory/src/monitors/identity/configuration/mod.rs` — native
+  generation state consumed by topology.
+- `crates/bevy_clerestory/src/monitors/identity/registry.rs` — generation-aware
+  cached evidence and instance identity.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — producer, revision,
   snapshot comparison, deltas, and tests.
 - `docs/bevy_clerestory/monitor-events.md` — update the companion contract.
 
 **Constraints from prior phases:** Phase 2 provides `MonitorIdentity`, private
-instance identity, entity-free `MonitorInfo`, `LiveMonitor`, and exact
-identity-to-entity resolution. It preserves the monitor-domain reflected-path
-test; if `MonitorTopologyRevision` derives `Reflect`, give it the same
+instance identity, entity-free `MonitorInfo`, `LiveMonitor`, exact
+identity-to-entity resolution, `build_monitors`, private instance-keyed deltas,
+and entity-bearing raw events. `MonitorConfiguration` is registered once by
+`MonitorPlugin`; unchanged generations use cached identity without evidence
+work, while changed generations must revalidate all live instances. It
+preserves the monitor-domain reflected-path test; if
+`MonitorTopologyRevision` derives `Reflect`, give it the same
 `bevy_clerestory::monitors` namespace and extend that test.
 
 **Pending decision: How the physical probe receives private topology diagnostics**
 
 Actual problem:
-Phase 4's external example must place topology revision, private instance
-identity, and raw identity evidence into one causal trace, but Phase 2 keeps the
-latter two private and Phase 3 does not yet define an observable diagnostic
-projection.
+Phase 4's external example must place topology revision, the
+`MonitorConfiguration` state/generation observed by topology production,
+private instance identity, and raw identity evidence into one causal trace, but
+Phase 2 keeps the latter two private and Phase 3 does not yet define an
+observable diagnostic projection.
 
 What exists now:
 - Phase 2 deliberately prevents consumers from matching on raw evidence or a
   private monitor lifetime key.
+- Phase 2's native callbacks are world-free and only advance atomic
+  configuration state.
 - Phase 3 creates revisioned topology state, while Phase 4 needs diagnostic
   records from the monitor domain at the exact production point.
 
 What should change:
-- Define a structured, diagnostic-only projection emitted inside the monitor
-  domain and consumed by the Phase 4 probe without exposing raw evidence as a
-  public matching or resolution input.
+- Define a structured, diagnostic-only projection emitted by the Bevy topology
+  producer and consumed by the Phase 4 probe. Include the configuration
+  state/generation used for that rebuild without exposing raw evidence as a
+  public matching or resolution input or moving world access into native
+  callbacks.
 
 Recommendation:
 Have Phase 3 establish the diagnostic projection beside topology production,
-then have Phase 4 merge those emitted records into its sequence; keep all
-identity decisions on `MonitorIdentity` and `MonitorId`.
+then have Phase 4 merge those emitted records into its sequence; include the
+configuration state/generation used by the producer and keep all identity
+decisions on `MonitorIdentity` and `MonitorId`.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Small Bevy `App` tests prove immediate observer visibility, same-ID geometry
 revision without raw events, independent unverified lifetimes, and updated
-`CurrentMonitor`; instrumentation proves unchanged scans do no identity work.
+`CurrentMonitor`. A generation-driven identity change installs `Monitors` and
+revision before raw observers and refreshes `CurrentMonitor` later in the same
+frame; an identical generation-driven rebuild does not increment revision.
+Instrumentation proves unchanged scans do no identity work.
 
 ### Phase 4 — Build the causal hotplug probe  · status: todo
 
@@ -459,10 +554,11 @@ relocation from Bevy linked despawn before recovery depends on either path.
 - Every record carries one monotonic sequence number, timestamp, `FrameCount`,
   and producer/schedule label.
 - Trace monitor entity, private instance key, raw identity evidence, verified
-  `MonitorId`, creation/removal; each `WindowKey`, entity, `OnMonitor` entity,
-  and native `current_monitor()`; monitor/`OnMonitor`/`HasWindows`/`Window`
-  lifecycle hooks at the cascade point; moved/resized/mode events; close/cancel
-  intent; and component/entity removal.
+  `MonitorId`, configuration state/generation, topology revision, and
+  creation/removal; each `WindowKey`, entity, `OnMonitor` entity, and native
+  `current_monitor()`; monitor/`OnMonitor`/`HasWindows`/`Window` lifecycle hooks
+  at the cascade point; moved/resized/mode events; close/cancel intent; and
+  component/entity removal.
 - Align the trace with Bevy 0.19 `changed_windows`, `create_monitors`, and
   `about_to_wait` behavior. Do not infer cause from a later update snapshot. If
   lifecycle hooks cannot prove whether relinking preceded cascade removal,
@@ -471,8 +567,10 @@ relocation from Bevy linked despawn before recovery depends on either path.
 - Run the available local physical disconnect/reconnect branch for both
   windows. Record whether each entity survived, was OS-relocated, or was removed
   through `HasWindows`, plus identity and placement capability.
-- Establish the evidence schema and manual script in the example README; Phase
-  16–19 fill its full platform matrix.
+- Establish the evidence schema and manual script in the example README. Every
+  run records the operator-confirmed physical inventory and exact unplug/replug
+  action separately from OS enumeration. Compare `MonitorId` continuity only
+  within one running `App`; Phase 16–19 fill the full platform matrix.
 
 **Files:**
 
@@ -480,20 +578,32 @@ relocation from Bevy linked despawn before recovery depends on either path.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs` — raw probe.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — trace
   schema, script, initial evidence, and mitigation conclusion.
+- `crates/bevy_clerestory/examples/restore_window/main.rs` — read-only reference
+  for BRP-enabled startup behavior.
+- `crates/bevy_clerestory/examples/restore_window/debug.rs` — read-only
+  reference for identity/entity and raw topology logging.
+- `crates/bevy_clerestory/examples/restore_window/input.rs` — read-only
+  reference for noninteractive test-mode input handling.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — read-only contract
   reference; add diagnostic hooks only if the public/lifecycle surface cannot
   provide required causal facts.
-- `crates/bevy_clerestory/src/monitors/identity.rs` — add diagnostic emission
-  only if the approved projection requires evidence at qualification time;
-  never expose raw evidence as matching input.
+- `crates/bevy_clerestory/src/monitors/identity/native.rs` — evidence production
+  reference for the approved diagnostic projection.
+- `crates/bevy_clerestory/src/monitors/identity/registry.rs` — private
+  instance/evidence state reference; never expose raw evidence as matching
+  input.
 
-**Constraints from prior phases:** Phase 3 guarantees ordered topology events,
-live/former entity resolution, revision metadata, and `CurrentMonitor` refresh.
-Do not implement recovery state in this probe.
+**Constraints from prior phases:** Phase 2's `restore_window` logging is probe
+groundwork, not physical evidence, and `MonitorId` is comparable only within one
+running `App`. Phase 3 guarantees ordered topology events, live/former entity
+resolution, configuration-generation and revision diagnostics, and
+`CurrentMonitor` refresh. Do not implement recovery state in this probe.
 
 **Acceptance gate:** The example builds with all features; the applicable local
-physical run records primary and secondary causal traces using the same schema;
-the README states the proven linked-despawn outcome or explicitly records why
+physical run records the operator-confirmed inventory, explicit unplug/replug
+action, and primary/secondary causal traces using the same schema. The three
+verified startup entities and startup smoke do not satisfy this gate. The
+README states the proven linked-despawn outcome or explicitly records why
 temporary engine tracing is still required. No later phase may guess the
 mitigation.
 
@@ -613,6 +723,9 @@ prepare the same `TargetPosition` through one staged path.
 - Primary `PreStartup` remains a thin consumer. Preserve its chained
   `apply_deferred` before `move_to_target_monitor` so X11 fullscreen behavior
   does not regress.
+- Preserve `ClerestoryPreStartupSet::MonitorsInitialized` before restore
+  loading/preparation so the primary and managed paths consume the initialized
+  generation-aware monitor snapshot.
 - Managed startup uses the same preparation path. A canonical replacement
   bound to an application-controlled recovery key must be able to bypass
   ordinary automatic startup restore until an explicit request.
@@ -624,6 +737,8 @@ prepare the same `TargetPosition` through one staged path.
 
 **Files:**
 
+- `crates/bevy_clerestory/src/lib.rs` — preserve the monitor-initialization
+  `PreStartup` set before restore preparation.
 - `crates/bevy_clerestory/src/managed.rs` — route managed startup through the
   shared preparation path.
 - `crates/bevy_clerestory/src/restore/mod.rs` — register shared preparation.
@@ -644,14 +759,16 @@ prepare the same `TargetPosition` through one staged path.
 - `crates/bevy_clerestory/src/x11_position_fix.rs` — preserve compensation
   boundary.
 
-**Constraints from prior phases:** Phase 5 supplies the one-read startup
+**Constraints from prior phases:** Phase 2 registers
+`ClerestoryPreStartupSet::MonitorsInitialized` as the boundary after the initial
+generation-aware monitor snapshot exists. Phase 5 supplies the one-read startup
 snapshot, `CapturedWindowPlacement`, and rebased-coordinate boundary.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Primary and managed startup tests still pass; tests prove startup and a
 synthetic runtime caller compute equivalent target size/mode/placement, X11
-fullscreen preparation keeps its flush/compensation order, and compositor-owned
-placement never installs a coordinate.
+fullscreen preparation keeps its monitor-initialization, flush, and
+compensation order, and compositor-owned placement never installs a coordinate.
 
 ### Phase 7 — Add one-shot registration and application-controlled recovery  · status: todo
 
@@ -1075,7 +1192,9 @@ Public API tests cover primary and managed registration, all event payloads,
 entity-derived restore identity, absent-key cancellation, and expected
 `AppTypeRegistry` event type data for every public event with no manual
 registration. Exact `TypePath` assertions include `MonitorConnected` and
-`MonitorDisconnected` under `bevy_clerestory::monitors::*`.
+`MonitorDisconnected` alongside `CurrentMonitor`, `MonitorId`, `MonitorIdentity`,
+`MonitorInfo`, and `Monitors` under `bevy_clerestory::monitors::*`, plus
+`MonitorTopologyRevision` if Phase 3 makes it reflected.
 
 ### Phase 12 — Complete the recovery example  · status: todo
 
@@ -1191,10 +1310,12 @@ availability while Hana remains sole owner of output existence/content.
   consumes raw `MonitorConnected`/`MonitorDisconnected` facts. Choose the path
   that matches each existing Hana lifecycle—do not invent state solely to test
   Clerestory.
-- Keep durable physical `MonitorId` separate from optional live monitor entity.
-  Clear the entity on disconnect; on reconnect match only exact verified
-  identity, then replace every retained `InputJack`/output target with the new
-  entity before re-enable. Never retain/use the disconnected entity.
+- Keep the process-lifetime `MonitorId` separate from the optional live monitor
+  entity. It may be retained across monitor-entity lifetimes within one running
+  `App`, but is never persisted or compared across application runs. Clear the
+  entity on disconnect; on reconnect match only exact verified identity, then
+  replace every retained `InputJack`/output target with the new entity before
+  re-enable. Never retain/use the disconnected entity.
 - An unverified target remains inactive until application selection.
 - Losing a cable target marks its in-world screen unavailable and creates no
   fallback output. Reconnect may offer application-controlled re-enable; it
@@ -1230,7 +1351,8 @@ availability while Hana remains sole owner of output existence/content.
 
 **Constraints from prior phases:** Phase 13 established Hana's local dependency
 and editor consumption. Phase 11's factual event/API boundary remains
-authoritative; rejected capture/readiness scope must stay out of Clerestory.
+authoritative; `MonitorId` is process-local rather than persisted identity, and
+rejected capture/readiness scope must stay out of Clerestory.
 
 **Acceptance gate:** Hana phase-local Build, Test, and Lint are green, plus
 affected Clerestory gates for API changes. Tests cover target loss/inactive UI,
@@ -1264,7 +1386,14 @@ and prove all hardware-independent acceptance behavior.
 
 **Files:**
 
-- `crates/bevy_clerestory/src/monitors/identity.rs` — final identity feedback.
+- `crates/bevy_clerestory/src/monitors/identity/mod.rs` — final identity surface
+  and internal ownership.
+- `crates/bevy_clerestory/src/monitors/identity/native.rs` — final native
+  evidence feedback.
+- `crates/bevy_clerestory/src/monitors/identity/registry.rs` — final ambiguity,
+  interner, and instance-cache feedback.
+- `crates/bevy_clerestory/src/monitors/identity/configuration/` — final native
+  generation-notification feedback in the owning target module.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — final metadata feedback.
 - `crates/bevy_clerestory/src/persistence/captured_window_state.rs` — final
   persistence feedback.
@@ -1314,6 +1443,8 @@ example.
   captured-position state, supported return mechanism, expected action, actual
   action, and pass/fail. Label transition/`App` proof separately from the
   physical observation.
+- Record that `MonitorId` comparisons are valid only within one running `App`;
+  never persist a token or compare token values across separate runs.
 - Verify unchanged monitor IDs on rearrangement do not initiate recovery and a
   fallback intervention cancels only the current return intent.
 - If physical behavior exposes a defect, fix only the named monitor/recovery/
@@ -1326,8 +1457,10 @@ example.
   probe; change only for a proven diagnostic/behavior defect.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — macOS
   rows/evidence.
-- `crates/bevy_clerestory/src/monitors/identity.rs` — macOS qualification fixes
-  only if evidence disproves it.
+- `crates/bevy_clerestory/src/monitors/identity/native.rs` — macOS UUID
+  qualification fixes only if evidence disproves it.
+- `crates/bevy_clerestory/src/monitors/identity/configuration/macos.rs` — macOS
+  display-reconfiguration notification fixes only if observed.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — lifecycle/order fixes only
   if observed.
 - `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — transition
@@ -1337,7 +1470,8 @@ example.
 
 **Constraints from prior phases:** Phase 15 freezes the automated/public
 baseline. Physical evidence may correct an implementation defect but must not
-weaken identity or capability gates.
+weaken identity or capability gates. `MonitorId` is process-local and may be
+compared across entity lifetimes only inside one running `App`.
 
 **Acceptance gate:** Every applicable macOS scenario has an evidence row and
 expected/actual result; unavailable hardware cases are explicitly marked rather
@@ -1359,6 +1493,8 @@ fullscreen, and entity-scoped real DPI behavior.
 - Confirm verified evidence identifies a physical panel rather than device name
   or adapter and remains unverified when descriptor/serial evidence is missing
   or duplicated.
+- Compare `MonitorId` only across entity lifetimes in one running `App`; record
+  evidence rather than token equality across separate runs.
 - Verify concurrent cross-DPI windows cannot advance each other's attempts and
   exclusive-fullscreen surface creation/restore remains correct.
 - Record entity survival versus linked cascade and apply only the mitigation
@@ -1372,8 +1508,12 @@ fullscreen, and entity-scoped real DPI behavior.
   probe corrections only if needed.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Windows
   rows/evidence.
-- `crates/bevy_clerestory/src/monitors/identity.rs` — Win32 evidence fixes only
-  if observed.
+- `crates/bevy_clerestory/src/monitors/identity/native.rs` — Win32 display-path
+  and EDID acquisition fixes only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/edid.rs` — panel-evidence
+  qualification fixes only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/configuration/windows.rs` —
+  Win32 display-configuration notification fixes only if observed.
 - `crates/bevy_clerestory/src/windows_dpi_fix.rs` — entity/attempt DPI fixes
   only if observed.
 - `crates/bevy_clerestory/src/restore/target_position/application.rs` —
@@ -1383,6 +1523,7 @@ fullscreen, and entity-scoped real DPI behavior.
 
 **Constraints from prior phases:** Phase 15 supplies the stable baseline and
 Phase 16 established the report schema; platform evidence remains independent.
+`MonitorId` is process-local and never comparable across application runs.
 
 **Acceptance gate:** Every applicable Windows scenario has an evidence row and
 expected/actual result; unavailable hardware is explicit. Any correction has a
@@ -1400,6 +1541,8 @@ placement, fullscreen, intervention, and DPI behavior.
 - Execute the shared script in an X11 session and record the core matrix.
 - Confirm a RandR CRTC/connector alone never verifies a physical panel; require
   stable descriptor/serial evidence and preserve permanent duplicate ambiguity.
+- Compare `MonitorId` only across entity lifetimes in one running `App`; record
+  evidence rather than token equality across separate runs.
 - Exercise negative origins, rearrangement, 1x↔2x scaling, windowed placement,
   borderless/exclusive fullscreen, zero displays, non-target-first return, and
   rapid hotplug.
@@ -1414,8 +1557,12 @@ placement, fullscreen, intervention, and DPI behavior.
   corrections only if needed.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — X11
   rows/evidence.
-- `crates/bevy_clerestory/src/monitors/identity.rs` — X11 evidence fixes only
-  if observed.
+- `crates/bevy_clerestory/src/monitors/identity/native.rs` — X11 RandR/EDID
+  acquisition fixes only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/edid.rs` — panel-evidence
+  qualification fixes only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/configuration/x11.rs` — RandR
+  configuration-notification fixes only if observed.
 - `crates/bevy_clerestory/src/x11_position_fix.rs` — frame-compensation fixes
   only if observed.
 - `crates/bevy_clerestory/src/restore/winit_info.rs` — startup ordering fixes
@@ -1425,6 +1572,7 @@ placement, fullscreen, intervention, and DPI behavior.
 
 **Constraints from prior phases:** Phase 15 supplies the stable baseline and
 the shared report distinguishes physical proof from automated assertions.
+`MonitorId` is process-local and never comparable across application runs.
 
 **Acceptance gate:** Every applicable X11 scenario has an evidence row and
 expected/actual result; unavailable hardware is explicit. Placement/fullscreen
@@ -1445,6 +1593,8 @@ placement or unsupported exclusive fullscreen.
 - A `wl_output` object ID alone remains `Unverified`. Record whether the
   compositor exposes equivalent stable physical-panel evidence; do not infer
   continuity from output name, position, or index.
+- Compare `MonitorId` only across entity lifetimes in one running `App` if the
+  compositor supplies qualified evidence; never compare tokens across runs.
 - Windowed capture must be
   `CapturedWindowPosition::CompositorControlled`, project
   `logical_position: None`, never emit `WindowPosition::At`, and leave
@@ -1465,8 +1615,12 @@ placement or unsupported exclusive fullscreen.
   probe corrections only if needed.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Wayland
   rows/evidence.
-- `crates/bevy_clerestory/src/monitors/identity.rs` — compositor evidence fixes
-  only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/native.rs` — compositor evidence
+  qualification fixes only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/registry.rs` — Wayland
+  verification/capability gating fixes only if observed.
+- `crates/bevy_clerestory/src/monitors/identity/configuration/mod.rs` — Wayland
+  configuration-generation capability fixes only if observed.
 - `crates/bevy_clerestory/src/platform.rs` — Wayland capability fixes only if
   observed.
 - `crates/bevy_clerestory/src/persistence/captured_window_state.rs` — typed
@@ -1476,7 +1630,8 @@ placement or unsupported exclusive fullscreen.
 
 **Constraints from prior phases:** Phase 15 supplies the stable baseline.
 Wayland's lack of client-controlled windowed positioning is a fixed contract,
-not a test failure to work around.
+not a test failure to work around. `MonitorId` remains process-local and never
+comparable across application runs.
 
 **Acceptance gate:** Every applicable Wayland scenario has an evidence row and
 expected/actual result; compositor and unavailable-hardware limits are explicit.

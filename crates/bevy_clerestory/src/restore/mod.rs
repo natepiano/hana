@@ -23,7 +23,7 @@ pub(crate) use winit_info::init_winit_info;
 pub(crate) use winit_info::load_target_position;
 pub(crate) use winit_info::move_to_target_monitor;
 
-use crate::monitors;
+use crate::ClerestoryPreStartupSet;
 
 pub(crate) struct RestorePlugin;
 
@@ -42,7 +42,7 @@ impl Plugin for RestorePlugin {
                 move_to_target_monitor,
             )
                 .chain()
-                .after(monitors::init_monitors),
+                .after(ClerestoryPreStartupSet::MonitorsInitialized),
         );
 
         app.add_systems(

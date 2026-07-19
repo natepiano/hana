@@ -48,6 +48,10 @@ pub(crate) const SETTLE_TIMEOUT_SECS: f32 = 2.0;
 // time conversion
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
 
+// windows display-config acquisition
+#[cfg(target_os = "windows")]
+pub(crate) const DISPLAY_CONFIG_ACQUISITION_ATTEMPTS: usize = 3;
+
 // windows dpi interception
 #[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
 pub(crate) const DPI_CHANGE_HANDLED_RESULT: isize = 0;

@@ -64,9 +64,11 @@ use managed::on_managed_window_load;
 use managed::on_managed_window_removed;
 use managed::on_persistence_changed;
 pub use monitors::CurrentMonitor;
+pub use monitors::LiveMonitor;
 pub use monitors::MonitorConnected;
 pub use monitors::MonitorDisconnected;
 pub use monitors::MonitorId;
+pub use monitors::MonitorIdentity;
 pub use monitors::MonitorInfo;
 use monitors::MonitorPlugin;
 pub use monitors::Monitors;
@@ -77,6 +79,11 @@ use restore::RestorePlugin;
 use restore::has_restoring_windows;
 use restore::no_restoring_windows;
 use restore_window_config::RestoreWindowConfig;
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, SystemSet)]
+enum ClerestoryPreStartupSet {
+    MonitorsInitialized,
+}
 
 /// The main plugin. See module docs for usage.
 ///
