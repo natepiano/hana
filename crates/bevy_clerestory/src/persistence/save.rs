@@ -384,32 +384,29 @@ pub(crate) fn save_window_state(
 /// On macOS, `Window.position` stays `Automatic` even after the OS places the window,
 /// so we must query winit directly. On Linux with W5 workaround, we also use winit
 /// to get `outer_position` (frame origin). On other platforms, `Window.position` suffices.
-pub(super) fn get_window_position(entity: Entity, window: &Window) -> Option<IVec2> {
-    #[cfg(any(
-        target_os = "macos",
-        all(target_os = "linux", feature = "workaround-winit-4443")
-    ))]
-    {
-        let _ = window;
-        WINIT_WINDOWS.with(|winit_windows| {
-            let winit_windows = winit_windows.borrow();
-            let winit_window = winit_windows.get_window(entity)?;
-            let physical_outer_position = winit_window.outer_position().ok()?;
-            Some(IVec2::new(
-                physical_outer_position.x,
-                physical_outer_position.y,
-            ))
-        })
-    }
-    #[cfg(not(any(
-        target_os = "macos",
-        all(target_os = "linux", feature = "workaround-winit-4443")
-    )))]
-    {
-        let _ = entity;
-        match window.position {
-            WindowPosition::At(p) => Some(p),
-            _ => None,
-        }
+#[cfg(any(
+    target_os = "macos",
+    all(target_os = "linux", feature = "workaround-winit-4443")
+))]
+pub(super) fn get_window_position(entity: Entity, _: &Window) -> Option<IVec2> {
+    WINIT_WINDOWS.with(|winit_windows| {
+        let winit_windows = winit_windows.borrow();
+        let winit_window = winit_windows.get_window(entity)?;
+        let physical_outer_position = winit_window.outer_position().ok()?;
+        Some(IVec2::new(
+            physical_outer_position.x,
+            physical_outer_position.y,
+        ))
+    })
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    all(target_os = "linux", feature = "workaround-winit-4443")
+)))]
+pub(super) const fn get_window_position(_: Entity, window: &Window) -> Option<IVec2> {
+    match window.position {
+        WindowPosition::At(position) => Some(position),
+        _ => None,
     }
 }
