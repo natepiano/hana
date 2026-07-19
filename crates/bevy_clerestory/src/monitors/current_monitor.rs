@@ -100,11 +100,7 @@ pub(crate) fn update_current_monitor(
         };
 
         // `changed` prevents redundant `CurrentMonitor` inserts and Bevy change detection.
-        let changed = existing.is_none_or(|existing_current_monitor| {
-            existing_current_monitor.monitor_info.index != current_monitor.monitor_info.index
-                || existing_current_monitor.effective_window_mode
-                    != current_monitor.effective_window_mode
-        });
+        let changed = current_monitor_changed(existing, &current_monitor);
 
         if changed {
             debug!(
@@ -114,6 +110,13 @@ pub(crate) fn update_current_monitor(
             commands.entity(entity).insert(current_monitor);
         }
     }
+}
+
+fn current_monitor_changed(existing: Option<&CurrentMonitor>, current: &CurrentMonitor) -> bool {
+    existing.is_none_or(|existing| {
+        existing.monitor_info != current.monitor_info
+            || existing.effective_window_mode != current.effective_window_mode
+    })
 }
 
 /// Detect monitor via winit's `current_monitor()`.
@@ -191,10 +194,11 @@ mod tests {
 
     use super::*;
     use crate::monitors::MonitorId;
+    use crate::monitors::MonitorIdentity;
 
     fn monitor_0() -> MonitorInfo {
         MonitorInfo {
-            id:                MonitorId(0),
+            identity:          MonitorIdentity::Unverified,
             index:             0,
             scale:             2.0,
             physical_position: IVec2::ZERO,
@@ -203,9 +207,7 @@ mod tests {
     }
 
     fn monitors_with(monitor_info: MonitorInfo) -> Monitors {
-        Monitors {
-            list: vec![monitor_info],
-        }
+        Monitors::from_test_monitors([(Entity::from_bits(1), monitor_info)])
     }
 
     fn window_at(physical_position: IVec2, physical_width: u32, physical_height: u32) -> Window {
@@ -300,7 +302,7 @@ mod tests {
     #[test]
     fn effective_window_mode_returns_mode_when_no_monitors() {
         let monitor_info = monitor_0();
-        let empty_monitors = Monitors { list: vec![] };
+        let empty_monitors = Monitors::from_test_monitors([]);
         let window = window_at(
             IVec2::ZERO,
             monitor_info.physical_size.x,
@@ -310,5 +312,23 @@ mod tests {
         let effective_window_mode =
             compute_effective_window_mode(&window, &monitor_info, &empty_monitors);
         assert_eq!(effective_window_mode, WindowMode::Windowed);
+    }
+
+    #[test]
+    fn identity_downgrade_changes_current_monitor_at_same_index() {
+        let monitor_info = monitor_0();
+        let existing = CurrentMonitor {
+            monitor_info:          MonitorInfo {
+                identity: MonitorIdentity::Verified(MonitorId::from_raw(7)),
+                ..monitor_info
+            },
+            effective_window_mode: WindowMode::Windowed,
+        };
+        let downgraded = CurrentMonitor {
+            monitor_info,
+            effective_window_mode: WindowMode::Windowed,
+        };
+
+        assert!(current_monitor_changed(Some(&existing), &downgraded));
     }
 }

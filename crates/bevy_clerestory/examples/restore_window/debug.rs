@@ -35,16 +35,15 @@ pub(crate) struct CachedWindowDebug {
     focus_state:       FocusState,
 }
 
-/// Logs every monitor's `MonitorId` at startup — the cross-platform spot-check.
-/// On any OS, boot the example and confirm each display reports a distinct,
-/// non-zero id (a `0` on macOS or an all-same value elsewhere means the native
-/// id lookup fell back to the position hash).
+/// Logs every monitor's qualified identity and live entity at startup.
 pub(crate) fn log_monitor_ids(monitors: Res<Monitors>) {
-    for monitor in &monitors.list {
+    for live_monitor in monitors.iter() {
+        let monitor = live_monitor.monitor_info;
         info!(
-            "[log_monitor_ids] index={} id={:?} position={:?} size={} scale={}",
+            "[log_monitor_ids] index={} entity={:?} identity={:?} position={:?} size={} scale={}",
             monitor.index,
-            monitor.id,
+            live_monitor.entity,
+            monitor.identity,
             monitor.physical_position,
             monitor.physical_size,
             monitor.scale
@@ -52,22 +51,29 @@ pub(crate) fn log_monitor_ids(monitors: Res<Monitors>) {
     }
 }
 
-/// Logs `MonitorConnected` — plug in a display and confirm the id and geometry.
+/// Logs `MonitorConnected` with the new entity lifetime and identity.
 pub(crate) fn on_monitor_connected(trigger: On<MonitorConnected>) {
     let monitor = &trigger.event().monitor;
     info!(
-        "[on_monitor_connected] id={:?} index={} position={:?} size={}",
-        monitor.id, monitor.index, monitor.physical_position, monitor.physical_size
+        "[on_monitor_connected] entity={:?} identity={:?} index={} position={:?} size={}",
+        trigger.event().entity,
+        monitor.identity,
+        monitor.index,
+        monitor.physical_position,
+        monitor.physical_size
     );
 }
 
-/// Logs `MonitorDisconnected` — unplug a display and confirm the id matches the
-/// one it connected with (proof the id survives across the session).
+/// Logs `MonitorDisconnected` with the ended entity lifetime and last identity.
 pub(crate) fn on_monitor_disconnected(trigger: On<MonitorDisconnected>) {
     let monitor = &trigger.event().monitor;
     info!(
-        "[on_monitor_disconnected] id={:?} index={} position={:?} size={}",
-        monitor.id, monitor.index, monitor.physical_position, monitor.physical_size
+        "[on_monitor_disconnected] former_entity={:?} identity={:?} index={} position={:?} size={}",
+        trigger.event().former_entity,
+        monitor.identity,
+        monitor.index,
+        monitor.physical_position,
+        monitor.physical_size
     );
 }
 

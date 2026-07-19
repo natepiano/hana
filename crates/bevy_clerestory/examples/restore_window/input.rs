@@ -275,8 +275,8 @@ pub(crate) fn format_monitor_row(
         NON_PRIMARY_MONITOR_MARKER
     };
     format!(
-        "{MONITOR_ID_LABEL} {}\n{MONITOR_INDEX_LABEL} {}{primary_marker} {SCALE_LABEL} {} - {REFRESH_RATE_LABEL} {refresh_display}{}",
-        current_monitor.id.0,
+        "{MONITOR_ID_LABEL} {:?}\n{MONITOR_INDEX_LABEL} {}{primary_marker} {SCALE_LABEL} {} - {REFRESH_RATE_LABEL} {refresh_display}{}",
+        current_monitor.identity,
         current_monitor.index,
         current_monitor.scale,
         platform_suffix()
