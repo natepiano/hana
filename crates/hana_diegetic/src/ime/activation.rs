@@ -3,7 +3,6 @@
 use bevy::camera::NormalizedRenderTarget;
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::entity::ContainsEntity;
-use bevy::picking::backend::HitData;
 use bevy::prelude::*;
 
 use super::ImeOpenSession;
@@ -11,6 +10,7 @@ use super::ImeTarget;
 use super::editor::PendingImePanelAnchor;
 use crate::ComputedDiegeticPanel;
 use crate::DiegeticPanel;
+use crate::render;
 
 pub(super) fn observe_panel_clicks(trigger: On<Add, DiegeticPanel>, mut commands: Commands) {
     commands
@@ -33,7 +33,11 @@ fn open_from_panel_click(
     let Ok((panel, computed, transform)) = panels.get(panel_entity) else {
         return;
     };
-    let Some(panel_local) = panel_local_from_hit(&click.hit, panel, transform) else {
+    let Some(panel_local) = click
+        .hit
+        .position
+        .and_then(|position| render::project_flat_panel_hit(position, panel, transform))
+    else {
         return;
     };
     let Some(record) = computed.field_at_local_position(panel_local) else {
@@ -77,24 +81,6 @@ fn open_from_panel_click(
             frame_count.0
         );
     }
-}
-
-fn panel_local_from_hit(
-    hit: &HitData,
-    panel: &DiegeticPanel,
-    transform: &GlobalTransform,
-) -> Option<Vec2> {
-    let position = hit.position?;
-    let local = transform.affine().inverse().transform_point3(position);
-    let points_to_world = panel.points_to_world();
-    if points_to_world <= 0.0 {
-        return None;
-    }
-    let (anchor_x, anchor_y) = panel.anchor_offsets();
-    Some(Vec2::new(
-        (local.x + anchor_x) / points_to_world,
-        (anchor_y - local.y) / points_to_world,
-    ))
 }
 
 fn pointer_window(click: &Pointer<Click>) -> Option<Entity> {

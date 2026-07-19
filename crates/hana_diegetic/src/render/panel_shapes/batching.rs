@@ -49,6 +49,7 @@ use crate::layout::Sidedness;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::panel::PanelOwned;
 use crate::render;
 use crate::render::AntiAlias;
 use crate::render::BatchRenderLayers;
@@ -966,7 +967,12 @@ fn spawn_panel_shape_source(
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel_entity).with_children(|children| {
         spawned = children
-            .spawn((PanelShape, source, PanelShapeOf(panel_entity)))
+            .spawn((
+                PanelShape,
+                source,
+                PanelShapeOf(panel_entity),
+                PanelOwned::from(panel_entity),
+            ))
             .id();
     });
     spawned

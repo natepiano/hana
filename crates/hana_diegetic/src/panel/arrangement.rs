@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 use hana_valence::Accordion;
+use hana_valence::AnchorPose;
+use hana_valence::AnchoredTo;
 use hana_valence::ArrangementMembers;
 use hana_valence::Coil;
 use hana_valence::Hinge;
@@ -13,6 +15,7 @@ use hana_valence::ResolvedAnchorGeometry;
 use hana_valence::Strip;
 
 use super::DiegeticPanel;
+use super::lifecycle;
 use super::valence_provider;
 
 /// Insert-only bundle that makes a panel a member of a valence arrangement.
@@ -34,6 +37,10 @@ impl ArrangedPanel {
     #[must_use]
     pub const fn arrangement(&self) -> Entity { self.member.arrangement }
 }
+
+/// Marks attachment, pose, and hinge state installed by panel arrangement placement.
+#[derive(Component)]
+pub(super) struct PanelArrangementRuntime;
 
 pub(super) fn apply_panel_member_placements(
     mut commands: Commands,
@@ -99,14 +106,30 @@ pub(super) fn apply_panel_member_placements(
         ensure_panel_anchor_geometry(&mut commands, entity, panel, geometry);
         commands.entity(entity).insert((
             placement.placement.anchored_to,
-            hana_valence::AnchorPose::default(),
+            AnchorPose::default(),
             Hinge {
                 edge:  placement.placement.hinge_edge,
                 angle: placement.angle,
             },
+            PanelArrangementRuntime,
         ));
         commands.entity(entity).remove::<PendingMemberPlacement>();
     }
+}
+
+/// Removes runtime placement state when a panel stops participating in an arrangement.
+pub(super) fn cleanup_panel_member_placement(
+    removed: On<Remove, Member>,
+    placements: Query<(), With<PanelArrangementRuntime>>,
+    mut commands: Commands,
+) {
+    let entity = removed.entity;
+    if !placements.contains(entity) {
+        return;
+    }
+    commands
+        .entity(entity)
+        .remove::<(AnchoredTo, AnchorPose, Hinge, PanelArrangementRuntime)>();
 }
 
 fn placement_target_ready(
@@ -142,9 +165,12 @@ fn ensure_panel_anchor_geometry(
     geometry: Option<&ResolvedAnchorGeometry>,
 ) {
     if geometry.is_none() {
-        commands
-            .entity(entity)
-            .insert(valence_provider::panel_anchor_geometry(panel));
+        lifecycle::write_owned_component(
+            commands,
+            entity,
+            entity,
+            valence_provider::panel_anchor_geometry(panel),
+        );
     }
 }
 

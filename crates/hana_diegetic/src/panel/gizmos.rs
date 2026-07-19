@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 
+use super::PanelOwned;
 use super::constants::DEBUG_TEXT_GIZMO_COLOR;
 use super::constants::DEBUG_TEXT_GIZMO_LINE_WIDTH;
 use super::constants::GIZMO_LINE_JOINT_SEGMENTS;
@@ -71,9 +72,12 @@ fn spawn_rect_gizmo(
         },
         ..default()
     };
-    commands
-        .entity(panel_entity)
-        .with_child((DebugGizmoChild, gizmo, Transform::IDENTITY));
+    commands.entity(panel_entity).with_child((
+        DebugGizmoChild,
+        gizmo,
+        Transform::IDENTITY,
+        PanelOwned::from(panel_entity),
+    ));
 }
 
 /// Renders debug overlays (text bounding boxes, element outlines) as

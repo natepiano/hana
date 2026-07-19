@@ -29,6 +29,7 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::LastPanelDimensions;
+use crate::panel::PanelRenderLayersOwnership;
 use crate::panel::PanelSystems;
 use crate::panel::ResolvedScreenPanelPosition;
 use crate::panel::ScreenPosition;
@@ -51,7 +52,7 @@ pub struct ScreenSpaceLight {
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ScreenSpaceSystems {
+pub(crate) enum ScreenSpaceSystems {
     ResolveDimensions,
     FlushDimensionObservers,
     FlushObserverCommands,
@@ -62,7 +63,6 @@ pub(crate) struct ScreenSpacePlugin;
 impl Plugin for ScreenSpacePlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(setup_screen_space_view)
-            .add_observer(cleanup_screen_space_view)
             .add_observer(cleanup_screen_space_on_window_close)
             .init_resource::<AnchorResolveDiagnostics>()
             .configure_sets(
@@ -390,7 +390,7 @@ fn setup_screen_space_view_for_panel(
         return;
     };
 
-    commands.entity(entity).insert(render_layers.clone());
+    panel::write_owned_render_layers(commands, entity, entity, Some(render_layers.clone()));
 
     let camera_exists = cameras.iter().any(|cam| {
         cam.order == camera_order
@@ -467,7 +467,10 @@ fn setup_screen_space_view_for_panel(
 fn propagate_screen_space_render_layers(
     panels_with_layers: Query<(Entity, &RenderLayers, &DiegeticPanel)>,
     children_query: Query<&Children>,
-    existing_layers: Query<&RenderLayers>,
+    layer_state: Query<(
+        Option<Ref<RenderLayers>>,
+        Option<&PanelRenderLayersOwnership>,
+    )>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel_layers, panel) in &panels_with_layers {
@@ -479,8 +482,9 @@ fn propagate_screen_space_render_layers(
         };
         propagate_layers_recursive(
             &children_query,
-            &existing_layers,
+            &layer_state,
             &mut commands,
+            panel_entity,
             children,
             panel_layers,
         );
@@ -489,20 +493,35 @@ fn propagate_screen_space_render_layers(
 
 fn propagate_layers_recursive(
     children_query: &Query<&Children>,
-    existing_layers: &Query<&RenderLayers>,
+    layer_state: &Query<(
+        Option<Ref<RenderLayers>>,
+        Option<&PanelRenderLayersOwnership>,
+    )>,
     commands: &mut Commands,
+    panel_entity: Entity,
     children: &Children,
     layers: &RenderLayers,
 ) {
     for child in children.iter() {
-        if existing_layers.get(child).is_err() {
-            commands.entity(child).insert(layers.clone());
+        let should_write = layer_state.get(child).map_or(true, |(current, ownership)| {
+            ownership.map_or_else(
+                || current.is_none(),
+                |ownership| {
+                    ownership.is_owned_by(panel_entity)
+                        && (!ownership.matches_current(panel_entity, current.as_ref())
+                            || current.as_deref() != Some(layers))
+                },
+            )
+        });
+        if should_write {
+            panel::write_owned_render_layers(commands, panel_entity, child, Some(layers.clone()));
         }
         if let Ok(grandchildren) = children_query.get(child) {
             propagate_layers_recursive(
                 children_query,
-                existing_layers,
+                layer_state,
                 commands,
+                panel_entity,
                 grandchildren,
                 layers,
             );
@@ -524,17 +543,15 @@ fn propagate_layers_recursive(
 /// `cleanup_screen_space_on_window_close` observer despawns panels only;
 /// teardown of their cameras/lights cascades through this observer,
 /// keeping single-owner cleanup.
-fn cleanup_screen_space_view(
-    trigger: On<Remove, DiegeticPanel>,
-    panels: Query<(Entity, &DiegeticPanel)>,
-    cameras: Query<(Entity, &ScreenSpaceCamera)>,
-    lights: Query<(Entity, &ScreenSpaceLight)>,
-    primary: Query<Entity, With<PrimaryWindow>>,
-    mut commands: Commands,
+pub(crate) fn cleanup_screen_space_view(
+    removed_entity: Entity,
+    removed_panel: &DiegeticPanel,
+    panels: &Query<(Entity, &DiegeticPanel)>,
+    cameras: &Query<(Entity, &ScreenSpaceCamera)>,
+    lights: &Query<(Entity, &ScreenSpaceLight)>,
+    primary: &Query<Entity, With<PrimaryWindow>>,
+    commands: &mut Commands,
 ) {
-    let Ok((_, removed_panel)) = panels.get(trigger.entity) else {
-        return;
-    };
     let CoordinateSpace::Screen {
         camera_order,
         ref render_layers,
@@ -549,12 +566,12 @@ fn cleanup_screen_space_view(
     // Iterating cameras (not windows) is what lets us clean up orphans
     // whose `WindowRef::Primary` panels can no longer be resolved because
     // the primary window itself was despawned.
-    for (cam_entity, cam) in &cameras {
+    for (cam_entity, cam) in cameras {
         if cam.order != camera_order || cam.render_layers != *render_layers {
             continue;
         }
         let still_used = panels.iter().any(|(entity, panel)| {
-            if entity == trigger.entity {
+            if entity == removed_entity {
                 return false;
             }
             let CoordinateSpace::Screen {
@@ -568,7 +585,7 @@ fn cleanup_screen_space_view(
             };
             *other_order == camera_order
                 && other_layers == render_layers
-                && resolve_window_ref(*other_window_ref, &primary) == Some(cam.window)
+                && resolve_window_ref(*other_window_ref, primary) == Some(cam.window)
         });
         if !still_used {
             commands.entity(cam_entity).despawn();
@@ -576,7 +593,7 @@ fn cleanup_screen_space_view(
     }
 
     let light_still_in_use = panels.iter().any(|(entity, panel)| {
-        if entity == trigger.entity {
+        if entity == removed_entity {
             return false;
         }
         match panel.coordinate_space() {
@@ -590,7 +607,7 @@ fn cleanup_screen_space_view(
     if light_still_in_use {
         return;
     }
-    for (entity, light) in &lights {
+    for (entity, light) in lights {
         if light.render_layers == *render_layers {
             commands.entity(entity).despawn();
         }
@@ -631,6 +648,7 @@ mod tests {
     use std::sync::Arc;
 
     use bevy::camera::RenderTarget;
+    use bevy::camera::visibility::RenderLayers;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
@@ -747,6 +765,67 @@ mod tests {
 
         let log = app.world().resource::<DimensionEventLog>();
         assert_eq!(log.0.len(), 1);
+    }
+
+    #[test]
+    fn propagated_layers_change_only_when_the_panel_layer_changes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .render_layers(RenderLayers::layer(3))
+            .layout(|_| {})
+            .build()
+            .expect("screen panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        let child = app.world_mut().spawn(ChildOf(panel)).id();
+        app.update();
+
+        let initial_tick = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should seed the child layer")
+            .last_changed();
+        app.update();
+        let unchanged_tick = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should retain the child layer")
+            .last_changed();
+        assert_eq!(unchanged_tick, initial_tick);
+
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(RenderLayers::layer(4));
+        app.update();
+        let updated = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should update the child layer");
+        assert_eq!(&*updated, &RenderLayers::layer(4));
+        let updated_tick = updated.last_changed();
+        assert_ne!(updated_tick, unchanged_tick);
+
+        app.update();
+        let final_tick = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should retain the updated child layer")
+            .last_changed();
+        assert_eq!(final_tick, updated_tick);
     }
 
     #[derive(Component)]
@@ -1036,11 +1115,13 @@ mod tests {
     }
 
     /// Helper for the multi-window cleanup tests: builds an app with two
-    /// windows and one bottom-right `Fit` panel pinned to each, then runs
+    /// windows and one bottom-right panel pinned to each, then runs
     /// one update to let the setup observers spawn cameras and lights.
     fn build_two_window_app() -> (App, Entity, Entity, Entity, Entity) {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(monospace_measurer())
+            .add_plugins(HeadlessLayoutPlugin);
         let primary = app
             .world_mut()
             .spawn((
@@ -1058,18 +1139,10 @@ mod tests {
                 ..Default::default()
             })
             .id();
-        app.configure_sets(
-            Update,
-            PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
-        );
-        app.add_systems(
-            Update,
-            write_known_content_size.in_set(PanelSystems::ComputeLayout),
-        );
         app.add_plugins(ScreenSpacePlugin);
 
         let primary_panel = DiegeticPanel::screen()
-            .size(Fit, Fit)
+            .size(Px(100.0), Px(50.0))
             .anchor(Anchor::BottomRight)
             .window(WindowRef::Primary)
             .layout(|_| {})
@@ -1078,7 +1151,7 @@ mod tests {
         let primary_panel = app.world_mut().spawn(primary_panel).id();
 
         let secondary_panel = DiegeticPanel::screen()
-            .size(Fit, Fit)
+            .size(Px(100.0), Px(50.0))
             .anchor(Anchor::BottomRight)
             .window_entity(secondary)
             .layout(|_| {})

@@ -9,6 +9,7 @@ use super::WidgetOf;
 use crate::PanelBuildError;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
+use crate::layout::BoundingBox;
 use crate::layout::LayoutTree;
 use crate::panel::DiegeticPanel;
 
@@ -80,11 +81,14 @@ impl WidgetSpec {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ComputedWidgetRecord {
-    id:            PanelElementId,
-    kind:          WidgetKind,
-    preorder:      usize,
-    authored:      WidgetSpec,
-    interactivity: Cascade<super::WidgetInteractivity>,
+    id:               PanelElementId,
+    kind:             WidgetKind,
+    preorder:         usize,
+    authored:         WidgetSpec,
+    interactivity:    Cascade<super::WidgetInteractivity>,
+    rect:             BoundingBox,
+    clipped_rect:     Option<BoundingBox>,
+    interaction_rank: usize,
 }
 
 impl ComputedWidgetRecord {
@@ -93,6 +97,8 @@ impl ComputedWidgetRecord {
         preorder: usize,
         authored: WidgetSpec,
         interactivity: Cascade<super::WidgetInteractivity>,
+        rect: BoundingBox,
+        clipped_rect: Option<BoundingBox>,
     ) -> Self {
         let kind = authored.kind();
         Self {
@@ -101,6 +107,9 @@ impl ComputedWidgetRecord {
             preorder,
             authored,
             interactivity,
+            rect,
+            clipped_rect,
+            interaction_rank: 0,
         }
     }
 
@@ -114,6 +123,16 @@ impl ComputedWidgetRecord {
 
     pub(crate) const fn interactivity(&self) -> Cascade<super::WidgetInteractivity> {
         self.interactivity
+    }
+
+    pub(crate) const fn rect(&self) -> BoundingBox { self.rect }
+
+    pub(crate) const fn clipped_rect(&self) -> Option<BoundingBox> { self.clipped_rect }
+
+    pub(crate) const fn interaction_rank(&self) -> usize { self.interaction_rank }
+
+    pub(crate) const fn set_interaction_rank(&mut self, interaction_rank: usize) {
+        self.interaction_rank = interaction_rank;
     }
 }
 

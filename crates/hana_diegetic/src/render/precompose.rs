@@ -35,6 +35,7 @@ use crate::layout::Unit;
 use crate::panel;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
+use crate::panel::PanelOwned;
 use crate::panel::PanelPrecomposeCache;
 use crate::panel::PrecomposeCacheEntry;
 use crate::panel::PrecomposeHelper;
@@ -366,6 +367,7 @@ fn spawn_precompose_entry(input: SpawnEntry<'_, '_, '_>) {
                 Cascade::Override(Lighting::Unlit),
                 Cascade::Override(PRECOMPOSE_TEXT_COVERAGE_BIAS),
                 layer.clone(),
+                PanelOwned::from(panel_entity),
             ))
             .id();
         camera = children
@@ -378,6 +380,7 @@ fn spawn_precompose_entry(input: SpawnEntry<'_, '_, '_>) {
                 Transform::from_translation(origin + Vec3::Z * PRECOMPOSE_CAMERA_Z)
                     .looking_at(origin, Vec3::Y),
                 layer.clone(),
+                PanelOwned::from(panel_entity),
             ))
             .id();
     });

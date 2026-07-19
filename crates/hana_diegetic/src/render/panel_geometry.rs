@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use bevy::asset::load_internal_asset;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
+use bevy::picking::Pickable;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 
@@ -33,6 +34,7 @@ use crate::layout::RenderCommandKind;
 use crate::layout::ShadowCasting;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
+use crate::panel::PanelOwned;
 
 /// The invisible full-panel interaction quad (Geometry mode only), tagged with
 /// its world size and center so a rebuild can leave it untouched when the panel
@@ -40,15 +42,24 @@ use crate::panel::DiegeticPanel;
 /// source material resolved from `SdfMaterial`. Both pairs are stored as `f32`
 /// bit patterns for exact equality.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
-struct PanelInteractionMesh {
+pub(crate) struct PanelInteractionMesh {
     /// World size (width, height).
     size:   [u32; 2],
     /// World-space transform center (x, y).
     center: [u32; 2],
 }
 
+impl PanelInteractionMesh {
+    pub(crate) const fn new(size: Vec2, center: Vec2) -> Self {
+        Self {
+            size:   vec2_bits(size),
+            center: vec2_bits(center),
+        }
+    }
+}
+
 /// Plugin that adds panel geometry rendering (backgrounds and borders).
-pub(super) struct PanelGeometryPlugin;
+pub(crate) struct PanelGeometryPlugin;
 
 impl Plugin for PanelGeometryPlugin {
     fn build(&self, app: &mut App) {
@@ -61,10 +72,55 @@ impl Plugin for PanelGeometryPlugin {
         app.init_resource::<ResolvedSdfSurfaceRegistry>();
         app.add_systems(
             PostUpdate,
-            build_panel_geometry
-                .in_set(PanelChildSystems::Build)
-                .before(MaterialTableAppendReady),
+            (
+                build_panel_geometry.before(MaterialTableAppendReady),
+                sync_interaction_mesh_render_layers.after(build_panel_geometry),
+            )
+                .in_set(PanelChildSystems::Build),
         );
+    }
+}
+
+/// Copies panel-facing `RenderLayers` changes and removals to the private
+/// interaction mesh without waiting for a geometry rebuild.
+fn sync_interaction_mesh_render_layers(
+    changed_panels: Query<
+        (Entity, &RenderLayers),
+        (
+            With<DiegeticPanel>,
+            Without<PanelInteractionMesh>,
+            Changed<RenderLayers>,
+        ),
+    >,
+    panels_without_layers: Query<(), (With<DiegeticPanel>, Without<RenderLayers>)>,
+    mut removed_layers: RemovedComponents<RenderLayers>,
+    mut interaction_meshes: Query<
+        (&PanelOwned, &mut RenderLayers),
+        (With<PanelInteractionMesh>, Without<DiegeticPanel>),
+    >,
+) {
+    for (panel, layers) in &changed_panels {
+        sync_panel_interaction_layers(panel, layers, &mut interaction_meshes);
+    }
+    for panel in removed_layers.read() {
+        if panels_without_layers.contains(panel) {
+            sync_panel_interaction_layers(panel, &RenderLayers::layer(0), &mut interaction_meshes);
+        }
+    }
+}
+
+fn sync_panel_interaction_layers(
+    panel: Entity,
+    layers: &RenderLayers,
+    interaction_meshes: &mut Query<
+        (&PanelOwned, &mut RenderLayers),
+        (With<PanelInteractionMesh>, Without<DiegeticPanel>),
+    >,
+) {
+    for (ownership, mut current) in interaction_meshes {
+        if ownership.owner() == panel && *current != *layers {
+            current.clone_from(layers);
+        }
     }
 }
 
@@ -187,7 +243,7 @@ fn build_panel_geometry(
             Changed<Resolved<ShadowCasting>>,
         )>,
     >,
-    old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
+    old_interaction: Query<(Entity, &PanelOwned, &PanelInteractionMesh)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
@@ -270,7 +326,7 @@ pub(crate) struct PanelReconcileContext<'a> {
 /// when the panel's world size or center changed, and left untouched otherwise.
 fn reconcile_interaction_mesh(
     context: &PanelReconcileContext<'_>,
-    old_interaction: &Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
+    old_interaction: &Query<(Entity, &PanelOwned, &PanelInteractionMesh)>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     commands: &mut Commands,
@@ -280,13 +336,10 @@ fn reconcile_interaction_mesh(
         world_size.x.mul_add(0.5, -context.anchor_x),
         world_size.y.mul_add(-0.5, context.anchor_y),
     );
-    let interaction = PanelInteractionMesh {
-        size:   vec2_bits(world_size),
-        center: vec2_bits(center),
-    };
+    let interaction = PanelInteractionMesh::new(world_size, center);
     let existing = old_interaction
         .iter()
-        .find(|(_, child_of, _)| child_of.parent() == context.panel_entity);
+        .find(|(_, ownership, _)| ownership.owner() == context.panel_entity);
     match existing {
         Some((_, _, current)) if *current == interaction => {},
         Some((entity, ..)) => {
@@ -852,12 +905,32 @@ fn spawn_interaction_mesh(
     commands.entity(context.panel_entity).with_child((
         interaction,
         RayCastBackfaces,
+        Pickable::IGNORE,
         NotShadowCaster,
         Mesh3d(meshes.add(Rectangle::new(size.x, size.y))),
         MeshMaterial3d(material),
         Transform::from_xyz(center.x, center.y, 0.0),
         context.layer.clone(),
+        PanelOwned::from(context.panel_entity),
     ));
+}
+
+/// Projects a world-space hit on the current flat panel surface into layout coordinates.
+pub(crate) fn project_flat_panel_hit(
+    position: Vec3,
+    panel: &DiegeticPanel,
+    transform: &GlobalTransform,
+) -> Option<Vec2> {
+    let points_to_world = panel.points_to_world();
+    if points_to_world <= 0.0 {
+        return None;
+    }
+    let local = transform.affine().inverse().transform_point3(position);
+    let (anchor_x, anchor_y) = panel.anchor_offsets();
+    Some(Vec2::new(
+        (local.x + anchor_x) / points_to_world,
+        (anchor_y - local.y) / points_to_world,
+    ))
 }
 
 const fn vec2_bits(value: Vec2) -> [u32; 2] { [value.x.to_bits(), value.y.to_bits()] }
@@ -1294,5 +1367,53 @@ mod tests {
         let surface = single_surface_snapshot(&app);
         assert_eq!(surface.fill_material, Some(element_material.id()));
         assert_eq!(surface.border_material, Some(element_material.id()));
+    }
+
+    #[test]
+    fn same_frame_panel_layer_reinsertion_wins_over_removal_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(PostUpdate, sync_interaction_mesh_render_layers);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .layout(|_| {})
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(RenderLayers::layer(1));
+        let interaction = app
+            .world_mut()
+            .spawn((
+                PanelInteractionMesh::new(Vec2::ONE, Vec2::ZERO),
+                PanelOwned::from(panel),
+                RenderLayers::layer(1),
+            ))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .entity_mut(panel)
+            .remove::<RenderLayers>()
+            .insert(RenderLayers::layer(4));
+        app.update();
+
+        assert_eq!(
+            app.world().get::<RenderLayers>(interaction),
+            Some(&RenderLayers::layer(4)),
+        );
+
+        app.world_mut().entity_mut(panel).remove::<RenderLayers>();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<RenderLayers>(interaction),
+            Some(&RenderLayers::layer(0)),
+        );
     }
 }

@@ -28,6 +28,7 @@ use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::panel::PanelOwned;
 use crate::render::clip;
 use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrder;
@@ -357,6 +358,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             z_index,
             z_index_rank,
             TextRunOf(panel_entity),
+            PanelOwned::from(panel_entity),
         ));
         spawned = child.id();
         sync_label_cascade_overrides(&mut child, label_cascades, None);

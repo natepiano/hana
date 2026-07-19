@@ -212,12 +212,8 @@ fn commit_layout_result(
             "panel {entity:?} has duplicate editable field ids: {field_id_conflicts:?}"
         );
     }
-    computed.set_result_with_fields(
-        result,
-        field_records,
-        field_id_conflicts,
-        scaled_tree.computed_widget_records(),
-    );
+    let widget_records = scaled_tree.computed_widget_records(&result);
+    computed.set_result_with_fields(result, field_records, field_id_conflicts, widget_records);
 }
 
 /// Returns the solved root surface, including root padding and border.

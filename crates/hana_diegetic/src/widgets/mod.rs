@@ -1,11 +1,15 @@
 mod button;
 mod id;
 mod interactivity;
+mod picking;
 mod reify;
 mod relationship;
 mod slider;
 
 use bevy::ecs::schedule::ApplyDeferred;
+use bevy::ecs::schedule::common_conditions::resource_exists;
+use bevy::picking::PickingSystems;
+use bevy::picking::mesh_picking::MeshPickingSettings;
 use bevy::prelude::*;
 pub use button::Button;
 pub(crate) use id::ComputedWidgetRecord;
@@ -28,6 +32,7 @@ pub use slider::SliderStep;
 
 use crate::PanelSystems;
 use crate::cascade;
+use crate::screen_space::ScreenSpaceSystems;
 
 /// Named scheduling points for semantic widget work.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -45,16 +50,29 @@ pub(crate) struct WidgetsPlugin;
 
 impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(cascade::cascade_plugin::<WidgetInteractivity>())
+        app.init_resource::<MeshPickingSettings>()
+            .add_plugins(cascade::cascade_plugin::<WidgetInteractivity>())
             .configure_sets(
                 Update,
                 (
-                    WidgetSystems::Reify.after(PanelSystems::ComputeLayout),
+                    WidgetSystems::Reify
+                        .after(PanelSystems::ComputeLayout)
+                        .after(PanelSystems::ResolveWorldFit)
+                        .after(ScreenSpaceSystems::ResolveDimensions),
                     WidgetSystems::ReifyCommandsApplied.after(WidgetSystems::Reify),
                     WidgetSystems::ResolveInteractivity
                         .after(WidgetSystems::ReifyCommandsApplied)
                         .before(PanelSystems::ResolvePanelAttachments),
                 ),
+            )
+            .add_systems(
+                PreUpdate,
+                picking::update_hits
+                    .run_if(
+                        resource_exists::<bevy::picking::backend::ray::RayMap>
+                            .and_then(resource_exists::<Assets<Mesh>>),
+                    )
+                    .in_set(PickingSystems::Backend),
             )
             .add_systems(
                 Update,

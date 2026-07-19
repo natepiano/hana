@@ -13,6 +13,7 @@ use self::batching::ShapeBatchStore;
 use self::batching::commit_panel_line_batch_buffers;
 use self::batching::reconcile_panel_line_batches;
 use self::batching::update_panel_line_batch_bounds;
+use self::relationship::PanelShapes;
 use super::PanelChildSystems;
 use super::material_table;
 use super::material_table::BatchResourcesReady;
@@ -36,4 +37,8 @@ impl Plugin for PanelShapePlugin {
                 .before(VisibilitySystems::CheckVisibility),
         );
     }
+}
+
+pub(crate) fn remove_panel_relationship(entity: &mut EntityCommands<'_>) {
+    entity.remove::<PanelShapes>();
 }
