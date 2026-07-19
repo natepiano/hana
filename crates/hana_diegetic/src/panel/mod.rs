@@ -13,6 +13,7 @@ mod diegetic_panel;
 mod events;
 mod field;
 mod gizmos;
+mod lifecycle;
 mod perf;
 mod precompose;
 mod sizing;
@@ -76,6 +77,9 @@ pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
 use hana_valence::AnchorSystems;
 use hana_valence::ResolveDiagnostics;
+pub(crate) use lifecycle::PanelOwned;
+pub(crate) use lifecycle::PanelRenderLayersOwnership;
+pub(crate) use lifecycle::write_owned_render_layers;
 pub use perf::BatchPerfStats;
 pub use perf::BatchSummary;
 use perf::DiagnosticsPlugin;
@@ -107,10 +111,18 @@ use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::PanelDefaults;
+use crate::cascade::SdfMaterial;
+use crate::cascade::ShapeMaterial;
+use crate::cascade::TextAlpha;
+use crate::cascade::TextMaterial;
+use crate::layout::GlyphShadowMode;
+use crate::layout::Lighting;
 use crate::layout::ShadowCasting;
 use crate::layout::ShapedTextCache;
+use crate::layout::Sidedness;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::WidgetInteractivity;
 
 /// System sets for ordering panel work and its cross-module dependencies.
 ///
@@ -142,6 +154,15 @@ pub enum PanelSystems {
     AnimateAnchorPose,
 }
 
+macro_rules! add_cascade_ownership_observers {
+    ($app:expr, $($attribute:ty),+ $(,)?) => {
+        $(
+            $app.add_observer(lifecycle::record_resolved_ownership::<$attribute>);
+            $app.add_observer(lifecycle::restore_preserved_resolved::<$attribute>);
+        )+
+    };
+}
+
 /// Headless layout runner — schedules `compute_panel_layouts` on `Update`
 /// and initializes the resources it consumes (diagnostics, perf stats,
 /// shaped-text cache).
@@ -164,7 +185,27 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_plugins(cascade::cascade_plugin::<HairlineFade>())
             .add_plugins(cascade::cascade_plugin::<HdrTextCoverageBias>())
             .add_plugins(cascade::cascade_plugin::<ShadowCasting>())
-            .add_observer(diegetic_panel::seed_panel_overrides)
+            .add_observer(diegetic_panel::seed_panel_overrides);
+
+        add_cascade_ownership_observers!(
+            app,
+            FontUnit,
+            AntiAlias,
+            HairlineFade,
+            HdrTextCoverageBias,
+            ShadowCasting,
+            WidgetInteractivity,
+            TextAlpha,
+            Lighting,
+            Sidedness,
+            GlyphShadowMode,
+            SdfMaterial,
+            TextMaterial,
+            ShapeMaterial,
+        );
+
+        app.add_observer(lifecycle::finalize_orphaned_panel_owned)
+            .add_observer(lifecycle::teardown_panel_role)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<PanelDefaults>()
@@ -172,6 +213,7 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_observer(coordinate_space::sync_panel_space_on_add)
             .add_observer(hana_valence::on_member_added)
             .add_observer(hana_valence::on_member_removed)
+            .add_observer(arrangement::cleanup_panel_member_placement)
             .add_observer(anchoring::on_panel_attachment_inserted)
             .add_observer(anchoring::on_panel_attachment_removed)
             .add_observer(anchoring::on_panel_space_changed)

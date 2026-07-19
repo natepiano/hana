@@ -83,7 +83,7 @@ impl ClipContext {
 
     fn child(self, element: &Element, bounds: BoundingBox) -> Self {
         if matches!(element.overflow, ChildOverflow::Clipped) {
-            let scissor_bounds = element_scissor_bounds(element, bounds);
+            let scissor_bounds = element.child_clip_bounds(bounds);
             Self {
                 inherited: self
                     .inherited
@@ -254,7 +254,7 @@ fn emit_down_traversal_commands(
     // Clip to the border's inner edge — content can fill up to (but
     // not into) the border. Padding is inside this region.
     if matches!(element.overflow, ChildOverflow::Clipped) {
-        let clip_bounds = element_scissor_bounds(element, bounds);
+        let clip_bounds = element.child_clip_bounds(bounds);
         push_command(
             commands,
             clip_bounds,
@@ -452,31 +452,6 @@ fn union_bounds(a: BoundingBox, b: BoundingBox) -> BoundingBox {
         y:      y0,
         width:  x1 - x0,
         height: y1 - y0,
-    }
-}
-
-fn element_scissor_bounds(element: &Element, bounds: BoundingBox) -> BoundingBox {
-    let top = element
-        .border
-        .as_ref()
-        .map_or(0.0, |border| border.top.value);
-    let right = element
-        .border
-        .as_ref()
-        .map_or(0.0, |border| border.right.value);
-    let bottom = element
-        .border
-        .as_ref()
-        .map_or(0.0, |border| border.bottom.value);
-    let left = element
-        .border
-        .as_ref()
-        .map_or(0.0, |border| border.left.value);
-    BoundingBox {
-        x:      bounds.x + left,
-        y:      bounds.y + top,
-        width:  (bounds.width - left - right).max(0.0),
-        height: (bounds.height - top - bottom).max(0.0),
     }
 }
 

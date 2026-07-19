@@ -20,10 +20,12 @@ use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
 use super::Border;
+use super::BoundingBox;
 use super::ChildDivider;
 use super::CornerRadius;
 use super::Dimension;
 use super::DrawZIndex;
+use super::LayoutResult;
 use super::Padding;
 use super::PanelDraw;
 use super::ShadowCasting;
@@ -213,6 +215,27 @@ impl Default for Element {
             shadow_casting:  Cascade::Inherit,
             precompose:      PrecomposeMode::Direct,
             content:         ElementContent::Empty,
+        }
+    }
+}
+
+impl Element {
+    pub(super) fn child_clip_bounds(&self, bounds: BoundingBox) -> BoundingBox {
+        let top = self.border.as_ref().map_or(0.0, |border| border.top.value);
+        let right = self
+            .border
+            .as_ref()
+            .map_or(0.0, |border| border.right.value);
+        let bottom = self
+            .border
+            .as_ref()
+            .map_or(0.0, |border| border.bottom.value);
+        let left = self.border.as_ref().map_or(0.0, |border| border.left.value);
+        BoundingBox {
+            x:      bounds.x + left,
+            y:      bounds.y + top,
+            width:  (bounds.width - left - right).max(0.0),
+            height: (bounds.height - top - bottom).max(0.0),
         }
     }
 }
@@ -722,15 +745,23 @@ impl LayoutTree {
         Ok(())
     }
 
-    pub(crate) fn computed_widget_records(&self) -> Vec<ComputedWidgetRecord> {
+    pub(crate) fn computed_widget_records(
+        &self,
+        result: &LayoutResult,
+    ) -> Vec<ComputedWidgetRecord> {
         let Some(root) = self.root else {
             return Vec::new();
         };
-        let mut records = Vec::new();
-        let mut stack = vec![(root, Cascade::Inherit)];
+        let Some(root_layout) = result.computed.get(root) else {
+            return Vec::new();
+        };
+        let mut ranked_records = Vec::new();
+        let mut stack = vec![(root, Cascade::Inherit, root_layout.bounds)];
         let mut preorder = 0;
-        while let Some((index, inherited_interactivity)) = stack.pop() {
-            let Some(element) = self.elements.get(index) else {
+        while let Some((index, inherited_interactivity, inherited_clip)) = stack.pop() {
+            let (Some(element), Some(computed)) =
+                (self.elements.get(index), result.computed.get(index))
+            else {
                 continue;
             };
             let interactivity = match element.interactivity {
@@ -738,19 +769,45 @@ impl LayoutTree {
                 Cascade::Override(value) => Cascade::Override(value),
             };
             if let (Some(id), Some(widget)) = (&element.id, &element.widget) {
-                records.push(ComputedWidgetRecord::new(
-                    id.clone(),
-                    preorder,
-                    widget.clone(),
-                    interactivity,
+                ranked_records.push((
+                    element.z_index,
+                    ComputedWidgetRecord::new(
+                        id.clone(),
+                        preorder,
+                        widget.clone(),
+                        interactivity,
+                        computed.bounds,
+                        computed.bounds.intersect(&inherited_clip),
+                    ),
                 ));
             }
             preorder += 1;
+            let child_clip = if matches!(element.overflow, ChildOverflow::Clipped) {
+                inherited_clip
+                    .intersect(&element.child_clip_bounds(computed.bounds))
+                    .unwrap_or_default()
+            } else {
+                inherited_clip
+            };
             for &child in self.children_of(index).iter().rev() {
-                stack.push((child, interactivity));
+                stack.push((child, interactivity, child_clip));
             }
         }
-        records
+
+        let mut rank_order: Vec<usize> = (0..ranked_records.len()).collect();
+        rank_order.sort_by_key(|&index| {
+            let (z_index, record) = &ranked_records[index];
+            (*z_index, record.preorder())
+        });
+        for (interaction_rank, record_index) in rank_order.into_iter().enumerate() {
+            ranked_records[record_index]
+                .1
+                .set_interaction_rank(interaction_rank);
+        }
+        ranked_records
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect()
     }
 
     /// Returns the first text string owned by `index` or one of its descendants.
@@ -1157,7 +1214,13 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
+    use std::sync::Arc;
+
     use bevy::asset::Assets;
     use bevy::asset::Handle;
     use bevy::color::Color;
@@ -1189,6 +1252,7 @@ mod tests {
     use crate::layout::Dimension;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutEngine;
     use crate::layout::Padding;
     use crate::layout::PanelCoord;
     use crate::layout::PanelDraw;
@@ -1196,6 +1260,7 @@ mod tests {
     use crate::layout::PanelShape;
     use crate::layout::Sizing;
     use crate::layout::Text;
+    use crate::layout::TextDimensions;
     use crate::layout::TextStyle;
     use crate::layout::Unit;
     use crate::layout::child_layout::ChildLayout;
@@ -1545,7 +1610,10 @@ mod tests {
             },
         );
         builder.with(El::new().button("inherited", Button::new()), |_| {});
-        let records = builder.build().computed_widget_records();
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
 
         assert_eq!(records.len(), 3);
         assert_eq!(
@@ -1557,6 +1625,75 @@ mod tests {
             Cascade::Override(WidgetInteractivity::Enabled)
         );
         assert_eq!(records[2].interactivity(), Cascade::Inherit);
+    }
+
+    #[test]
+    fn computed_widgets_store_clipped_rects_and_visual_interaction_rank() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::row().size(20.0, 20.0).clip(), |builder| {
+            builder.with(
+                El::new().size(30.0, 10.0).button("partial", Button::new()),
+                |_| {},
+            );
+            builder.with(
+                El::new().size(10.0, 10.0).button("clipped", Button::new()),
+                |_| {},
+            );
+        });
+        builder.with(El::overlay().size(20.0, 20.0), |builder| {
+            builder.with(
+                El::new()
+                    .size(20.0, 20.0)
+                    .button("back", Button::new())
+                    .z_index(-1),
+                |_| {},
+            );
+            builder.with(
+                El::new()
+                    .size(20.0, 20.0)
+                    .button("front-first", Button::new())
+                    .z_index(2),
+                |_| {},
+            );
+            builder.with(
+                El::new()
+                    .size(20.0, 20.0)
+                    .button("front-last", Button::new())
+                    .z_index(2),
+                |_| {},
+            );
+        });
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        let partial = records
+            .iter()
+            .find(|record| record.id() == &PanelElementId::named("partial"))
+            .expect("partially clipped widget should have a record");
+        assert!((partial.rect().width - 30.0).abs() < FLOAT_TOLERANCE);
+        assert!(
+            partial
+                .clipped_rect()
+                .is_some_and(|rect| (rect.width - 20.0).abs() < FLOAT_TOLERANCE)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| record.id() == &PanelElementId::named("clipped"))
+                .and_then(super::ComputedWidgetRecord::clipped_rect),
+            None
+        );
+
+        let rank = |id| {
+            records
+                .iter()
+                .find(|record| record.id() == &PanelElementId::named(id))
+                .map(super::ComputedWidgetRecord::interaction_rank)
+        };
+        assert!(rank("back") < rank("front-first"));
+        assert!(rank("front-first") < rank("front-last"));
     }
 
     #[test]

@@ -18,6 +18,8 @@ use hana_valence::ResolvedAnchorOffset;
 use super::CoordinateSpace;
 use super::DiegeticPanel;
 use super::coordinate_space::PanelSpace;
+use super::lifecycle;
+use super::lifecycle::PanelComponentOwnership;
 use crate::layout::Anchor;
 use crate::layout::Dimension;
 use crate::layout::Unit;
@@ -211,9 +213,8 @@ pub(super) fn on_panel_attachment_inserted(
         return;
     };
     let Some(panel) = panel else {
-        commands
-            .entity(entity)
-            .remove::<(ValenceAnchoredTo, ResolvedAnchorOffset)>();
+        lifecycle::remove_owned_component::<ValenceAnchoredTo>(&mut commands, entity, entity);
+        lifecycle::remove_owned_component::<ResolvedAnchorOffset>(&mut commands, entity, entity);
         return;
     };
     reconcile_panel_anchor(
@@ -268,17 +269,14 @@ fn reconcile_panel_anchor(
     commands: &mut Commands,
 ) {
     if space != PanelSpace::World {
-        commands.entity(entity).remove::<(
-            ValenceAnchoredTo,
-            ResolvedAnchorOffset,
-            AnchoredWorldPanelPose,
-        )>();
+        lifecycle::remove_owned_component::<ValenceAnchoredTo>(commands, entity, entity);
+        lifecycle::remove_owned_component::<ResolvedAnchorOffset>(commands, entity, entity);
+        commands.entity(entity).remove::<AnchoredWorldPanelPose>();
         return;
     }
-    let mut entity_commands = commands.entity(entity);
-    entity_commands.insert(authored.valence_relation());
+    lifecycle::write_owned_component(commands, entity, entity, authored.valence_relation());
     if let (Some(transform), None) = (transform, pose) {
-        entity_commands.insert(AnchoredWorldPanelPose {
+        commands.entity(entity).insert(AnchoredWorldPanelPose {
             authored_transform: *transform,
         });
     }
@@ -289,9 +287,16 @@ pub(super) fn on_panel_attachment_removed(
     removed: On<Remove, PanelAttachmentAuthored>,
     mut commands: Commands,
 ) {
-    commands
-        .entity(removed.entity)
-        .remove::<(ValenceAnchoredTo, ResolvedAnchorOffset)>();
+    lifecycle::remove_owned_component::<ValenceAnchoredTo>(
+        &mut commands,
+        removed.entity,
+        removed.entity,
+    );
+    lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
+        &mut commands,
+        removed.entity,
+        removed.entity,
+    );
 }
 
 /// Restores a world panel's authored local transform after panel anchoring stops.
@@ -320,30 +325,50 @@ pub(super) fn restore_inactive_world_panel_poses(
 /// Resolves diegetic world-panel offsets into valence resolver-frame offsets.
 pub(super) fn write_panel_anchor_offsets(
     mut commands: Commands,
-    attachments: Query<
-        (
-            Entity,
-            &PanelAttachmentAuthored,
-            &PanelAnchorOffset,
-            &DiegeticPanel,
-        ),
-        With<ValenceAnchoredTo>,
-    >,
+    attachments: Query<(
+        Entity,
+        &PanelAttachmentAuthored,
+        &PanelAnchorOffset,
+        &DiegeticPanel,
+        Ref<ValenceAnchoredTo>,
+        Option<&PanelComponentOwnership<ValenceAnchoredTo>>,
+    )>,
     targets: Query<(&DiegeticPanel, &GlobalTransform)>,
 ) {
-    for (entity, authored, offset, source_panel) in &attachments {
+    for (entity, authored, offset, source_panel, relation, ownership) in &attachments {
+        if !ownership.is_some_and(|ownership| ownership.owns(entity, relation.last_changed())) {
+            lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
+                &mut commands,
+                entity,
+                entity,
+            );
+            continue;
+        }
         if !matches!(
             source_panel.coordinate_space(),
             CoordinateSpace::World { .. }
         ) {
-            commands.entity(entity).remove::<ResolvedAnchorOffset>();
+            lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
+                &mut commands,
+                entity,
+                entity,
+            );
             continue;
         }
         let Some(offset) = lowered_world_offset(authored.target(), *offset, &targets) else {
-            commands.entity(entity).remove::<ResolvedAnchorOffset>();
+            lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
+                &mut commands,
+                entity,
+                entity,
+            );
             continue;
         };
-        commands.entity(entity).insert(ResolvedAnchorOffset(offset));
+        lifecycle::write_owned_component(
+            &mut commands,
+            entity,
+            entity,
+            ResolvedAnchorOffset(offset),
+        );
     }
 }
 

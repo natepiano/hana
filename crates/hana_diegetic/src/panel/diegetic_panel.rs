@@ -27,6 +27,7 @@ use super::coordinate_space::PanelSpace;
 use super::coordinate_space::ScreenPosition;
 use super::events::LastPanelDimensions;
 use super::field::PanelFieldRecord;
+use super::lifecycle;
 use super::precompose::PanelPrecomposeCache;
 use super::validate_screen_conversion;
 use super::validate_world_conversion;
@@ -964,13 +965,15 @@ fn apply_panel_screen_conversion_now(
     transform.rotation = Quat::from_rotation_z(rotation);
     transform.scale = Vec3::ONE;
     *resolved_position = ResolvedScreenPanelPosition::default();
-    let mut entity_commands = commands.entity(entity);
-    entity_commands.insert((render_layers, PanelSpace::Screen));
+    commands.entity(entity).insert(PanelSpace::Screen);
+    lifecycle::write_owned_render_layers(commands, entity, entity, Some(render_layers));
     if let Some(handoff) = handoff.filter(|_| was_world_panel) {
-        entity_commands.insert(handoff);
+        commands.entity(entity).insert(handoff);
     }
     if was_world_panel {
-        entity_commands.remove::<PreparedPanelScreenConversion>();
+        commands
+            .entity(entity)
+            .remove::<PreparedPanelScreenConversion>();
     }
 }
 
@@ -1055,14 +1058,24 @@ fn prepare_world_panel_for_screen_conversion(
         width:  fixed_pixel_sizing(conversion.size.x),
         height: fixed_pixel_sizing(conversion.size.y),
     };
-    commands.entity(entity).insert((
-        PreparedPanelScreenConversion {
+    commands
+        .entity(entity)
+        .insert(PreparedPanelScreenConversion {
             size: conversion.size,
-        },
+        });
+    lifecycle::write_owned_cascade(
+        commands,
+        entity,
+        entity,
         Cascade::Override(FontUnit(Unit::Pixels)),
-        Cascade::Override(Lighting::Unlit),
+    );
+    lifecycle::write_owned_cascade(commands, entity, entity, Cascade::Override(Lighting::Unlit));
+    lifecycle::write_owned_cascade(
+        commands,
+        entity,
+        entity,
         Cascade::Override(Sidedness::FrontOnly),
-    ));
+    );
     true
 }
 
@@ -1145,23 +1158,33 @@ fn apply_panel_world_conversion_now(
     }
     *transform = next_transform;
     *resolved_position = ResolvedScreenPanelPosition::default();
-    let mut entity_commands = commands.entity(entity);
-    entity_commands.insert(PanelSpace::World);
+    commands.entity(entity).insert(PanelSpace::World);
     if let Some(saved) = saved {
-        entity_commands.insert((
+        lifecycle::write_owned_cascade(
+            commands,
+            entity,
+            entity,
             Cascade::Override(FontUnit(saved.resolved_font_unit)),
+        );
+        lifecycle::write_owned_cascade(
+            commands,
+            entity,
+            entity,
             Cascade::Override(saved.resolved_lighting),
+        );
+        lifecycle::write_owned_cascade(
+            commands,
+            entity,
+            entity,
             Cascade::Override(saved.resolved_sidedness),
-        ));
-        if let Some(render_layers) = saved.render_layers {
-            entity_commands.insert(render_layers);
-        } else {
-            entity_commands.remove::<RenderLayers>();
-        }
+        );
+        lifecycle::write_owned_render_layers(commands, entity, entity, saved.render_layers);
     } else {
-        entity_commands.remove::<RenderLayers>();
+        lifecycle::write_owned_render_layers(commands, entity, entity, None);
     }
-    entity_commands.remove::<PreparedPanelScreenConversion>();
+    commands
+        .entity(entity)
+        .remove::<PreparedPanelScreenConversion>();
 }
 
 /// Spawn-time authoring bridge for panel cascade overrides.
@@ -1231,12 +1254,7 @@ fn seed_panel_value<A: CascadeAttribute>(
     entity: Entity,
     authored: Cascade<A>,
 ) {
-    let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
-        return;
-    };
-    if !entity_mut.contains::<Cascade<A>>() {
-        entity_mut.insert(authored);
-    }
+    lifecycle::seed_owned_cascade(world, entity, entity, authored);
 }
 
 /// Per-frame tree-change classification consumed by the panel layout system.
@@ -1459,7 +1477,7 @@ impl ComputedDiegeticPanel {
 
         result.regenerate_commands(tree);
         self.draw_order = DrawOrder::from_commands(&result.commands);
-        self.widget_records = tree.computed_widget_records();
+        self.widget_records = tree.computed_widget_records(result);
         true
     }
 
