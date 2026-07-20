@@ -1,5 +1,32 @@
 //! Monitor topology snapshots and raw lifetime events.
 
+#[cfg(all(test, feature = "monitor-probe"))]
+mod example_probe {
+    pub(super) mod constants {
+        pub(crate) const FIELD_MONITOR: &str = "monitor";
+        pub(crate) const FIELD_MONITOR_ENTITY: &str = "monitor_entity";
+        pub(crate) const FIELD_TOPOLOGY_REVISION: &str = "topology_revision";
+        pub(crate) const FIELD_TRANSITION: &str = "transition";
+        pub(crate) const KIND_MONITOR_CONNECTED: &str = "monitor-connected";
+        pub(crate) const KIND_MONITOR_DISCONNECTED: &str = "monitor-disconnected";
+        pub(crate) const KIND_MONITOR_TOPOLOGY: &str = "monitor-topology";
+        pub(crate) const MONITOR_PROBE_TARGET: &str = "bevy_clerestory::monitor_probe";
+        pub(crate) const PRODUCER_MONITOR_CONNECTED: &str = "observer::MonitorConnected";
+        pub(crate) const PRODUCER_MONITOR_DISCONNECTED: &str = "observer::MonitorDisconnected";
+        pub(crate) const TRACE_FIELD_FRAME_COUNT: &str = "frame_count";
+        pub(crate) const TRACE_FIELD_PRODUCER_SCHEDULE: &str = "producer_schedule";
+        pub(crate) const TRANSITION_CREATED: &str = "created";
+        pub(crate) const TRANSITION_REMOVED: &str = "removed";
+    }
+
+    pub(super) mod trace {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/restore_after_reconnect/trace.rs"
+        ));
+    }
+}
+
 #[cfg(test)]
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -769,11 +796,21 @@ pub(super) fn update_monitors(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "monitor-probe")]
+    use bevy::log::tracing_subscriber::Registry;
+    #[cfg(feature = "monitor-probe")]
+    use bevy::log::tracing_subscriber::prelude::*;
     use bevy::reflect::TypePath;
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
     use bevy::window::WindowPosition;
 
+    #[cfg(feature = "monitor-probe")]
+    use super::example_probe::trace as example_trace;
+    #[cfg(feature = "monitor-probe")]
+    use super::example_probe::trace::ProbeTrace;
+    #[cfg(feature = "monitor-probe")]
+    use super::example_probe::trace::TraceRecord;
     #[cfg(feature = "monitor-probe")]
     use super::monitor_probe::InjectedTopologyProbeRecords;
     use super::*;
@@ -795,6 +832,12 @@ mod tests {
     const PANEL_B_EVIDENCE: &[u8] = b"panel-b";
     const RETURNED_MONITOR_POSITION: IVec2 = IVec2::new(3_840, 120);
     const RETURNED_MONITOR_SIZE: UVec2 = UVec2::new(3_840, 2_160);
+    #[cfg(feature = "monitor-probe")]
+    const RUNTIME_TRACE_FRAME: u32 = 9;
+    #[cfg(feature = "monitor-probe")]
+    const SCHEDULE_PRE_STARTUP_MONITORS: &str = "PreStartup::init_monitors";
+    #[cfg(feature = "monitor-probe")]
+    const SCHEDULE_UPDATE_MONITORS: &str = "Update::monitor_topology_producer";
 
     #[derive(Default, Resource)]
     struct TopologyObservations {
@@ -1046,6 +1089,121 @@ mod tests {
         observations.current_monitors_at_disconnect.clear();
     }
 
+    #[cfg(feature = "monitor-probe")]
+    fn trace_field<'a>(record: &'a TraceRecord, name: &str) -> Option<&'a str> {
+        record
+            .fields
+            .iter()
+            .find(|(field_name, _)| field_name == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    fn run_example_trace_scenario() -> (Entity, Vec<TraceRecord>) {
+        let mut app = startup_topology_app();
+        let trace = ProbeTrace::default();
+        app.insert_resource(trace.clone())
+            .add_observer(example_trace::on_monitor_connected)
+            .add_observer(example_trace::on_monitor_disconnected);
+        let Some(layer) = example_trace::monitor_probe_layer(&mut app) else {
+            return (Entity::PLACEHOLDER, Vec::new());
+        };
+        let subscriber = Registry::default().with(layer);
+        let startup_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+
+        bevy::log::tracing::subscriber::with_default(subscriber, || {
+            app.update();
+            app.world_mut().resource_mut::<FrameCount>().0 = RUNTIME_TRACE_FRAME;
+            spawn_monitor(
+                &mut app,
+                PANEL_B_EVIDENCE,
+                IVec2::new(MONITOR_WIDTH.to_i32(), 0),
+                UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+                LOW_DPI_SCALE,
+            );
+            app.update();
+        });
+
+        (startup_entity, trace.records())
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    fn assert_startup_trace(startup: &TraceRecord) {
+        assert_eq!(startup.frame_count, 0);
+        assert_eq!(startup.producer, SCHEDULE_PRE_STARTUP_MONITORS);
+        assert_eq!(
+            startup.kind,
+            super::example_probe::constants::KIND_MONITOR_TOPOLOGY
+        );
+        assert_eq!(
+            trace_field(startup, "configuration_state"),
+            Some("\"ready\"")
+        );
+        assert_eq!(
+            trace_field(startup, "configuration_generation"),
+            Some("Some(0)")
+        );
+        assert_eq!(trace_field(startup, "topology_revision"), Some("0"));
+        assert_eq!(
+            trace_field(startup, "evidence_provenance"),
+            Some("\"observed-current-generation\"")
+        );
+        assert_eq!(
+            trace_field(startup, "topology_change"),
+            Some("\"connected\"")
+        );
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    fn assert_connected_trace(connected: &TraceRecord, startup_entity: Entity) {
+        let startup_entity = format!("{startup_entity:?}");
+        assert_eq!(connected.frame_count, 0);
+        assert_eq!(
+            connected.producer,
+            super::example_probe::constants::PRODUCER_MONITOR_CONNECTED
+        );
+        assert_eq!(
+            connected.kind,
+            super::example_probe::constants::KIND_MONITOR_CONNECTED
+        );
+        assert_eq!(
+            trace_field(
+                connected,
+                super::example_probe::constants::FIELD_MONITOR_ENTITY
+            ),
+            Some(startup_entity.as_str())
+        );
+        assert_eq!(
+            trace_field(
+                connected,
+                super::example_probe::constants::FIELD_TOPOLOGY_REVISION
+            ),
+            Some("0")
+        );
+        assert!(trace_field(connected, super::example_probe::constants::FIELD_MONITOR).is_some());
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    fn assert_runtime_trace(runtime: &TraceRecord) {
+        assert_eq!(runtime.frame_count, RUNTIME_TRACE_FRAME);
+        assert_eq!(runtime.producer, SCHEDULE_UPDATE_MONITORS);
+        assert_eq!(
+            runtime.kind,
+            super::example_probe::constants::KIND_MONITOR_TOPOLOGY
+        );
+        assert_eq!(trace_field(runtime, "topology_revision"), Some("1"));
+        assert_eq!(
+            trace_field(runtime, "topology_change"),
+            Some("\"connected\"")
+        );
+    }
+
     fn assert_returned_monitor_order(
         app: &App,
         returned: Entity,
@@ -1273,6 +1431,26 @@ mod tests {
                 .lookups,
             0
         );
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    #[test]
+    fn example_trace_factory_orders_real_startup_observer_and_runtime_records() {
+        let (startup_entity, records) = run_example_trace_scenario();
+        assert_eq!(records.len(), 4);
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.sequence)
+                .collect::<Vec<_>>(),
+            [1, 2, 3, 4]
+        );
+        assert_startup_trace(&records[0]);
+        assert_connected_trace(&records[1], startup_entity);
+        assert_runtime_trace(&records[2]);
+        assert!(records
+            .windows(2)
+            .all(|records| records[0].timestamp_unix_micros <= records[1].timestamp_unix_micros));
     }
 
     #[test]
