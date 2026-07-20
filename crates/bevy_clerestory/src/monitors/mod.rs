@@ -1,9 +1,12 @@
 mod current_monitor;
 mod identity;
+#[cfg(feature = "monitor-probe")]
+mod monitor_probe;
 mod topology;
 
 use bevy::prelude::*;
 pub use current_monitor::CurrentMonitor;
+use current_monitor::clear_monitor_selection_inputs;
 pub(crate) use current_monitor::update_current_monitor;
 use identity::MonitorConfiguration;
 pub use identity::MonitorId;
@@ -13,6 +16,7 @@ pub use topology::LiveMonitor;
 pub use topology::MonitorConnected;
 pub use topology::MonitorDisconnected;
 pub use topology::MonitorInfo;
+pub use topology::MonitorTopologyRevision;
 pub use topology::Monitors;
 use topology::init_monitors;
 use topology::update_monitors;
@@ -28,10 +32,11 @@ impl Plugin for MonitorPlugin {
         let configuration = MonitorConfiguration::register(*app.world().resource::<Platform>());
         app.insert_resource(configuration)
             .init_resource::<MonitorIdentityRegistry>()
+            .add_observer(clear_monitor_selection_inputs)
             .add_systems(
                 PreStartup,
                 init_monitors.in_set(ClerestoryPreStartupSet::MonitorsInitialized),
             )
-            .add_systems(Update, update_monitors);
+            .add_systems(Update, (update_monitors, update_current_monitor).chain());
     }
 }
