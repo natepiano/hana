@@ -1,6 +1,14 @@
 use std::collections::HashMap;
 
+use bevy::ecs::change_detection::Ref;
+use bevy::platform::collections::HashMap as BevyHashMap;
 use bevy::prelude::*;
+use hana_valence::AnchorId;
+use hana_valence::AnchorPoint;
+use hana_valence::AnchoredHere;
+use hana_valence::AnchoredTo as ValenceAnchoredTo;
+use hana_valence::Edge;
+use hana_valence::ResolvedAnchorGeometry;
 
 use super::PanelWidget;
 use super::PanelWidgetIndex;
@@ -11,12 +19,45 @@ use super::WidgetSpec;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::cascade::CascadeFrom;
+use crate::layout::Anchor;
+use crate::panel;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
+use crate::panel::PanelComponentOwnership;
 use crate::panel::PanelOwned;
+use crate::panel::PanelSpace;
 
 #[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
 pub(super) struct WidgetPreorder(usize);
+
+#[derive(Clone, Copy, Component, Debug, PartialEq)]
+pub(super) struct WidgetAnchorRect {
+    panel_offset: Vec3,
+    size:         Vec2,
+    anchor:       Anchor,
+    space:        PanelSpace,
+}
+
+impl WidgetAnchorRect {
+    fn new(panel: &DiegeticPanel, rect: crate::BoundingBox) -> Self {
+        let scale = panel.points_to_world();
+        let (x_offset, y_offset) = panel.anchor_offsets();
+        let (center_x, center_y) = rect.center();
+        let size = Vec2::new(rect.width * scale, rect.height * scale);
+        Self {
+            panel_offset: Vec3::new(
+                center_x.mul_add(scale, -x_offset),
+                (-center_y).mul_add(scale, y_offset),
+                0.0,
+            ),
+            size,
+            anchor: panel.anchor(),
+            space: PanelSpace::from(panel.coordinate_space()),
+        }
+    }
+
+    const fn transform(self) -> Transform { Transform::from_translation(self.panel_offset) }
+}
 
 /// Reifies widget entities for every changed computed panel.
 pub(super) fn reify_widgets(
@@ -24,6 +65,7 @@ pub(super) fn reify_widgets(
         (
             Entity,
             &DiegeticPanel,
+            &GlobalTransform,
             &ComputedDiegeticPanel,
             Option<&PanelWidgets>,
             &mut PanelWidgetIndex,
@@ -36,12 +78,15 @@ pub(super) fn reify_widgets(
         &WidgetSpec,
         &WidgetPreorder,
         &Transform,
+        &WidgetAnchorRect,
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
     )>,
     mut commands: Commands,
 ) {
-    for (panel_entity, panel, computed, panel_widgets, mut widget_index) in &mut changed_panels {
+    for (panel_entity, panel, panel_global, computed, panel_widgets, mut widget_index) in
+        &mut changed_panels
+    {
         let existing_entities: &[Entity] = panel_widgets.map_or(&[], |widgets| &**widgets);
         let existing_by_id: HashMap<&PanelElementId, Entity> = existing_entities
             .iter()
@@ -49,23 +94,25 @@ pub(super) fn reify_widgets(
                 existing_widgets
                     .get(*entity)
                     .ok()
-                    .map(|(widget, _, _, _, _, _, _)| (widget.id(), *entity))
+                    .map(|(widget, _, _, _, _, _, _, _)| (widget.id(), *entity))
             })
             .collect();
 
         let mut visited = Vec::with_capacity(computed.widget_records().len());
         let mut next_widget_index = HashMap::with_capacity(computed.widget_records().len());
         for record in computed.widget_records() {
+            let anchor_rect = WidgetAnchorRect::new(panel, record.rect());
             let entity = match existing_by_id.get(record.id()).copied() {
                 None => spawn_widget(
                     &mut commands,
                     panel_entity,
+                    panel_global,
                     record.id().clone(),
                     record.kind(),
                     record.authored().clone(),
                     record.preorder(),
                     record.interactivity(),
-                    widget_transform(panel, record.rect()),
+                    anchor_rect,
                 ),
                 Some(entity) => {
                     update_widget(
@@ -75,7 +122,7 @@ pub(super) fn reify_widgets(
                         record.authored(),
                         record.preorder(),
                         record.interactivity(),
-                        widget_transform(panel, record.rect()),
+                        anchor_rect,
                         panel_entity,
                         &existing_widgets,
                     );
@@ -99,13 +146,16 @@ pub(super) fn reify_widgets(
 fn spawn_widget(
     commands: &mut Commands<'_, '_>,
     panel: Entity,
+    panel_global: &GlobalTransform,
     id: PanelElementId,
     kind: WidgetKind,
     authored: WidgetSpec,
     preorder: usize,
     interactivity: Cascade<super::WidgetInteractivity>,
-    transform: Transform,
+    anchor_rect: WidgetAnchorRect,
 ) -> Entity {
+    let transform = anchor_rect.transform();
+    let global_transform = panel_global.mul_transform(transform);
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel).with_children(|children| {
         spawned = children
@@ -116,6 +166,8 @@ fn spawn_widget(
                 authored,
                 WidgetPreorder(preorder),
                 transform,
+                global_transform,
+                anchor_rect,
                 interactivity,
                 CascadeFrom::new(panel),
                 PanelOwned::from(panel),
@@ -132,7 +184,7 @@ fn update_widget(
     authored: &WidgetSpec,
     preorder: usize,
     interactivity: Cascade<super::WidgetInteractivity>,
-    transform: Transform,
+    anchor_rect: WidgetAnchorRect,
     panel: Entity,
     existing_widgets: &Query<(
         &PanelWidget,
@@ -140,6 +192,7 @@ fn update_widget(
         &WidgetSpec,
         &WidgetPreorder,
         &Transform,
+        &WidgetAnchorRect,
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
     )>,
@@ -150,6 +203,7 @@ fn update_widget(
         existing_authored,
         existing_preorder,
         existing_transform,
+        existing_anchor_rect,
         existing_interactivity,
         existing_cascade_from,
     )) = existing_widgets.get(entity)
@@ -166,8 +220,12 @@ fn update_widget(
     if existing_preorder.0 != preorder {
         widget.insert(WidgetPreorder(preorder));
     }
+    let transform = anchor_rect.transform();
     if *existing_transform != transform {
         widget.insert(transform);
+    }
+    if *existing_anchor_rect != anchor_rect {
+        widget.insert(anchor_rect);
     }
     if existing_interactivity != Some(&interactivity) {
         widget.insert(interactivity);
@@ -177,14 +235,159 @@ fn update_widget(
     }
 }
 
-fn widget_transform(panel: &DiegeticPanel, rect: crate::BoundingBox) -> Transform {
-    let scale = panel.points_to_world();
-    let (x_offset, y_offset) = panel.anchor_offsets();
-    Transform::from_xyz(
-        rect.x.mul_add(scale, -x_offset),
-        (-rect.y).mul_add(scale, y_offset),
-        0.0,
-    )
+pub(super) fn update_world_anchor_geometry(
+    mut commands: Commands,
+    changed_geometry_widgets: Query<
+        (
+            Entity,
+            &WidgetOf,
+            &WidgetAnchorRect,
+            Option<&AnchoredHere>,
+            Option<Ref<ResolvedAnchorGeometry>>,
+            Option<&PanelComponentOwnership<ResolvedAnchorGeometry>>,
+        ),
+        (
+            With<PanelWidget>,
+            Or<(Changed<WidgetAnchorRect>, Changed<AnchoredHere>)>,
+        ),
+    >,
+    changed_relation_widgets: Query<
+        (
+            Entity,
+            &WidgetOf,
+            &WidgetAnchorRect,
+            Option<&AnchoredHere>,
+            Option<Ref<ValenceAnchoredTo>>,
+            Option<&PanelComponentOwnership<ValenceAnchoredTo>>,
+        ),
+        (
+            With<PanelWidget>,
+            Or<(
+                Changed<WidgetAnchorRect>,
+                Changed<AnchoredHere>,
+                Changed<GlobalTransform>,
+            )>,
+        ),
+    >,
+    panel_globals: Query<&GlobalTransform, With<DiegeticPanel>>,
+    widgets: Query<(&WidgetOf, Option<&AnchoredHere>), With<PanelWidget>>,
+    mut removed_demands: RemovedComponents<AnchoredHere>,
+) {
+    for (entity, widget_of, anchor_rect, demand, geometry, geometry_ownership) in
+        &changed_geometry_widgets
+    {
+        let panel = widget_of.panel();
+        if demand.is_none_or(AnchoredHere::is_empty) || anchor_rect.space != PanelSpace::World {
+            retire_world_anchor_state(&mut commands, panel, entity);
+            continue;
+        }
+
+        let next_geometry = widget_anchor_geometry(anchor_rect.size);
+        let geometry_matches = geometry.as_ref().is_some_and(|geometry| {
+            geometry_ownership
+                .is_some_and(|ownership| ownership.owns(panel, geometry.last_changed()))
+                && same_geometry(geometry, &next_geometry)
+        });
+        if !geometry_matches {
+            panel::write_owned_component(&mut commands, panel, entity, next_geometry);
+        }
+    }
+
+    for (entity, widget_of, anchor_rect, demand, relation, relation_ownership) in
+        &changed_relation_widgets
+    {
+        let panel = widget_of.panel();
+        if demand.is_none_or(AnchoredHere::is_empty) || anchor_rect.space != PanelSpace::World {
+            continue;
+        }
+        let Ok(panel_global) = panel_globals.get(panel) else {
+            continue;
+        };
+        let next_relation = widget_panel_relation(panel, *anchor_rect, panel_global);
+        let relation_matches = relation.as_ref().is_some_and(|relation| {
+            relation_ownership
+                .is_some_and(|ownership| ownership.owns(panel, relation.last_changed()))
+                && **relation == next_relation
+        });
+        if !relation_matches {
+            panel::write_owned_component(&mut commands, panel, entity, next_relation);
+        }
+    }
+
+    for entity in removed_demands.read() {
+        let Ok((widget_of, demand)) = widgets.get(entity) else {
+            continue;
+        };
+        if demand.is_some_and(|demand| !demand.is_empty()) {
+            continue;
+        }
+        let panel = widget_of.panel();
+        retire_world_anchor_state(&mut commands, panel, entity);
+    }
+}
+
+fn widget_panel_relation(
+    panel: Entity,
+    rect: WidgetAnchorRect,
+    panel_global: &GlobalTransform,
+) -> ValenceAnchoredTo {
+    let panel_scale = panel_global.affine().transform_vector3(Vec3::X).length();
+    ValenceAnchoredTo::new(panel, AnchorId::Center, AnchorId::from(rect.anchor))
+        .with_offset(rect.panel_offset * panel_scale)
+}
+
+fn widget_anchor_geometry(size: Vec2) -> ResolvedAnchorGeometry {
+    let (center_x, center_y) = Anchor::Center.offset(size.x, size.y);
+    let points = [
+        Anchor::TopLeft,
+        Anchor::TopCenter,
+        Anchor::TopRight,
+        Anchor::CenterLeft,
+        Anchor::Center,
+        Anchor::CenterRight,
+        Anchor::BottomLeft,
+        Anchor::BottomCenter,
+        Anchor::BottomRight,
+    ]
+    .into_iter()
+    .map(|anchor| {
+        let (x, y) = anchor.offset(size.x, size.y);
+        (
+            AnchorId::from(anchor),
+            AnchorPoint {
+                position: Vec3::new(x - center_x, center_y - y, 0.0),
+                frame:    None,
+            },
+        )
+    })
+    .collect::<BevyHashMap<_, _>>();
+    let edges = [
+        (Anchor::TopLeft, Anchor::TopRight),
+        (Anchor::TopRight, Anchor::BottomRight),
+        (Anchor::BottomRight, Anchor::BottomLeft),
+        (Anchor::BottomLeft, Anchor::TopLeft),
+    ]
+    .map(|(start, end)| Edge {
+        start: AnchorId::from(start),
+        end:   AnchorId::from(end),
+    })
+    .to_vec();
+    ResolvedAnchorGeometry { points, edges }
+}
+
+fn same_geometry(left: &ResolvedAnchorGeometry, right: &ResolvedAnchorGeometry) -> bool {
+    left.points.len() == right.points.len()
+        && left.points.iter().all(|(anchor_id, left_point)| {
+            right.points.get(anchor_id).is_some_and(|right_point| {
+                left_point.position == right_point.position && left_point.frame == right_point.frame
+            })
+        })
+        && left.edges == right.edges
+}
+
+fn retire_world_anchor_state(commands: &mut Commands<'_, '_>, panel: Entity, widget: Entity) {
+    panel::remove_owned_component::<ValenceAnchoredTo>(commands, panel, widget);
+    panel::remove_owned_component::<ResolvedAnchorGeometry>(commands, panel, widget);
 }
 
 #[cfg(test)]
@@ -195,10 +398,18 @@ fn widget_transform(panel: &DiegeticPanel, rect: crate::BoundingBox) -> Transfor
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
+    use bevy::transform::TransformPlugin;
     use bevy::window::PrimaryWindow;
+    use hana_valence::AnchorId;
+    use hana_valence::AnchorPose;
+    use hana_valence::AnchoredHere;
+    use hana_valence::AnchoredTo as ValenceAnchoredTo;
+    use hana_valence::ResolvedAnchorGeometry;
+    use hana_valence::ResolvedAnchorOffset;
 
     use super::WidgetPreorder;
     use crate::Anchor;
+    use crate::AnchoredToPanel;
     use crate::Button;
     use crate::ComputedDiegeticPanel;
     use crate::DiegeticPanel;
@@ -219,6 +430,8 @@ mod tests {
     use crate::WidgetOf;
     use crate::cascade::Cascade;
     use crate::cascade::CascadeFrom;
+    use crate::panel::PanelAttachmentAuthored;
+    use crate::panel::PanelComponentOwnership;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::PanelWidgetIndex;
@@ -226,9 +439,24 @@ mod tests {
     use crate::widgets::WidgetSpec;
     use crate::widgets::WidgetsPlugin;
 
+    const ANCHOR_EPSILON: f32 = 1e-4;
+    const ANCHORED_OWNER_ROTATION: f32 = 0.3;
+    const ANCHORED_OWNER_TRANSLATION: Vec3 = Vec3::new(1.0, 2.0, 0.0);
+    const ANCHORED_POSE_TRANSLATION: Vec3 = Vec3::new(0.4, -0.2, 0.1);
+    const DEPENDENT_PANEL_HEIGHT: f32 = 10.0;
+    const DEPENDENT_PANEL_WIDTH: f32 = 20.0;
+    const DEPENDENT_PANEL_WORLD_WIDTH: f32 = 0.2;
+    const OFFSET_PANEL_HEIGHT: f32 = 50.0;
+    const OFFSET_PANEL_WIDTH: f32 = 100.0;
+    const OFFSET_PANEL_WORLD_WIDTH: f32 = 2.0;
+    const OFFSET_WIDGET_HEIGHT: f32 = 10.0;
+    const OFFSET_WIDGET_SPACER: f32 = 30.0;
+    const OFFSET_WIDGET_WIDTH: f32 = 20.0;
+    const RESIZED_WIDGET_WIDTH: f32 = 40.0;
     const SCREEN_FIT_SPACER_WIDTH: f32 = 30.0;
     const SCREEN_FIT_WIDGET_HEIGHT: f32 = 10.0;
     const SCREEN_FIT_WIDGET_WIDTH: f32 = 20.0;
+    const UPDATED_OWNER_SCALE: f32 = 1.75;
 
     #[derive(Component)]
     struct ApplicationData;
@@ -238,6 +466,26 @@ mod tests {
         for id in ids {
             builder.with(El::new().button(*id, Button::new()), |_| {});
         }
+        builder.build()
+    }
+
+    fn offset_widget_tree(width: f32) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(OFFSET_PANEL_WIDTH, OFFSET_PANEL_HEIGHT);
+        builder.with(
+            El::row().size(OFFSET_PANEL_WIDTH, OFFSET_PANEL_HEIGHT),
+            |builder| {
+                builder.with(
+                    El::new().size(OFFSET_WIDGET_SPACER, OFFSET_WIDGET_HEIGHT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .size(width, OFFSET_WIDGET_HEIGHT)
+                        .button("offset", Button::new()),
+                    |_| {},
+                );
+            },
+        );
         builder.build()
     }
 
@@ -285,6 +533,69 @@ mod tests {
         app
     }
 
+    fn world_anchor_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(TransformPlugin)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin));
+        app
+    }
+
+    fn spawn_world_panel(
+        app: &mut App,
+        tree: LayoutTree,
+        anchor: Anchor,
+        transform: Transform,
+    ) -> Entity {
+        let panel = DiegeticPanel::world()
+            .size(Mm(OFFSET_PANEL_WIDTH), Mm(OFFSET_PANEL_HEIGHT))
+            .world_width(OFFSET_PANEL_WORLD_WIDTH)
+            .anchor(anchor)
+            .with_tree(tree)
+            .build()
+            .expect("world panel should build");
+        app.world_mut().spawn((panel, transform)).id()
+    }
+
+    fn spawn_widget_dependent(
+        app: &mut App,
+        target: Entity,
+        source_anchor: Anchor,
+        target_anchor: Anchor,
+    ) -> Entity {
+        let panel = DiegeticPanel::world()
+            .size(Mm(DEPENDENT_PANEL_WIDTH), Mm(DEPENDENT_PANEL_HEIGHT))
+            .world_width(DEPENDENT_PANEL_WORLD_WIDTH)
+            .anchor(Anchor::Center)
+            .layout(|_| {})
+            .build()
+            .expect("dependent panel should build");
+        app.world_mut()
+            .spawn((
+                panel,
+                Transform::default(),
+                AnchoredToPanel::new(target, source_anchor, target_anchor),
+                ApplicationData,
+            ))
+            .id()
+    }
+
+    fn anchor_world_position(app: &App, entity: Entity, anchor: Anchor) -> Vec3 {
+        let geometry = app
+            .world()
+            .get::<ResolvedAnchorGeometry>(entity)
+            .expect("entity should have anchor geometry");
+        let point = geometry
+            .points
+            .get(&AnchorId::from(anchor))
+            .expect("geometry should contain the requested anchor");
+        app.world()
+            .get::<GlobalTransform>(entity)
+            .expect("entity should have a global transform")
+            .transform_point(point.position)
+    }
+
     fn spawn_panel(app: &mut App, tree: LayoutTree) -> Option<Entity> {
         let result = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
@@ -309,6 +620,14 @@ mod tests {
         assert!(
             (actual - expected).abs() < 1e-6,
             "expected {expected}, got {actual}"
+        );
+    }
+
+    #[track_caller]
+    fn assert_close_3d(actual: Vec3, expected: Vec3) {
+        assert!(
+            actual.abs_diff_eq(expected, ANCHOR_EPSILON),
+            "expected {expected:?}, got {actual:?}",
         );
     }
 
@@ -384,8 +703,12 @@ mod tests {
             })
             .map(crate::widgets::ComputedWidgetRecord::rect);
         let rect = rect.expect("widget should have computed bounds");
-        assert_close(transform.translation.x, rect.x.mul_add(scale, -anchor_x));
-        assert_close(transform.translation.y, rect.y.mul_add(-scale, anchor_y));
+        let (center_x, center_y) = rect.center();
+        assert_close(transform.translation.x, center_x.mul_add(scale, -anchor_x));
+        assert_close(
+            transform.translation.y,
+            (-center_y).mul_add(scale, anchor_y),
+        );
         assert!(app.world().get::<Mesh3d>(widget).is_none());
         assert!(
             app.world()
@@ -425,8 +748,8 @@ mod tests {
         let (anchor_x, anchor_y) = panel_component.anchor_offsets();
         assert!(anchor_x > 0.0);
         assert!(anchor_y > 0.0);
-        assert_close(transform.translation.x, -anchor_x);
-        assert_close(transform.translation.y, anchor_y);
+        assert_close(transform.translation.x, 0.0);
+        assert_close(transform.translation.y, 0.0);
     }
 
     #[test]
@@ -499,8 +822,308 @@ mod tests {
             .world()
             .get::<Transform>(widget)
             .expect("screen Fit widget should carry a transform");
-        assert_close(transform.translation.x, rect.x.mul_add(scale, -anchor_x));
-        assert_close(transform.translation.y, (-rect.y).mul_add(scale, anchor_y));
+        let (center_x, center_y) = rect.center();
+        assert_close(transform.translation.x, center_x.mul_add(scale, -anchor_x));
+        assert_close(
+            transform.translation.y,
+            (-center_y).mul_add(scale, anchor_y),
+        );
+    }
+
+    #[test]
+    fn world_anchor_state_tracks_demand_and_rect_changes() {
+        let mut app = world_anchor_app();
+        let panel = spawn_world_panel(
+            &mut app,
+            offset_widget_tree(OFFSET_WIDGET_WIDTH),
+            Anchor::Center,
+            Transform::default(),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("offset"))
+            .expect("widget should be reified");
+
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_none());
+        assert!(app.world().get::<ValenceAnchoredTo>(widget).is_none());
+
+        let first = spawn_widget_dependent(&mut app, widget, Anchor::Center, Anchor::TopRight);
+        let second = spawn_widget_dependent(&mut app, widget, Anchor::Center, Anchor::BottomRight);
+        app.update();
+
+        let first_right = app
+            .world()
+            .get::<ResolvedAnchorGeometry>(widget)
+            .and_then(|geometry| geometry.points.get(&AnchorId::from(Anchor::TopRight)))
+            .map(|point| point.position.x)
+            .expect("demand should publish widget geometry");
+        assert!(app.world().get::<ValenceAnchoredTo>(widget).is_some());
+        assert_eq!(
+            app.world()
+                .get::<AnchoredHere>(widget)
+                .map(AnchoredHere::len),
+            Some(2),
+        );
+
+        app.world_mut()
+            .entity_mut(first)
+            .remove::<AnchoredToPanel>();
+        app.update();
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_some());
+        assert!(app.world().get::<ValenceAnchoredTo>(widget).is_some());
+        assert_eq!(
+            app.world()
+                .get::<AnchoredHere>(widget)
+                .map(AnchoredHere::len),
+            Some(1),
+        );
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, offset_widget_tree(RESIZED_WIDGET_WIDTH))
+            .expect("resized tree should be accepted");
+        app.update();
+        assert_eq!(
+            resolve_widget(&mut app, panel, PanelElementId::named("offset")),
+            Some(widget),
+        );
+        let resized_right = app
+            .world()
+            .get::<ResolvedAnchorGeometry>(widget)
+            .and_then(|geometry| geometry.points.get(&AnchorId::from(Anchor::TopRight)))
+            .map(|point| point.position.x)
+            .expect("rect change should refill widget geometry");
+        assert!(resized_right > first_right);
+
+        app.world_mut()
+            .entity_mut(second)
+            .remove::<AnchoredToPanel>();
+        app.update();
+        assert!(app.world().get::<AnchoredHere>(widget).is_none());
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_none());
+        assert!(app.world().get::<ValenceAnchoredTo>(widget).is_none());
+    }
+
+    #[test]
+    fn active_widget_demand_tracks_later_owner_scale_without_refilling_geometry() {
+        let mut app = world_anchor_app();
+        let panel = spawn_world_panel(
+            &mut app,
+            offset_widget_tree(OFFSET_WIDGET_WIDTH),
+            Anchor::Center,
+            Transform::from_translation(ANCHORED_OWNER_TRANSLATION)
+                .with_rotation(Quat::from_rotation_z(ANCHORED_OWNER_ROTATION)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("offset"))
+            .expect("widget should be reified");
+        let authored_center = app
+            .world()
+            .get::<Transform>(widget)
+            .expect("widget should keep its authored panel-local center")
+            .translation;
+        assert_ne!(
+            authored_center,
+            Vec3::ZERO,
+            "widget should be off the owner panel origin",
+        );
+        let dependent = spawn_widget_dependent(&mut app, widget, Anchor::Center, Anchor::TopRight);
+        app.update();
+
+        let owner_global = app
+            .world()
+            .get::<GlobalTransform>(panel)
+            .expect("owner panel should have a global transform");
+        assert_close_3d(
+            app.world()
+                .get::<GlobalTransform>(widget)
+                .expect("demanded widget should have a global transform")
+                .translation(),
+            owner_global.transform_point(authored_center),
+        );
+        let geometry_tick = app
+            .world()
+            .entity(widget)
+            .get_ref::<ResolvedAnchorGeometry>()
+            .expect("demand should publish widget geometry")
+            .last_changed();
+
+        app.world_mut()
+            .get_mut::<Transform>(panel)
+            .expect("owner panel should have a transform")
+            .scale = Vec3::splat(UPDATED_OWNER_SCALE);
+
+        // `TransformSystems::Propagate` exposes the edited owner scale after
+        // the resolver pass that still reads the prior `GlobalTransform`.
+        app.update();
+        let propagated_scale = app
+            .world()
+            .get::<GlobalTransform>(panel)
+            .expect("owner panel should have a propagated global transform")
+            .to_scale_rotation_translation()
+            .0;
+        assert_close_3d(propagated_scale, Vec3::splat(UPDATED_OWNER_SCALE));
+
+        // This is the first resolver pass that reads the propagated owner scale.
+        app.update();
+
+        let owner_global = app
+            .world()
+            .get::<GlobalTransform>(panel)
+            .expect("owner panel should retain its global transform");
+        assert_close_3d(
+            app.world()
+                .get::<GlobalTransform>(widget)
+                .expect("demanded widget should retain its global transform")
+                .translation(),
+            owner_global.transform_point(authored_center),
+        );
+        assert_eq!(
+            app.world()
+                .entity(widget)
+                .get_ref::<ResolvedAnchorGeometry>()
+                .expect("demanded widget should retain its geometry")
+                .last_changed(),
+            geometry_tick,
+            "owner scale changes should not rewrite widget geometry",
+        );
+        assert_close_3d(
+            anchor_world_position(&app, dependent, Anchor::Center),
+            anchor_world_position(&app, widget, Anchor::TopRight),
+        );
+        assert!(
+            app.world()
+                .get::<AnchoredHere>(widget)
+                .is_some_and(|demand| demand.contains(&dependent)),
+            "dependent should keep active widget demand",
+        );
+    }
+
+    #[test]
+    fn final_demand_retirement_preserves_application_relation_and_removes_owned_geometry() {
+        let mut app = world_anchor_app();
+        let panel = spawn_world_panel(
+            &mut app,
+            offset_widget_tree(OFFSET_WIDGET_WIDTH),
+            Anchor::Center,
+            Transform::default(),
+        );
+        let application_target = spawn_world_panel(
+            &mut app,
+            LayoutBuilder::new(OFFSET_PANEL_WIDTH, OFFSET_PANEL_HEIGHT).build(),
+            Anchor::Center,
+            Transform::default(),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("offset"))
+            .expect("widget should be reified");
+        let dependent = spawn_widget_dependent(&mut app, widget, Anchor::Center, Anchor::TopRight);
+        app.update();
+
+        let application_relation =
+            ValenceAnchoredTo::new(application_target, AnchorId::Center, AnchorId::Center);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(application_relation);
+        app.world_mut()
+            .entity_mut(dependent)
+            .remove::<AnchoredToPanel>();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<ValenceAnchoredTo>(widget),
+            Some(&application_relation),
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<ValenceAnchoredTo>>(widget)
+                .is_none(),
+        );
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_none());
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<ResolvedAnchorGeometry>>(widget)
+                .is_none(),
+        );
+    }
+
+    #[test]
+    fn anchored_panel_widget_chain_resolves_same_frame_motion_in_order() {
+        let mut app = world_anchor_app();
+        let base = spawn_world_panel(
+            &mut app,
+            LayoutBuilder::new(OFFSET_PANEL_WIDTH, OFFSET_PANEL_HEIGHT).build(),
+            Anchor::Center,
+            Transform::from_translation(ANCHORED_OWNER_TRANSLATION)
+                .with_rotation(Quat::from_rotation_z(ANCHORED_OWNER_ROTATION)),
+        );
+        let panel = spawn_world_panel(
+            &mut app,
+            offset_widget_tree(OFFSET_WIDGET_WIDTH),
+            Anchor::Center,
+            Transform::default(),
+        );
+        app.world_mut().entity_mut(panel).insert((
+            AnchoredToPanel::new(base, Anchor::Center, Anchor::Center),
+            AnchorPose::default(),
+        ));
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("offset"))
+            .expect("widget should be reified");
+        let dependent =
+            spawn_widget_dependent(&mut app, widget, Anchor::TopLeft, Anchor::BottomRight);
+        app.world_mut()
+            .get_mut::<AnchorPose>(panel)
+            .expect("anchored owner should have a pose")
+            .translation = ANCHORED_POSE_TRANSLATION;
+
+        app.update();
+
+        assert_close_3d(
+            anchor_world_position(&app, dependent, Anchor::TopLeft),
+            anchor_world_position(&app, widget, Anchor::BottomRight),
+        );
+    }
+
+    #[test]
+    fn panel_role_teardown_detaches_widget_target_dependents() {
+        let mut app = world_anchor_app();
+        let panel = spawn_world_panel(
+            &mut app,
+            offset_widget_tree(OFFSET_WIDGET_WIDTH),
+            Anchor::Center,
+            Transform::default(),
+        );
+        app.world_mut().entity_mut(panel).insert(ApplicationData);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("offset"))
+            .expect("widget should be reified");
+        let dependent =
+            spawn_widget_dependent(&mut app, widget, Anchor::Center, Anchor::BottomCenter);
+        app.update();
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_some());
+        assert!(app.world().get::<ValenceAnchoredTo>(widget).is_some());
+        assert!(app.world().get::<ValenceAnchoredTo>(dependent).is_some());
+
+        app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
+        app.update();
+
+        assert!(app.world().get_entity(panel).is_ok());
+        assert!(app.world().get::<ApplicationData>(panel).is_some());
+        assert!(app.world().get_entity(widget).is_err());
+        assert!(app.world().get_entity(dependent).is_ok());
+        assert!(app.world().get::<ApplicationData>(dependent).is_some());
+        assert!(
+            app.world()
+                .get::<PanelAttachmentAuthored>(dependent)
+                .is_none()
+        );
+        assert!(app.world().get::<ValenceAnchoredTo>(dependent).is_none());
+        assert!(app.world().get::<ResolvedAnchorOffset>(dependent).is_none());
+        assert!(
+            app.world()
+                .get::<AnchoredHere>(panel)
+                .is_none_or(|demand| !demand.contains(&widget)),
+        );
     }
 
     #[test]

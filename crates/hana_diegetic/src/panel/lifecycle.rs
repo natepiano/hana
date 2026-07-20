@@ -8,11 +8,13 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_kana::resolve_entity_cascade;
+use hana_valence::AnchoredHere;
 use hana_valence::AnchoredTo;
 use hana_valence::Member;
 use hana_valence::ResolvedAnchorGeometry;
 use hana_valence::ResolvedAnchorOffset;
 
+use super::AnchoredToPanel;
 use super::ComputedDiegeticPanel;
 use super::DiegeticPanel;
 use super::DiegeticPanelChangeClassification;
@@ -51,6 +53,7 @@ use crate::render::ResolvedSdfSurfaceRegistry;
 use crate::screen_space;
 use crate::screen_space::ScreenSpaceCamera;
 use crate::screen_space::ScreenSpaceLight;
+use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::PanelWidgets;
 use crate::widgets::WidgetInteractivity;
@@ -80,7 +83,7 @@ enum PanelRemoval {
 /// A different change tick means application code replaced or mutated `T`.
 /// Hana then relinquishes ownership and leaves that component untouched.
 #[derive(Component)]
-pub(super) struct PanelComponentOwnership<T: Component> {
+pub(crate) struct PanelComponentOwnership<T: Component> {
     owner:        Entity,
     written_tick: Tick,
     marker:       PhantomData<T>,
@@ -95,7 +98,7 @@ impl<T: Component> PanelComponentOwnership<T> {
         }
     }
 
-    pub(super) fn owns(&self, owner: Entity, current: Tick) -> bool {
+    pub(crate) fn owns(&self, owner: Entity, current: Tick) -> bool {
         self.owner == owner && self.written_tick == current
     }
 }
@@ -188,6 +191,9 @@ pub(super) fn teardown_panel_role(
     trigger: On<Remove, DiegeticPanel>,
     panels: Query<(Entity, &DiegeticPanel)>,
     owned_entities: Query<(Entity, &PanelOwned)>,
+    widget_demands: Query<&AnchoredHere, With<PanelWidget>>,
+    authored_attachments: Query<&PanelAttachmentAuthored>,
+    world_attachments: Query<&AnchoredTo>,
     parents: Query<&ChildOf>,
     cameras: Query<(Entity, &ScreenSpaceCamera)>,
     lights: Query<(Entity, &ScreenSpaceLight)>,
@@ -211,6 +217,15 @@ pub(super) fn teardown_panel_role(
     if let Some(resolved_surfaces) = resolved_surfaces.as_deref_mut() {
         resolved_surfaces.remove_panel(entity);
     }
+
+    finalize_widget_anchor_state(
+        entity,
+        &owned_entities,
+        &widget_demands,
+        &authored_attachments,
+        &world_attachments,
+        &mut commands,
+    );
 
     let panel_removal = trigger
         .trigger()
@@ -251,6 +266,39 @@ pub(super) fn teardown_panel_role(
         PanelTextRuns,
     )>();
     render::remove_panel_shape_relationship(&mut panel_entity);
+}
+
+fn finalize_widget_anchor_state(
+    panel: Entity,
+    owned_entities: &Query<(Entity, &PanelOwned)>,
+    widget_demands: &Query<&AnchoredHere, With<PanelWidget>>,
+    authored_attachments: &Query<&PanelAttachmentAuthored>,
+    world_attachments: &Query<&AnchoredTo>,
+    commands: &mut Commands<'_, '_>,
+) {
+    for (widget, ownership) in owned_entities {
+        if ownership.owner() != panel {
+            continue;
+        }
+        let Ok(demand) = widget_demands.get(widget) else {
+            continue;
+        };
+        for dependent in demand.iter() {
+            let authored_targets_widget = authored_attachments
+                .get(dependent)
+                .is_ok_and(|attachment| attachment.target() == widget);
+            let world_targets_widget = world_attachments
+                .get(dependent)
+                .is_ok_and(|attachment| attachment.target() == widget);
+            if authored_targets_widget {
+                commands.entity(dependent).remove::<AnchoredToPanel>();
+            } else if world_targets_widget {
+                commands.entity(dependent).remove::<AnchoredTo>();
+            }
+        }
+        remove_owned_component::<AnchoredTo>(commands, panel, widget);
+        remove_owned_component::<ResolvedAnchorGeometry>(commands, panel, widget);
+    }
 }
 
 /// Despawns a deferred runtime spawn when its recorded panel role no longer
@@ -392,7 +440,7 @@ pub(super) fn restore_preserved_resolved<A: CascadeAttribute>(
 }
 
 /// Writes a Hana-owned component without replacing application-owned state.
-pub(super) fn write_owned_component<T: Component>(
+pub(crate) fn write_owned_component<T: Component>(
     commands: &mut Commands<'_, '_>,
     owner: Entity,
     entity: Entity,
@@ -481,7 +529,7 @@ pub(super) fn seed_owned_cascade<A: CascadeAttribute>(
 }
 
 /// Removes `T` only while its ownership record still matches Hana's write.
-pub(super) fn remove_owned_component<T: Component>(
+pub(crate) fn remove_owned_component<T: Component>(
     commands: &mut Commands<'_, '_>,
     owner: Entity,
     entity: Entity,
