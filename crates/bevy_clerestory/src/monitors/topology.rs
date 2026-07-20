@@ -1,14 +1,19 @@
 //! Monitor topology snapshots and raw lifetime events.
 
+#[cfg(test)]
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::Monitor;
-use bevy::window::PrimaryWindow;
 use bevy::winit::WinitMonitors;
+#[cfg(feature = "monitor-probe")]
 use bevy_diagnostic::FrameCount;
 use bevy_kana::ToI32;
+use winit::monitor::MonitorHandle;
 
-use super::CurrentMonitor;
+use super::current_monitor;
 use super::identity;
 use super::identity::MonitorConfiguration;
 use super::identity::MonitorConfigurationState;
@@ -17,6 +22,18 @@ use super::identity::MonitorIdentificationError;
 use super::identity::MonitorIdentity;
 use super::identity::MonitorIdentityRegistry;
 use super::identity::MonitorInstanceId;
+#[cfg(test)]
+use super::identity::QualifiedEvidence;
+#[cfg(feature = "monitor-probe")]
+use super::monitor_probe;
+#[cfg(feature = "monitor-probe")]
+use super::monitor_probe::FormerIdentityProbe;
+#[cfg(feature = "monitor-probe")]
+use super::monitor_probe::TopologyChangeKind;
+#[cfg(feature = "monitor-probe")]
+use super::monitor_probe::TopologyProbeRecord;
+#[cfg(feature = "monitor-probe")]
+use super::monitor_probe::TopologyProducerSchedule;
 use crate::Platform;
 
 /// Entity-free information about one live monitor.
@@ -25,13 +42,13 @@ use crate::Platform;
 pub struct MonitorInfo {
     /// Verified physical-panel identity, when qualified evidence is available.
     pub identity:          MonitorIdentity,
-    /// Index in the monitor enumeration order.
+    /// Index in Bevy's cached `WinitMonitors` order for this monitor lifetime.
     pub index:             usize,
-    /// Scale factor (typically 1.0 or 2.0 on macOS).
+    /// Scale factor supplied by the current Bevy monitor entity.
     pub scale:             f64,
-    /// Top-left corner of the monitor.
+    /// Top-left corner supplied by the current Bevy monitor entity.
     pub physical_position: IVec2,
-    /// Monitor dimensions in pixels.
+    /// Monitor dimensions in pixels supplied by the current Bevy monitor entity.
     pub physical_size:     UVec2,
 }
 
@@ -44,13 +61,27 @@ pub struct LiveMonitor<'a> {
     pub monitor_info: &'a MonitorInfo,
 }
 
-/// Current monitor topology in winit enumeration order.
+/// Monotonic version of the installed entity and identity topology.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Resource, Reflect)]
+#[reflect(Resource)]
+#[type_path = "bevy_clerestory::monitors"]
+pub struct MonitorTopologyRevision(u64);
+
+impl MonitorTopologyRevision {
+    /// Return the installed revision number.
+    #[must_use]
+    pub const fn get(self) -> u64 { self.0 }
+
+    const fn next(self) -> Self { Self(self.0 + 1) }
+}
+
+/// Last installed monitor topology in Bevy's cached `WinitMonitors` order.
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct Monitors {
     #[reflect(ignore)]
-    live: Vec<MonitorSnapshot>,
+    pub(super) live: Vec<MonitorSnapshot>,
 }
 
 /// A monitor entity lifetime started.
@@ -235,17 +266,72 @@ impl Monitors {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct MonitorSnapshot {
-    instance_id:  MonitorInstanceId,
-    entity:       Entity,
-    monitor_info: MonitorInfo,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct MonitorSnapshot {
+    pub(super) instance_id:  MonitorInstanceId,
+    pub(super) entity:       Entity,
+    pub(super) monitor_info: MonitorInfo,
 }
 
-fn monitor_deltas(
-    previous: &Monitors,
-    rebuilt: &Monitors,
-) -> (Vec<MonitorSnapshot>, Vec<MonitorSnapshot>) {
+struct ScannedMonitor {
+    entity:            Entity,
+    cached_index:      Option<usize>,
+    handle:            Option<MonitorHandle>,
+    index:             usize,
+    scale:             f64,
+    physical_position: IVec2,
+    physical_size:     UVec2,
+}
+
+pub(super) struct MonitorChanges {
+    pub(super) connected:        Vec<MonitorSnapshot>,
+    pub(super) disconnected:     Vec<MonitorSnapshot>,
+    #[cfg(feature = "monitor-probe")]
+    pub(super) identity_changed: Vec<MonitorSnapshot>,
+}
+
+struct MonitorBuild {
+    monitors:               Monitors,
+    #[cfg(feature = "monitor-probe")]
+    former_identity_probes: Vec<FormerIdentityProbe>,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct TopologyProducerActivity {
+    pub topology_scans:       usize,
+    pub component_reads:      usize,
+    pub cached_order_lookups: usize,
+    pub identity_requests:    usize,
+    pub handle_lookups:       usize,
+    pub evidence_loads:       usize,
+}
+
+#[cfg(test)]
+#[derive(Default, Resource)]
+pub(super) struct InjectedMonitorEvidence {
+    evidence:     HashMap<Entity, Result<&'static [u8], MonitorIdentificationError>>,
+    pub activity: TopologyProducerActivity,
+}
+
+#[cfg(test)]
+#[derive(Default, Resource)]
+pub(super) struct InjectedWinitMonitorOrder {
+    entities: Vec<Entity>,
+}
+
+#[cfg(test)]
+impl InjectedWinitMonitorOrder {
+    fn connect(&mut self, entity: Entity) { self.entities.push(entity); }
+
+    fn disconnect(&mut self, entity: Entity) { self.entities.retain(|cached| *cached != entity); }
+
+    fn replace(&mut self, entities: impl IntoIterator<Item = Entity>) {
+        self.entities = entities.into_iter().collect();
+    }
+}
+
+fn monitor_changes(previous: &Monitors, rebuilt: &Monitors) -> MonitorChanges {
     let connected = rebuilt
         .live
         .iter()
@@ -268,7 +354,152 @@ fn monitor_deltas(
         })
         .copied()
         .collect();
-    (connected, disconnected)
+
+    #[cfg(feature = "monitor-probe")]
+    let identity_changed = rebuilt
+        .live
+        .iter()
+        .filter(|monitor| {
+            previous.live.iter().any(|previous| {
+                previous.instance_id == monitor.instance_id
+                    && previous.monitor_info.identity != monitor.monitor_info.identity
+            })
+        })
+        .copied()
+        .collect();
+
+    MonitorChanges {
+        connected,
+        disconnected,
+        #[cfg(feature = "monitor-probe")]
+        identity_changed,
+    }
+}
+
+fn installed_topology_changed(previous: &Monitors, rebuilt: &Monitors) -> bool {
+    previous.live.len() != rebuilt.live.len()
+        || previous.live.iter().any(|previous_monitor| {
+            rebuilt
+                .live
+                .iter()
+                .find(|rebuilt_monitor| rebuilt_monitor.instance_id == previous_monitor.instance_id)
+                .is_none_or(|rebuilt_monitor| {
+                    rebuilt_monitor.entity != previous_monitor.entity
+                        || rebuilt_monitor.monitor_info.identity
+                            != previous_monitor.monitor_info.identity
+                        || rebuilt_monitor.monitor_info.index != previous_monitor.monitor_info.index
+                })
+        })
+}
+
+fn assign_cached_monitor_order(
+    scanned: &mut [ScannedMonitor],
+    winit_monitors: &WinitMonitors,
+    #[cfg(test)] mut injected_evidence: Option<&mut InjectedMonitorEvidence>,
+    #[cfg(test)] injected_order: Option<&InjectedWinitMonitorOrder>,
+) {
+    #[cfg(test)]
+    if let Some(injected_order) = injected_order {
+        for monitor in &mut *scanned {
+            if let Some(injected_evidence) = injected_evidence.as_deref_mut() {
+                injected_evidence.activity.cached_order_lookups += 1;
+            }
+            monitor.cached_index = injected_order
+                .entities
+                .iter()
+                .position(|entity| *entity == monitor.entity);
+        }
+        assign_unassociated_indices(scanned, injected_order.entities.len());
+        return;
+    }
+
+    let cached_handles: Vec<_> = (0..).map_while(|index| winit_monitors.nth(index)).collect();
+    for monitor in &mut *scanned {
+        #[cfg(test)]
+        if let Some(injected_evidence) = injected_evidence.as_deref_mut() {
+            injected_evidence.activity.cached_order_lookups += 1;
+        }
+        monitor.handle = winit_monitors.find_entity(monitor.entity);
+        monitor.cached_index = monitor.handle.as_ref().and_then(|handle| {
+            cached_handles
+                .iter()
+                .position(|cached_handle| cached_handle == handle)
+        });
+    }
+    assign_unassociated_indices(scanned, cached_handles.len());
+}
+
+fn assign_unassociated_indices(scanned: &mut [ScannedMonitor], cached_monitor_count: usize) {
+    scanned.sort_by_key(|monitor| {
+        (
+            monitor.cached_index.is_none(),
+            monitor.cached_index.unwrap_or_default(),
+            monitor.entity.to_bits(),
+        )
+    });
+
+    let mut unassociated_index = cached_monitor_count;
+    for monitor in scanned {
+        monitor.index = monitor.cached_index.unwrap_or_else(|| {
+            let index = unassociated_index;
+            unassociated_index += 1;
+            index
+        });
+    }
+}
+
+fn identify_monitor(
+    monitor: &ScannedMonitor,
+    identity_registry: &mut MonitorIdentityRegistry,
+    configuration: MonitorConfigurationState,
+    platform: Platform,
+    #[cfg(test)] injected_evidence: Option<&mut InjectedMonitorEvidence>,
+) {
+    let instance_id = monitor.entity.into();
+
+    #[cfg(test)]
+    if let Some(injected_evidence) = injected_evidence {
+        injected_evidence.activity.identity_requests += 1;
+        if monitor.cached_index.is_none() {
+            injected_evidence.activity.handle_lookups += 1;
+            identity::monitor_handle_missing(identity_registry, instance_id, configuration);
+            return;
+        }
+        let evidence = injected_evidence
+            .evidence
+            .get(&monitor.entity)
+            .copied()
+            .unwrap_or(Err(MonitorIdentificationError::MissingMonitorHandle));
+        identity_registry.identity(
+            instance_id,
+            configuration,
+            || {
+                injected_evidence.activity.handle_lookups += 1;
+                injected_evidence.activity.evidence_loads += 1;
+                evidence.map(|bytes| QualifiedEvidence::Synthetic(bytes.to_vec()))
+            },
+            platform,
+        );
+        return;
+    }
+
+    if monitor.cached_index.is_none() {
+        identity::monitor_handle_missing(identity_registry, instance_id, configuration);
+        return;
+    }
+
+    identity_registry.identity(
+        instance_id,
+        configuration,
+        || {
+            let handle = monitor
+                .handle
+                .as_ref()
+                .ok_or(MonitorIdentificationError::MissingMonitorHandle)?;
+            identity::qualified_evidence(handle, platform)
+        },
+        platform,
+    );
 }
 
 fn build_monitors(
@@ -277,46 +508,130 @@ fn build_monitors(
     identity_registry: &mut MonitorIdentityRegistry,
     configuration: MonitorConfigurationState,
     platform: Platform,
-) -> Monitors {
-    for (entity, _) in monitors.iter() {
-        let instance_id = entity.into();
-        identity_registry.identity(
-            instance_id,
+    #[cfg(test)] mut injected_evidence: Option<&mut InjectedMonitorEvidence>,
+    #[cfg(test)] injected_order: Option<&InjectedWinitMonitorOrder>,
+) -> MonitorBuild {
+    #[cfg(test)]
+    if let Some(injected_evidence) = injected_evidence.as_deref_mut() {
+        injected_evidence.activity.topology_scans += 1;
+    }
+
+    let mut scanned = Vec::new();
+    for (entity, monitor) in monitors.iter() {
+        #[cfg(test)]
+        if let Some(injected_evidence) = injected_evidence.as_deref_mut() {
+            injected_evidence.activity.component_reads += 1;
+        }
+        scanned.push(ScannedMonitor {
+            entity,
+            cached_index: None,
+            handle: None,
+            index: usize::MAX,
+            scale: monitor.scale_factor,
+            physical_position: monitor.physical_position,
+            physical_size: monitor.physical_size(),
+        });
+    }
+    assign_cached_monitor_order(
+        &mut scanned,
+        winit_monitors,
+        #[cfg(test)]
+        injected_evidence.as_deref_mut(),
+        #[cfg(test)]
+        injected_order,
+    );
+
+    let live_instances: HashSet<_> = scanned
+        .iter()
+        .map(|monitor| MonitorInstanceId::from(monitor.entity))
+        .collect();
+    let disconnected_instances: Vec<_> = identity_registry
+        .active_instances()
+        .filter(|instance_id| !live_instances.contains(instance_id))
+        .collect();
+    #[cfg(feature = "monitor-probe")]
+    let former_identity_probes = disconnected_instances
+        .iter()
+        .map(|instance_id| FormerIdentityProbe {
+            instance_id:    *instance_id,
+            identity_probe: identity_registry.probe(*instance_id),
+        })
+        .collect();
+    for instance_id in disconnected_instances {
+        identity_registry.disconnect(instance_id);
+    }
+
+    for monitor in &scanned {
+        identify_monitor(
+            monitor,
+            identity_registry,
             configuration,
-            || {
-                let handle = winit_monitors
-                    .find_entity(entity)
-                    .ok_or(MonitorIdentificationError::MissingMonitorHandle)?;
-                identity::qualified_evidence(&handle, platform)
-            },
             platform,
+            #[cfg(test)]
+            injected_evidence.as_deref_mut(),
         );
     }
-    identity_registry.observe_configuration(configuration);
 
-    let live = monitors
-        .iter()
-        .enumerate()
-        .map(|(index, (entity, monitor))| {
-            let instance_id = entity.into();
-            let identity = identity_registry
-                .cached_identity(instance_id)
+    let live = scanned
+        .into_iter()
+        .map(|monitor| {
+            let identity = identity::cached_identity(identity_registry, monitor.entity.into())
                 .unwrap_or(MonitorIdentity::Unverified);
             MonitorSnapshot {
-                instance_id,
-                entity,
+                instance_id:  monitor.entity.into(),
+                entity:       monitor.entity,
                 monitor_info: MonitorInfo {
                     identity,
-                    index,
-                    scale: monitor.scale_factor,
+                    index: monitor.index,
+                    scale: monitor.scale,
                     physical_position: monitor.physical_position,
-                    physical_size: monitor.physical_size(),
+                    physical_size: monitor.physical_size,
                 },
             }
         })
         .collect();
+    identity_registry.observe_configuration(configuration);
 
-    Monitors { live }
+    MonitorBuild {
+        monitors: Monitors { live },
+        #[cfg(feature = "monitor-probe")]
+        former_identity_probes,
+    }
+}
+
+fn queue_topology_install(
+    commands: &mut Commands,
+    rebuilt: Monitors,
+    revision: MonitorTopologyRevision,
+    changes: MonitorChanges,
+    #[cfg(feature = "monitor-probe")] probe_records: Vec<TopologyProbeRecord>,
+) {
+    let topology_is_empty = rebuilt.is_empty();
+    commands.queue(move |world: &mut World| {
+        world.insert_resource(rebuilt);
+        world.insert_resource(revision);
+        if topology_is_empty {
+            current_monitor::remove_current_monitors_for_empty_topology(world);
+        }
+        #[cfg(feature = "monitor-probe")]
+        for record in probe_records {
+            #[cfg(test)]
+            monitor_probe::capture_record(world, &record);
+            record.emit();
+        }
+        for monitor in changes.connected {
+            world.trigger(MonitorConnected {
+                entity:  monitor.entity,
+                monitor: monitor.monitor_info,
+            });
+        }
+        for monitor in changes.disconnected {
+            world.trigger(MonitorDisconnected {
+                former_entity: monitor.entity,
+                monitor:       monitor.monitor_info,
+            });
+        }
+    });
 }
 
 /// Initialize the [`Monitors`] resource at startup.
@@ -327,126 +642,447 @@ pub(super) fn init_monitors(
     mut identity_registry: ResMut<MonitorIdentityRegistry>,
     configuration: Res<MonitorConfiguration>,
     platform: Res<Platform>,
-    _: NonSendMarker,
-) {
-    let monitors_resource = build_monitors(
-        &monitors,
-        &winit_monitors,
-        &mut identity_registry,
-        configuration.state(),
-        *platform,
-    );
-    debug!(
-        "[init_monitors] Found {} monitors",
-        monitors_resource.iter().len()
-    );
-    for monitor in monitors_resource.iter() {
-        debug!(
-            "[init_monitors] Monitor {}: entity={:?} identity={:?} position=({}, {}) size={}x{} scale={}",
-            monitor.monitor_info.index,
-            monitor.entity,
-            monitor.monitor_info.identity,
-            monitor.monitor_info.physical_position.x,
-            monitor.monitor_info.physical_position.y,
-            monitor.monitor_info.physical_size.x,
-            monitor.monitor_info.physical_size.y,
-            monitor.monitor_info.scale
-        );
-    }
-    commands.insert_resource(monitors_resource);
-}
-
-/// Refresh [`Monitors`] after a native display-configuration notification or a
-/// monitor lifetime change, and emit one raw event per changed lifetime.
-pub(super) fn update_monitors(
-    mut commands: Commands,
-    monitors: Query<(Entity, &Monitor)>,
-    winit_monitors: Res<WinitMonitors>,
-    previous: Res<Monitors>,
-    added: Query<Entity, Added<Monitor>>,
-    mut removed: RemovedComponents<Monitor>,
-    mut identity_registry: ResMut<MonitorIdentityRegistry>,
-    configuration: Res<MonitorConfiguration>,
-    platform: Res<Platform>,
-    frame_count: Res<FrameCount>,
-    current_monitor_query: Query<Option<&CurrentMonitor>, With<PrimaryWindow>>,
+    #[cfg(feature = "monitor-probe")] frame_count: Res<FrameCount>,
+    #[cfg(test)] mut injected_evidence: Option<ResMut<InjectedMonitorEvidence>>,
+    #[cfg(test)] injected_order: Option<Res<InjectedWinitMonitorOrder>>,
     _: NonSendMarker,
 ) {
     let configuration = configuration.state();
-    let configuration_changed = identity_registry.configuration_changed(configuration);
-    let monitor_was_removed = removed.read().count() > 0;
-    if added.is_empty() && !monitor_was_removed && !configuration_changed {
-        return;
-    }
-
-    for previous_monitor in &previous.live {
-        if monitors.get(previous_monitor.entity).is_err() {
-            identity_registry.disconnect(previous_monitor.instance_id);
-        }
-    }
-
-    let rebuilt = build_monitors(
+    let monitor_build = build_monitors(
         &monitors,
         &winit_monitors,
         &mut identity_registry,
         configuration,
         *platform,
+        #[cfg(test)]
+        injected_evidence.as_deref_mut(),
+        #[cfg(test)]
+        injected_order.as_deref(),
     );
-    let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
+    debug!(
+        "[init_monitors] Found {} monitors",
+        monitor_build.monitors.iter().len()
+    );
+    let revision = MonitorTopologyRevision::default();
+    let changes = monitor_changes(&Monitors { live: Vec::new() }, &monitor_build.monitors);
+    #[cfg(feature = "monitor-probe")]
+    let probe_records = monitor_probe::changed_probe_records(
+        &changes,
+        &monitor_build.former_identity_probes,
+        &identity_registry,
+        frame_count.0,
+        TopologyProducerSchedule::PreStartup,
+        configuration,
+        revision,
+    );
+    queue_topology_install(
+        &mut commands,
+        monitor_build.monitors,
+        revision,
+        changes,
+        #[cfg(feature = "monitor-probe")]
+        probe_records,
+    );
+}
 
-    if let Some(current_monitor) = current_monitor_query.iter().next().flatten() {
-        debug!(
-            "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
-            frame_count.0,
-            rebuilt.iter().len(),
-            current_monitor.monitor_info.index,
-            current_monitor.monitor_info.scale,
-        );
-    } else {
-        debug!(
-            "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor=None",
-            frame_count.0,
-            rebuilt.iter().len(),
-        );
+/// Revalidate and install monitor entity-lifetime topology changes.
+pub(super) fn update_monitors(
+    mut commands: Commands,
+    monitors: Query<(Entity, &Monitor)>,
+    winit_monitors: Res<WinitMonitors>,
+    added_monitors: Query<(), Added<Monitor>>,
+    mut removed_monitors: RemovedComponents<Monitor>,
+    previous: Res<Monitors>,
+    revision: Res<MonitorTopologyRevision>,
+    mut identity_registry: ResMut<MonitorIdentityRegistry>,
+    configuration: Res<MonitorConfiguration>,
+    platform: Res<Platform>,
+    #[cfg(feature = "monitor-probe")] frame_count: Res<FrameCount>,
+    #[cfg(test)] mut injected_evidence: Option<ResMut<InjectedMonitorEvidence>>,
+    #[cfg(test)] injected_order: Option<Res<InjectedWinitMonitorOrder>>,
+    _: NonSendMarker,
+) {
+    let configuration = configuration.state();
+    let configuration_changed = identity_registry.configuration_changed(configuration);
+    let monitor_added = !added_monitors.is_empty();
+    let monitor_removed = removed_monitors.read().count() != 0;
+    if !monitor_added && !monitor_removed && !configuration_changed {
+        return;
     }
 
-    commands.insert_resource(rebuilt);
-    for monitor in connected {
-        commands.trigger(MonitorConnected {
-            entity:  monitor.entity,
-            monitor: monitor.monitor_info,
-        });
+    let monitor_build = build_monitors(
+        &monitors,
+        &winit_monitors,
+        &mut identity_registry,
+        configuration,
+        *platform,
+        #[cfg(test)]
+        injected_evidence.as_deref_mut(),
+        #[cfg(test)]
+        injected_order.as_deref(),
+    );
+    let rebuilt = monitor_build.monitors;
+    if !installed_topology_changed(&previous, &rebuilt) {
+        if configuration_changed {
+            #[cfg(feature = "monitor-probe")]
+            for record in monitor_probe::current_probe_records(
+                &previous,
+                &identity_registry,
+                frame_count.0,
+                TopologyProducerSchedule::Update,
+                configuration,
+                *revision,
+                TopologyChangeKind::RevalidatedUnchanged,
+            ) {
+                record.emit();
+            }
+        }
+        return;
     }
-    for monitor in disconnected {
-        commands.trigger(MonitorDisconnected {
-            former_entity: monitor.entity,
-            monitor:       monitor.monitor_info,
-        });
-    }
+
+    let revision = revision.next();
+    let changes = monitor_changes(&previous, &rebuilt);
+    debug!(
+        "[update_monitors] installed revision={} with {} monitors",
+        revision.get(),
+        rebuilt.iter().len(),
+    );
+    #[cfg(feature = "monitor-probe")]
+    let probe_records = monitor_probe::changed_probe_records(
+        &changes,
+        &monitor_build.former_identity_probes,
+        &identity_registry,
+        frame_count.0,
+        TopologyProducerSchedule::Update,
+        configuration,
+        revision,
+    );
+    queue_topology_install(
+        &mut commands,
+        rebuilt,
+        revision,
+        changes,
+        #[cfg(feature = "monitor-probe")]
+        probe_records,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use bevy::reflect::TypePath;
+    use bevy::window::PrimaryWindow;
+    use bevy::window::WindowMode;
+    use bevy::window::WindowPosition;
 
+    #[cfg(feature = "monitor-probe")]
+    use super::monitor_probe::InjectedTopologyProbeRecords;
     use super::*;
+    use crate::ManagedWindow;
+    use crate::constants::SCALE_FACTOR_EPSILON;
+    use crate::monitors::CurrentMonitor;
+    use crate::monitors::current_monitor::InjectedCurrentMonitorSource;
+    use crate::monitors::identity::OperatingSystemQueryError;
 
     const ENTITY_1: Entity = Entity::from_bits(1);
     const ENTITY_2: Entity = Entity::from_bits(2);
     const ENTITY_3: Entity = Entity::from_bits(3);
     const ENTITY_4: Entity = Entity::from_bits(4);
+    const DEFAULT_SCALE: f64 = 2.0;
+    const LOW_DPI_SCALE: f64 = 1.0;
+    const MONITOR_HEIGHT: u32 = 1_440;
+    const MONITOR_WIDTH: u32 = 2_560;
+    const PANEL_A_EVIDENCE: &[u8] = b"panel-a";
+    const PANEL_B_EVIDENCE: &[u8] = b"panel-b";
+    const RETURNED_MONITOR_POSITION: IVec2 = IVec2::new(3_840, 120);
+    const RETURNED_MONITOR_SIZE: UVec2 = UVec2::new(3_840, 2_160);
+
+    #[derive(Default, Resource)]
+    struct TopologyObservations {
+        connected:                      Vec<(Entity, MonitorTopologyRevision)>,
+        connected_indices:              Vec<(Entity, usize)>,
+        #[cfg(feature = "monitor-probe")]
+        probe_records_at_connect:       Vec<usize>,
+        disconnected:                   Vec<(Entity, MonitorTopologyRevision)>,
+        disconnected_indices:           Vec<(Entity, usize)>,
+        current_monitors_at_disconnect: Vec<usize>,
+    }
+
+    #[derive(Default, Resource)]
+    struct DownstreamObservations {
+        restore_current_monitors: usize,
+        settle_current_monitors:  usize,
+    }
 
     fn monitor(identity: MonitorIdentity, index: usize, position: IVec2) -> MonitorInfo {
         MonitorInfo {
             identity,
             index,
-            scale: 2.0,
+            scale: DEFAULT_SCALE,
             physical_position: position,
-            physical_size: UVec2::new(2560, 1440),
+            physical_size: UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
         }
     }
 
     fn verified(raw: u64) -> MonitorIdentity { MonitorIdentity::Verified(MonitorId::from_raw(raw)) }
+
+    fn monitor_component(position: IVec2, size: UVec2, scale: f64) -> Monitor {
+        Monitor {
+            name:                    None,
+            physical_height:         size.y,
+            physical_width:          size.x,
+            physical_position:       position,
+            refresh_rate_millihertz: None,
+            scale_factor:            scale,
+            video_modes:             Vec::new(),
+        }
+    }
+
+    fn observe_connected(
+        event: On<MonitorConnected>,
+        monitors: Res<Monitors>,
+        revision: Res<MonitorTopologyRevision>,
+        #[cfg(feature = "monitor-probe")] probe_records: Res<InjectedTopologyProbeRecords>,
+        mut observations: ResMut<TopologyObservations>,
+    ) {
+        let installed = monitors
+            .iter()
+            .find(|monitor| monitor.entity == event.entity)
+            .map(|monitor| *monitor.monitor_info);
+        assert_eq!(installed, Some(event.monitor));
+        observations.connected.push((event.entity, *revision));
+        observations
+            .connected_indices
+            .push((event.entity, event.monitor.index));
+        #[cfg(feature = "monitor-probe")]
+        observations
+            .probe_records_at_connect
+            .push(probe_records.records.len());
+    }
+
+    fn observe_disconnected(
+        event: On<MonitorDisconnected>,
+        monitors: Res<Monitors>,
+        revision: Res<MonitorTopologyRevision>,
+        windows: Query<&CurrentMonitor, Or<(With<PrimaryWindow>, With<ManagedWindow>)>>,
+        mut observations: ResMut<TopologyObservations>,
+    ) {
+        assert!(
+            monitors
+                .iter()
+                .all(|monitor| monitor.entity != event.former_entity)
+        );
+        observations
+            .disconnected
+            .push((event.former_entity, *revision));
+        observations
+            .disconnected_indices
+            .push((event.former_entity, event.monitor.index));
+        observations
+            .current_monitors_at_disconnect
+            .push(windows.iter().count());
+    }
+
+    fn observe_restore_input(
+        windows: Query<&CurrentMonitor, With<PrimaryWindow>>,
+        mut observations: ResMut<DownstreamObservations>,
+    ) {
+        observations.restore_current_monitors = windows.iter().count();
+    }
+
+    fn observe_settle_input(
+        windows: Query<&CurrentMonitor, With<PrimaryWindow>>,
+        mut observations: ResMut<DownstreamObservations>,
+    ) {
+        observations.settle_current_monitors = windows.iter().count();
+    }
+
+    fn observed_topology_app() -> App {
+        let mut app = App::new();
+        app.insert_resource(Platform::X11)
+            .insert_resource(WinitMonitors::default())
+            .insert_resource(MonitorConfiguration::for_test())
+            .init_resource::<MonitorIdentityRegistry>()
+            .init_resource::<InjectedMonitorEvidence>()
+            .init_resource::<InjectedWinitMonitorOrder>()
+            .init_resource::<InjectedCurrentMonitorSource>()
+            .init_resource::<TopologyObservations>()
+            .init_resource::<DownstreamObservations>()
+            .add_observer(observe_connected)
+            .add_observer(observe_disconnected)
+            .add_observer(current_monitor::clear_monitor_selection_inputs);
+        #[cfg(feature = "monitor-probe")]
+        app.init_resource::<FrameCount>()
+            .init_resource::<InjectedTopologyProbeRecords>();
+        app
+    }
+
+    fn add_topology_update_systems(app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                (update_monitors, current_monitor::update_current_monitor).chain(),
+                observe_restore_input.after(current_monitor::update_current_monitor),
+                observe_settle_input.after(observe_restore_input),
+            ),
+        );
+    }
+
+    fn topology_app() -> App {
+        let mut app = observed_topology_app();
+        app.insert_resource(Monitors { live: Vec::new() })
+            .init_resource::<MonitorTopologyRevision>();
+        add_topology_update_systems(&mut app);
+        app
+    }
+
+    fn startup_topology_app() -> App {
+        let mut app = observed_topology_app();
+        app.add_systems(PreStartup, init_monitors);
+        add_topology_update_systems(&mut app);
+        app
+    }
+
+    fn spawn_monitor(
+        app: &mut App,
+        evidence: &'static [u8],
+        position: IVec2,
+        size: UVec2,
+        scale: f64,
+    ) -> Entity {
+        let entity = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .insert(entity, Ok(evidence));
+        app.world_mut()
+            .resource_mut::<InjectedWinitMonitorOrder>()
+            .connect(entity);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(monitor_component(position, size, scale));
+        entity
+    }
+
+    fn spawn_monitor_at(
+        app: &mut App,
+        entity: Entity,
+        evidence: &'static [u8],
+        position: IVec2,
+        size: UVec2,
+        scale: f64,
+    ) -> Entity {
+        let spawned = app.world_mut().spawn_empty_at(entity).is_ok();
+        assert!(spawned);
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .insert(entity, Ok(evidence));
+        app.world_mut()
+            .resource_mut::<InjectedWinitMonitorOrder>()
+            .connect(entity);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(monitor_component(position, size, scale));
+        entity
+    }
+
+    fn remove_monitor(app: &mut App, entity: Entity) {
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .remove(&entity);
+        app.world_mut()
+            .resource_mut::<InjectedWinitMonitorOrder>()
+            .disconnect(entity);
+        app.world_mut().entity_mut(entity).remove::<Monitor>();
+    }
+
+    fn set_cached_monitor_order(app: &mut App, entities: impl IntoIterator<Item = Entity>) {
+        app.world_mut()
+            .resource_mut::<InjectedWinitMonitorOrder>()
+            .replace(entities);
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    fn despawn_monitor(app: &mut App, entity: Entity) {
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .remove(&entity);
+        app.world_mut()
+            .resource_mut::<InjectedWinitMonitorOrder>()
+            .disconnect(entity);
+        assert!(app.world_mut().despawn(entity));
+    }
+
+    fn despawn_monitor_for_reuse(app: &mut App, entity: Entity) -> Option<Entity> {
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .remove(&entity);
+        app.world_mut()
+            .resource_mut::<InjectedWinitMonitorOrder>()
+            .disconnect(entity);
+        app.world_mut().despawn_no_free(entity)
+    }
+
+    fn reset_activity(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .activity = TopologyProducerActivity::default();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .reset_activity();
+    }
+
+    fn reset_observations(app: &mut App) {
+        let mut observations = app.world_mut().resource_mut::<TopologyObservations>();
+        observations.connected.clear();
+        observations.connected_indices.clear();
+        #[cfg(feature = "monitor-probe")]
+        observations.probe_records_at_connect.clear();
+        observations.disconnected.clear();
+        observations.disconnected_indices.clear();
+        observations.current_monitors_at_disconnect.clear();
+    }
+
+    fn assert_returned_monitor_order(
+        app: &App,
+        returned: Entity,
+        survivor: Entity,
+        original_identity: Option<MonitorIdentity>,
+    ) {
+        let monitors = app.world().resource::<Monitors>();
+        assert_eq!(
+            monitors
+                .iter()
+                .map(|monitor| (monitor.entity, monitor.monitor_info.index))
+                .collect::<Vec<_>>(),
+            [(returned, 0), (survivor, 1)]
+        );
+        assert_eq!(
+            monitors.by_index(0).map(|monitor| monitor.identity),
+            original_identity
+        );
+        assert_eq!(
+            monitors.by_index(0).map(|monitor| (
+                monitor.physical_position,
+                monitor.physical_size,
+                monitor.scale,
+            )),
+            Some((
+                RETURNED_MONITOR_POSITION,
+                RETURNED_MONITOR_SIZE,
+                DEFAULT_SCALE,
+            ))
+        );
+        assert_eq!(
+            app.world()
+                .resource::<TopologyObservations>()
+                .connected_indices,
+            [(returned, 0)]
+        );
+    }
 
     #[test]
     fn reflected_type_paths_preserve_monitor_namespace() {
@@ -457,6 +1093,7 @@ mod tests {
                 <MonitorIdentity as TypePath>::type_path(),
                 <MonitorInfo as TypePath>::type_path(),
                 <Monitors as TypePath>::type_path(),
+                <MonitorTopologyRevision as TypePath>::type_path(),
                 <MonitorConnected as TypePath>::type_path(),
                 <MonitorDisconnected as TypePath>::type_path(),
             ],
@@ -466,6 +1103,7 @@ mod tests {
                 "bevy_clerestory::monitors::MonitorIdentity",
                 "bevy_clerestory::monitors::MonitorInfo",
                 "bevy_clerestory::monitors::Monitors",
+                "bevy_clerestory::monitors::MonitorTopologyRevision",
                 "bevy_clerestory::monitors::MonitorConnected",
                 "bevy_clerestory::monitors::MonitorDisconnected",
             ]
@@ -479,7 +1117,11 @@ mod tests {
             (ENTITY_1, monitor(verified(7), 0, IVec2::ZERO)),
             (
                 ENTITY_2,
-                monitor(MonitorIdentity::Unverified, 1, IVec2::new(2560, 0)),
+                monitor(
+                    MonitorIdentity::Unverified,
+                    1,
+                    IVec2::new(MONITOR_WIDTH.to_i32(), 0),
+                ),
             ),
         ]);
 
@@ -495,7 +1137,10 @@ mod tests {
                 ENTITY_1,
                 monitor(MonitorIdentity::Unverified, 0, IVec2::ZERO),
             ),
-            (ENTITY_2, monitor(verified(8), 1, IVec2::new(2560, 0))),
+            (
+                ENTITY_2,
+                monitor(verified(8), 1, IVec2::new(MONITOR_WIDTH.to_i32(), 0)),
+            ),
         ]);
 
         assert!(monitors.by_id(MonitorId::from_raw(7)).is_none());
@@ -507,7 +1152,10 @@ mod tests {
         let id = MonitorId::from_raw(7);
         let monitors = Monitors::from_test_monitors([
             (ENTITY_1, monitor(verified(7), 0, IVec2::ZERO)),
-            (ENTITY_2, monitor(verified(7), 1, IVec2::new(2560, 0))),
+            (
+                ENTITY_2,
+                monitor(verified(7), 1, IVec2::new(MONITOR_WIDTH.to_i32(), 0)),
+            ),
         ]);
 
         assert!(monitors.by_id(id).is_none());
@@ -515,52 +1163,811 @@ mod tests {
     }
 
     #[test]
-    fn raw_deltas_include_verified_and_unverified_entities() {
+    fn raw_deltas_preserve_snapshot_order_for_verified_and_unverified_entities() {
         let previous = Monitors::from_test_monitors([
-            (ENTITY_1, monitor(verified(1), 0, IVec2::ZERO)),
+            (ENTITY_2, monitor(verified(2), 0, IVec2::ZERO)),
             (
-                ENTITY_2,
-                monitor(MonitorIdentity::Unverified, 1, IVec2::new(2560, 0)),
+                ENTITY_1,
+                monitor(
+                    MonitorIdentity::Unverified,
+                    1,
+                    IVec2::new(MONITOR_WIDTH.to_i32(), 0),
+                ),
             ),
         ]);
         let rebuilt = Monitors::from_test_monitors([
-            (ENTITY_3, monitor(verified(3), 0, IVec2::ZERO)),
+            (ENTITY_4, monitor(verified(4), 0, IVec2::ZERO)),
             (
-                ENTITY_4,
-                monitor(MonitorIdentity::Unverified, 1, IVec2::new(2560, 0)),
+                ENTITY_3,
+                monitor(
+                    MonitorIdentity::Unverified,
+                    1,
+                    IVec2::new(MONITOR_WIDTH.to_i32(), 0),
+                ),
             ),
         ]);
 
-        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
-        let connected_verified = MonitorConnected {
-            entity:  connected[0].entity,
-            monitor: connected[0].monitor_info,
-        };
-        let connected_unverified = MonitorConnected {
-            entity:  connected[1].entity,
-            monitor: connected[1].monitor_info,
-        };
-        let disconnected_verified = MonitorDisconnected {
-            former_entity: disconnected[0].entity,
-            monitor:       disconnected[0].monitor_info,
-        };
-        let disconnected_unverified = MonitorDisconnected {
-            former_entity: disconnected[1].entity,
-            monitor:       disconnected[1].monitor_info,
-        };
+        let changes = monitor_changes(&previous, &rebuilt);
 
-        assert_eq!(connected_verified.entity, ENTITY_3);
-        assert_eq!(connected_verified.monitor.identity, verified(3));
-        assert_eq!(connected_unverified.entity, ENTITY_4);
+        assert_eq!(changes.connected.len(), 2);
+        assert_eq!(changes.disconnected.len(), 2);
         assert_eq!(
-            connected_unverified.monitor.identity,
+            changes
+                .connected
+                .iter()
+                .map(|monitor| monitor.entity)
+                .collect::<Vec<_>>(),
+            [ENTITY_4, ENTITY_3]
+        );
+        assert_eq!(changes.connected[0].monitor_info.identity, verified(4));
+        assert_eq!(
+            changes
+                .disconnected
+                .iter()
+                .map(|monitor| monitor.entity)
+                .collect::<Vec<_>>(),
+            [ENTITY_2, ENTITY_1]
+        );
+        assert_eq!(changes.disconnected[0].monitor_info.identity, verified(2));
+    }
+
+    #[test]
+    fn startup_installs_before_observer_and_emits_connect_once_at_revision_zero() {
+        let mut app = startup_topology_app();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+
+        app.update();
+
+        let observations = app.world().resource::<TopologyObservations>();
+        assert_eq!(
+            observations.connected,
+            [(entity, MonitorTopologyRevision(0))]
+        );
+        assert!(observations.disconnected.is_empty());
+        assert_eq!(
+            app.world()
+                .resource::<Monitors>()
+                .iter()
+                .next()
+                .map(|live| live.entity),
+            Some(entity)
+        );
+        #[cfg(feature = "monitor-probe")]
+        {
+            assert_eq!(observations.probe_records_at_connect, [1]);
+            let captured = app.world().resource::<InjectedTopologyProbeRecords>();
+            assert_eq!(captured.records.len(), 1);
+            let record = &captured.records[0];
+            assert_eq!(record.frame_count, 0);
+            assert_eq!(record.schedule, "PreStartup::init_monitors");
+            assert_eq!(record.configuration_state, "ready");
+            assert_eq!(record.configuration_generation, Some(0));
+            assert_eq!(record.revision, 0);
+            assert_eq!(record.evidence_provenance, "observed-current-generation");
+            assert_eq!(record.evidence_generation, Some(0));
+            assert_eq!(record.entity, entity);
+            assert_eq!(record.change, "connected");
+        }
+
+        reset_activity(&mut app);
+        app.update();
+
+        let observations = app.world().resource::<TopologyObservations>();
+        assert_eq!(
+            observations.connected,
+            [(entity, MonitorTopologyRevision(0))]
+        );
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity::default()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .lookups,
+            0
+        );
+    }
+
+    #[test]
+    fn empty_startup_installs_revision_zero_without_connect() {
+        let mut app = startup_topology_app();
+
+        app.update();
+
+        assert!(app.world().resource::<Monitors>().is_empty());
+        assert_eq!(
+            *app.world().resource::<MonitorTopologyRevision>(),
+            MonitorTopologyRevision(0)
+        );
+        let observations = app.world().resource::<TopologyObservations>();
+        assert!(observations.connected.is_empty());
+        assert!(observations.disconnected.is_empty());
+        #[cfg(feature = "monitor-probe")]
+        assert!(
+            app.world()
+                .resource::<InjectedTopologyProbeRecords>()
+                .records
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn post_startup_addition_installs_before_observer_and_advances_revision() {
+        let mut app = startup_topology_app();
+        app.update();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+
+        app.update();
+
+        let observations = app.world().resource::<TopologyObservations>();
+        assert_eq!(
+            observations.connected,
+            [(entity, MonitorTopologyRevision(1))]
+        );
+        assert!(observations.disconnected.is_empty());
+        assert_eq!(
+            app.world()
+                .resource::<Monitors>()
+                .iter()
+                .next()
+                .map(|live| live.entity),
+            Some(entity)
+        );
+    }
+
+    #[test]
+    fn removal_installs_empty_topology_before_observer() {
+        let mut app = topology_app();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        reset_observations(&mut app);
+
+        remove_monitor(&mut app, entity);
+        app.update();
+
+        let observations = app.world().resource::<TopologyObservations>();
+        assert_eq!(
+            observations.disconnected,
+            [(entity, MonitorTopologyRevision(2))]
+        );
+        assert_eq!(observations.current_monitors_at_disconnect, [0]);
+        assert!(app.world().resource::<Monitors>().is_empty());
+    }
+
+    #[test]
+    fn reconnect_uses_new_entity_metadata_and_retains_stable_identity() {
+        let mut app = topology_app();
+        let original = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            LOW_DPI_SCALE,
+        );
+        app.update();
+        let original_identity = app.world().resource::<Monitors>().first().identity;
+
+        remove_monitor(&mut app, original);
+        app.update();
+        let returned = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            RETURNED_MONITOR_POSITION,
+            RETURNED_MONITOR_SIZE,
+            DEFAULT_SCALE,
+        );
+        app.update();
+
+        let live = app.world().resource::<Monitors>().iter().next();
+        assert_eq!(live.map(|monitor| monitor.entity), Some(returned));
+        assert_eq!(
+            live.map(|monitor| monitor.monitor_info.identity),
+            Some(original_identity)
+        );
+        assert_eq!(
+            live.map(|monitor| monitor.monitor_info.physical_position),
+            Some(RETURNED_MONITOR_POSITION)
+        );
+        assert_eq!(
+            live.map(|monitor| monitor.monitor_info.physical_size),
+            Some(RETURNED_MONITOR_SIZE)
+        );
+        assert_eq!(
+            live.map(|monitor| monitor.monitor_info.scale),
+            Some(DEFAULT_SCALE)
+        );
+    }
+
+    #[test]
+    fn cached_winit_indices_cover_despawn_reconnect_and_entity_reuse() {
+        let mut app = topology_app();
+        let original = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            LOW_DPI_SCALE,
+        );
+        let survivor_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+        let survivor = spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            survivor_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        set_cached_monitor_order(&mut app, [survivor, original]);
+
+        app.update();
+
+        let monitors = app.world().resource::<Monitors>();
+        assert_eq!(
+            monitors
+                .iter()
+                .map(|monitor| (monitor.entity, monitor.monitor_info.index))
+                .collect::<Vec<_>>(),
+            [(survivor, 0), (original, 1)]
+        );
+        assert_eq!(
+            monitors
+                .by_index(0)
+                .map(|monitor| monitor.physical_position),
+            Some(survivor_position)
+        );
+        let original_identity = monitors
+            .iter()
+            .find(|monitor| monitor.entity == original)
+            .map(|monitor| monitor.monitor_info.identity);
+        let connected_indices = &app
+            .world()
+            .resource::<TopologyObservations>()
+            .connected_indices;
+        assert_eq!(connected_indices.len(), 2);
+        assert!(connected_indices.contains(&(original, 1)));
+        assert!(connected_indices.contains(&(survivor, 0)));
+        reset_observations(&mut app);
+
+        let reusable_entity = despawn_monitor_for_reuse(&mut app, original);
+        assert!(reusable_entity.is_some());
+        let Some(reusable_entity) = reusable_entity else {
+            return;
+        };
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<TopologyObservations>()
+                .disconnected_indices,
+            [(original, 1)]
+        );
+        reset_observations(&mut app);
+
+        let returned = spawn_monitor_at(
+            &mut app,
+            reusable_entity,
+            PANEL_A_EVIDENCE,
+            RETURNED_MONITOR_POSITION,
+            RETURNED_MONITOR_SIZE,
+            DEFAULT_SCALE,
+        );
+        assert_eq!(returned.index(), original.index());
+        assert_ne!(returned.generation(), original.generation());
+        set_cached_monitor_order(&mut app, [returned, survivor]);
+        let mut entity_order = [returned, survivor];
+        entity_order.sort_by_key(|entity| entity.to_bits());
+        assert_ne!(entity_order, [returned, survivor]);
+
+        app.update();
+
+        assert_returned_monitor_order(&app, returned, survivor, original_identity);
+    }
+
+    #[test]
+    fn missing_cached_handle_uses_deterministic_unassociated_index() {
+        let mut app = topology_app();
+        let missing = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let cached_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+        let cached = spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            cached_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        set_cached_monitor_order(&mut app, [cached]);
+
+        app.update();
+
+        let monitors = app.world().resource::<Monitors>();
+        assert_eq!(
+            monitors
+                .iter()
+                .map(|monitor| (monitor.entity, monitor.monitor_info.index))
+                .collect::<Vec<_>>(),
+            [(cached, 0), (missing, 1)]
+        );
+        assert_eq!(
+            monitors.by_index(1).map(|monitor| monitor.identity),
+            Some(MonitorIdentity::Unverified)
+        );
+        assert_eq!(
+            monitors
+                .by_index(1)
+                .map(|monitor| monitor.physical_position),
+            Some(IVec2::ZERO)
+        );
+    }
+
+    #[test]
+    fn changed_evidence_on_new_entity_cannot_inherit_verified_identity() {
+        let mut app = topology_app();
+        let original = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        let original_identity = app.world().resource::<Monitors>().first().identity;
+
+        remove_monitor(&mut app, original);
+        app.update();
+        spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+
+        assert_ne!(
+            app.world().resource::<Monitors>().first().identity,
+            original_identity
+        );
+    }
+
+    #[test]
+    fn generation_identity_change_updates_mapping_without_raw_events() {
+        let mut app = topology_app();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        reset_observations(&mut app);
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .insert(entity, Ok(PANEL_B_EVIDENCE));
+        app.world()
+            .resource::<MonitorConfiguration>()
+            .advance_for_test();
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Monitors>().first().identity,
             MonitorIdentity::Unverified
         );
-        assert_eq!(disconnected_verified.former_entity, ENTITY_1);
-        assert_eq!(disconnected_verified.monitor.identity, verified(1));
-        assert_eq!(disconnected_unverified.former_entity, ENTITY_2);
         assert_eq!(
-            disconnected_unverified.monitor.identity,
+            *app.world().resource::<MonitorTopologyRevision>(),
+            MonitorTopologyRevision(2)
+        );
+        let observations = app.world().resource::<TopologyObservations>();
+        assert!(observations.connected.is_empty());
+        assert!(observations.disconnected.is_empty());
+    }
+
+    #[test]
+    fn revalidation_projects_final_ambiguity_independent_of_cached_order() {
+        for changed_monitor_first in [false, true] {
+            let mut app = topology_app();
+            let panel_a = spawn_monitor(
+                &mut app,
+                PANEL_A_EVIDENCE,
+                IVec2::ZERO,
+                UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+                DEFAULT_SCALE,
+            );
+            let panel_b = spawn_monitor(
+                &mut app,
+                PANEL_B_EVIDENCE,
+                IVec2::new(MONITOR_WIDTH.to_i32(), 0),
+                UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+                DEFAULT_SCALE,
+            );
+            set_cached_monitor_order(&mut app, [panel_a, panel_b]);
+            app.update();
+            let verified_ids: Vec<_> = app
+                .world()
+                .resource::<Monitors>()
+                .iter()
+                .filter_map(|monitor| match monitor.monitor_info.identity {
+                    MonitorIdentity::Verified(id) => Some(id),
+                    MonitorIdentity::Unverified => None,
+                })
+                .collect();
+            assert_eq!(verified_ids.len(), 2);
+
+            app.world_mut()
+                .resource_mut::<InjectedMonitorEvidence>()
+                .evidence
+                .insert(panel_b, Ok(PANEL_A_EVIDENCE));
+            if changed_monitor_first {
+                set_cached_monitor_order(&mut app, [panel_b, panel_a]);
+            }
+            app.world()
+                .resource::<MonitorConfiguration>()
+                .advance_for_test();
+
+            app.update();
+
+            let monitors = app.world().resource::<Monitors>();
+            assert!(
+                monitors
+                    .iter()
+                    .all(|monitor| monitor.monitor_info.identity == MonitorIdentity::Unverified)
+            );
+            assert!(
+                verified_ids
+                    .into_iter()
+                    .all(|id| monitors.by_id(id).is_none())
+            );
+        }
+    }
+
+    #[cfg(feature = "monitor-probe")]
+    #[test]
+    fn removal_with_generation_advance_reports_retained_evidence() {
+        let mut app = topology_app();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        app.world_mut()
+            .resource_mut::<InjectedTopologyProbeRecords>()
+            .records
+            .clear();
+        despawn_monitor(&mut app, entity);
+        app.world()
+            .resource::<MonitorConfiguration>()
+            .advance_for_test();
+
+        app.update();
+
+        let captured = app.world().resource::<InjectedTopologyProbeRecords>();
+        assert_eq!(captured.records.len(), 1);
+        assert_eq!(captured.records[0].configuration_generation, Some(1));
+        assert_eq!(captured.records[0].evidence_generation, Some(0));
+        assert_eq!(
+            captured.records[0].evidence_provenance,
+            "retained-earlier-generation"
+        );
+        assert_eq!(captured.records[0].entity, entity);
+        assert_eq!(captured.records[0].change, "disconnected");
+    }
+
+    #[test]
+    fn identical_generation_revalidation_keeps_revision_and_raw_events() {
+        let mut app = topology_app();
+        spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        reset_observations(&mut app);
+        reset_activity(&mut app);
+        app.world()
+            .resource::<MonitorConfiguration>()
+            .advance_for_test();
+
+        app.update();
+
+        assert_eq!(
+            *app.world().resource::<MonitorTopologyRevision>(),
+            MonitorTopologyRevision(1)
+        );
+        let observations = app.world().resource::<TopologyObservations>();
+        assert!(observations.connected.is_empty());
+        assert!(observations.disconnected.is_empty());
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity {
+                topology_scans:       1,
+                component_reads:      1,
+                cached_order_lookups: 1,
+                identity_requests:    1,
+                handle_lookups:       1,
+                evidence_loads:       1,
+            }
+        );
+    }
+
+    #[test]
+    fn same_entity_metadata_change_without_lifetime_signal_is_not_observed() {
+        let mut app = topology_app();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            LOW_DPI_SCALE,
+        );
+        app.update();
+        reset_activity(&mut app);
+        let changed = app
+            .world_mut()
+            .entity_mut(entity)
+            .get_mut::<Monitor>()
+            .map(|mut monitor| {
+                monitor.physical_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+                monitor.scale_factor = DEFAULT_SCALE;
+            });
+        assert!(changed.is_some());
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Monitors>().first().physical_position,
+            IVec2::ZERO
+        );
+        assert!(
+            (app.world().resource::<Monitors>().first().scale - LOW_DPI_SCALE).abs()
+                < SCALE_FACTOR_EPSILON
+        );
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity::default()
+        );
+    }
+
+    #[test]
+    fn idle_update_performs_no_topology_identity_or_window_lookup() {
+        let mut app = topology_app();
+        spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let window_entity = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(IVec2::ZERO));
+        app.update();
+        reset_activity(&mut app);
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity::default()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .lookups,
+            0
+        );
+    }
+
+    #[test]
+    fn relevant_window_change_refreshes_current_monitor_once() {
+        let mut app = topology_app();
+        spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let second_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+        spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            second_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let window_entity = app
+            .world_mut()
+            .spawn((
+                Window {
+                    position: WindowPosition::At(IVec2::ZERO),
+                    ..Default::default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(IVec2::ZERO));
+        app.update();
+        reset_activity(&mut app);
+        let changed = app
+            .world_mut()
+            .entity_mut(window_entity)
+            .get_mut::<Window>()
+            .map(|mut window| {
+                window.position = WindowPosition::At(second_position);
+                window.mode = WindowMode::Windowed;
+            });
+        assert!(changed.is_some());
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(second_position));
+
+        app.update();
+
+        let expected_monitor = app
+            .world()
+            .resource::<Monitors>()
+            .at(second_position.x, second_position.y)
+            .copied();
+        assert_eq!(
+            expected_monitor.map(|monitor| monitor.physical_position),
+            Some(second_position)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .lookups,
+            1
+        );
+        assert_eq!(
+            app.world()
+                .entity(window_entity)
+                .get::<CurrentMonitor>()
+                .map(|current_monitor| current_monitor.monitor_info),
+            expected_monitor
+        );
+    }
+
+    #[test]
+    fn empty_topology_clears_current_monitor_before_restore_and_settle() {
+        let mut app = topology_app();
+        let monitor_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let window_entity = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(IVec2::ZERO));
+        app.update();
+        assert!(
+            app.world()
+                .entity(window_entity)
+                .contains::<CurrentMonitor>()
+        );
+        remove_monitor(&mut app, monitor_entity);
+
+        app.update();
+
+        assert!(
+            !app.world()
+                .entity(window_entity)
+                .contains::<CurrentMonitor>()
+        );
+        let observations = app.world().resource::<DownstreamObservations>();
+        assert_eq!(observations.restore_current_monitors, 0);
+        assert_eq!(observations.settle_current_monitors, 0);
+        assert_eq!(
+            app.world()
+                .resource::<TopologyObservations>()
+                .current_monitors_at_disconnect,
+            [0]
+        );
+    }
+
+    #[test]
+    fn cached_instance_skips_native_evidence_during_another_addition() {
+        let mut app = topology_app();
+        spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            IVec2::new(MONITOR_WIDTH.to_i32(), 0),
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        reset_activity(&mut app);
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity {
+                topology_scans:       1,
+                component_reads:      2,
+                cached_order_lookups: 2,
+                identity_requests:    2,
+                handle_lookups:       1,
+                evidence_loads:       1,
+            }
+        );
+    }
+
+    #[test]
+    fn configuration_failure_is_injected_without_physical_display_setup() {
+        let mut app = topology_app();
+        let entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .insert(
+                entity,
+                Err(OperatingSystemQueryError::StableIdentityProperty.into()),
+            );
+        app.world()
+            .resource::<MonitorConfiguration>()
+            .advance_for_test();
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<Monitors>().first().identity,
             MonitorIdentity::Unverified
         );
     }
