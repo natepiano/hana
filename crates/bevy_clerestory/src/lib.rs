@@ -71,6 +71,7 @@ pub use monitors::MonitorId;
 pub use monitors::MonitorIdentity;
 pub use monitors::MonitorInfo;
 use monitors::MonitorPlugin;
+pub use monitors::MonitorTopologyRevision;
 pub use monitors::Monitors;
 pub use persistence::WindowKey;
 pub use platform::Platform;
@@ -242,7 +243,6 @@ impl Plugin for WindowManagerPluginCustomPath {
         app.add_systems(
             Update,
             (
-                monitors::update_current_monitor,
                 persistence::save_window_state
                     .run_if(no_restoring_windows)
                     .after(monitors::update_current_monitor),

@@ -6,8 +6,12 @@ mod registry;
 use bevy::prelude::*;
 pub(super) use configuration::MonitorConfiguration;
 pub(super) use configuration::MonitorConfigurationState;
+#[cfg(test)]
+pub(super) use native::QualifiedEvidence;
 pub(super) use native::qualified_evidence;
 pub(super) use registry::MonitorIdentificationError;
+#[cfg(feature = "monitor-probe")]
+pub(super) use registry::MonitorIdentityProbe;
 pub(super) use registry::MonitorIdentityRegistry;
 pub(super) use registry::MonitorInstanceId;
 pub(super) use registry::OperatingSystemQueryError;
@@ -32,4 +36,19 @@ pub enum MonitorIdentity {
     Verified(MonitorId),
     /// Panel evidence is unavailable, insufficient, contradictory, or ambiguous.
     Unverified,
+}
+
+pub(super) fn cached_identity(
+    registry: &MonitorIdentityRegistry,
+    instance_id: MonitorInstanceId,
+) -> Option<MonitorIdentity> {
+    registry.cached_identity(instance_id)
+}
+
+pub(super) fn monitor_handle_missing(
+    registry: &mut MonitorIdentityRegistry,
+    instance_id: MonitorInstanceId,
+    configuration: MonitorConfigurationState,
+) {
+    registry.monitor_handle_missing(instance_id, configuration);
 }

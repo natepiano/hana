@@ -24,6 +24,7 @@ pub(crate) use winit_info::load_target_position;
 pub(crate) use winit_info::move_to_target_monitor;
 
 use crate::ClerestoryPreStartupSet;
+use crate::monitors;
 
 pub(crate) struct RestorePlugin;
 
@@ -48,7 +49,7 @@ impl Plugin for RestorePlugin {
         app.add_systems(
             Update,
             (
-                restore_windows,
+                restore_windows.after(monitors::update_current_monitor),
                 check_restore_settling.after(restore_windows),
             )
                 .run_if(has_restoring_windows),

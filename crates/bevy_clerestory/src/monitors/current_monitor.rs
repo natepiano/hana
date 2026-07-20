@@ -3,6 +3,8 @@
 //! Maintains `CurrentMonitor` on all managed windows using winit detection
 //! with position-based fallback.
 
+#[cfg(test)]
+use std::collections::HashMap;
 use std::ops::Deref;
 
 use bevy::ecs::system::NonSendMarker;
@@ -13,6 +15,7 @@ use bevy::window::WindowMode;
 use bevy::winit::WINIT_WINDOWS;
 use bevy_kana::ToI32;
 
+use super::MonitorIdentity;
 use super::MonitorInfo;
 use super::Monitors;
 use crate::ManagedWindow;
@@ -53,6 +56,73 @@ impl Deref for CurrentMonitor {
     fn deref(&self) -> &Self::Target { &self.monitor_info }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowRegistration {
+    Unmanaged,
+    Primary,
+    Managed,
+    PrimaryAndManaged,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct MonitorSelectionInputs {
+    registration:          WindowRegistration,
+    position:              WindowPosition,
+    physical_size:         UVec2,
+    base_scale_factor:     f32,
+    scale_factor_override: Option<f32>,
+    window_mode:           WindowMode,
+}
+
+impl MonitorSelectionInputs {
+    fn from_window(window: &Window, registration: WindowRegistration) -> Self {
+        Self {
+            registration,
+            position: window.position,
+            physical_size: window.resolution.physical_size(),
+            base_scale_factor: window.resolution.base_scale_factor(),
+            scale_factor_override: window.resolution.scale_factor_override(),
+            window_mode: window.mode,
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Default, Resource)]
+pub(crate) struct InjectedCurrentMonitorSource {
+    positions:   HashMap<Entity, Option<IVec2>>,
+    pub lookups: usize,
+}
+
+#[cfg(test)]
+impl InjectedCurrentMonitorSource {
+    pub(super) fn set_position(&mut self, entity: Entity, position: Option<IVec2>) {
+        self.positions.insert(entity, position);
+    }
+
+    pub(super) const fn reset_activity(&mut self) { self.lookups = 0; }
+}
+
+pub(super) fn clear_monitor_selection_inputs(
+    removed: On<Remove, (Window, PrimaryWindow, ManagedWindow)>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(removed.entity)
+        .try_remove::<MonitorSelectionInputs>();
+}
+
+pub(super) fn remove_current_monitors_for_empty_topology(world: &mut World) {
+    let mut query = world.query_filtered::<Entity, (
+        With<CurrentMonitor>,
+        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
+    )>();
+    let entities: Vec<_> = query.iter(world).collect();
+    for entity in entities {
+        world.entity_mut(entity).remove::<CurrentMonitor>();
+    }
+}
+
 /// Unified monitor detection system. Maintains `CurrentMonitor` on all managed windows.
 ///
 /// Detection priority:
@@ -65,30 +135,55 @@ impl Deref for CurrentMonitor {
 pub(crate) fn update_current_monitor(
     mut commands: Commands,
     windows: Query<
-        (Entity, &Window, Option<&CurrentMonitor>),
+        (
+            Entity,
+            &Window,
+            Option<&CurrentMonitor>,
+            Option<&MonitorSelectionInputs>,
+            Has<PrimaryWindow>,
+            Has<ManagedWindow>,
+        ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
     monitors: Res<Monitors>,
+    #[cfg(test)] mut injected_source: Option<ResMut<InjectedCurrentMonitorSource>>,
     _: NonSendMarker,
 ) {
     if monitors.is_empty() {
         return;
     }
 
-    for (entity, window, existing) in &windows {
-        let winit_result = winit_detect_monitor(entity, &monitors);
+    let topology_changed = monitors.is_changed();
+    for (entity, window, existing, previous_inputs, primary, managed) in &windows {
+        let registration = match (primary, managed) {
+            (true, false) => WindowRegistration::Primary,
+            (false, true) => WindowRegistration::Managed,
+            (true, true) => WindowRegistration::PrimaryAndManaged,
+            (false, false) => WindowRegistration::Unmanaged,
+        };
+        let current_inputs = MonitorSelectionInputs::from_window(window, registration);
+        if !topology_changed && existing.is_some() && previous_inputs == Some(&current_inputs) {
+            continue;
+        }
+
+        let winit_result = winit_detect_monitor(
+            entity,
+            &monitors,
+            #[cfg(test)]
+            injected_source.as_deref_mut(),
+        );
         let position_result = if winit_result.is_none() {
             position_detect_monitor(window, &monitors)
         } else {
             None
         };
+        let existing_result =
+            existing.and_then(|current_monitor| monitor_from_existing(current_monitor, &monitors));
 
-        let (monitor_info, source) = match (winit_result, position_result, existing) {
+        let (monitor_info, source) = match (winit_result, position_result, existing_result) {
             (Some(monitor_info), _, _) => (monitor_info, MONITOR_SOURCE_WINIT),
             (_, Some(monitor_info), _) => (monitor_info, MONITOR_SOURCE_POSITION),
-            (_, _, Some(current_monitor)) => {
-                (current_monitor.monitor_info, MONITOR_SOURCE_EXISTING)
-            },
+            (_, _, Some(monitor_info)) => (monitor_info, MONITOR_SOURCE_EXISTING),
             _ => (*monitors.first(), MONITOR_SOURCE_FALLBACK),
         };
 
@@ -98,17 +193,18 @@ pub(crate) fn update_current_monitor(
             monitor_info,
             effective_window_mode,
         };
-
         // `changed` prevents redundant `CurrentMonitor` inserts and Bevy change detection.
         let changed = current_monitor_changed(existing, &current_monitor);
 
+        let mut entity_commands = commands.entity(entity);
         if changed {
             debug!(
                 "[update_current_monitor] source={} index={} scale={} effective_window_mode={:?}",
                 source, monitor_info.index, monitor_info.scale, effective_window_mode
             );
-            commands.entity(entity).insert(current_monitor);
+            entity_commands.insert(current_monitor);
         }
+        entity_commands.insert(current_inputs);
     }
 }
 
@@ -119,8 +215,37 @@ fn current_monitor_changed(existing: Option<&CurrentMonitor>, current: &CurrentM
     })
 }
 
+fn monitor_from_existing(
+    current_monitor: &CurrentMonitor,
+    monitors: &Monitors,
+) -> Option<MonitorInfo> {
+    match current_monitor.monitor_info.identity {
+        MonitorIdentity::Verified(id) => monitors.by_id(id).copied(),
+        MonitorIdentity::Unverified => monitors
+            .iter()
+            .find(|monitor| monitor.monitor_info == &current_monitor.monitor_info)
+            .map(|monitor| *monitor.monitor_info),
+    }
+}
+
 /// Detect monitor via winit's `current_monitor()`.
-fn winit_detect_monitor(entity: Entity, monitors: &Monitors) -> Option<MonitorInfo> {
+fn winit_detect_monitor(
+    entity: Entity,
+    monitors: &Monitors,
+    #[cfg(test)] injected_source: Option<&mut InjectedCurrentMonitorSource>,
+) -> Option<MonitorInfo> {
+    #[cfg(test)]
+    if let Some(source) = injected_source {
+        source.lookups += 1;
+        return source
+            .positions
+            .get(&entity)
+            .copied()
+            .flatten()
+            .and_then(|position| monitors.at(position.x, position.y))
+            .copied();
+    }
+
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         winit_windows.get_window(entity).and_then(|winit_window| {
@@ -330,5 +455,66 @@ mod tests {
         };
 
         assert!(current_monitor_changed(Some(&existing), &downgraded));
+    }
+
+    #[test]
+    fn removed_current_monitor_is_reinstalled_once() {
+        let mut app = App::new();
+        app.insert_resource(monitors_with(monitor_0()))
+            .init_resource::<InjectedCurrentMonitorSource>()
+            .add_systems(Update, update_current_monitor);
+        let entity = app
+            .world_mut()
+            .spawn((window_at(IVec2::ZERO, 800, 600), PrimaryWindow))
+            .id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(entity, Some(IVec2::ZERO));
+        app.update();
+        assert!(app.world().entity(entity).contains::<CurrentMonitor>());
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<CurrentMonitor>();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .reset_activity();
+
+        app.update();
+
+        assert!(app.world().entity(entity).contains::<CurrentMonitor>());
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .lookups,
+            1
+        );
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .lookups,
+            1
+        );
+    }
+
+    #[test]
+    fn removing_window_registration_clears_monitor_selection_inputs() {
+        let mut app = App::new();
+        app.add_observer(clear_monitor_selection_inputs);
+        let window = Window::default();
+        let inputs = MonitorSelectionInputs::from_window(&window, WindowRegistration::Primary);
+        let entity = app.world_mut().spawn((window, PrimaryWindow, inputs)).id();
+
+        app.world_mut().entity_mut(entity).remove::<PrimaryWindow>();
+        app.world_mut().flush();
+
+        assert!(
+            app.world()
+                .entity(entity)
+                .get::<MonitorSelectionInputs>()
+                .is_none()
+        );
     }
 }

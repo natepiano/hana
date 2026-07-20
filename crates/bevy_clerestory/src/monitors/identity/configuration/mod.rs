@@ -35,10 +35,25 @@ impl From<u64> for MonitorConfigurationGeneration {
     fn from(value: u64) -> Self { Self(value) }
 }
 
+impl MonitorConfigurationGeneration {
+    #[cfg(feature = "monitor-probe")]
+    pub const fn get(self) -> u64 { self.0 }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MonitorConfigurationState {
     Ready(MonitorConfigurationGeneration),
     Unavailable(MonitorIdentificationError),
+}
+
+#[cfg(feature = "monitor-probe")]
+impl MonitorConfigurationState {
+    pub const fn probe_fields(self) -> (&'static str, Option<u64>) {
+        match self {
+            Self::Ready(generation) => ("ready", Some(generation.get())),
+            Self::Unavailable(_) => ("unavailable", None),
+        }
+    }
 }
 
 struct MonitorConfigurationGenerationTracker {
@@ -159,6 +174,17 @@ impl MonitorConfiguration {
             |_| self.tracker.state(),
         )
     }
+
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            tracker:      Arc::new(MonitorConfigurationGenerationTracker::default()),
+            registration: Ok(ConfigurationNotificationRegistration::Wayland),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn advance_for_test(&self) { self.tracker.advance(); }
 }
 
 enum ConfigurationNotificationRegistration {

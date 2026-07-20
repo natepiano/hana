@@ -1,5 +1,17 @@
+#[cfg(target_os = "macos")]
+use std::collections::BTreeMap;
+#[cfg(target_os = "macos")]
+use std::hash::Hash;
+#[cfg(target_os = "macos")]
+use std::hash::Hasher;
 #[cfg(target_os = "windows")]
 use std::mem::size_of;
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
+#[cfg(target_os = "macos")]
+use std::sync::OnceLock;
+#[cfg(target_os = "macos")]
+use std::sync::PoisonError;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Devices::DeviceAndDriverInstallation::DICS_FLAG_GLOBAL;
@@ -106,16 +118,69 @@ use crate::Platform;
 #[cfg(target_os = "windows")]
 use crate::constants::DISPLAY_CONFIG_ACQUISITION_ATTEMPTS;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum QualifiedEvidence {
     #[cfg(target_os = "macos")]
-    MacOsDisplayUuid(MonitorHandle),
+    MacOsDisplayUuid(MacOsDisplayUuid),
     #[cfg(target_os = "windows")]
     WindowsEdid(Vec<u8>),
     #[cfg(all(unix, not(target_os = "macos")))]
     X11Edid(Vec<u8>),
     #[cfg(test)]
     Synthetic(Vec<u8>),
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug)]
+pub struct MacOsDisplayUuid {
+    handle: MonitorHandle,
+    hash:   u64,
+}
+
+#[cfg(target_os = "macos")]
+impl From<&MonitorHandle> for MacOsDisplayUuid {
+    fn from(handle: &MonitorHandle) -> Self {
+        static HASHES: OnceLock<Mutex<MacOsHandleHashes>> = OnceLock::new();
+
+        let hash = {
+            let mut hashes = HASHES
+                .get_or_init(|| Mutex::new(MacOsHandleHashes::default()))
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(hash) = hashes.by_handle.get(handle) {
+                *hash
+            } else {
+                let hash = hashes.next;
+                hashes.by_handle.insert(handle.clone(), hash);
+                hashes.next = hashes.next.saturating_add(1);
+                hash
+            }
+        };
+        Self {
+            handle: handle.clone(),
+            hash,
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl PartialEq for MacOsDisplayUuid {
+    fn eq(&self, other: &Self) -> bool { self.handle == other.handle }
+}
+
+#[cfg(target_os = "macos")]
+impl Eq for MacOsDisplayUuid {}
+
+#[cfg(target_os = "macos")]
+impl Hash for MacOsDisplayUuid {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.hash.hash(state); }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct MacOsHandleHashes {
+    by_handle: BTreeMap<MonitorHandle, u64>,
+    next:      u64,
 }
 
 pub fn qualified_evidence(
@@ -126,7 +191,9 @@ pub fn qualified_evidence(
         Platform::MacOs => {
             #[cfg(target_os = "macos")]
             {
-                Ok(QualifiedEvidence::MacOsDisplayUuid(handle.clone()))
+                Ok(QualifiedEvidence::MacOsDisplayUuid(MacOsDisplayUuid::from(
+                    handle,
+                )))
             }
             #[cfg(not(target_os = "macos"))]
             {

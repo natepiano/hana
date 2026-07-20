@@ -63,15 +63,53 @@ impl From<Entity> for MonitorInstanceId {
 #[derive(Debug, Resource)]
 pub struct MonitorIdentityRegistry {
     configuration:    Option<MonitorConfigurationState>,
+    evidence_indices: HashMap<QualifiedEvidence, usize>,
     evidence_records: Vec<EvidenceRecord>,
     instances:        HashMap<MonitorInstanceId, InstanceIdentity>,
     next_id:          Option<u64>,
+}
+
+#[cfg(feature = "monitor-probe")]
+#[derive(Clone, Copy, Debug)]
+pub struct MonitorIdentityProbe {
+    evidence: EvidenceProbe,
+}
+
+#[cfg(feature = "monitor-probe")]
+impl MonitorIdentityProbe {
+    pub const fn unavailable() -> Self {
+        Self {
+            evidence: EvidenceProbe::Unavailable,
+        }
+    }
+
+    pub fn evidence_fields(
+        &self,
+        configuration: MonitorConfigurationState,
+    ) -> (&'static str, Option<u64>) {
+        match self.evidence {
+            EvidenceProbe::Observed { generation }
+                if matches!(
+                    configuration,
+                    MonitorConfigurationState::Ready(current_generation)
+                        if current_generation == generation
+                ) =>
+            {
+                ("observed-current-generation", Some(generation.get()))
+            },
+            EvidenceProbe::Observed { generation } | EvidenceProbe::Retained { generation } => {
+                ("retained-earlier-generation", Some(generation.get()))
+            },
+            EvidenceProbe::Unavailable => ("unavailable", None),
+        }
+    }
 }
 
 impl Default for MonitorIdentityRegistry {
     fn default() -> Self {
         Self {
             configuration:    None,
+            evidence_indices: HashMap::new(),
             evidence_records: Vec::new(),
             instances:        HashMap::new(),
             next_id:          Some(0),
@@ -88,6 +126,31 @@ impl MonitorIdentityRegistry {
         self.configuration = Some(state);
     }
 
+    pub fn active_instances(&self) -> impl Iterator<Item = MonitorInstanceId> + '_ {
+        self.instances.keys().copied()
+    }
+
+    pub(super) fn cached_identity(
+        &self,
+        instance_id: MonitorInstanceId,
+    ) -> Option<MonitorIdentity> {
+        self.instances
+            .get(&instance_id)
+            .map(|instance| instance.identity)
+    }
+
+    pub(super) fn monitor_handle_missing(
+        &mut self,
+        instance_id: MonitorInstanceId,
+        configuration: MonitorConfigurationState,
+    ) {
+        self.cache_read_failure(
+            instance_id,
+            configuration,
+            MonitorIdentificationError::MissingMonitorHandle,
+        );
+    }
+
     pub fn identity<F>(
         &mut self,
         instance_id: MonitorInstanceId,
@@ -98,37 +161,50 @@ impl MonitorIdentityRegistry {
     where
         F: FnOnce() -> Result<QualifiedEvidence, MonitorIdentificationError>,
     {
-        let generation = match configuration {
-            MonitorConfigurationState::Ready(generation) => generation,
-            MonitorConfigurationState::Unavailable(error) => {
-                return self.cache_read_failure(instance_id, None, error);
-            },
-        };
         if self
             .instances
             .get(&instance_id)
-            .is_some_and(|instance| instance.generation == Some(generation))
+            .is_some_and(|instance| instance.configuration == configuration)
         {
             return self.instances[&instance_id].identity;
         }
+        let generation = match configuration {
+            MonitorConfigurationState::Ready(generation) => generation,
+            MonitorConfigurationState::Unavailable(error) => {
+                return self.cache_read_failure(instance_id, configuration, error);
+            },
+        };
         if platform.is_wayland() {
             return self.cache_read_failure(
                 instance_id,
-                Some(generation),
+                configuration,
                 MonitorIdentificationError::StablePhysicalIdentityUnavailable,
             );
         }
 
         match load_evidence() {
             Ok(evidence) => self.accept_evidence(instance_id, generation, evidence),
-            Err(error) => self.cache_read_failure(instance_id, Some(generation), error),
+            Err(error) => self.cache_read_failure(instance_id, configuration, error),
         }
     }
 
-    pub fn cached_identity(&self, instance_id: MonitorInstanceId) -> Option<MonitorIdentity> {
-        self.instances
-            .get(&instance_id)
-            .map(|instance_identity| instance_identity.identity)
+    #[cfg(feature = "monitor-probe")]
+    pub fn probe(&self, instance_id: MonitorInstanceId) -> MonitorIdentityProbe {
+        let evidence =
+            self.instances
+                .get(&instance_id)
+                .map_or(EvidenceProbe::Unavailable, |instance| {
+                    match (&instance.evidence, instance.provenance) {
+                        (Some(_), EvidenceProvenance::Observed { generation }) => {
+                            EvidenceProbe::Observed { generation }
+                        },
+                        (Some(_), EvidenceProvenance::Retained { generation }) => {
+                            EvidenceProbe::Retained { generation }
+                        },
+                        _ => EvidenceProbe::Unavailable,
+                    }
+                });
+        MonitorIdentityProbe { evidence }
     }
 
     pub fn disconnect(&mut self, instance_id: MonitorInstanceId) {
@@ -185,13 +261,13 @@ impl MonitorIdentityRegistry {
                     MonitorIdentificationError::TokenExhausted,
                 );
             };
-            self.evidence_records.push(EvidenceRecord {
-                evidence: evidence.clone(),
-                status:   EvidenceStatus::Verified {
+            self.install_record(
+                evidence.clone(),
+                EvidenceStatus::Verified {
                     id,
                     active_instance: Some(instance_id),
                 },
-            });
+            );
             return self.cache_verified(instance_id, generation, evidence, id);
         };
 
@@ -259,9 +335,11 @@ impl MonitorIdentityRegistry {
             instance_id,
             InstanceIdentity {
                 evidence: Some(evidence),
+                evidence_generation: Some(generation),
+                provenance: EvidenceProvenance::observed(generation),
                 identity,
                 error: None,
-                generation: Some(generation),
+                configuration: MonitorConfigurationState::Ready(generation),
             },
         );
         identity
@@ -278,10 +356,12 @@ impl MonitorIdentityRegistry {
         self.instances.insert(
             instance_id,
             InstanceIdentity {
-                evidence:   Some(evidence),
-                identity:   MonitorIdentity::Unverified,
-                error:      Some(error),
-                generation: Some(generation),
+                evidence:            Some(evidence),
+                evidence_generation: Some(generation),
+                provenance:          EvidenceProvenance::observed(generation),
+                identity:            MonitorIdentity::Unverified,
+                error:               Some(error),
+                configuration:       MonitorConfigurationState::Ready(generation),
             },
         );
         MonitorIdentity::Unverified
@@ -290,22 +370,28 @@ impl MonitorIdentityRegistry {
     fn cache_read_failure(
         &mut self,
         instance_id: MonitorInstanceId,
-        generation: Option<MonitorConfigurationGeneration>,
+        configuration: MonitorConfigurationState,
         error: MonitorIdentificationError,
     ) -> MonitorIdentity {
         log_identification_error(instance_id, error);
         if let Some(instance) = self.instances.get_mut(&instance_id) {
             instance.identity = MonitorIdentity::Unverified;
             instance.error = Some(error);
-            instance.generation = generation;
+            instance.configuration = configuration;
+            instance.provenance = instance.evidence_generation.map_or(
+                EvidenceProvenance::Unavailable,
+                EvidenceProvenance::retained,
+            );
         } else {
             self.instances.insert(
                 instance_id,
                 InstanceIdentity {
                     evidence: None,
+                    evidence_generation: None,
+                    provenance: EvidenceProvenance::Unavailable,
                     identity: MonitorIdentity::Unverified,
                     error: Some(error),
-                    generation,
+                    configuration,
                 },
             );
         }
@@ -323,10 +409,7 @@ impl MonitorIdentityRegistry {
             record.status = EvidenceStatus::Ambiguous;
             active_instance
         } else {
-            self.evidence_records.push(EvidenceRecord {
-                evidence: evidence.clone(),
-                status:   EvidenceStatus::Ambiguous,
-            });
+            self.install_record(evidence.clone(), EvidenceStatus::Ambiguous);
             None
         };
         if let Some(active_identity) =
@@ -338,24 +421,82 @@ impl MonitorIdentityRegistry {
     }
 
     fn record_index(&self, evidence: &QualifiedEvidence) -> Option<usize> {
-        self.evidence_records
-            .iter()
-            .position(|record| record.evidence == *evidence)
+        self.evidence_indices.get(evidence).copied()
     }
 
     fn record_mut(&mut self, evidence: &QualifiedEvidence) -> Option<&mut EvidenceRecord> {
-        self.evidence_records
-            .iter_mut()
-            .find(|record| record.evidence == *evidence)
+        let index = self.record_index(evidence)?;
+        let record = self.evidence_records.get_mut(index)?;
+        debug_assert_eq!(
+            record.evidence, *evidence,
+            "evidence index must remain exact"
+        );
+        Some(record)
+    }
+
+    fn install_record(&mut self, evidence: QualifiedEvidence, status: EvidenceStatus) -> usize {
+        let index = self.evidence_records.len();
+        self.evidence_records.push(EvidenceRecord {
+            evidence: evidence.clone(),
+            status,
+        });
+        let replaced = self.evidence_indices.insert(evidence, index);
+        debug_assert!(replaced.is_none(), "evidence records are append-only");
+        index
     }
 }
 
 #[derive(Clone, Debug)]
 struct InstanceIdentity {
-    evidence:   Option<QualifiedEvidence>,
-    identity:   MonitorIdentity,
-    error:      Option<MonitorIdentificationError>,
-    generation: Option<MonitorConfigurationGeneration>,
+    evidence:            Option<QualifiedEvidence>,
+    evidence_generation: Option<MonitorConfigurationGeneration>,
+    provenance:          EvidenceProvenance,
+    identity:            MonitorIdentity,
+    error:               Option<MonitorIdentificationError>,
+    configuration:       MonitorConfigurationState,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum EvidenceProvenance {
+    Observed {
+        #[cfg(feature = "monitor-probe")]
+        generation: MonitorConfigurationGeneration,
+    },
+    Retained {
+        #[cfg(feature = "monitor-probe")]
+        generation: MonitorConfigurationGeneration,
+    },
+    Unavailable,
+}
+
+impl EvidenceProvenance {
+    #[cfg(feature = "monitor-probe")]
+    const fn observed(generation: MonitorConfigurationGeneration) -> Self {
+        Self::Observed { generation }
+    }
+
+    #[cfg(not(feature = "monitor-probe"))]
+    const fn observed(_: MonitorConfigurationGeneration) -> Self { Self::Observed {} }
+
+    #[cfg(feature = "monitor-probe")]
+    const fn retained(generation: MonitorConfigurationGeneration) -> Self {
+        Self::Retained { generation }
+    }
+
+    #[cfg(not(feature = "monitor-probe"))]
+    const fn retained(_: MonitorConfigurationGeneration) -> Self { Self::Retained {} }
+}
+
+#[cfg(feature = "monitor-probe")]
+#[derive(Clone, Copy, Debug)]
+enum EvidenceProbe {
+    Observed {
+        generation: MonitorConfigurationGeneration,
+    },
+    Retained {
+        generation: MonitorConfigurationGeneration,
+    },
+    Unavailable,
 }
 
 #[derive(Debug)]
@@ -395,6 +536,8 @@ mod tests {
     const INSTANCE_2: MonitorInstanceId = MonitorInstanceId(Entity::from_bits(2));
     const INSTANCE_3: MonitorInstanceId = MonitorInstanceId(Entity::from_bits(3));
     const INSTANCE_4: MonitorInstanceId = MonitorInstanceId(Entity::from_bits(4));
+    const PANEL_A_EVIDENCE: &[u8] = b"panel-a";
+    const PANEL_B_EVIDENCE: &[u8] = b"panel-b";
 
     fn evidence(bytes: &[u8]) -> QualifiedEvidence { QualifiedEvidence::Synthetic(bytes.to_vec()) }
 
@@ -412,7 +555,7 @@ mod tests {
             state(0),
             || {
                 loader_calls.set(loader_calls.get() + 1);
-                Ok(evidence(b"panel-a"))
+                Ok(evidence(PANEL_A_EVIDENCE))
             },
             Platform::X11,
         );
@@ -421,7 +564,7 @@ mod tests {
             state(0),
             || {
                 loader_calls.set(loader_calls.get() + 1);
-                Ok(evidence(b"panel-a"))
+                Ok(evidence(PANEL_A_EVIDENCE))
             },
             Platform::X11,
         );
@@ -429,6 +572,33 @@ mod tests {
         assert_eq!(first, MonitorIdentity::Verified(MonitorId::from_raw(0)));
         assert_eq!(cached, first);
         assert_eq!(loader_calls.get(), 1);
+        assert_eq!(registry.evidence_records.len(), 1);
+        assert_eq!(registry.next_id, Some(1));
+    }
+
+    #[test]
+    fn unchanged_unavailable_state_does_not_invoke_identifier_loader() {
+        let mut registry = MonitorIdentityRegistry::default();
+        let loader_calls = Cell::new(0);
+        let unavailable = MonitorConfigurationState::Unavailable(
+            OperatingSystemQueryError::ConfigurationNotificationStream.into(),
+        );
+
+        for _ in 0..2 {
+            registry.identity(
+                INSTANCE_1,
+                unavailable,
+                || {
+                    loader_calls.set(loader_calls.get() + 1);
+                    Ok(evidence(PANEL_A_EVIDENCE))
+                },
+                Platform::X11,
+            );
+        }
+
+        assert_eq!(loader_calls.get(), 0);
+        assert_eq!(registry.evidence_records.len(), 0);
+        assert_eq!(registry.next_id, Some(0));
     }
 
     #[test]
@@ -437,13 +607,13 @@ mod tests {
         let first = registry.identity(
             INSTANCE_1,
             state(0),
-            || Ok(evidence(b"panel-a")),
+            || Ok(evidence(PANEL_A_EVIDENCE)),
             Platform::X11,
         );
         let revalidated = registry.identity(
             INSTANCE_1,
             state(1),
-            || Ok(evidence(b"panel-a")),
+            || Ok(evidence(PANEL_A_EVIDENCE)),
             Platform::X11,
         );
 
@@ -492,7 +662,7 @@ mod tests {
         let original = registry.identity(
             INSTANCE_1,
             state(0),
-            || Ok(evidence(b"panel-a")),
+            || Ok(evidence(PANEL_A_EVIDENCE)),
             Platform::X11,
         );
         let failed = registry.identity(
@@ -508,7 +678,7 @@ mod tests {
         let retried = registry.identity(
             INSTANCE_1,
             state(2),
-            || Ok(evidence(b"panel-a")),
+            || Ok(evidence(PANEL_A_EVIDENCE)),
             Platform::X11,
         );
 
@@ -523,10 +693,11 @@ mod tests {
     #[test]
     fn tokens_are_monotonic_and_never_reassigned() {
         let mut registry = MonitorIdentityRegistry::default();
-        let first = registry.accept_evidence(INSTANCE_1, 0_u64.into(), evidence(b"panel-a"));
+        let first = registry.accept_evidence(INSTANCE_1, 0_u64.into(), evidence(PANEL_A_EVIDENCE));
         registry.disconnect(INSTANCE_1);
-        let reconnected = registry.accept_evidence(INSTANCE_2, 0_u64.into(), evidence(b"panel-a"));
-        let second = registry.accept_evidence(INSTANCE_3, 0_u64.into(), evidence(b"panel-b"));
+        let reconnected =
+            registry.accept_evidence(INSTANCE_2, 0_u64.into(), evidence(PANEL_A_EVIDENCE));
+        let second = registry.accept_evidence(INSTANCE_3, 0_u64.into(), evidence(PANEL_B_EVIDENCE));
 
         assert_eq!(first, MonitorIdentity::Verified(MonitorId::from_raw(0)));
         assert_eq!(reconnected, first);
@@ -558,6 +729,31 @@ mod tests {
         let second = registry.accept_evidence(INSTANCE_2, 0_u64.into(), evidence(b"same-prefix-b"));
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn old_evidence_uses_exact_index_after_large_history() {
+        const HISTORY_LENGTH: u64 = 4_096;
+
+        let mut registry = MonitorIdentityRegistry::default();
+        for raw in 0..HISTORY_LENGTH {
+            let instance_id = MonitorInstanceId(Entity::from_bits(raw + 1));
+            let evidence = evidence(&raw.to_le_bytes());
+            registry.accept_evidence(instance_id, 0_u64.into(), evidence);
+            registry.disconnect(instance_id);
+        }
+
+        let oldest = evidence(&0_u64.to_le_bytes());
+        assert_eq!(registry.evidence_indices.get(&oldest), Some(&0));
+        assert_eq!(registry.record_index(&oldest), Some(0));
+        assert_eq!(
+            registry.accept_evidence(INSTANCE_1, 1_u64.into(), oldest),
+            MonitorIdentity::Verified(MonitorId::from_raw(0))
+        );
+        assert_eq!(
+            Some(registry.evidence_records.len()),
+            usize::try_from(HISTORY_LENGTH).ok()
+        );
     }
 
     #[test]

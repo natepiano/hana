@@ -1,139 +1,198 @@
-# Monitor connect/disconnect events
+# Monitor topology and raw events
 
 ## Status
 
-**Implemented in `bevy_clerestory` (0.2.0-dev); hana migration pending a
-0.2.0 release.** `update_monitors` now triggers `MonitorConnected` /
-`MonitorDisconnected`. `hana` still runs its interim raw-`Monitor` observers (see
-[Interim implementation in hana](#interim-implementation-in-hana)) because it
-depends on the published `0.1.1`; it switches to the display-space events once
-`0.2.0` is released.
+Implemented in `bevy_clerestory` 0.2.0-dev. `Monitors`,
+`MonitorTopologyRevision`, `MonitorConnected`, and `MonitorDisconnected` form
+one entity-lifetime topology contract.
 
-## Next steps
+## Installed topology
 
-Ordered path from this branch to hana on the display-space events:
+`Monitors` is the last installed snapshot of live Bevy `Monitor` entities in
+Bevy's cached `WinitMonitors` order. Each `LiveMonitor` contains the current
+entity plus an entity-free `MonitorInfo`:
 
-1. **Merge** `feature/monitor-events` → `main`.
-2. **Release** `bevy_clerestory` 0.2.0 (`/release bevy_clerestory`): bumps
-   `0.2.0-dev` → `0.2.0` and publishes.
-3. **Bump hana's dep** `bevy_clerestory` `0.1.1` → `0.2.0` in
-   `crates/hana/Cargo.toml`.
-4. **Migrate hana's code** per [Migration](#migration) below — swap the interim
-   raw-`Monitor` observers for observers on `bevy_clerestory::MonitorConnected` /
-   `MonitorDisconnected`, and rename the clashing panel-space events.
+- `identity`: `MonitorIdentity::Verified(MonitorId)` only when complete,
+  qualified native evidence identifies one active physical panel;
+- `index`: the cached `WinitMonitors` index used by
+  `MonitorSelection::Index` for this monitor lifetime;
+- `physical_position`, `physical_size`, and `scale`: values supplied by that
+  Bevy `Monitor` component when Clerestory performed topology work.
 
-## Motivation
+`MonitorId` is an opaque, append-only process token. It is never persisted.
+Ambiguous, incomplete, contradictory, or unavailable evidence produces
+`MonitorIdentity::Unverified`; matching never substitutes connector, position,
+index, geometry, or the first monitor.
 
-An app that mirrors OS displays in-world (live screen capture on 3D panels)
-needs to react when a monitor is plugged in or unplugged:
+The cached winit association is consulted only during a triggered topology
+build. It does not call `available_monitors()` or refresh native arrangement,
+resolution, origin, scale, or other metadata. If a live `Monitor` component
+temporarily has no cached handle, its identity remains unverified and its
+deterministic entity-order position after the cached index range is
+out-of-range for `MonitorSelection::Index`; Clerestory does not claim an
+unobserved native order or redirect the index to another panel.
 
-- **Disconnect** — freeze the last captured frame, grey it out, overlay a
-  `DISCONNECTED` label, and stop the capture session.
-- **Connect / reconnect** — resume the live feed on the existing panel, or spawn
-  a new panel for a brand-new display.
+`MonitorInfo` never contains an entity. Use `Monitors::iter` for current entity
+association or `Monitors::entity_by_id` for an exact, unique verified identity.
+`Monitors::by_id` and `entity_by_id` return `None` for unverified identities and
+for multiple live instances carrying the same token.
 
-Today no crate emits a monitor-change signal:
+`MonitorTopologyRevision` starts at zero with the startup snapshot. It advances
+when the installed entity set or identity-to-entity mapping changes. It does not
+represent continuous monitor-property observation. A configuration generation
+that revalidates identity but reproduces the installed entity/identity snapshot
+leaves both `Monitors` and the revision unchanged.
 
-- `xcap` (the capture backend) goes silent on macOS when a display disconnects —
-  no channel close, no error, only repeated recv timeouts — so it cannot be the
-  source of truth. A reconnect requires re-polling `xcap::Monitor::all()`.
-- Bevy exposes the live set only as `bevy::window::Monitor` entities, spawned and
-  despawned each frame by `bevy_winit`'s `create_monitors`. Detecting a change
-  means watching `Added<Monitor>` / `RemovedComponents<Monitor>`.
-- `bevy_clerestory` already watches exactly that in `update_monitors` to rebuild
-  its `Monitors` resource, but it swallows the edge — consumers only see the new
-  `Monitors` value via change detection, not *which* display appeared or vanished.
+`init_monitors` treats every monitor in a non-empty startup snapshot as a new
+entity lifetime relative to an empty pre-install topology. During `PreStartup`,
+it installs `Monitors` and `MonitorTopologyRevision(0)` before triggering one
+`MonitorConnected` observer per monitor in the installed cached-monitor order.
+The presence of startup monitors does not advance the revision. An empty startup
+installs the empty snapshot and revision zero without a connection event.
 
-`bevy_clerestory` is the natural home: it already tracks the monitor set and
-already defines window-level `EntityEvent`s in `events.rs`.
+## Entity-lifetime boundary
 
-## API
+Bevy 0.19's `bevy_winit` checks `available_monitors()` in `create_monitors()` at
+the winit `about_to_wait` boundary. A newly enumerated handle receives a new
+Bevy `Monitor` entity, and a missing handle's entity is despawned. Clerestory
+uses those component additions/removals as the monitor connect/disconnect
+boundary.
 
-Two global events, triggered alongside the `Monitors` rebuild in
-`update_monitors`. Global (not entity-targeted) because the payload *is* the
-identity of the changed display; the consumer maps that to its own entity.
+A genuine reconnect therefore supplies a new Bevy `Monitor` component. The
+returning entity's position, size, and scale enter the new installed snapshot,
+including a cross-DPI reconnect.
 
-```rust
-/// A display was connected. Triggered after `Monitors` is rebuilt to include it.
-#[derive(Event, Debug, Clone, Reflect)]
-#[reflect(Event)]
-pub struct MonitorConnected {
-    /// The newly present monitor, as recorded in `Monitors`.
-    pub monitor: MonitorInfo,
-}
+For an equal handle that remains connected, Bevy does not refresh the existing
+component's properties. Clerestory consequently refreshes its topology snapshot
+for monitor entity lifetime changes and stable-identity revalidation; it does
+not guarantee live metadata refresh when arrangement, resolution, origin, size,
+or scale changes while the same entity remains present. Such a change may
+produce no `MonitorTopologyRevision` update and must not initiate reconnect
+recovery.
 
-/// A display was disconnected. Triggered after `Monitors` is rebuilt without it.
-#[derive(Event, Debug, Clone, Reflect)]
-#[reflect(Event)]
-pub struct MonitorDisconnected {
-    /// Geometry of the monitor as last known, before it vanished.
-    pub monitor: MonitorInfo,
-}
-```
+Wayland remains compositor-controlled for window positioning. Clerestory does
+not promise client-selected windowed placement or manufacture verified physical
+identity when the compositor does not expose sufficient evidence.
 
-The workspace enables `reflect_auto_register`, so these non-generic reflected
-events require no explicit `App::register_type` calls. `#[reflect(Event)]`
-provides the event type data used by BRP `world.trigger_event` and
-`world.observe+watch`.
+## Signal-driven producer
 
-`MonitorInfo` carries a new `id: MonitorId` field — a stable, OS-assigned display
-id normalized to `u64` across platforms (macOS `CGDirectDisplayID`, X11 /
-Wayland output id, hashed GDI device name on Windows), sourced from winit's
-`MonitorHandle` via `bevy::winit::WinitMonitors`. It survives display
-rearrangement, unlike `index`. `physical_position / scale` still yields the
-logical top-left used to pair a display with a capture feed.
+The topology producer checks three signals:
 
-### Emission point
+1. `Added<Monitor>`;
+2. removed `Monitor` components;
+3. a changed `MonitorConfiguration` state or generation requiring identity
+   revalidation.
 
-`update_monitors` computes `added` (`Added<Monitor>`) and `removed`
-(`RemovedComponents<Monitor>`); when either is non-empty it rebuilds the
-resource, diffs the previous `Monitors` against the rebuilt one **keyed on
-`MonitorId`**, and `commands.trigger`s a `MonitorConnected` /
-`MonitorDisconnected` per delta. Id-keying (not position) means rearranging
-displays fires nothing — only a genuine appear/vanish does.
+When none occurred, it returns before scanning monitor entities, reading
+component metadata, looking up winit/native monitor handles, doing identity
+work, allocating a snapshot, changing the revision, or causing a native
+`current_monitor()` lookup.
 
-The system takes a `NonSendMarker` so it runs on the main thread while reading
-winit `MonitorHandle`s. Because `RemovedComponents<Monitor>` yields despawned
-entities whose winit handle is already gone, the `MonitorInfo` for a disconnect
-(including its `id`) comes from the *previous* `Monitors` snapshot, which
-captured the id when the display connected.
+On a trigger, the producer scans live Bevy `Monitor` entities once. It builds
+the snapshot from their component metadata and compares cached
+`WinitMonitors::nth` / entity-handle associations only to align indices with
+`MonitorSelection::Index`. Cached handles are not queried for properties. The
+producer uses native property access only for stable physical identity evidence
+and does not enumerate another native topology for ordering, arrangement,
+geometry, resolution, or scale.
 
-## Consumer contract
+macOS, Windows, and X11 configuration callbacks remain world-free and only
+advance the atomic `MonitorConfiguration` generation. They exist so a triggered
+build can revalidate qualified stable identity, including the rare case where a
+native handle is reused. X11 uses the Phase 2 RandR notification listener only;
+there is no XCB/RandR current-topology query, XSettings DPI parser,
+`RESOURCE_MANAGER` tracker, or XFixes owner tracker in this producer.
 
-- Events fire **after** `Monitors` reflects the change, so a handler can read the
-  current `Monitors` consistently.
-- A reconnect of the same physical display fires `MonitorConnected` again; a
-  consumer must treat connect as idempotent (resume, don't duplicate).
-- Capture backends still need their own reconcile on connect — the event is the
-  trigger, not the capture session. The consumer re-polls `xcap::Monitor::all()`
-  (or equivalent) in response.
+The identity registry caches by configuration state/generation. A cached
+instance in the same configuration does not invoke its evidence loader. The
+append-only evidence history uses an exact
+`HashMap<QualifiedEvidence, usize>` index with expected constant-time lookup;
+records and `MonitorId` values are never reused or renumbered. Changed qualified
+evidence cannot transfer an old verified identity to a different physical
+panel.
 
-## Interim implementation in hana
+Raw lifetime deltas use private `MonitorInstanceId` values derived from Bevy
+entity lifetimes, not `MonitorId` or metadata. Identity-only revalidation may
+change `Monitors` and `MonitorTopologyRevision`, but emits no connect or
+disconnect event. Identical revalidation changes neither and emits no raw
+event.
 
-Until `hana` upgrades to `bevy_clerestory` 0.2.0, it sources the signal locally
-in `crates/hana/src/screens/connection.rs`:
+## Raw lifetime events
 
-- `on_monitor_added` (`On<Add, Monitor>`) / `on_monitor_removed`
-  (`On<Remove, Monitor>`) observers each queue `hana_video::reconcile_screens`,
-  which diffs `xcap::Monitor::all()` by display id, re-opening or dropping
-  capture sessions and flipping `ScreenFeed::connection`.
-- `sync_screen_connections` turns each per-panel connection transition into a
-  `MonitorConnected { entity }` / `MonitorDisconnected { entity }` **`EntityEvent`
-  targeted at the screen-panel fill** — the panel-space analogue of the
-  display-space events here. These are hana's own events, name-clashing with the
-  `bevy_clerestory` ones.
-- Observers `on_monitor_connected` / `on_monitor_disconnected` do the visible
-  work (resume the feed vs. freeze + greyscale halftone + `DISCONNECTED` overlay).
+`MonitorConnected` contains:
 
-### Migration
+- `entity`: the new live Bevy monitor entity;
+- `monitor`: the entity-free `MonitorInfo` installed for that lifetime.
 
-On the 0.2.0 upgrade, replace `on_monitor_added` / `on_monitor_removed` with
-observers on `bevy_clerestory::MonitorConnected` / `MonitorDisconnected` that
-queue `reconcile_screens` and, for a brand-new display, spawn the panel. The
-feed-driven layer stays: `sync_screen_connections` and the panel-space
-`EntityEvent`s still fire the visible connect/disconnect once xcap actually
-produces (or drops) a frame — a monitor appearing is not the same instant as its
-capture feed becoming ready, and a freshly spawned panel connects on its first
-frame with no monitor event at all. Rename hana's panel-space events (e.g.
-`ScreenFeedConnected` / `ScreenFeedDisconnected`) to clear the name clash with
-the display-space events.
+`MonitorDisconnected` contains:
+
+- `former_entity`: the ended Bevy monitor entity;
+- `monitor`: its last installed entity-free `MonitorInfo`.
+
+Connect and disconnect events are raw lifetime facts. Recovery policy may use
+them as inputs, but these events do not claim that two lifetimes represent the
+same physical panel. Applications decide whether and how to recreate windows.
+
+## Same-update ordering
+
+One queued world operation performs a changed install in this order:
+
+1. install `Monitors`;
+2. install `MonitorTopologyRevision`;
+3. remove stale `CurrentMonitor` components if no monitors remain;
+4. emit optional `monitor-probe` records;
+5. trigger `MonitorConnected` and `MonitorDisconnected` observers.
+
+A connect observer can immediately resolve the event entity. A disconnect
+observer sees `former_entity` absent. For an empty topology, it also sees stale
+`CurrentMonitor` removed.
+
+The `PreStartup` producer uses this same operation at revision zero, so startup
+probe records precede startup connect observers. Connected events follow the new
+installed snapshot order; disconnected events follow the prior installed
+snapshot order. A later `update_monitors` run without another topology or
+configuration signal emits no duplicate event and performs no topology work.
+
+The monitor plugin runs `update_current_monitor` after topology installation
+with a deferred-command synchronization point. Restore application runs after
+that refresh, and settle verification runs after restore application. There is
+no timer-based monitor-metadata settling.
+
+`update_current_monitor` stores private inputs for managed/primary registration,
+position, physical resolution, base and overridden scale, and window mode. It
+performs a native `current_monitor()` lookup only after an installed topology
+change or when those relevant window inputs change. Title, focus, visibility,
+cursor, and other unrelated edits do not cause a lookup; an idle update does no
+native current-window work.
+
+## Diagnostic probe
+
+The disabled-by-default `monitor-probe` Cargo feature emits structured tracing
+records under the `bevy_clerestory::monitor_probe` target. Records are tied to
+actual producer work: add/remove, identity-changing revalidation, or an
+explicitly recorded unchanged identity revalidation. A record may include:
+
+- consumed configuration state and generation;
+- producer `FrameCount` and schedule label;
+- installed topology revision and transition kind;
+- private monitor instance identity;
+- evidence provenance and its generation;
+- public `MonitorIdentity` and verified `MonitorId`, when present;
+- current or former monitor entity and its lifetime state.
+
+The startup producer reports `PreStartup::init_monitors`; the runtime producer
+reports `Update::monitor_topology_producer`. Startup connected records carry the
+startup configuration and evidence provenance, `MonitorTopologyRevision(0)`,
+and the producer's `FrameCount` before the public connect observer runs.
+
+Probe records do not claim that connected-monitor geometry or scale was freshly
+queried. They are diagnostic output, not public events, resolvers, matching
+inputs, or stable serialization. Applications and recovery code do not depend
+on them, and normal builds do not compile the optional tracing dependency.
+
+## Consumer responsibilities
+
+Display-capture consumers still reconcile their own backend after a connect or
+disconnect. A monitor entity appearing does not mean a capture frame is ready,
+and Clerestory does not own capture sessions, rendered content, cable routing,
+window recreation, or application UI policy.
