@@ -15,6 +15,11 @@ version              = "0.2.0-dev"
 name = "bevy_clerestory"
 path = "src/lib.rs"
 
+[[example]]
+name              = "restore_after_reconnect"
+path              = "examples/restore_after_reconnect/main.rs"
+required-features = ["monitor-probe"]
+
 [dependencies]
 bevy = { workspace = true, features = [
   "bevy_log",
