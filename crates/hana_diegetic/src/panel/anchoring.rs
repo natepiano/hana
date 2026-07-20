@@ -1,14 +1,16 @@
-//! Panel-to-panel anchoring authoring types.
+//! Panel-source anchoring authoring types.
 //!
 //! Anchoring is a per-frame resolved attachment, not `ChildOf` parenting.
-//! The pin position depends on both panels' sizes: a `Fit` target that
-//! remeasures or a window resize moves the target anchor point, so a
-//! parent-relative transform captured once would go stale. Screen panels also
-//! get window-absolute translations written every frame, which a parent
-//! transform would double-apply. Reparenting would further couple lifetimes
-//! (target despawn despawns dependents), inherit the target's scale chain, and
-//! turn an attachment cycle into a hierarchy cycle. The resolvers instead
-//! keep diegetic authoring separate from the coordinate-space positioners.
+//! The pin position depends on the source and target geometry: a `Fit` panel
+//! target that remeasures or a widget target whose rectangle changes moves the
+//! target anchor point, so a parent-relative transform captured once would go
+//! stale. Screen panels also get window-absolute translations written every
+//! frame, which a parent transform would double-apply. Reparenting would
+//! further couple lifetimes (target despawn despawns dependents), inherit the
+//! target's scale chain, and turn an attachment cycle into a hierarchy cycle.
+//! The resolvers instead keep diegetic authoring separate from the
+//! coordinate-space positioners. World sources may target world panels or
+//! reified world widgets; screen sources currently require panel targets.
 
 use bevy::prelude::*;
 use hana_valence::AnchorId;
@@ -23,8 +25,10 @@ use super::lifecycle::PanelComponentOwnership;
 use crate::layout::Anchor;
 use crate::layout::Dimension;
 use crate::layout::Unit;
+use crate::widgets::PanelWidget;
+use crate::widgets::WidgetOf;
 
-/// Insert-only bundle that pins one panel anchor point to another panel.
+/// Insert-only bundle that pins a panel anchor point to a target entity.
 #[derive(Bundle, Clone, Copy, Debug, PartialEq)]
 pub struct AnchoredToPanel {
     authored: PanelAttachmentAuthored,
@@ -32,7 +36,10 @@ pub struct AnchoredToPanel {
 }
 
 impl AnchoredToPanel {
-    /// Creates a panel attachment from the source panel to `target`.
+    /// Creates an attachment from the source panel to `target`.
+    ///
+    /// A world source may target a world panel or reified world widget. Screen
+    /// sources currently require panel targets.
     #[must_use]
     pub const fn new(target: Entity, source: Anchor, target_anchor: Anchor) -> Self {
         Self {
@@ -52,7 +59,7 @@ impl AnchoredToPanel {
         self
     }
 
-    /// Target panel entity.
+    /// Target panel or reified world widget entity.
     #[must_use]
     pub const fn target(&self) -> Entity { self.authored.target() }
 
@@ -60,7 +67,7 @@ impl AnchoredToPanel {
     #[must_use]
     pub const fn source_anchor(&self) -> Anchor { self.authored.source_anchor() }
 
-    /// Anchor point on the target panel.
+    /// Anchor point on the target panel or reified world widget.
     #[must_use]
     pub const fn target_anchor(&self) -> Anchor { self.authored.target_anchor() }
 
@@ -86,7 +93,7 @@ pub(crate) struct PanelAttachmentAuthored {
 }
 
 impl PanelAttachmentAuthored {
-    /// Target panel entity.
+    /// Target panel or reified world widget entity.
     #[must_use]
     pub(crate) const fn target(&self) -> Entity { self.target }
 
@@ -94,7 +101,7 @@ impl PanelAttachmentAuthored {
     #[must_use]
     pub(crate) const fn source_anchor(&self) -> Anchor { self.source }
 
-    /// Anchor point on the target panel.
+    /// Anchor point on the target panel or reified world widget.
     #[must_use]
     pub(crate) const fn target_anchor(&self) -> Anchor { self.target_anchor }
 
@@ -114,14 +121,15 @@ impl PanelAttachmentAuthored {
     }
 }
 
-/// Offset from a target panel anchor point.
+/// Offset from a target panel or reified world widget anchor point.
 ///
-/// Coordinates are authored in panel-local layout space: positive x moves
+/// Coordinates are authored in target-local layout space: positive x moves
 /// right, positive y moves down, positive z moves the source in front of the
-/// target — along the target plane normal for world panels, toward the screen
+/// target — along the target plane normal for world targets, toward the screen
 /// camera for screen panels. Bare `f32` values resolve against the target
-/// panel's layout unit; [`Px`](crate::Px), [`Mm`](crate::Mm),
-/// [`Pt`](crate::Pt), and [`In`](crate::In) carry explicit units.
+/// panel's layout unit; a widget target uses its owning panel's layout unit.
+/// [`Px`](crate::Px), [`Mm`](crate::Mm), [`Pt`](crate::Pt), and
+/// [`In`](crate::In) carry explicit units.
 ///
 /// Screen depth selects draw order under the shared orthographic camera and
 /// never changes apparent size. The camera sits at z = 1000 with a far plane
@@ -322,6 +330,44 @@ pub(super) fn restore_inactive_world_panel_poses(
     }
 }
 
+#[derive(Clone, Copy)]
+enum AnchorTargetMetrics {
+    Panel {
+        layout_unit: Unit,
+        layout_size: Vec2,
+        world_size:  Vec2,
+    },
+    Widget {
+        layout_unit:           Unit,
+        world_per_layout_unit: Vec2,
+    },
+}
+
+impl AnchorTargetMetrics {
+    const fn layout_unit(self) -> Unit {
+        match self {
+            Self::Panel { layout_unit, .. } | Self::Widget { layout_unit, .. } => layout_unit,
+        }
+    }
+
+    fn world_per_layout_unit(self) -> Option<Vec2> {
+        match self {
+            Self::Panel {
+                layout_size,
+                world_size,
+                ..
+            } => Some(Vec2::new(
+                world_size.x / layout_size.x,
+                world_size.y / layout_size.y,
+            )),
+            Self::Widget {
+                world_per_layout_unit,
+                ..
+            } => valid_offset_size(world_per_layout_unit).then_some(world_per_layout_unit),
+        }
+    }
+}
+
 /// Resolves diegetic world-panel offsets into valence resolver-frame offsets.
 pub(super) fn write_panel_anchor_offsets(
     mut commands: Commands,
@@ -333,7 +379,8 @@ pub(super) fn write_panel_anchor_offsets(
         Ref<ValenceAnchoredTo>,
         Option<&PanelComponentOwnership<ValenceAnchoredTo>>,
     )>,
-    targets: Query<(&DiegeticPanel, &GlobalTransform)>,
+    panel_targets: Query<(&DiegeticPanel, &GlobalTransform)>,
+    widget_targets: Query<&WidgetOf, With<PanelWidget>>,
 ) {
     for (entity, authored, offset, source_panel, relation, ownership) in &attachments {
         if !ownership.is_some_and(|ownership| ownership.owns(entity, relation.last_changed())) {
@@ -355,7 +402,9 @@ pub(super) fn write_panel_anchor_offsets(
             );
             continue;
         }
-        let Some(offset) = lowered_world_offset(authored.target(), *offset, &targets) else {
+        let Some(offset) =
+            lowered_world_offset(authored.target(), *offset, &panel_targets, &widget_targets)
+        else {
             lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
                 &mut commands,
                 entity,
@@ -375,43 +424,87 @@ pub(super) fn write_panel_anchor_offsets(
 fn lowered_world_offset(
     target: Entity,
     offset: PanelAnchorOffset,
-    targets: &Query<(&DiegeticPanel, &GlobalTransform)>,
+    panel_targets: &Query<(&DiegeticPanel, &GlobalTransform)>,
+    widget_targets: &Query<&WidgetOf, With<PanelWidget>>,
 ) -> Option<Vec3> {
-    let (target_panel, target_global) = targets.get(target).ok()?;
+    let metrics = anchor_target_metrics(target, panel_targets, widget_targets)?;
+    let offset = offset.to_layout_units(metrics.layout_unit());
+    if !offset.is_finite() {
+        return None;
+    }
+    let world_per_layout_unit = metrics.world_per_layout_unit()?;
+    Some(Vec3::new(
+        offset.x * world_per_layout_unit.x,
+        -offset.y * world_per_layout_unit.y,
+        offset.z * world_per_layout_unit.x,
+    ))
+}
+
+fn anchor_target_metrics(
+    target: Entity,
+    panel_targets: &Query<(&DiegeticPanel, &GlobalTransform)>,
+    widget_targets: &Query<&WidgetOf, With<PanelWidget>>,
+) -> Option<AnchorTargetMetrics> {
+    if let Ok((target_panel, target_global)) = panel_targets.get(target) {
+        return panel_target_metrics(target_panel, target_global);
+    }
+    let widget_of = widget_targets.get(target).ok()?;
+    let (owner_panel, owner_global) = panel_targets.get(widget_of.panel()).ok()?;
+    if !matches!(
+        owner_panel.coordinate_space(),
+        CoordinateSpace::World { .. }
+    ) {
+        return None;
+    }
+    // A reified widget's authored `Transform` is translation-only, so its
+    // `WidgetOf` owner supplies the effective scale before child propagation.
+    let owner_scale = transform_scale(owner_global)?;
+    let layout_to_world = owner_panel.layout_unit().to_points() * owner_panel.points_to_world();
+    let world_per_layout_unit = owner_scale * layout_to_world;
+    Some(AnchorTargetMetrics::Widget {
+        layout_unit: owner_panel.layout_unit(),
+        world_per_layout_unit,
+    })
+}
+
+fn panel_target_metrics(
+    target_panel: &DiegeticPanel,
+    target_global: &GlobalTransform,
+) -> Option<AnchorTargetMetrics> {
     if !matches!(
         target_panel.coordinate_space(),
         CoordinateSpace::World { .. }
     ) {
         return None;
     }
-    let panel_size = Vec2::new(target_panel.width(), target_panel.height());
-    if !valid_offset_size(panel_size) {
+    let layout_size = Vec2::new(target_panel.width(), target_panel.height());
+    if !valid_offset_size(layout_size) {
         return None;
     }
-    let offset = offset.to_layout_units(target_panel.layout_unit());
-    if !offset.is_finite() {
-        return None;
-    }
-    let target_size = target_world_size(target_panel, target_global)?;
-    Some(Vec3::new(
-        offset.x * target_size.x / panel_size.x,
-        -offset.y * target_size.y / panel_size.y,
-        offset.z * target_size.x / panel_size.x,
-    ))
+    let world_size = target_world_size(target_panel, target_global)?;
+    Some(AnchorTargetMetrics::Panel {
+        layout_unit: target_panel.layout_unit(),
+        layout_size,
+        world_size,
+    })
 }
 
 fn target_world_size(panel: &DiegeticPanel, transform: &GlobalTransform) -> Option<Vec2> {
-    let affine = transform.affine();
-    let right_scale = affine.transform_vector3(Vec3::X).length();
-    let up_scale = affine.transform_vector3(Vec3::Y).length();
-    if !right_scale.is_finite() || !up_scale.is_finite() {
-        return None;
-    }
+    let scale = transform_scale(transform)?;
     let size = Vec2::new(
-        panel.world_width() * right_scale,
-        panel.world_height() * up_scale,
+        panel.world_width() * scale.x,
+        panel.world_height() * scale.y,
     );
     valid_offset_size(size).then_some(size)
+}
+
+fn transform_scale(transform: &GlobalTransform) -> Option<Vec2> {
+    let affine = transform.affine();
+    let scale = Vec2::new(
+        affine.transform_vector3(Vec3::X).length(),
+        affine.transform_vector3(Vec3::Y).length(),
+    );
+    valid_offset_size(scale).then_some(scale)
 }
 
 fn valid_offset_size(size: Vec2) -> bool { size.is_finite() && size.x > 0.0 && size.y > 0.0 }
@@ -450,6 +543,7 @@ mod tests {
     use hana_valence::AnchoredHere;
     use hana_valence::AnchoredTo as ValenceAnchoredTo;
     use hana_valence::ResolveDiagnostics;
+    use hana_valence::ResolveSkip;
     use hana_valence::ResolvedAnchorGeometry;
     use hana_valence::ResolvedAnchorOffset;
 
@@ -457,9 +551,13 @@ mod tests {
     use super::AnchoredWorldPanelPose;
     use super::PanelAnchorOffset;
     use super::PanelAttachmentAuthored;
+    use crate::Button;
+    use crate::El;
     use crate::HeadlessLayoutPlugin;
+    use crate::LayoutBuilder;
     use crate::Mm;
     use crate::PanelScreenConversion;
+    use crate::PanelSystems;
     use crate::PanelWorldConversion;
     use crate::Pt;
     use crate::Px;
@@ -474,6 +572,21 @@ mod tests {
     use crate::panel::conversion::SavedWorldRestoreMode;
     use crate::panel::coordinate_space::PanelSpace;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::PanelWidgets;
+    use crate::widgets::WidgetSystems;
+    use crate::widgets::WidgetsPlugin;
+
+    const DIAGNOSTIC_REPEAT_COUNT: u32 = 2;
+    const TRANSFORM_SCALE: f32 = 2.0;
+    const WIDGET_HEIGHT: f32 = 10.0;
+    const WIDGET_OFFSET_MILLIMETERS: f32 = 5.0;
+    const WIDGET_OFFSET_PIXELS: f32 = 10.0;
+    const WIDGET_OFFSET_POINTS: f32 = 3.0;
+    const WIDGET_OWNER_ROTATION: f32 = 0.4;
+    const WIDGET_OWNER_TRANSLATION: Vec3 = Vec3::new(1.0, 2.0, 3.0);
+    const WIDGET_WIDTH: f32 = 20.0;
+    const WORLD_WIDGET_PANEL_HEIGHT: f32 = 100.0;
+    const WORLD_WIDGET_PANEL_WIDTH: f32 = 200.0;
 
     fn reverse_targets(world: &World, target: Entity) -> Vec<Entity> {
         world
@@ -680,6 +793,234 @@ mod tests {
     }
 
     #[test]
+    fn widget_target_offset_uses_owner_units_and_transformed_scale() {
+        let mut app = app_with_world_anchoring();
+        app.add_plugins(WidgetsPlugin);
+        let mut tree = LayoutBuilder::new(WORLD_WIDGET_PANEL_WIDTH, WORLD_WIDGET_PANEL_HEIGHT);
+        tree.with(
+            El::new()
+                .size(WIDGET_WIDTH, WIDGET_HEIGHT)
+                .button("offset-target", Button::new()),
+            |_| {},
+        );
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::Center),
+                Transform::from_translation(WIDGET_OWNER_TRANSLATION)
+                    .with_rotation(Quat::from_rotation_z(WIDGET_OWNER_ROTATION))
+                    .with_scale(Vec3::splat(TRANSFORM_SCALE)),
+            ))
+            .id();
+        app.world_mut()
+            .commands()
+            .set_tree(target, tree.build())
+            .expect("widget target tree should be accepted");
+        app.update();
+        let widget = app
+            .world()
+            .get::<PanelWidgets>(target)
+            .and_then(|widgets| widgets.first().copied())
+            .expect("target widget should be reified");
+        let widget_local = transform(&app, widget);
+        assert_ne!(
+            widget_local.translation,
+            Vec3::ZERO,
+            "widget target should be off the owner panel origin",
+        );
+        let owner_global = global_transform(&app, target);
+        let expected_widget_position = owner_global.transform_point(widget_local.translation);
+        assert_close_3d(
+            global_transform(&app, widget).translation(),
+            expected_widget_position,
+        );
+        let offset =
+            PanelAnchorOffset::new(Px(WIDGET_OFFSET_PIXELS), Mm(WIDGET_OFFSET_MILLIMETERS))
+                .with_z(Pt(WIDGET_OFFSET_POINTS));
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::Center),
+                Transform::default(),
+                AnchoredToPanel::new(widget, Anchor::Center, Anchor::TopRight).with_offset(offset),
+            ))
+            .id();
+
+        app.update();
+
+        assert_close_3d(
+            global_transform(&app, widget).translation(),
+            expected_widget_position,
+        );
+        let target_panel = app
+            .world()
+            .get::<DiegeticPanel>(target)
+            .expect("target panel should remain live");
+        let world_per_layout_unit =
+            target_panel.world_width() / target_panel.width() * TRANSFORM_SCALE;
+        let expected = Vec3::new(
+            WIDGET_OFFSET_PIXELS * Unit::Pixels.to_points() / Unit::Millimeters.to_points()
+                * world_per_layout_unit,
+            -WIDGET_OFFSET_MILLIMETERS * world_per_layout_unit,
+            WIDGET_OFFSET_POINTS * Unit::Points.to_points() / Unit::Millimeters.to_points()
+                * world_per_layout_unit,
+        );
+        assert_close_3d(resolved_offset(&app, source), expected);
+        assert_eq!(
+            app.world()
+                .get::<AnchoredHere>(widget)
+                .map(AnchoredHere::len),
+            Some(1),
+        );
+        assert_eq!(
+            app.world()
+                .get::<ValenceAnchoredTo>(widget)
+                .map(ValenceAnchoredTo::target),
+            Some(target),
+        );
+        assert!(
+            app.world().get::<ResolvedAnchorGeometry>(source).is_some(),
+            "source panel should publish anchor geometry",
+        );
+        assert!(
+            app.world().get::<ResolvedAnchorGeometry>(widget).is_some(),
+            "demanded widget should publish anchor geometry",
+        );
+        let widget_rotation = global_transform(&app, widget).rotation();
+        assert_close_3d(
+            resolved_anchor_point(&app, source, Anchor::Center),
+            resolved_anchor_point(&app, widget, Anchor::TopRight) + widget_rotation * expected,
+        );
+    }
+
+    #[test]
+    fn newly_reified_widget_uses_owner_scale_for_offset_on_first_resolver_pass() {
+        let mut app = app_with_world_anchoring();
+        app.add_plugins(WidgetsPlugin);
+        app.add_systems(
+            Update,
+            attach_source_to_new_widget
+                .after(WidgetSystems::ReifyCommandsApplied)
+                .before(PanelSystems::ResolvePanelAttachments),
+        );
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::Center),
+                Transform::from_translation(WIDGET_OWNER_TRANSLATION)
+                    .with_rotation(Quat::from_rotation_z(WIDGET_OWNER_ROTATION))
+                    .with_scale(Vec3::splat(TRANSFORM_SCALE)),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((world_panel(Anchor::Center), Transform::default()))
+            .id();
+        app.insert_resource(PendingWidgetTarget {
+            owner_panel:  target,
+            source_panel: source,
+            widget:       None,
+        });
+
+        app.update();
+
+        let owner_scale = global_transform(&app, target)
+            .to_scale_rotation_translation()
+            .0;
+        assert_close_3d(owner_scale, Vec3::splat(TRANSFORM_SCALE));
+        let mut tree = LayoutBuilder::new(WORLD_WIDGET_PANEL_WIDTH, WORLD_WIDGET_PANEL_HEIGHT);
+        tree.with(
+            El::row().size(WORLD_WIDGET_PANEL_WIDTH, WORLD_WIDGET_PANEL_HEIGHT),
+            |tree| {
+                tree.with(El::new().size(WIDGET_WIDTH, WIDGET_HEIGHT), |_| {});
+                tree.with(
+                    El::new()
+                        .size(WIDGET_WIDTH, WIDGET_HEIGHT)
+                        .button("same-frame-offset-target", Button::new()),
+                    |_| {},
+                );
+            },
+        );
+        app.world_mut()
+            .commands()
+            .set_tree(target, tree.build())
+            .expect("widget target tree should be accepted");
+
+        app.update();
+
+        let widget = app
+            .world()
+            .resource::<PendingWidgetTarget>()
+            .widget
+            .expect("new widget should be targeted in its reification frame");
+        let widget_local = transform(&app, widget);
+        assert_ne!(widget_local.translation, Vec3::ZERO);
+        assert_close_3d(widget_local.scale, Vec3::ONE);
+        let target_panel = app
+            .world()
+            .get::<DiegeticPanel>(target)
+            .expect("target panel should remain live");
+        let owner_global = global_transform(&app, target);
+        let (owner_scale, owner_rotation, _) = owner_global.to_scale_rotation_translation();
+        let (expected_widget_center, expected_widget_corner) =
+            expected_widget_center_and_corner(target_panel, &owner_global);
+        let widget_global = global_transform(&app, widget);
+        let widget_scale = widget_global.to_scale_rotation_translation().0;
+        assert_close_3d(widget_global.translation(), expected_widget_center);
+        assert_close_3d(widget_scale, owner_scale);
+        let world_per_layout_unit =
+            target_panel.world_width() / target_panel.width() * owner_scale.x;
+        let expected_offset = Vec3::new(
+            WIDGET_OFFSET_PIXELS * Unit::Pixels.to_points() / Unit::Millimeters.to_points()
+                * world_per_layout_unit,
+            -WIDGET_OFFSET_MILLIMETERS * world_per_layout_unit,
+            WIDGET_OFFSET_POINTS * Unit::Points.to_points() / Unit::Millimeters.to_points()
+                * world_per_layout_unit,
+        );
+        assert_close_3d(resolved_offset(&app, source), expected_offset);
+        assert_close_3d(
+            global_transform(&app, source).translation(),
+            expected_widget_corner + owner_rotation * expected_offset,
+        );
+    }
+
+    #[test]
+    fn missing_geometry_diagnostics_deduplicate_by_attachment_key() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((Transform::default(), GlobalTransform::default()))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::Center),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::Center, Anchor::Center),
+            ))
+            .id();
+
+        app.update();
+        app.update();
+
+        let diagnostics = app.world().resource::<ResolveDiagnostics>();
+        let entries = diagnostics
+            .entries()
+            .filter(|entry| {
+                entry.source == source
+                    && entry.target == target
+                    && entry.reason == ResolveSkip::MissingTargetGeometry
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert!(
+            entries
+                .first()
+                .is_some_and(|entry| entry.count == DIAGNOSTIC_REPEAT_COUNT),
+        );
+    }
+
+    #[test]
     fn removing_panel_attachment_restores_authored_world_pose() {
         let mut app = app_with_world_anchoring();
         let target = app
@@ -714,6 +1055,65 @@ mod tests {
 
     #[derive(Resource)]
     struct PoseLift(f32);
+
+    #[derive(Resource)]
+    struct PendingWidgetTarget {
+        owner_panel:  Entity,
+        source_panel: Entity,
+        widget:       Option<Entity>,
+    }
+
+    fn attach_source_to_new_widget(
+        mut commands: Commands,
+        mut pending: ResMut<PendingWidgetTarget>,
+        panel_widgets: Query<&PanelWidgets>,
+    ) {
+        if pending.widget.is_some() {
+            return;
+        }
+        let Some(widget) = panel_widgets
+            .get(pending.owner_panel)
+            .ok()
+            .and_then(|widgets| widgets.first().copied())
+        else {
+            return;
+        };
+        let offset =
+            PanelAnchorOffset::new(Px(WIDGET_OFFSET_PIXELS), Mm(WIDGET_OFFSET_MILLIMETERS))
+                .with_z(Pt(WIDGET_OFFSET_POINTS));
+        commands.entity(pending.source_panel).insert(
+            AnchoredToPanel::new(widget, Anchor::Center, Anchor::TopRight).with_offset(offset),
+        );
+        pending.widget = Some(widget);
+    }
+
+    fn expected_widget_center_and_corner(
+        target_panel: &DiegeticPanel,
+        owner_global: &GlobalTransform,
+    ) -> (Vec3, Vec3) {
+        let authored_widget_min = Vec2::new(WIDGET_WIDTH, 0.0);
+        let authored_widget_size = Vec2::new(WIDGET_WIDTH, WIDGET_HEIGHT);
+        let authored_widget_center = authored_widget_min + authored_widget_size / 2.0;
+        let widget_layout_to_world =
+            target_panel.layout_unit().to_points() * target_panel.points_to_world();
+        let (panel_anchor_x, panel_anchor_y) = target_panel.anchor_offsets();
+        let widget_center_local = Vec3::new(
+            authored_widget_center
+                .x
+                .mul_add(widget_layout_to_world, -panel_anchor_x),
+            (-authored_widget_center.y).mul_add(widget_layout_to_world, panel_anchor_y),
+            0.0,
+        );
+        let widget_half_extents_local = Vec3::new(
+            authored_widget_size.x * widget_layout_to_world / 2.0,
+            authored_widget_size.y * widget_layout_to_world / 2.0,
+            0.0,
+        );
+        (
+            owner_global.transform_point(widget_center_local),
+            owner_global.transform_point(widget_center_local + widget_half_extents_local),
+        )
+    }
 
     fn app_with_world_anchoring() -> App {
         let mut app = App::new();
@@ -778,6 +1178,18 @@ mod tests {
                     panel_offset.y - source_offset.y,
                     0.0,
                 )
+    }
+
+    fn resolved_anchor_point(app: &App, entity: Entity, anchor: Anchor) -> Vec3 {
+        let geometry = app
+            .world()
+            .get::<ResolvedAnchorGeometry>(entity)
+            .expect("entity has ResolvedAnchorGeometry");
+        let point = geometry
+            .points
+            .get(&hana_valence::AnchorId::from(anchor))
+            .expect("geometry contains requested anchor");
+        global_transform(app, entity).transform_point(point.position)
     }
 
     fn anchor_offset(anchor: Anchor, size: Vec2) -> Vec2 {

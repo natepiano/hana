@@ -12,6 +12,7 @@ use bevy::picking::PickingSystems;
 use bevy::picking::mesh_picking::MeshPickingSettings;
 use bevy::prelude::*;
 pub use button::Button;
+use hana_valence::AnchorSystems;
 pub(crate) use id::ComputedWidgetRecord;
 pub use id::PanelWidget;
 pub(crate) use id::PanelWidgetIndex;
@@ -82,6 +83,10 @@ impl Plugin for WidgetsPlugin {
                     interactivity::resolve_interactivity
                         .in_set(WidgetSystems::ResolveInteractivity),
                 ),
+            )
+            .add_systems(
+                PostUpdate,
+                reify::update_world_anchor_geometry.in_set(AnchorSystems::FillGeometry),
             );
     }
 }

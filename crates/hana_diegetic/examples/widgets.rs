@@ -21,6 +21,7 @@ use fairy_dust::cube_face_transform;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
+use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
 use hana_diegetic::CornerRadius;
@@ -30,6 +31,7 @@ use hana_diegetic::FitMax;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Padding;
+use hana_diegetic::PanelAnchorOffset;
 use hana_diegetic::PanelElementId;
 use hana_diegetic::PanelText;
 use hana_diegetic::PanelWidget;
@@ -61,7 +63,7 @@ const CUBE_CLEARANCE: f32 = 0.1;
 const DESCRIPTION_LINES: [&str; 3] = [
     "Hover each control; interaction changes are logged in the terminal.",
     "D changes the secondary button through PanelWidgetReader and PanelWidgetWriter.",
-    "Later phases add focus, activation, slider input, presets, and tooltips here.",
+    "The status panel uses AnchoredToPanel to follow the level slider.",
 ];
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
 const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
@@ -85,6 +87,7 @@ const SLIDER_RANGE_END: f32 = 1.0;
 const SLIDER_RANGE_START: f32 = 0.0;
 const SLIDER_STEP: f32 = 0.05;
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
+const STATUS_ANCHOR_OFFSET: Px = Px(12.0);
 const STATUS_BORDER: Color = Color::srgba(0.20, 0.80, 0.68, 0.86);
 const STATUS_BORDER_WIDTH: Px = Px(1.0);
 const STATUS_COLOR: Color = Color::srgb(0.38, 0.94, 0.78);
@@ -165,6 +168,9 @@ struct WidgetLabPanel;
 #[derive(Component)]
 struct WidgetInteractionReadout;
 
+#[derive(Component)]
+struct WidgetAnchorInstalled;
+
 fn main() {
     // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -198,9 +204,35 @@ fn main() {
         .with_camera_control_panel()
         .init_resource::<SecondaryMode>()
         .add_systems(PostStartup, spawn_widget_lab)
-        .add_systems(Update, report_interaction_changes)
+        .add_systems(
+            Update,
+            (anchor_interaction_readout, report_interaction_changes),
+        )
         .with_shortcut(KeyCode::KeyD, toggle_secondary_button)
         .run();
+}
+
+fn anchor_interaction_readout(
+    mut commands: Commands,
+    panel: Single<Entity, With<WidgetLabPanel>>,
+    readout: Single<
+        Entity,
+        (
+            With<WidgetInteractionReadout>,
+            Without<WidgetAnchorInstalled>,
+        ),
+    >,
+    reader: PanelWidgetReader,
+) {
+    let id = PanelElementId::named(SLIDER_ID);
+    let Some(widget) = reader.entity(*panel, &id) else {
+        return;
+    };
+    commands.entity(*readout).insert((
+        AnchoredToPanel::new(widget, Anchor::TopCenter, Anchor::BottomCenter)
+            .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET)),
+        WidgetAnchorInstalled,
+    ));
 }
 
 fn spawn_widget_lab(
