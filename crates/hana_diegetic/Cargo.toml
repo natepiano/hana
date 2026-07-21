@@ -33,7 +33,8 @@ bevy = { workspace = true, features = [
   "bevy_render",
   "mesh_picking",
 ] }
-bevy_kana = { workspace = true }
+bevy_enhanced_input = { workspace = true }
+bevy_kana = { workspace = true, features = ["input"] }
 bitflags = { workspace = true }
 hana_valence = { workspace = true }
 image = { workspace = true }

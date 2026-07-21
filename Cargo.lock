@@ -3285,6 +3285,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
+ "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
  "bitflags 2.13.0",
