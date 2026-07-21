@@ -1576,7 +1576,7 @@ topology transition.
   fullscreen restore tests.
 - Phases 11, 13–14, and 19–21 remain dispatch-ready without further changes.
 
-### Phase 9 — Execute runtime restore attempts  · status: todo
+### Phase 9 — Execute runtime restore attempts  · status: done (`6da3313a`)
 
 #### Work Order
 
@@ -1729,6 +1729,61 @@ test creates the ECS window before `OnMonitor`, then proves recovery observes
 only the repaired association and performs no native monitor metadata polling.
 Cancellation tests prove no attempt survives and durable diagnostics remain.
 
+#### Retrospective
+
+**What worked:**
+
+- Explicit replacements and surviving automatic windows now enter the same
+  staged restore builder used at startup, carrying one immutable attempt tuple
+  through application and settling.
+- The private completion validator is the only runtime path that publishes a
+  restored or mismatch result and advances the recovery lifecycle.
+- A macOS physical run restored both application-created replacement windows
+  to `MonitorId(1)` after that display returned at index 2.
+
+**What deviated from the plan:**
+
+- DPI progression remains in the restore strategy modules instead of changing
+  `windows_dpi_fix.rs`; it now validates the entity, attempt, strategy phase,
+  and reported and live scale before advancing.
+- Managed replacement startup had to defer automatic startup restoration when
+  an existing application-controlled registration was waiting for an explicit
+  replacement; the explicit request then binds the replacement and creates the
+  runtime attempt.
+- Entityless automatic intents remain entirely untouched rather than entering
+  partial preparation, keeping reconstruction wholly in Phase 10.
+
+**Surprises:**
+
+- On macOS, winit first created both replacement windows on another connected
+  monitor; Clerestory moved them to the returned display and completed only
+  after `OnMonitor` confirmed the verified identity.
+- Live-scale correction must never rewrite a strategy that is already waiting
+  for a matching scale message; doing so would bypass the message validation.
+
+**Implications for remaining phases:**
+
+- Phase 10 must construct and canonically bind an entityless automatic window
+  before creating its attempt, then preserve Phase 9's full-tuple validation.
+- Timeout, retry, replacement loss, and topology replanning must clear or
+  replace the complete attempt state without publishing a stale result.
+- Later physical tests must accept monitor-index changes across reconnect and
+  verify the stable `MonitorId`, not the old list index.
+
+### Phase 9 Review
+
+- Phase 10 now distinguishes the unchanged recovery registration generation
+  from a fresh restore-attempt ID and carries the original absolute deadline
+  through retries.
+- Phase 10's file list now names the restore strategy and schedule owners that
+  Phase 9 established for attempt-aware DPI progression.
+- Phase 12 now treats the successful temporary replacement smoke as evidence,
+  not permanent example functionality.
+- Phase 15 now audits the specific replacement, validation, stale-topology, and
+  DPI regressions added in Phase 9.
+- Phase 16 now preserves the completed Phase 9 macOS runtime-restore row.
+- Phases 11, 13–14, and 17–21 remain dispatch-ready without further changes.
+
 ### Phase 10 — Harden retry, cleanup, and linked-despawn behavior  · status: todo
 
 #### Work Order
@@ -1775,14 +1830,18 @@ linked-deletion replacement path.
   identity-only revision with no raw event still invalidates or replans the
   affected attempt; a coalesced disconnect/connect install is one input. A
   reconnected still-verified target may supply changed geometry through its new
-  Bevy monitor entity; create a new private attempt generation and recompute
-  placement without extending the original deadline.
+  Bevy monitor entity; allocate a fresh `RestoreAttemptId`, preserve the
+  existing `RecoveryGeneration`, and recompute placement without extending the
+  original absolute deadline.
 - One finalizer removes every transient attempt component on success, mismatch,
   timeout, cancellation, target loss, or replacement loss while retaining
   durable `RestoreDiagnostics`. Late results/DPI messages from old attempts
   cannot advance a retry.
-- Timeout covers winit creation, X11 compensation, DPI, fullscreen application,
-  and settling, then enters the explicit retryable state.
+- Runtime timeout reads the absolute deadline stored by Phase 9 at request
+  acceptance. That one deadline covers winit creation, preparation, X11
+  compensation, DPI, fullscreen application, and settling; replanning keeps
+  it, while startup restoration retains its existing settling timer. Expiry
+  enters the explicit retryable state.
 - Mismatch retains frozen target and usable fallback, ends the attempt, and
   never retries every frame. Retry begins only from a later matching topology
   revision or accepted explicit request.
@@ -1800,15 +1859,23 @@ linked-deletion replacement path.
   registration generation.
 - `crates/bevy_clerestory/src/recovery/registration.rs` — missing/removal
   classification and selected adapter binding.
+- `crates/bevy_clerestory/src/recovery/mod.rs` — register retry and
+  reconstruction systems.
 - `crates/bevy_clerestory/src/recovery/application_controlled.rs` — retryable
   explicit path.
 - `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — retry,
   zero-display, and selected linked-despawn path.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — replanning,
   invalidation, timeout, and finalizer.
+- `crates/bevy_clerestory/src/restore/mod.rs` — order new attempt consumers.
 - `crates/bevy_clerestory/src/restore/settle_state.rs` — validated private
   completion only.
-- `crates/bevy_clerestory/src/windows_dpi_fix.rs` — reject late DPI messages.
+- `crates/bevy_clerestory/src/restore/target_position/application.rs` — reject
+  stale attempt application.
+- `crates/bevy_clerestory/src/restore/target_position/strategy.rs` — reject
+  late DPI messages by entity, attempt, strategy phase, and scale.
+- `crates/bevy_clerestory/src/windows_dpi_fix.rs` — change only if the native
+  Windows subclass itself needs correction.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — source
   of the causal decision.
 
@@ -1824,8 +1891,9 @@ evaluation per topology revision, central completion validation, and
 cancellation cleanup for every transient attempt component while retaining
 durable diagnostics. Phase 8's entityless `AutomaticRestoreIntent` and retained
 registration generation remain authoritative until this phase binds exactly
-one shell; a replacement generation invalidates the old intent and any attempt
-derived from it.
+one shell. Binding that shell preserves the same generation. Only a newly
+registered `WindowRecovery` generation invalidates the old intent and any
+attempt derived from it.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Table-driven tests cover cleanup at every stage, stale completions after retry,
@@ -2008,7 +2076,10 @@ Phase 7's ordering: select and confirm `OnMonitor` before inserting
 `ProbePlacementRequested` and consume it through
 `Added<ProbePlacementRequested>` in the next `Update`. Preserve both diagnostic
 routes, `bevy_clerestory::monitor_probe` and
-`bevy_clerestory::recovery_probe`.
+`bevy_clerestory::recovery_probe`. Phase 9's physical validation used temporary
+example observers to create application-controlled replacements and trace
+results, then removed them; its success is evidence for the runtime API, not
+shipped example behavior. This phase must add the permanent consumer.
 
 **Acceptance gate:** The example builds and its non-hardware logic is covered by
 Clerestory Test/Lint gates. On available hardware, the script completes
@@ -2180,7 +2251,10 @@ consumer passes, reusing the regressions already added by earlier phases.
 - Inventory the tests shipped by Phases 1–14 against immediate topology
   observers, identity ambiguity, first eligible registration, persistence
   promotion/freezing/projection, primary/secondary and both policies, attempt
-  cleanup/retry, concurrent DPI, reflected events, zero displays, linked
+  cleanup/retry, managed application-controlled replacement bypass of startup
+  restore, full-tuple completion validation including `RecoveryGeneration`,
+  stale-topology rejection before geometry mutation, entity/attempt/reported/
+  live-scale DPI matching, reflected events, zero displays, linked
   deletion before topology, zero-window survival, exactly-one replacement,
   unregistered non-reconstruction, delayed `OnMonitor` repair, readiness
   cleanup, zero native monitor polling, and Wayland capability gating. Rerun
@@ -2243,7 +2317,13 @@ example.
   accepted `MonitorId(1)` on entity `233v0` at index 1, linked deletion emitted
   one pending fact per key before topology revision 1, reconnect installed
   entity `243v0` at index 2 with the same ID in revision 2, and no window was
-  reconstructed because Phases 9–10 were not yet implemented. Run the Phase 12
+  reconstructed because Phases 9–10 were not yet implemented. Also retain the
+  Phase 9 application-controlled execution row: the target began as entity
+  `237v0`, `MonitorId(1)`, at index 1; disconnect revision 1 removed the primary
+  and managed windows and emitted one pending fact per key; reconnect revision
+  2 installed entity `247v0` with the same ID at index 2; the application
+  created managed replacement `248v0` and primary replacement `249v0`; both
+  completed runtime restoration on index 2 with no mismatch. Run the Phase 12
   script on macOS and append completed-automatic-recovery rows without
   replacing or reinterpreting any earlier observation.
 - Cover same-panel reconnect; same panel through another port/dock; a different
@@ -2295,8 +2375,9 @@ weaken identity or capability gates. `MonitorId` is process-local and may be
 compared across entity lifetimes only inside one running `App`. Phase 4's raw
 macOS row remains valid evidence, and Phase 7's application-controlled row
 and Phase 8's pre-execution automatic row remain separate from Phase 12's
-completed automatic-return rows. This phase extends the matrix without
-recasting any earlier result.
+completed automatic-return rows. Phase 9's application-controlled execution
+row remains separate as well. This phase extends the matrix without recasting
+any earlier result.
 
 **Acceptance gate:** Every applicable macOS scenario has an evidence row and
 expected/actual result; unavailable hardware cases are explicitly marked rather

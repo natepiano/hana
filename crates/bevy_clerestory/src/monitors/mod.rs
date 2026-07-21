@@ -48,11 +48,15 @@ impl Plugin for MonitorPlugin {
             )
             .add_systems(
                 Update,
-                update_monitors.in_set(ClerestoryUpdateSet::MonitorTopology),
+                (update_monitors, ApplyDeferred)
+                    .chain()
+                    .in_set(ClerestoryUpdateSet::MonitorTopology),
             )
             .add_systems(
                 Update,
-                update_current_monitor.in_set(ClerestoryUpdateSet::CurrentMonitor),
+                (update_current_monitor, ApplyDeferred)
+                    .chain()
+                    .in_set(ClerestoryUpdateSet::CurrentMonitor),
             );
     }
 }

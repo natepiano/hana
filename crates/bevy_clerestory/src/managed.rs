@@ -15,6 +15,9 @@ use super::monitors;
 use super::monitors::Monitors;
 use super::persistence::CapturedWindowStates;
 use super::platform::Platform;
+use super::recovery::CanonicalWindowRole;
+use super::recovery::RecoveryRegistrations;
+use super::recovery::WindowRecovery;
 use super::restore::NativeWindowReady;
 use super::restore::RestorePreparation;
 
@@ -170,6 +173,7 @@ pub(crate) fn on_managed_window_load(
     mut windows: Query<(&mut Window, Option<&OnMonitor>)>,
     monitors: Res<Monitors>,
     platform: Res<Platform>,
+    recovery_registrations: Option<Res<RecoveryRegistrations>>,
 ) {
     let entity = add.entity;
     let Ok(managed_window) = managed.get(entity) else {
@@ -194,6 +198,21 @@ pub(crate) fn on_managed_window_load(
     if captured_window_states.is_bound_to(&window_key, entity) {
         debug!(
             "[on_managed_window_load] Bypassing automatic startup restore for canonically bound window \"{name}\""
+        );
+        return;
+    }
+
+    let is_application_controlled_replacement = recovery_registrations
+        .as_deref()
+        .and_then(|registrations| registrations.by_key(&window_key))
+        .is_some_and(|registration| {
+            registration.policy == WindowRecovery::ApplicationControlled
+                && registration.role == CanonicalWindowRole::Managed
+                && registration.entity.is_none()
+        });
+    if is_application_controlled_replacement {
+        debug!(
+            "[on_managed_window_load] Deferring managed replacement \"{name}\" to explicit restore acceptance"
         );
         return;
     }

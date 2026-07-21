@@ -9,6 +9,8 @@ use bevy_kana::ToI32;
 use bevy_kana::ToU32;
 
 use super::RestorePreparation;
+use super::restore_attempt::RuntimeRestoreCompletion;
+use super::restore_attempt::RuntimeRestoreOutcome;
 use super::target_position::TargetPosition;
 use super::winit_info::X11FrameCompensated;
 use crate::Platform;
@@ -322,7 +324,7 @@ pub(crate) fn check_restore_settling(
             emit_settle_success(
                 &mut commands,
                 entity,
-                window_key,
+                restore_preparation,
                 &settle_target,
                 total_elapsed_ms,
                 stability_elapsed_ms,
@@ -331,7 +333,7 @@ pub(crate) fn check_restore_settling(
             emit_settle_mismatch(
                 &mut commands,
                 entity,
-                window_key,
+                restore_preparation,
                 &settle_target,
                 &build_settle_actual(window, current_snapshot, actual_scale),
                 total_elapsed_ms,
@@ -359,41 +361,51 @@ fn build_settle_actual(
 fn emit_settle_success(
     commands: &mut Commands,
     entity: Entity,
-    window_key: WindowKey,
+    restore_preparation: &RestorePreparation,
     settle_target: &SettleTarget,
     total_elapsed_ms: f32,
     stability_elapsed_ms: f32,
 ) {
+    let window_key = restore_preparation.window_key().clone();
     debug!(
         "[check_restore_settling] [{window_key}] Settled after {total_elapsed_ms:.0}ms \
          (stable for {stability_elapsed_ms:.0}ms)"
     );
-    commands
-        .entity(entity)
-        .trigger(|entity| WindowRestored {
-            entity,
-            window_key,
-            physical_position: settle_target.physical_position,
-            logical_position: settle_target.logical_position,
-            logical_size: settle_target.logical_size,
-            physical_size: settle_target.physical_size,
-            window_mode: settle_target.window_mode,
-            monitor_index: settle_target.monitor,
-        })
-        .remove::<TargetPosition>()
-        .remove::<RestorePreparation>()
-        .remove::<X11FrameCompensated>();
+    let restored = WindowRestored {
+        entity,
+        window_key,
+        physical_position: settle_target.physical_position,
+        logical_position: settle_target.logical_position,
+        logical_size: settle_target.logical_size,
+        physical_size: settle_target.physical_size,
+        window_mode: settle_target.window_mode,
+        monitor_index: settle_target.monitor,
+    };
+    if let Some(restore_attempt) = restore_preparation.recovery_attempt() {
+        commands.trigger(RuntimeRestoreCompletion::new(
+            restore_attempt.clone(),
+            RuntimeRestoreOutcome::Restored(restored),
+        ));
+    } else {
+        commands.trigger(restored);
+        commands
+            .entity(entity)
+            .remove::<TargetPosition>()
+            .remove::<RestorePreparation>()
+            .remove::<X11FrameCompensated>();
+    }
 }
 
 /// Emit `WindowRestoreMismatch` and clean up `TargetPosition` when settle times out.
 fn emit_settle_mismatch(
     commands: &mut Commands,
     entity: Entity,
-    window_key: WindowKey,
+    restore_preparation: &RestorePreparation,
     settle_target: &SettleTarget,
     settle_actual: &SettleActual,
     total_elapsed_ms: f32,
 ) {
+    let window_key = restore_preparation.window_key().clone();
     warn!(
         "[check_restore_settling] [{window_key}] Settle timeout after {total_elapsed_ms:.0}ms — \
         mismatch remains: \
@@ -426,27 +438,35 @@ fn emit_settle_mismatch(
                     .to_i32(),
             )
         });
-    commands
-        .entity(entity)
-        .trigger(|entity| WindowRestoreMismatch {
-            entity,
-            window_key,
-            expected_physical_position: settle_target.physical_position,
-            actual_physical_position: settle_actual.settle_snapshot.physical_position,
-            expected_logical_position: settle_target.logical_position,
-            actual_logical_position,
-            expected_physical_size: settle_target.physical_size,
-            actual_physical_size: settle_actual.settle_snapshot.physical_size,
-            expected_logical_size: settle_target.logical_size,
-            actual_logical_size: settle_actual.logical_size,
-            expected_window_mode: settle_target.window_mode,
-            actual_window_mode: settle_actual.settle_snapshot.window_mode,
-            expected_monitor: settle_target.monitor,
-            actual_monitor: settle_actual.settle_snapshot.monitor,
-            expected_scale: settle_target.scale,
-            actual_scale: settle_actual.scale,
-        })
-        .remove::<TargetPosition>()
-        .remove::<RestorePreparation>()
-        .remove::<X11FrameCompensated>();
+    let mismatch = WindowRestoreMismatch {
+        entity,
+        window_key,
+        expected_physical_position: settle_target.physical_position,
+        actual_physical_position: settle_actual.settle_snapshot.physical_position,
+        expected_logical_position: settle_target.logical_position,
+        actual_logical_position,
+        expected_physical_size: settle_target.physical_size,
+        actual_physical_size: settle_actual.settle_snapshot.physical_size,
+        expected_logical_size: settle_target.logical_size,
+        actual_logical_size: settle_actual.logical_size,
+        expected_window_mode: settle_target.window_mode,
+        actual_window_mode: settle_actual.settle_snapshot.window_mode,
+        expected_monitor: settle_target.monitor,
+        actual_monitor: settle_actual.settle_snapshot.monitor,
+        expected_scale: settle_target.scale,
+        actual_scale: settle_actual.scale,
+    };
+    if let Some(restore_attempt) = restore_preparation.recovery_attempt() {
+        commands.trigger(RuntimeRestoreCompletion::new(
+            restore_attempt.clone(),
+            RuntimeRestoreOutcome::Mismatch(mismatch),
+        ));
+    } else {
+        commands.trigger(mismatch);
+        commands
+            .entity(entity)
+            .remove::<TargetPosition>()
+            .remove::<RestorePreparation>()
+            .remove::<X11FrameCompensated>();
+    }
 }
