@@ -275,6 +275,7 @@ impl CapturedWindowStates {
         self.entries.get(window_key).and_then(|entry| entry.live) == Some(LiveWindow { entity })
     }
 
+    #[cfg(test)]
     pub(crate) fn unbind(&mut self, window_key: &WindowKey, entity: Entity) {
         if let Some(entry) = self.entries.get_mut(window_key)
             && entry.live == Some(LiveWindow { entity })
@@ -283,19 +284,96 @@ impl CapturedWindowStates {
         }
     }
 
-    pub(crate) fn unbind_entity(&mut self, entity: Entity) {
-        for entry in self.entries.values_mut() {
-            if entry.live == Some(LiveWindow { entity }) {
-                entry.live = None;
-            }
-        }
-    }
-
-    #[cfg(test)]
     pub(crate) fn freeze(&mut self, window_key: &WindowKey) {
         if let Some(entry) = self.entries.get_mut(window_key) {
             entry.persistence = PersistenceWriteState::Frozen;
         }
+    }
+
+    pub(crate) fn cancel(
+        &mut self,
+        window_key: &WindowKey,
+        entity: Option<Entity>,
+        managed_window_persistence: &ManagedWindowPersistence,
+    ) -> StateMutation {
+        let Some(entry) = self.entries.get_mut(window_key) else {
+            return StateMutation::Unchanged;
+        };
+        entry.persistence = PersistenceWriteState::Writable;
+        if entity.is_some_and(|entity| entry.live == Some(LiveWindow { entity })) {
+            return StateMutation::Unchanged;
+        }
+        self.deactivate_absent(window_key, managed_window_persistence)
+    }
+
+    pub(crate) fn deactivate(
+        &mut self,
+        window_key: &WindowKey,
+        entity: Entity,
+        managed_window_persistence: &ManagedWindowPersistence,
+    ) -> StateMutation {
+        let Some(entry) = self.entries.get_mut(window_key) else {
+            return StateMutation::Unchanged;
+        };
+        if entry.live != Some(LiveWindow { entity }) {
+            return StateMutation::Unchanged;
+        }
+        entry.live = None;
+        self.deactivate_absent(window_key, managed_window_persistence)
+    }
+
+    fn deactivate_absent(
+        &mut self,
+        window_key: &WindowKey,
+        managed_window_persistence: &ManagedWindowPersistence,
+    ) -> StateMutation {
+        let Some(entry) = self.entries.get_mut(window_key) else {
+            return StateMutation::Unchanged;
+        };
+        if entry.persistence == PersistenceWriteState::Frozen {
+            return StateMutation::Unchanged;
+        }
+        match managed_window_persistence {
+            ManagedWindowPersistence::RememberAll => {
+                let CapturedPlacement::Captured(captured) = &entry.placement else {
+                    return StateMutation::Unchanged;
+                };
+                entry.placement = CapturedPlacement::PersistedOnly(
+                    captured.project(&super::save::application_name()),
+                );
+            },
+            ManagedWindowPersistence::ActiveOnly => {
+                self.entries.remove(window_key);
+            },
+        }
+        self.dirty = DirtyState::Dirty;
+        StateMutation::Changed
+    }
+
+    pub(crate) fn deactivate_entity(
+        &mut self,
+        entity: Entity,
+        managed_window_persistence: &ManagedWindowPersistence,
+    ) -> StateMutation {
+        let window_keys: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.live == Some(LiveWindow { entity }))
+            .map(|(window_key, _)| window_key.clone())
+            .collect();
+        window_keys
+            .iter()
+            .fold(StateMutation::Unchanged, |mutation, window_key| {
+                match (
+                    mutation,
+                    self.deactivate(window_key, entity, managed_window_persistence),
+                ) {
+                    (StateMutation::Changed, _) | (_, StateMutation::Changed) => {
+                        StateMutation::Changed
+                    },
+                    _ => StateMutation::Unchanged,
+                }
+            })
     }
 
     pub(crate) fn capture(
@@ -311,9 +389,7 @@ impl CapturedWindowStates {
 
         if let Some(entry) = self.entries.get_mut(&window_key) {
             entry.live = Some(LiveWindow { entity });
-            if entry.persistence == PersistenceWriteState::Frozen
-                || matches!(entry.placement, CapturedPlacement::PersistedOnly(_))
-            {
+            if entry.persistence == PersistenceWriteState::Frozen {
                 return StateMutation::Unchanged;
             }
             if entry.placement == CapturedPlacement::Captured(placement.clone()) {
@@ -433,7 +509,6 @@ impl CapturedWindowStates {
             .map(|live| live.entity)
     }
 
-    #[cfg(test)]
     pub(crate) fn captured_placement(
         &self,
         window_key: &WindowKey,
@@ -451,30 +526,44 @@ impl CapturedWindowStates {
     }
 }
 
-pub(super) fn on_primary_window_removed(
+pub(crate) fn on_primary_window_removed(
     removed: On<Remove, PrimaryWindow>,
     managed_window_persistence: Res<ManagedWindowPersistence>,
     mut captured_window_states: ResMut<CapturedWindowStates>,
 ) {
-    captured_window_states.unbind(&WindowKey::Primary, removed.entity);
+    captured_window_states.deactivate(
+        &WindowKey::Primary,
+        removed.entity,
+        &managed_window_persistence,
+    );
     captured_window_states.apply_policy(&managed_window_persistence);
 }
 
-pub(super) fn on_window_removed(
+pub(crate) fn on_window_removed(
     removed: On<Remove, Window>,
     managed_window_persistence: Res<ManagedWindowPersistence>,
     mut captured_window_states: ResMut<CapturedWindowStates>,
 ) {
-    captured_window_states.unbind_entity(removed.entity);
+    captured_window_states.deactivate_entity(removed.entity, &managed_window_persistence);
     captured_window_states.apply_policy(&managed_window_persistence);
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use bevy::window::WindowMode;
+    use tempfile::NamedTempFile;
 
     use super::*;
     use crate::monitors::MonitorIdentity;
+    use crate::persistence::format;
+    use crate::persistence::save::StateFileWrite;
+    use crate::persistence::save::application_name;
+    use crate::persistence::save::save_all_states;
+
+    const CANCELLED_ORIGINAL_OFFSET: IVec2 = IVec2::new(10, 20);
+    const CANCELLED_REPLACEMENT_OFFSET: IVec2 = IVec2::new(30, 40);
 
     fn monitor(index: usize, scale: f64, physical_position: IVec2) -> MonitorInfo {
         MonitorInfo {
@@ -588,6 +677,107 @@ mod tests {
         states.apply_policy(&ManagedWindowPersistence::ActiveOnly);
 
         assert_eq!(states.project("changed-app").get(&key), Some(&original));
+    }
+
+    #[test]
+    fn live_cancellation_makes_the_captured_entry_writable() {
+        let key = WindowKey::Managed("cancelled".to_string());
+        let entity = Entity::PLACEHOLDER;
+        let original = captured(monitor(0, 1.0, IVec2::ZERO), CANCELLED_ORIGINAL_OFFSET);
+        let replacement = captured(monitor(1, 2.0, IVec2::ZERO), CANCELLED_REPLACEMENT_OFFSET);
+        let mut states = CapturedWindowStates::default();
+        states.capture(key.clone(), entity, original);
+        states.freeze(&key);
+
+        assert_eq!(
+            states.cancel(&key, Some(entity), &ManagedWindowPersistence::RememberAll,),
+            StateMutation::Unchanged
+        );
+        assert_eq!(
+            states.capture(key.clone(), entity, replacement.clone()),
+            StateMutation::Changed
+        );
+        assert_eq!(states.captured_placement(&key), Some(&replacement));
+    }
+
+    #[test]
+    fn live_cancellation_promotes_a_persisted_only_entry_on_the_next_capture() {
+        let key = WindowKey::Managed("cancelled-startup".to_string());
+        let entity = Entity::PLACEHOLDER;
+        let replacement = captured(monitor(1, 2.0, IVec2::ZERO), CANCELLED_REPLACEMENT_OFFSET);
+        let mut states = CapturedWindowStates::default();
+        states.seed(HashMap::from([(key.clone(), persisted())]));
+
+        assert!(states.bind_and_freeze(&key, entity));
+        assert_eq!(
+            states.capture(key.clone(), entity, replacement.clone()),
+            StateMutation::Unchanged
+        );
+        assert!(matches!(
+            states.placement(&key),
+            Some(CapturedPlacement::PersistedOnly(_))
+        ));
+
+        assert_eq!(
+            states.cancel(&key, Some(entity), &ManagedWindowPersistence::RememberAll),
+            StateMutation::Unchanged
+        );
+        assert_eq!(
+            states.capture(key.clone(), entity, replacement.clone()),
+            StateMutation::Changed
+        );
+        assert_eq!(states.captured_placement(&key), Some(&replacement));
+        assert_eq!(
+            states.entry(&key).map(|entry| entry.persistence),
+            Some(PersistenceWriteState::Writable)
+        );
+    }
+
+    #[test]
+    fn remember_all_retained_write_preserves_the_application_name() {
+        let key = WindowKey::Managed("remembered".to_string());
+        let entity = Entity::PLACEHOLDER;
+        let mut states = CapturedWindowStates::default();
+        states.capture(
+            key.clone(),
+            entity,
+            captured(monitor(0, 1.0, IVec2::ZERO), CANCELLED_ORIGINAL_OFFSET),
+        );
+
+        assert_eq!(
+            states.deactivate(&key, entity, &ManagedWindowPersistence::RememberAll),
+            StateMutation::Changed
+        );
+        let app_name = application_name();
+        assert!(!app_name.is_empty());
+        let projected = states.project("replacement-name");
+        assert_eq!(
+            projected.get(&key).map(|state| state.app_name.as_str()),
+            Some(app_name.as_str())
+        );
+
+        let file = NamedTempFile::new();
+        assert!(file.is_ok(), "temporary state file should be available");
+        let Ok(file) = file else {
+            return;
+        };
+        assert_eq!(
+            save_all_states(file.path(), &projected),
+            StateFileWrite::Written
+        );
+        let contents = fs::read_to_string(file.path());
+        assert!(contents.is_ok(), "written state file should be readable");
+        let Ok(contents) = contents else {
+            return;
+        };
+        let decoded = format::decode(&contents);
+        assert_eq!(
+            decoded
+                .as_ref()
+                .and_then(|states| states.get(&key))
+                .map(|state| state.app_name.as_str()),
+            Some(app_name.as_str())
+        );
     }
 
     #[test]

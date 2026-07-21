@@ -24,6 +24,7 @@ use crate::constants::MONITOR_SOURCE_EXISTING;
 use crate::constants::MONITOR_SOURCE_FALLBACK;
 use crate::constants::MONITOR_SOURCE_POSITION;
 use crate::constants::MONITOR_SOURCE_WINIT;
+use crate::restore::NativeWindowReady;
 use crate::restore::RestorePreparation;
 
 /// Component storing the current monitor and effective window mode.
@@ -176,6 +177,18 @@ pub(crate) fn current_monitor_from_association(
     })
 }
 
+pub(crate) fn exact_monitor_association(
+    on_monitor: &OnMonitor,
+    current_monitor: &CurrentMonitor,
+    monitors: &Monitors,
+) -> Option<MonitorInfo> {
+    let installed = monitors
+        .iter()
+        .find(|monitor| monitor.entity == on_monitor.0)
+        .map(|monitor| *monitor.monitor_info)?;
+    (current_monitor.monitor_info == installed).then_some(installed)
+}
+
 pub(super) fn remove_current_monitors_for_empty_topology(world: &mut World) {
     let mut query = world.query_filtered::<Entity, (
         With<CurrentMonitor>,
@@ -183,7 +196,9 @@ pub(super) fn remove_current_monitors_for_empty_topology(world: &mut World) {
     )>();
     let entities: Vec<_> = query.iter(world).collect();
     for entity in entities {
-        world.entity_mut(entity).remove::<CurrentMonitor>();
+        world
+            .entity_mut(entity)
+            .remove::<(CurrentMonitor, NativeWindowReady)>();
     }
 }
 

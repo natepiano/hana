@@ -1,8 +1,10 @@
 # Restore after reconnect causal probe
 
 This example records the boundary between native monitor enumeration, Bevy's
-monitor/window relationships, and Clerestory's installed topology. It does not
-implement recovery or select a linked-despawn mitigation.
+monitor/window relationships, and Clerestory's installed topology. Both windows
+register `WindowRecovery::ApplicationControlled`. The example records factual
+target loss and return, but it does not request restoration or create window
+content after a linked despawn.
 
 Run it with an external monitor index selected from the operator's physical
 inventory:
@@ -72,6 +74,15 @@ native handle or query its name, position, size, scale, or other arrangement
 metadata. If no handle is equal, both matched fields are recorded as
 `unresolved`; physical position is never used as monitor identity.
 
+Clerestory emits `recovery-accepted` from its registration system only after
+the canonical role, native readiness, startup-restore completion, captured
+placement, and exact verified `OnMonitor`/`CurrentMonitor` association all pass
+the core acceptance checks.
+`recovery-pending` contains the canonical key and absent `MonitorId`.
+`recovery-available` contains the same key and the returned `MonitorInfo`.
+Repeated raw monitor events do not create repeated recovery facts for one
+installed topology revision.
+
 Synchronous lifecycle records cover `Monitor`, `HasWindows`, `OnMonitor`,
 `Window`, and `ManagedWindow` add/remove/despawn hooks. `OnMonitor` also has
 distinct `Discard` and `Insert` producers. `Discard` records the old `OnMonitor`
@@ -88,8 +99,9 @@ They are buffered message evidence, not synchronous `On<Remove, Window>`
 component-lifecycle evidence. Sequence values establish order within each
 buffer and the time each reader records its entries; they do not claim
 production order between those buffers. Close requests record only close
-intent. Recovery cancellation is not applicable in this phase because the
-probe has no recovery generation or cancellation action.
+intent. Clerestory classifies Bevy's accepted `ClosingWindow` marker as
+cancellation before the later despawn. A declined close request does not add
+that marker and does not cancel recovery.
 
 `PostUpdate::trace_window_component_changes` records component state before
 Bevy winit's private `Last::changed_windows` system consumes changed `Window`
@@ -141,9 +153,14 @@ the run header before launching the example.
    entity survived without relocation; or entity removed through the
    `HasWindows` cascade. Record the last verified identity and whether
    top-level placement is available on the platform.
+   Confirm exactly one `recovery-pending` record exists for each accepted
+   window key, including keys whose entities were already removed.
 7. Replug the exact connection recorded in step 4. Do not restart the app.
 8. Wait for the runtime topology record, then record the new monitor entity,
    verified identity, configuration generation, and topology revision.
+   Confirm exactly one `recovery-available` record exists for each pending key
+   whose original `MonitorId` returned. No window should be reconstructed,
+   re-enabled, moved, resized, or restored by this example.
 9. Compare `MonitorId` only with records from this same running process.
 10. After the replug evidence is complete, close the primary window if it
     survived. Confirm its close-request record precedes process exit. If the

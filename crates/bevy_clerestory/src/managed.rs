@@ -66,6 +66,13 @@ pub(crate) struct ManagedWindowRegistry {
     pub(crate) entities: HashMap<Entity, String>,
 }
 
+impl ManagedWindowRegistry {
+    #[must_use]
+    pub(crate) fn name(&self, entity: Entity) -> Option<&str> {
+        self.entities.get(&entity).map(String::as_str)
+    }
+}
+
 /// Register and deduplicate a `ManagedWindow` name.
 pub(crate) fn on_managed_window_added(
     add: On<Add, ManagedWindow>,
@@ -136,7 +143,7 @@ pub(crate) fn on_managed_window_removed(
     }
     if let Some(name) = managed_window_registry.entities.remove(&entity) {
         let window_key = WindowKey::Managed(name.clone());
-        captured_window_states.unbind(&window_key, entity);
+        captured_window_states.deactivate(&window_key, entity, &managed_window_persistence);
         captured_window_states.apply_policy(&managed_window_persistence);
 
         managed_window_registry.names.remove(&name);

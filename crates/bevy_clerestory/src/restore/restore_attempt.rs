@@ -76,6 +76,32 @@ pub(crate) fn mark_native_window_ready(
     }
 }
 
+pub(crate) fn clear_native_window_ready(remove: On<Remove, OnMonitor>, mut commands: Commands) {
+    commands
+        .entity(remove.entity)
+        .try_remove::<(CurrentMonitor, NativeWindowReady)>();
+}
+
+#[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
+type RestoreAttemptComponents = (
+    RestorePreparation,
+    TargetPosition,
+    X11FrameCompensated,
+    crate::x11_position_fix::X11FrameTop,
+);
+
+#[cfg(not(all(target_os = "linux", feature = "workaround-winit-4445")))]
+type RestoreAttemptComponents = (RestorePreparation, TargetPosition, X11FrameCompensated);
+
+pub(crate) fn cancel_restore(commands: &mut Commands, entity: Entity) {
+    commands.entity(entity).queue(|mut entity: EntityWorldMut| {
+        entity.remove::<RestoreAttemptComponents>();
+        if let Some(mut window) = entity.get_mut::<Window>() {
+            window.visible = true;
+        }
+    });
+}
+
 struct RestoreTargetBuilder<'a> {
     source:              &'a CapturedPlacement,
     monitors:            &'a Monitors,
@@ -293,14 +319,27 @@ mod tests {
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
     use bevy::window::WindowPosition;
+    use bevy::window::WindowScaleFactorChanged;
 
     use super::*;
+    use crate::CancelWindowRecovery;
+    use crate::ManagedWindowPersistence;
+    use crate::WindowRecovery;
+    use crate::WindowRestoreMismatch;
+    use crate::WindowRestored;
+    use crate::managed::ManagedWindowRegistry;
     use crate::monitors::InjectedCurrentMonitorSource;
     use crate::monitors::MonitorId;
+    use crate::monitors::MonitorTopologyRevision;
     use crate::monitors::NativeQueryActivity;
     use crate::persistence::CapturedWindowPosition;
     use crate::persistence::SavedWindowMode;
+    use crate::recovery::RecoveryPlugin;
     use crate::restore::RestorePlugin;
+    use crate::restore::check_restore_settling;
+    use crate::restore::has_restoring_windows;
+    use crate::restore::restore_windows;
+    use crate::restore::settle_state::SettleState;
     use crate::restore::target_position::MonitorScaleStrategy;
 
     const CAPTURED_OFFSET: IVec2 = IVec2::new(100, 50);
@@ -323,6 +362,20 @@ mod tests {
         monitor_scale_strategy: MonitorScaleStrategy,
         saved_window_mode:      SavedWindowMode,
         monitor_index:          usize,
+    }
+
+    #[derive(Default, Resource)]
+    struct RestoreOutcomeCounts {
+        restored:   usize,
+        mismatched: usize,
+    }
+
+    fn record_restored(_: On<WindowRestored>, mut outcomes: ResMut<RestoreOutcomeCounts>) {
+        outcomes.restored += 1;
+    }
+
+    fn record_mismatch(_: On<WindowRestoreMismatch>, mut outcomes: ResMut<RestoreOutcomeCounts>) {
+        outcomes.mismatched += 1;
     }
 
     impl From<&TargetPosition> for TargetSnapshot {
@@ -427,6 +480,7 @@ mod tests {
             .init_resource::<InjectedCurrentMonitorSource>()
             .add_observer(monitors::install_current_monitor_from_association)
             .add_observer(mark_native_window_ready)
+            .add_observer(clear_native_window_ready)
             .add_systems(
                 Update,
                 (monitors::update_current_monitor, prepare_restore_targets).chain(),
@@ -548,6 +602,91 @@ mod tests {
     }
 
     #[test]
+    fn recovery_cancellation_finishes_a_hidden_live_window_and_removes_the_restore_attempt() {
+        let captured_window_placement = captured_placement(
+            MonitorIdentity::Verified(TARGET_ID),
+            1,
+            CapturedWindowPosition::Restorable {
+                logical_offset: CAPTURED_OFFSET,
+            },
+            SavedWindowMode::Windowed,
+        );
+        let monitors = monitors_with_returned_target();
+        let mut target_position =
+            build_target_for_synthetic_runtime(&captured_window_placement, &monitors);
+        target_position.settle_state = Some(SettleState::new());
+        let restore_diagnostics = RestoreDiagnostics {
+            starting_monitor_index: 0,
+            starting_scale:         target_position.starting_scale,
+            target_scale:           target_position.target_scale,
+            monitor_scale_strategy: target_position.monitor_scale_strategy,
+        };
+        let mut app = App::new();
+        app.insert_resource(monitors)
+            .insert_resource(MonitorTopologyRevision::default())
+            .insert_resource(Platform::Windows)
+            .insert_resource(ManagedWindowPersistence::RememberAll)
+            .init_resource::<ManagedWindowRegistry>()
+            .init_resource::<CapturedWindowStates>()
+            .init_resource::<RestoreOutcomeCounts>()
+            .init_resource::<Time>()
+            .add_message::<WindowScaleFactorChanged>()
+            .add_plugins(RecoveryPlugin)
+            .add_observer(record_restored)
+            .add_observer(record_mismatch)
+            .add_systems(
+                Update,
+                (restore_windows, check_restore_settling)
+                    .chain()
+                    .run_if(has_restoring_windows),
+            );
+        let entity = app
+            .world_mut()
+            .spawn((
+                Window {
+                    visible: false,
+                    ..default()
+                },
+                PrimaryWindow,
+                WindowRecovery::ApplicationControlled,
+                RestorePreparation::startup(WindowKey::Primary),
+                target_position,
+                X11FrameCompensated,
+                restore_diagnostics,
+            ))
+            .id();
+        app.world_mut().flush();
+
+        app.world_mut().trigger(CancelWindowRecovery {
+            window: WindowKey::Primary,
+        });
+        app.world_mut().flush();
+
+        assert!(app.world().get_entity(entity).is_ok());
+        assert_eq!(
+            app.world()
+                .get::<Window>(entity)
+                .map(|window| window.visible),
+            Some(true)
+        );
+        assert!(app.world().get::<RestorePreparation>(entity).is_none());
+        assert!(app.world().get::<TargetPosition>(entity).is_none());
+        assert!(app.world().get::<X11FrameCompensated>(entity).is_none());
+        assert!(app.world().get::<RestoreDiagnostics>(entity).is_some());
+
+        app.update();
+        app.update();
+        app.update();
+
+        assert!(app.world().get::<RestorePreparation>(entity).is_none());
+        assert!(app.world().get::<TargetPosition>(entity).is_none());
+        assert!(app.world().get::<X11FrameCompensated>(entity).is_none());
+        let outcomes = app.world().resource::<RestoreOutcomeCounts>();
+        assert_eq!(outcomes.restored, 0);
+        assert_eq!(outcomes.mismatched, 0);
+    }
+
+    #[test]
     fn rejected_monitor_association_clears_stale_readiness() {
         let captured_window_placement = captured_placement(
             MonitorIdentity::Verified(TARGET_ID),
@@ -581,6 +720,28 @@ mod tests {
                 monitor_metadata: 0,
             }
         );
+    }
+
+    #[test]
+    fn removed_monitor_association_clears_stale_readiness() {
+        let captured_window_placement = captured_placement(
+            MonitorIdentity::Verified(TARGET_ID),
+            1,
+            CapturedWindowPosition::Restorable {
+                logical_offset: CAPTURED_OFFSET,
+            },
+            SavedWindowMode::Windowed,
+        );
+        let (mut app, entity, _) =
+            captured_startup_app(captured_window_placement, StartupReadiness::Associated);
+        assert!(app.world().get::<NativeWindowReady>(entity).is_some());
+        assert!(app.world().get::<CurrentMonitor>(entity).is_some());
+
+        app.world_mut().entity_mut(entity).remove::<OnMonitor>();
+        app.world_mut().flush();
+
+        assert!(app.world().get::<NativeWindowReady>(entity).is_none());
+        assert!(app.world().get::<CurrentMonitor>(entity).is_none());
     }
 
     #[test]

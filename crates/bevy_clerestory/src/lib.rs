@@ -41,6 +41,7 @@ mod managed;
 mod monitors;
 mod persistence;
 mod platform;
+mod recovery;
 mod restore;
 mod restore_window_config;
 mod visibility;
@@ -61,7 +62,6 @@ use managed::ManagedWindowRegistry;
 use managed::on_managed_window_added;
 use managed::on_managed_window_load;
 use managed::on_managed_window_removed;
-use managed::on_persistence_changed;
 pub use monitors::CurrentMonitor;
 pub use monitors::LiveMonitor;
 pub use monitors::MonitorConnected;
@@ -75,6 +75,12 @@ pub use monitors::Monitors;
 use persistence::PersistencePlugin;
 pub use persistence::WindowKey;
 pub use platform::Platform;
+pub use recovery::CancelWindowRecovery;
+use recovery::RecoveryPlugin;
+pub use recovery::RestoreWindow;
+pub use recovery::WindowRecovery;
+pub use recovery::WindowRecoveryAvailable;
+pub use recovery::WindowRecoveryPending;
 use restore::RestorePlugin;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 use restore::has_restoring_windows;
@@ -84,6 +90,19 @@ use restore_window_config::RestoreWindowConfig;
 enum ClerestoryPreStartupSet {
     MonitorsInitialized,
     PersistenceLoaded,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, SystemSet)]
+pub(crate) enum ClerestoryUpdateSet {
+    MonitorTopology,
+    RecoveryTopology,
+    CurrentMonitor,
+    RecoveryWindow,
+    RestorePreparation,
+    X11Compensation,
+    RestoreApplication,
+    RestoreSettling,
+    Persistence,
 }
 
 /// The main plugin. See module docs for usage.
@@ -216,7 +235,23 @@ impl Plugin for WindowManagerPluginCustomPath {
             )
                 .chain(),
         )
+        .configure_sets(
+            Update,
+            (
+                ClerestoryUpdateSet::MonitorTopology,
+                ClerestoryUpdateSet::RecoveryTopology,
+                ClerestoryUpdateSet::CurrentMonitor,
+                ClerestoryUpdateSet::RecoveryWindow,
+                ClerestoryUpdateSet::RestorePreparation,
+                ClerestoryUpdateSet::X11Compensation,
+                ClerestoryUpdateSet::RestoreApplication,
+                ClerestoryUpdateSet::RestoreSettling,
+                ClerestoryUpdateSet::Persistence,
+            )
+                .chain(),
+        )
         .add_plugins(MonitorPlugin)
+        .add_plugins(RecoveryPlugin)
         .add_plugins(PersistencePlugin)
         .add_plugins(RestorePlugin)
         .insert_resource(RestoreWindowConfig { path })
@@ -233,25 +268,19 @@ impl Plugin for WindowManagerPluginCustomPath {
             (
                 x11_position_fix::compensate_target_position
                     .after(restore::prepare_restore_targets)
-                    .before(restore::restore_windows),
+                    .before(restore::restore_windows)
+                    .in_set(ClerestoryUpdateSet::X11Compensation),
                 // Re-apply the compensated position once the window is mapped: bevy 0.19
                 // can ignore the first `set_outer_position` request while the X11 window is
                 // unmapped, while a mapped window's `Window.position` readback matches the
                 // requested compensated position plus `X11FrameTop`.
                 x11_position_fix::reapply_compensated_position
                     .after(restore::restore_windows)
-                    .before(restore::check_restore_settling),
+                    .before(restore::check_restore_settling)
+                    .in_set(ClerestoryUpdateSet::RestoreApplication),
             )
                 .run_if(has_restoring_windows)
                 .run_if(|p: Res<Platform>| p.is_x11()),
-        );
-
-        app.add_systems(
-            Update,
-            on_persistence_changed
-                .run_if(resource_changed::<ManagedWindowPersistence>)
-                .after(monitors::update_current_monitor)
-                .before(persistence::write_dirty_window_states),
         );
     }
 }

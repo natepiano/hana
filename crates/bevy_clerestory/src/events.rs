@@ -4,6 +4,44 @@ use bevy::prelude::*;
 use bevy::window::WindowMode;
 
 use super::WindowKey;
+use super::monitors::MonitorId;
+use super::monitors::MonitorInfo;
+
+/// A registered window's verified target monitor is no longer installed.
+#[derive(Event, Debug, Clone, Reflect)]
+#[type_path = "bevy_clerestory::recovery"]
+pub struct WindowRecoveryPending {
+    /// Canonical primary or managed persistence key.
+    pub window_key: WindowKey,
+    /// Process-local verified identity of the absent target monitor.
+    pub monitor_id: MonitorId,
+}
+
+/// A registered window's exact verified target monitor is installed again.
+#[derive(Event, Debug, Clone, Reflect)]
+#[type_path = "bevy_clerestory::recovery"]
+pub struct WindowRecoveryAvailable {
+    /// Canonical primary or managed persistence key.
+    pub window_key: WindowKey,
+    /// Current entity-free snapshot for the returned target monitor.
+    pub monitor:    MonitorInfo,
+}
+
+/// Request restoration of one application-controlled window entity.
+#[derive(EntityEvent, Debug, Clone, Reflect)]
+#[type_path = "bevy_clerestory::recovery"]
+pub struct RestoreWindow {
+    /// Existing or application-created canonical window entity.
+    pub entity: Entity,
+}
+
+/// Cancel the current recovery generation for one canonical window key.
+#[derive(Event, Debug, Clone, Reflect)]
+#[type_path = "bevy_clerestory::recovery"]
+pub struct CancelWindowRecovery {
+    /// Canonical primary or managed persistence key.
+    pub window: WindowKey,
+}
 
 /// Event fired when a window restore completes and the window becomes visible.
 ///
