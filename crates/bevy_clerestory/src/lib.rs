@@ -49,7 +49,6 @@ mod windows_dpi_fix;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 mod x11_position_fix;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
@@ -73,17 +72,18 @@ pub use monitors::MonitorInfo;
 use monitors::MonitorPlugin;
 pub use monitors::MonitorTopologyRevision;
 pub use monitors::Monitors;
+use persistence::PersistencePlugin;
 pub use persistence::WindowKey;
 pub use platform::Platform;
 use restore::RestorePlugin;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 use restore::has_restoring_windows;
-use restore::no_restoring_windows;
 use restore_window_config::RestoreWindowConfig;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, SystemSet)]
 enum ClerestoryPreStartupSet {
     MonitorsInitialized,
+    PersistenceLoaded,
 }
 
 /// The main plugin. See module docs for usage.
@@ -208,17 +208,23 @@ impl Plugin for WindowManagerPluginCustomPath {
             app.add_systems(Update, windows_dpi_fix::install_dpi_fix_on_managed);
         }
 
-        app.add_plugins(MonitorPlugin)
-            .add_plugins(RestorePlugin)
-            .insert_resource(RestoreWindowConfig {
-                path,
-                loaded_states: HashMap::new(),
-            })
-            .insert_resource(managed_window_persistence)
-            .init_resource::<ManagedWindowRegistry>()
-            .add_observer(on_managed_window_added)
-            .add_observer(on_managed_window_removed)
-            .add_observer(on_managed_window_load);
+        app.configure_sets(
+            PreStartup,
+            (
+                ClerestoryPreStartupSet::MonitorsInitialized,
+                ClerestoryPreStartupSet::PersistenceLoaded,
+            )
+                .chain(),
+        )
+        .add_plugins(MonitorPlugin)
+        .add_plugins(PersistencePlugin)
+        .add_plugins(RestorePlugin)
+        .insert_resource(RestoreWindowConfig { path })
+        .insert_resource(managed_window_persistence)
+        .init_resource::<ManagedWindowRegistry>()
+        .add_observer(on_managed_window_added)
+        .add_observer(on_managed_window_removed)
+        .add_observer(on_managed_window_load);
 
         // X11 frame extent compensation (W6 workaround, winit #4445).
         #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
@@ -238,19 +244,12 @@ impl Plugin for WindowManagerPluginCustomPath {
                 .run_if(|p: Res<Platform>| p.is_x11()),
         );
 
-        // `monitors::update_current_monitor` runs before persistence systems read
-        // `CurrentMonitor`.
         app.add_systems(
             Update,
-            (
-                persistence::save_window_state
-                    .run_if(no_restoring_windows)
-                    .after(monitors::update_current_monitor),
-                on_persistence_changed
-                    .run_if(resource_changed::<ManagedWindowPersistence>)
-                    .run_if(no_restoring_windows)
-                    .after(monitors::update_current_monitor),
-            ),
+            on_persistence_changed
+                .run_if(resource_changed::<ManagedWindowPersistence>)
+                .after(monitors::update_current_monitor)
+                .before(persistence::write_dirty_window_states),
         );
     }
 }

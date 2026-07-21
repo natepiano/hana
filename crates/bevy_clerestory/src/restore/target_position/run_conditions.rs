@@ -6,8 +6,3 @@ use super::target::TargetPosition;
 pub(crate) fn has_restoring_windows(query: Query<(), With<TargetPosition>>) -> bool {
     !query.is_empty()
 }
-
-/// Run condition: returns true if no entity has a `TargetPosition` component.
-pub(crate) fn no_restoring_windows(query: Query<(), With<TargetPosition>>) -> bool {
-    query.is_empty()
-}

@@ -10,11 +10,11 @@
 //! ## Adding a new version
 //!
 //! 1. Bump [`CURRENT_STATE_VERSION`].
-//! 2. If the new version changes `PersistedEntry` or `WindowState` fields, add new structs (e.g.
-//!    `PersistedEntryV2`) and a conversion from the old entry type. If only semantics change, the
-//!    existing structs can be reused.
+//! 2. If the new version changes `PersistedEntry` or `PersistedWindowState` fields, add new structs
+//!    (e.g. `PersistedEntryV2`) and a conversion from the old entry type. If only semantics change,
+//!    the existing structs can be reused.
 //! 3. Add a `decode_v<N>` function that accepts a [`PersistedState`] and returns
-//!    `Option<HashMap<WindowKey, WindowState>>`.
+//!    `Option<HashMap<WindowKey, PersistedWindowState>>`.
 //! 4. Add an arm to the `match persisted.version` block inside [`decode`].
 //! 5. Update [`encode`] to write the new format (only the latest version is ever written).
 //! 6. Add a test that round-trips through the new version **and** a test that an older version file
@@ -24,7 +24,7 @@
 //!
 //! | Format | Description |
 //! |--------|-------------|
-//! | Legacy single-window | Bare `WindowState` (no version field, pre-multi-window) |
+//! | Legacy single-window | Bare `PersistedWindowState` (no version field, pre-multi-window) |
 //! | v1 | `PersistedState { version: 1, entries }` with `width`/`height` (physical) |
 //! | v2 | `PersistedState { version: 2, entries }` with `logical_width`/`logical_height` + `monitor_scale` |
 
@@ -42,10 +42,10 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::constants::PERSISTED_STATE_VERSION_V1;
+use super::window_state::PersistedWindowState;
 #[cfg(test)]
 use super::window_state::SavedVideoMode;
 use super::window_state::SavedWindowMode;
-use super::window_state::WindowState;
 use crate::constants::CURRENT_STATE_VERSION;
 use crate::constants::DEFAULT_SCALE_FACTOR;
 use crate::constants::PRIMARY_WINDOW_KEY;
@@ -75,7 +75,7 @@ pub(super) struct PersistedEntry {
     #[serde(rename = "key")]
     window_key:   WindowKey,
     #[serde(rename = "state")]
-    window_state: WindowState,
+    window_state: PersistedWindowState,
 }
 
 /// Versioned persisted state format.
@@ -109,9 +109,10 @@ struct WindowStateV1 {
 }
 
 impl WindowStateV1 {
-    /// Convert to current `WindowState`, treating v1 values as logical (assumes scale 1.0).
-    fn into_current(self) -> WindowState {
-        WindowState {
+    /// Convert to current `PersistedWindowState`, treating v1 values as logical (assumes scale
+    /// 1.0).
+    fn into_current(self) -> PersistedWindowState {
+        PersistedWindowState {
             logical_position:  self.logical_position,
             logical_width:     self.logical_width,
             logical_height:    self.logical_height,
@@ -144,7 +145,7 @@ struct PersistedStateV1 {
 /// Tries versioned formats first (dispatching by the `version` field),
 /// then falls back to legacy unversioned formats. See the module-level
 /// docs for the full list of supported formats.
-pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, PersistedWindowState>> {
     // Probe only `VersionProbe::version` before dispatching to `PersistedStateV1` or
     // `PersistedState`.
     if let Ok(probe) = from_str::<VersionProbe>(contents) {
@@ -160,14 +161,14 @@ pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> 
             },
         }
     } else {
-        // Legacy unversioned format — bare `WindowState` from before multi-window
+        // Legacy unversioned format — bare `PersistedWindowState` from before multi-window
         // support. Cannot participate in the version match above because it has no
         // `version` field.
         decode_legacy_single_window(contents)
     }
 }
 
-fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, PersistedWindowState>> {
     let window_state_v1 = from_str::<WindowStateV1>(contents).ok()?;
     debug!("[decode] Migrated legacy single-window format to v2");
     Some(HashMap::from([(
@@ -176,7 +177,7 @@ fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, Wind
     )]))
 }
 
-fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, PersistedWindowState>> {
     let persisted_state_v1 = from_str::<PersistedStateV1>(contents).ok()?;
     if persisted_state_v1.version != PERSISTED_STATE_VERSION_V1 {
         warn!(
@@ -207,7 +208,7 @@ fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
     Some(states)
 }
 
-fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, PersistedWindowState>> {
     let persisted_state = from_str::<PersistedState>(contents).ok()?;
     let mut states = HashMap::with_capacity(persisted_state.entries.len());
     for persisted_entry in persisted_state.entries {
@@ -230,7 +231,7 @@ fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
 }
 
 /// Encode typed runtime state into persisted v1 text.
-pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String, Error> {
+pub(super) fn encode(states: &HashMap<WindowKey, PersistedWindowState>) -> Result<String, Error> {
     let mut entries: Vec<PersistedEntry> = states
         .iter()
         .map(|(key, window_state)| PersistedEntry {
@@ -263,14 +264,14 @@ mod tests {
     use super::PERSISTED_STATE_VERSION_V1;
     use super::PersistedEntry;
     use super::PersistedState;
+    use super::PersistedWindowState;
     use super::SavedVideoMode;
     use super::SavedWindowMode;
     use super::WindowKey;
-    use super::WindowState;
     use crate::persistence::format;
 
-    fn sample_state() -> WindowState {
-        WindowState {
+    fn sample_state() -> PersistedWindowState {
+        PersistedWindowState {
             logical_position:  Some((10, 20)),
             logical_width:     800,
             logical_height:    600,
@@ -292,7 +293,7 @@ mod tests {
                 },
                 PersistedEntry {
                     window_key:   WindowKey::Managed("primary".to_string()),
-                    window_state: WindowState {
+                    window_state: PersistedWindowState {
                         logical_position: Some((30, 40)),
                         ..sample_state()
                     },
@@ -405,7 +406,7 @@ mod tests {
     mod golden_legacy {
         use super::*;
 
-        /// Bare `WindowState` — windowed mode, from `macos_0/same_monitor_restore.ron`.
+        /// Bare `PersistedWindowState` — windowed mode, from `macos_0/same_monitor_restore.ron`.
         const WINDOWED: &str = "\
 (
     position: Some((200, 200)),
@@ -416,7 +417,7 @@ mod tests {
     app_name: \"restore_window\",
 )";
 
-        /// Bare `WindowState` — borderless fullscreen, from
+        /// Bare `PersistedWindowState` — borderless fullscreen, from
         /// `macos_0/fullscreen_borderless_programmatic.ron`.
         const BORDERLESS_FULLSCREEN: &str = "\
 (
@@ -428,7 +429,7 @@ mod tests {
     app_name: \"restore_window\",
 )";
 
-        /// Bare `WindowState` — exclusive fullscreen with explicit video mode,
+        /// Bare `PersistedWindowState` — exclusive fullscreen with explicit video mode,
         /// from `macos_0/fullscreen_exclusive.ron`.
         const EXCLUSIVE_FULLSCREEN: &str = "\
 (
@@ -532,7 +533,7 @@ mod tests {
             (WindowKey::Primary, sample_state()),
             (
                 WindowKey::Managed("inspector".to_string()),
-                WindowState {
+                PersistedWindowState {
                     logical_position:  Some((100, 200)),
                     logical_width:     1024,
                     logical_height:    768,

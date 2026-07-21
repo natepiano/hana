@@ -26,6 +26,9 @@ pub struct MonitorId(u64);
 
 impl MonitorId {
     pub(super) const fn from_raw(raw: u64) -> Self { Self(raw) }
+
+    #[cfg(test)]
+    pub(crate) const fn from_test_raw(raw: u64) -> Self { Self(raw) }
 }
 
 /// Public physical-panel identity state for a monitor.

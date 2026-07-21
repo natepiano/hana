@@ -100,8 +100,8 @@ impl From<&WindowMode> for SavedWindowMode {
 ///
 /// `scale` records the scale factor of the monitor at save time. It is informational
 /// only — restore uses the target monitor's live scale factor, not this saved value.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct WindowState {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PersistedWindowState {
     /// Top-left corner of the window content area in logical pixels.
     /// `None` on Wayland where clients cannot access window position.
     pub(crate) logical_position:  Option<(i32, i32)>,

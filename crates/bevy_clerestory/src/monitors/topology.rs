@@ -278,7 +278,7 @@ impl Monitors {
     }
 
     #[cfg(test)]
-    pub(super) fn from_test_monitors(
+    pub(crate) fn from_test_monitors(
         monitors: impl IntoIterator<Item = (Entity, MonitorInfo)>,
     ) -> Self {
         let live = monitors
@@ -796,14 +796,19 @@ pub(super) fn update_monitors(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::Path;
+
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::Registry;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::prelude::*;
     use bevy::reflect::TypePath;
+    use bevy::window::OnMonitor;
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
     use bevy::window::WindowPosition;
+    use tempfile::NamedTempFile;
 
     #[cfg(feature = "monitor-probe")]
     use super::example_probe::trace as example_trace;
@@ -815,10 +820,17 @@ mod tests {
     use super::monitor_probe::InjectedTopologyProbeRecords;
     use super::*;
     use crate::ManagedWindow;
+    use crate::ManagedWindowPersistence;
     use crate::constants::SCALE_FACTOR_EPSILON;
     use crate::monitors::CurrentMonitor;
     use crate::monitors::current_monitor::InjectedCurrentMonitorSource;
     use crate::monitors::identity::OperatingSystemQueryError;
+    use crate::persistence::CapturedWindowPlacement;
+    use crate::persistence::CapturedWindowStates;
+    use crate::persistence::InjectedWindowPositions;
+    use crate::persistence::PersistencePlugin;
+    use crate::persistence::WindowKey;
+    use crate::restore_window_config::RestoreWindowConfig;
 
     const ENTITY_1: Entity = Entity::from_bits(1);
     const ENTITY_2: Entity = Entity::from_bits(2);
@@ -854,6 +866,12 @@ mod tests {
     struct DownstreamObservations {
         restore_current_monitors: usize,
         settle_current_monitors:  usize,
+    }
+
+    #[derive(Resource)]
+    struct ScheduledMonitorAssociation {
+        window_entity:  Entity,
+        monitor_entity: Entity,
     }
 
     fn monitor(identity: MonitorIdentity, index: usize, position: IVec2) -> MonitorInfo {
@@ -939,6 +957,16 @@ mod tests {
         observations.settle_current_monitors = windows.iter().count();
     }
 
+    fn insert_scheduled_monitor_association(
+        mut commands: Commands,
+        association: Res<ScheduledMonitorAssociation>,
+    ) {
+        commands
+            .entity(association.window_entity)
+            .insert(OnMonitor(association.monitor_entity));
+        commands.remove_resource::<ScheduledMonitorAssociation>();
+    }
+
     fn observed_topology_app() -> App {
         let mut app = App::new();
         app.insert_resource(Platform::X11)
@@ -952,7 +980,8 @@ mod tests {
             .init_resource::<DownstreamObservations>()
             .add_observer(observe_connected)
             .add_observer(observe_disconnected)
-            .add_observer(current_monitor::clear_monitor_selection_inputs);
+            .add_observer(current_monitor::clear_monitor_selection_inputs)
+            .add_observer(current_monitor::install_current_monitor_from_association);
         #[cfg(feature = "monitor-probe")]
         app.init_resource::<FrameCount>()
             .init_resource::<InjectedTopologyProbeRecords>();
@@ -1078,6 +1107,44 @@ mod tests {
             .reset_activity();
     }
 
+    fn assert_persistence_idle(app: &App) {
+        let activity = app.world().resource::<CapturedWindowStates>().activity();
+        assert_eq!(activity.file_reads, 0);
+        assert_eq!(activity.window_scans, 0);
+        assert_eq!(activity.captures, 0);
+        assert_eq!(activity.projections, 0);
+        assert_eq!(activity.writes, 0);
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity::default()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .lookups,
+            0
+        );
+        assert_eq!(app.world().resource::<InjectedWindowPositions>().lookups, 0);
+    }
+
+    fn reset_persistence_activity(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<CapturedWindowStates>()
+            .reset_activity();
+        app.world_mut()
+            .resource_mut::<InjectedWindowPositions>()
+            .reset_activity();
+        reset_activity(app);
+    }
+
+    fn assert_single_persistence_batch(app: &App) {
+        let activity = app.world().resource::<CapturedWindowStates>().activity();
+        assert_eq!(activity.window_scans, 1);
+        assert_eq!(activity.captures, 1);
+        assert_eq!(activity.projections, 1);
+        assert_eq!(activity.writes, 1);
+    }
+
     fn reset_observations(app: &mut App) {
         let mut observations = app.world_mut().resource_mut::<TopologyObservations>();
         observations.connected.clear();
@@ -1158,6 +1225,33 @@ mod tests {
             trace_field(startup, "topology_change"),
             Some("\"connected\"")
         );
+    }
+
+    fn assert_capture_snapshot(
+        placement: &CapturedWindowPlacement,
+        physical_position: IVec2,
+        scale: f64,
+    ) {
+        assert_eq!(
+            placement.monitor_snapshot.physical_position,
+            physical_position
+        );
+        assert!((placement.monitor_snapshot.scale - scale).abs() < SCALE_FACTOR_EPSILON);
+    }
+
+    fn installed_monitor(app: &App, entity: Entity) -> Option<MonitorInfo> {
+        app.world()
+            .resource::<Monitors>()
+            .iter()
+            .find(|monitor| monitor.entity == entity)
+            .map(|monitor| *monitor.monitor_info)
+    }
+
+    fn assert_persisted_monitor(path: &Path, index: usize, scale: f64) -> Result<(), String> {
+        let persisted = fs::read_to_string(path).map_err(|error| error.to_string())?;
+        assert!(persisted.contains(&format!("monitor_scale: {scale:.1}")));
+        assert!(persisted.contains(&format!("monitor_index: {index}")));
+        Ok(())
     }
 
     #[cfg(feature = "monitor-probe")]
@@ -1934,6 +2028,212 @@ mod tests {
             app.world().resource::<InjectedMonitorEvidence>().activity,
             TopologyProducerActivity::default()
         );
+    }
+
+    #[test]
+    fn persistence_schedule_is_idle_and_rebases_from_returned_monitor_metadata()
+    -> Result<(), String> {
+        let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
+        let installed_position = IVec2::new(-1_920, 0);
+        let window_position = IVec2::new(-1_760, 90);
+        let same_entity_edit = IVec2::new(-3_840, -200);
+        let mut app = topology_app();
+        app.insert_resource(ManagedWindowPersistence::RememberAll)
+            .insert_resource(RestoreWindowConfig {
+                path: state_file.path().to_path_buf(),
+            })
+            .init_resource::<InjectedWindowPositions>()
+            .add_plugins(PersistencePlugin);
+        let monitor_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            installed_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            LOW_DPI_SCALE,
+        );
+        let mut window = Window {
+            position: WindowPosition::At(window_position),
+            ..default()
+        };
+        window.resolution.set(800.0, 600.0);
+        let window_entity = app.world_mut().spawn((window, PrimaryWindow)).id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(window_position));
+        app.world_mut()
+            .resource_mut::<InjectedWindowPositions>()
+            .set(window_entity, Some(window_position));
+
+        app.update();
+
+        let installed_capture = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .captured_placement(&WindowKey::Primary)
+            .cloned()
+            .ok_or_else(|| "primary window should have captured placement".to_string())?;
+        assert_capture_snapshot(&installed_capture, installed_position, LOW_DPI_SCALE);
+
+        reset_persistence_activity(&mut app);
+
+        app.update();
+
+        assert_persistence_idle(&app);
+
+        let edited = app
+            .world_mut()
+            .entity_mut(monitor_entity)
+            .get_mut::<Monitor>()
+            .map(|mut monitor| {
+                monitor.physical_position = same_entity_edit;
+                monitor.scale_factor = DEFAULT_SCALE;
+            });
+        assert!(edited.is_some());
+        app.update();
+
+        assert_persistence_idle(&app);
+        let retained_capture = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .captured_placement(&WindowKey::Primary);
+        assert_eq!(
+            retained_capture.map(|placement| placement.monitor_snapshot),
+            Some(installed_capture.monitor_snapshot)
+        );
+
+        app.world_mut().entity_mut(window_entity).remove::<Window>();
+        app.world_mut().flush();
+        remove_monitor(&mut app, monitor_entity);
+        app.update();
+        let returned_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            RETURNED_MONITOR_POSITION,
+            RETURNED_MONITOR_SIZE,
+            DEFAULT_SCALE,
+        );
+        app.update();
+
+        let returned_monitor = installed_monitor(&app, returned_entity)
+            .ok_or_else(|| "returned monitor should be installed".to_string())?;
+        assert_eq!(
+            returned_monitor.physical_position,
+            RETURNED_MONITOR_POSITION
+        );
+        assert!((returned_monitor.scale - DEFAULT_SCALE).abs() < SCALE_FACTOR_EPSILON);
+        assert_eq!(
+            installed_capture.rebased_physical_position(&returned_monitor),
+            Some(RETURNED_MONITOR_POSITION + IVec2::new(320, 180))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn on_monitor_association_repairs_initial_managed_fallback_before_persistence()
+    -> Result<(), String> {
+        let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
+        let second_monitor_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+        let window_position = second_monitor_position + IVec2::new(120, 80);
+        let window_key = WindowKey::Managed("secondary".to_string());
+        let mut app = topology_app();
+        app.insert_resource(ManagedWindowPersistence::RememberAll)
+            .insert_resource(RestoreWindowConfig {
+                path: state_file.path().to_path_buf(),
+            })
+            .init_resource::<InjectedWindowPositions>()
+            .add_plugins(PersistencePlugin);
+        spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let second_monitor_entity = spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            second_monitor_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            LOW_DPI_SCALE,
+        );
+        let window_entity = app
+            .world_mut()
+            .spawn((
+                Window::default(),
+                ManagedWindow {
+                    name: "secondary".to_string(),
+                },
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, None);
+        app.world_mut()
+            .resource_mut::<InjectedWindowPositions>()
+            .set(window_entity, Some(window_position));
+        app.add_systems(
+            Last,
+            insert_scheduled_monitor_association
+                .run_if(resource_exists::<ScheduledMonitorAssociation>),
+        );
+
+        app.update();
+
+        let fallback = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .captured_placement(&window_key)
+            .ok_or_else(|| "managed window should capture the initial fallback".to_string())?;
+        assert_eq!(fallback.monitor_snapshot.index, 0);
+        assert!((fallback.monitor_snapshot.scale - DEFAULT_SCALE).abs() < SCALE_FACTOR_EPSILON);
+        assert_persisted_monitor(state_file.path(), 0, DEFAULT_SCALE)?;
+        assert_single_persistence_batch(&app);
+
+        reset_persistence_activity(&mut app);
+
+        app.insert_resource(ScheduledMonitorAssociation {
+            window_entity,
+            monitor_entity: second_monitor_entity,
+        });
+        app.update();
+
+        let installed_monitor = installed_monitor(&app, second_monitor_entity)
+            .ok_or_else(|| "associated monitor should be installed".to_string())?;
+        let current_monitor = app.world().get::<CurrentMonitor>(window_entity);
+        assert_eq!(
+            current_monitor.map(|current_monitor| current_monitor.monitor_info),
+            Some(installed_monitor)
+        );
+
+        app.update();
+
+        let captured = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .captured_placement(&window_key)
+            .ok_or_else(|| "managed window should be recaptured".to_string())?;
+        assert_eq!(captured.monitor_snapshot, installed_monitor);
+        let projected = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .project("test");
+        let projected = projected
+            .get(&window_key)
+            .ok_or_else(|| "managed window should be projected".to_string())?;
+        assert_eq!(projected.monitor, 1);
+        assert!((projected.scale - LOW_DPI_SCALE).abs() < SCALE_FACTOR_EPSILON);
+        assert_persisted_monitor(state_file.path(), 1, LOW_DPI_SCALE)?;
+        assert_single_persistence_batch(&app);
+        assert_eq!(
+            app.world().resource::<InjectedMonitorEvidence>().activity,
+            TopologyProducerActivity::default()
+        );
+        let native_current_monitor_lookups = app
+            .world()
+            .resource::<InjectedCurrentMonitorSource>()
+            .lookups;
+        assert_eq!(native_current_monitor_lookups, 0);
+        Ok(())
     }
 
     #[test]

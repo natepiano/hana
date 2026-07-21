@@ -15,10 +15,9 @@ use crate::constants::DEFAULT_SCALE_FACTOR;
 use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
-use crate::persistence;
+use crate::persistence::CapturedWindowStates;
 #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
 use crate::persistence::SavedWindowMode;
-use crate::restore_window_config::RestoreWindowConfig;
 
 /// Window decoration dimensions (title bar, borders).
 struct WindowDecoration {
@@ -41,6 +40,19 @@ impl WinitInfo {
             self.window_decoration.physical_width,
             self.window_decoration.physical_height,
         )
+    }
+}
+
+#[cfg(test)]
+impl Default for WinitInfo {
+    fn default() -> Self {
+        Self {
+            starting_monitor_index: PRIMARY_MONITOR_INDEX,
+            window_decoration:      WindowDecoration {
+                physical_width:  0,
+                physical_height: 0,
+            },
+        }
     }
 }
 
@@ -146,16 +158,11 @@ pub(crate) fn load_target_position(
     window_entity: Single<Entity, With<PrimaryWindow>>,
     monitors: Res<Monitors>,
     winit_info: Res<WinitInfo>,
-    mut restore_window_config: ResMut<RestoreWindowConfig>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
     platform: Res<Platform>,
 ) {
-    if let Some(all_states) = persistence::load_all_states(&restore_window_config.path) {
-        restore_window_config.loaded_states = all_states;
-    }
-
-    let Some(window_state) = restore_window_config
-        .loaded_states
-        .get(&WindowKey::Primary)
+    let Some(window_state) = captured_window_states
+        .persisted(&WindowKey::Primary)
         .cloned()
     else {
         debug!("[load_target_position] No saved bevy_clerestory state, showing window");
@@ -167,6 +174,8 @@ pub(crate) fn load_target_position(
         });
         return;
     };
+    captured_window_states.bind(&WindowKey::Primary, *window_entity);
+    captured_window_states.freeze(&WindowKey::Primary);
 
     debug!(
         "[load_target_position] Loaded state: position={:?} logical_size={}x{} monitor_scale={} monitor_index={} mode={:?}",
