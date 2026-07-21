@@ -54,6 +54,7 @@ impl Plugin for PersistencePlugin {
                     save::capture_changed_windows
                         .after(monitors::update_current_monitor)
                         .after(restore::check_restore_settling),
+                    captured_window_state::finish_capture_suppression,
                     save::write_dirty_window_states,
                 )
                     .chain()
