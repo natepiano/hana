@@ -3259,6 +3259,7 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
+ "bevy_enhanced_input",
  "bevy_kana",
  "bitflags 2.13.0",
  "clay-layout",

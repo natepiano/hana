@@ -6,13 +6,23 @@
 //! Current controls:
 //!   D - Toggle the secondary button between enabled and disabled
 //!   H - Return to the camera home pose
-//!   N/P - Focus the next/previous widget
-//!   1/0 - Focus the first/last widget
-//!   A/C - Activate/cancel the focused widget
+//!   Tab / Shift+Tab - Focus the next/previous widget through Hana's adapter
+//!   Home / End - Focus the first/last widget through Hana's adapter
+//!   Enter or Space / Escape - Activate/cancel through Hana's adapter
+//!   P - Focus the previous widget through an app-owned Bevy Kana action
 
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_enhanced_input::prelude::ActionSettings;
+use bevy_enhanced_input::prelude::ActionSpawner;
+use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::InputAction;
+use bevy_enhanced_input::prelude::InputContextAppExt;
+use bevy_kana::Keybindings;
+use bevy_kana::action;
+use bevy_kana::bind_action_system;
+use bevy_kana::event;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -22,21 +32,16 @@ use fairy_dust::FairyDustCube;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_panel_material;
 use fairy_dust::cube_face_transform;
-use hana_diegetic::ActivateFocusedWidget;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
-use hana_diegetic::CancelFocusedWidget;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::El;
 use hana_diegetic::FitMax;
-use hana_diegetic::FocusFirstWidget;
-use hana_diegetic::FocusLastWidget;
-use hana_diegetic::FocusNextWidget;
 use hana_diegetic::FocusPreviousWidget;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
@@ -60,6 +65,7 @@ use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::WidgetFocusChanged;
+use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
 
@@ -77,7 +83,7 @@ const CUBE_CLEARANCE: f32 = 0.1;
 const DESCRIPTION_LINES: [&str; 5] = [
     "Hover each control; interaction changes are logged in the terminal.",
     "D changes the secondary button through PanelWidgetReader and PanelWidgetWriter.",
-    "N/P and 1/0 traverse focus; A/C route activate and cancel requests.",
+    "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
     "The world status panel follows the level slider below the cube controls.",
     "The screen status panel follows the separate top-right screen widget.",
 ];
@@ -212,6 +218,39 @@ struct ScreenWidgetInteractionReadout;
 #[derive(Component)]
 struct ScreenWidgetAnchorInstalled;
 
+#[derive(Component)]
+struct AppWidgetInputContext;
+
+action!(
+    /// App-owned action that requests previous-widget focus.
+    AppFocusPrevious
+);
+
+action!(
+    /// Modifier action used by the app-owned widget keybindings.
+    AppWidgetShift
+);
+
+event!(
+    /// App-owned event that invokes the core widget-focus request system.
+    AppFocusPreviousEvent
+);
+
+struct AppOwnedWidgetInputPlugin;
+
+impl Plugin for AppOwnedWidgetInputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_input_context::<AppWidgetInputContext>()
+            .add_systems(Startup, spawn_app_widget_input);
+        bind_action_system!(
+            app,
+            AppFocusPrevious,
+            AppFocusPreviousEvent,
+            focus_previous_widget
+        );
+    }
+}
+
 fn main() {
     // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -244,6 +283,7 @@ fn main() {
         )
         .with_camera_control_panel()
         .init_resource::<SecondaryMode>()
+        .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
         .add_observer(report_widget_focus_changed)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
@@ -255,14 +295,20 @@ fn main() {
                 request_initial_widget_focus,
             ),
         )
-        .with_shortcut(KeyCode::KeyN, focus_next_widget)
-        .with_shortcut(KeyCode::KeyP, focus_previous_widget)
-        .with_shortcut(KeyCode::Digit1, focus_first_widget)
-        .with_shortcut(KeyCode::Digit0, focus_last_widget)
-        .with_shortcut(KeyCode::KeyA, activate_focused_widget)
-        .with_shortcut(KeyCode::KeyC, cancel_focused_widget)
         .with_shortcut(KeyCode::KeyD, toggle_secondary_button)
         .run();
+}
+
+fn spawn_app_widget_input(mut commands: Commands) {
+    commands.spawn((
+        AppWidgetInputContext,
+        Actions::<AppWidgetInputContext>::spawn(SpawnWith(spawn_app_widget_actions)),
+    ));
+}
+
+fn spawn_app_widget_actions(spawner: &mut ActionSpawner<AppWidgetInputContext>) {
+    let keybindings = Keybindings::new::<AppWidgetShift>(spawner, ActionSettings::default());
+    keybindings.spawn_key::<AppFocusPrevious>(spawner, KeyCode::KeyP);
 }
 
 fn request_initial_widget_focus(
@@ -312,46 +358,11 @@ fn report_widget_focus_changed(
     }
 }
 
-fn focus_next_widget(
-    window: Single<Entity, With<PrimaryWindow>>,
-    mut requests: MessageWriter<FocusNextWidget>,
-) {
-    requests.write(FocusNextWidget { window: *window });
-}
-
 fn focus_previous_widget(
     window: Single<Entity, With<PrimaryWindow>>,
     mut requests: MessageWriter<FocusPreviousWidget>,
 ) {
     requests.write(FocusPreviousWidget { window: *window });
-}
-
-fn focus_first_widget(
-    window: Single<Entity, With<PrimaryWindow>>,
-    mut requests: MessageWriter<FocusFirstWidget>,
-) {
-    requests.write(FocusFirstWidget { window: *window });
-}
-
-fn focus_last_widget(
-    window: Single<Entity, With<PrimaryWindow>>,
-    mut requests: MessageWriter<FocusLastWidget>,
-) {
-    requests.write(FocusLastWidget { window: *window });
-}
-
-fn activate_focused_widget(
-    window: Single<Entity, With<PrimaryWindow>>,
-    mut requests: MessageWriter<ActivateFocusedWidget>,
-) {
-    requests.write(ActivateFocusedWidget { window: *window });
-}
-
-fn cancel_focused_widget(
-    window: Single<Entity, With<PrimaryWindow>>,
-    mut requests: MessageWriter<CancelFocusedWidget>,
-) {
-    requests.write(CancelFocusedWidget { window: *window });
 }
 
 fn anchor_screen_interaction_readout(
