@@ -1,20 +1,12 @@
 //! Restore configuration.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-
-use super::WindowKey;
-use super::persistence::WindowState;
 
 /// Configuration for the `RestoreWindowPlugin`.
 #[derive(Resource, Clone)]
 pub(crate) struct RestoreWindowConfig {
     /// Full path to the state file.
-    pub(crate) path:          PathBuf,
-    /// Snapshot of window states as loaded from the file at startup.
-    /// Populated during restore so downstream code can compare intended vs actual state.
-    /// Entries persist as a read-only snapshot for the example's File column.
-    pub(crate) loaded_states: HashMap<WindowKey, WindowState>,
+    pub(crate) path: PathBuf,
 }

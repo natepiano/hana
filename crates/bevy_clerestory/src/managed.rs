@@ -5,8 +5,6 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_kana::ToI32;
-use bevy_kana::ToU32;
 
 use super::WindowKey;
 use super::constants::DEFAULT_SCALE_FACTOR;
@@ -16,14 +14,14 @@ use super::constants::PRIMARY_MONITOR_INDEX;
 use super::constants::PRIMARY_WINDOW_KEY;
 use super::monitors::CurrentMonitor;
 use super::monitors::Monitors;
-use super::persistence;
-use super::persistence::SavedWindowMode;
-use super::persistence::WindowState;
+use super::persistence::CapturedWindowPlacement;
+use super::persistence::CapturedWindowStates;
+use super::persistence::PersistedWindowState;
 use super::platform::Platform;
 use super::restore;
+use super::restore::MonitorResolutionSource;
 use super::restore::WinitInfo;
 use super::restore::X11FrameCompensated;
-use super::restore_window_config::RestoreWindowConfig;
 
 /// Marks a window entity as managed by the window manager plugin.
 ///
@@ -73,15 +71,11 @@ pub(crate) struct ManagedWindowRegistry {
     pub(crate) entities: HashMap<Entity, String>,
 }
 
-/// Observer: register a `ManagedWindow` name, deduplicate if needed, and save initial state if
-/// needed.
+/// Register and deduplicate a `ManagedWindow` name.
 pub(crate) fn on_managed_window_added(
     add: On<Add, ManagedWindow>,
     mut managed: Query<&mut ManagedWindow>,
     mut managed_window_registry: ResMut<ManagedWindowRegistry>,
-    restore_window_config: Res<RestoreWindowConfig>,
-    monitors: Res<Monitors>,
-    windows: Query<&Window>,
     primary_query: Query<(), With<PrimaryWindow>>,
 ) {
     let entity = add.entity;
@@ -128,86 +122,20 @@ pub(crate) fn on_managed_window_added(
     debug!(
         "[on_managed_window_added] Registered managed window \"{unique_name}\" on entity {entity:?}"
     );
-
-    // If no saved state exists for this window, save its current position/size immediately
-    let existing = persistence::load_all_states(&restore_window_config.path);
-    let already_saved = existing
-        .as_ref()
-        .is_some_and(|states| states.contains_key(&WindowKey::Managed(unique_name.clone())));
-
-    if !already_saved && let Ok(window) = windows.get(entity) {
-        let monitor_info = match window.position {
-            WindowPosition::At(physical_position) => *monitors.monitor_for_window(
-                physical_position,
-                window.physical_width(),
-                window.physical_height(),
-            ),
-            _ => *monitors.first(),
-        };
-        let logical_position = match window.position {
-            WindowPosition::At(physical_position) => {
-                let logical_x = (f64::from(physical_position.x) / monitor_info.scale)
-                    .round()
-                    .to_i32();
-                let logical_y = (f64::from(physical_position.y) / monitor_info.scale)
-                    .round()
-                    .to_i32();
-                Some((logical_x, logical_y))
-            },
-            _ => None,
-        };
-        let window_state = WindowState {
-            logical_position,
-            logical_width: window.width().to_u32(),
-            logical_height: window.height().to_u32(),
-            scale: monitor_info.scale,
-            monitor: monitor_info.index,
-            saved_window_mode: SavedWindowMode::Windowed,
-            app_name: String::new(),
-        };
-
-        let mut states = existing.unwrap_or_default();
-        states.insert(WindowKey::Managed(unique_name.clone()), window_state);
-        persistence::save_all_states(&restore_window_config.path, &states);
-        debug!("[on_managed_window_added] Saved initial state for \"{unique_name}\"");
-    }
 }
 
 /// Observer: unregister a `ManagedWindow` name when removed, and update state file if `ActiveOnly`.
 pub(crate) fn on_managed_window_removed(
     remove: On<Remove, ManagedWindow>,
     mut managed_window_registry: ResMut<ManagedWindowRegistry>,
-    restore_window_config: Res<RestoreWindowConfig>,
     managed_window_persistence: Res<ManagedWindowPersistence>,
-    monitors: Res<Monitors>,
-    all_windows: Query<
-        (
-            Entity,
-            &Window,
-            Option<&CurrentMonitor>,
-            Option<&ManagedWindow>,
-        ),
-        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
-    >,
-    primary_query: Query<(), With<PrimaryWindow>>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
 ) {
     let entity = remove.entity;
     if let Some(name) = managed_window_registry.entities.remove(&entity) {
-        // If `ActiveOnly`, rebuild state from all remaining active windows.
-        // The removed entity's `ManagedWindow` is being removed, so the query
-        // naturally excludes it — but guard against it just in case.
-        if *managed_window_persistence == ManagedWindowPersistence::ActiveOnly {
-            persistence::save_active_window_state(
-                &restore_window_config,
-                &monitors,
-                &all_windows,
-                &primary_query,
-                Some(entity),
-            );
-            debug!(
-                "[on_managed_window_removed] Rebuilt state file without \"{name}\" (ActiveOnly)"
-            );
-        }
+        let window_key = WindowKey::Managed(name.clone());
+        captured_window_states.unbind(&window_key, entity);
+        captured_window_states.apply_policy(&managed_window_persistence);
 
         managed_window_registry.names.remove(&name);
         debug!(
@@ -216,34 +144,12 @@ pub(crate) fn on_managed_window_removed(
     }
 }
 
-/// When `ManagedWindowPersistence` switches to `ActiveOnly`, immediately rebuild the state
-/// file from the currently-active windows so that any previously-remembered-but-closed
-/// window entries are pruned.
+/// Apply the current retention policy to captured entries.
 pub(crate) fn on_persistence_changed(
     managed_window_persistence: Res<ManagedWindowPersistence>,
-    restore_window_config: Res<RestoreWindowConfig>,
-    monitors: Res<Monitors>,
-    all_windows: Query<
-        (
-            Entity,
-            &Window,
-            Option<&CurrentMonitor>,
-            Option<&ManagedWindow>,
-        ),
-        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
-    >,
-    primary_query: Query<(), With<PrimaryWindow>>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
 ) {
-    if *managed_window_persistence == ManagedWindowPersistence::ActiveOnly {
-        persistence::save_active_window_state(
-            &restore_window_config,
-            &monitors,
-            &all_windows,
-            &primary_query,
-            None,
-        );
-        debug!("[on_persistence_changed] Rebuilt state file for ActiveOnly mode");
-    }
+    captured_window_states.apply_policy(&managed_window_persistence);
 }
 
 /// Observer: hide a managed window on creation and load its saved state.
@@ -253,7 +159,7 @@ pub(crate) fn on_managed_window_load(
     managed: Query<&ManagedWindow>,
     monitors: Res<Monitors>,
     winit_info: Option<Res<WinitInfo>>,
-    restore_window_config: Res<RestoreWindowConfig>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
     mut windows: Query<&mut Window>,
     primary_monitor: Query<&CurrentMonitor, With<PrimaryWindow>>,
     platform: Res<Platform>,
@@ -271,20 +177,19 @@ pub(crate) fn on_managed_window_load(
         window.visible = false;
     }
 
-    // Check the startup snapshot — not the file, which may have been modified by
-    // `on_managed_window_added` saving initial state for brand-new windows.
     let window_key = WindowKey::Managed((*name).clone());
-    let Some(saved_state) = restore_window_config
-        .loaded_states
-        .get(&window_key)
-        .cloned()
-    else {
+    let captured_placement = captured_window_states
+        .captured_placement(&window_key)
+        .cloned();
+    let Some(saved_state) = captured_window_states.restore_state(&window_key) else {
         debug!("[on_managed_window_load] No saved state for \"{name}\", showing window");
         if let Ok(mut window) = windows.get_mut(entity) {
             window.visible = true;
         }
         return;
     };
+    captured_window_states.bind(&window_key, entity);
+    captured_window_states.freeze(&window_key);
 
     debug!(
         "[on_managed_window_load] Loaded state for \"{name}\": position={:?} logical_size={}x{} monitor_scale={} monitor={} mode={:?}",
@@ -329,6 +234,7 @@ pub(crate) fn on_managed_window_load(
         &mut commands,
         primary_scale,
         *platform,
+        captured_placement.as_ref(),
     );
 }
 
@@ -341,25 +247,26 @@ pub(crate) fn on_managed_window_load(
 /// preventing the physical size from being doubled on high-DPI displays.
 fn restore_managed_window(
     entity: Entity,
-    saved_window_state: &WindowState,
+    saved_window_state: &PersistedWindowState,
     monitors: &Monitors,
     winit_info: &WinitInfo,
     commands: &mut Commands,
     primary_scale: f64,
     platform: Platform,
+    captured_placement: Option<&CapturedWindowPlacement>,
 ) {
-    let resolved_monitor = restore::resolve_target_monitor_and_position(
-        saved_window_state.monitor,
-        saved_window_state.logical_position,
-        monitors,
-    );
+    let ManagedRestoreTarget {
+        monitor_info,
+        logical_position,
+        monitor_resolution_source,
+        prepared_position,
+    } = resolve_managed_restore_target(saved_window_state, monitors, captured_placement);
     if matches!(
-        resolved_monitor.monitor_resolution_source,
+        monitor_resolution_source,
         restore::MonitorResolutionSource::FallbackToPrimary
     ) {
         warn!(
-            "[restore_managed_window] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
-            saved_window_state.monitor,
+            "[restore_managed_window] Target monitor unavailable, falling back to monitor {PRIMARY_MONITOR_INDEX}",
         );
     }
 
@@ -368,14 +275,17 @@ fn restore_managed_window(
     // The window is created on the focused window's monitor (the primary window's monitor)
     // without explicit positioning. Its starting scale matches the primary monitor, not the
     // target monitor.
-    let target_position = restore::compute_target_position(
+    let mut target_position = restore::compute_target_position(
         saved_window_state,
-        resolved_monitor.monitor_info,
-        resolved_monitor.logical_position,
+        monitor_info,
+        logical_position,
         physical_decoration,
         primary_scale,
         platform,
     );
+    if let PreparedPosition::Retained(physical_position) = prepared_position {
+        target_position.physical_position = physical_position;
+    }
 
     debug!(
         "[restore_managed_window] saved_position={:?} clamped_position={:?} target_scale={} logical={}x{} physical={}x{} monitor={} monitor_position=({},{}) monitor_size=({},{})",
@@ -387,10 +297,10 @@ fn restore_managed_window(
         target_position.physical_size.x,
         target_position.physical_size.y,
         target_position.monitor_index,
-        resolved_monitor.monitor_info.physical_position.x,
-        resolved_monitor.monitor_info.physical_position.y,
-        resolved_monitor.monitor_info.physical_size.x,
-        resolved_monitor.monitor_info.physical_size.y,
+        monitor_info.physical_position.x,
+        monitor_info.physical_position.y,
+        monitor_info.physical_size.x,
+        monitor_info.physical_size.y,
     );
 
     let is_fullscreen = saved_window_state.saved_window_mode.is_fullscreen();
@@ -401,5 +311,414 @@ fn restore_managed_window(
     // and delaying restore gives the compositor time to revert position changes.
     if is_fullscreen || !platform.needs_frame_compensation() {
         commands.entity(entity).insert(X11FrameCompensated);
+    }
+}
+
+struct ManagedRestoreTarget<'a> {
+    monitor_info:              &'a super::monitors::MonitorInfo,
+    logical_position:          Option<(i32, i32)>,
+    monitor_resolution_source: MonitorResolutionSource,
+    prepared_position:         PreparedPosition,
+}
+
+enum PreparedPosition {
+    Computed,
+    Retained(Option<IVec2>),
+}
+
+fn resolve_managed_restore_target<'a>(
+    saved_window_state: &PersistedWindowState,
+    monitors: &'a Monitors,
+    captured_placement: Option<&CapturedWindowPlacement>,
+) -> ManagedRestoreTarget<'a> {
+    let Some(captured_placement) = captured_placement else {
+        let resolved_monitor = restore::resolve_target_monitor_and_position(
+            saved_window_state.monitor,
+            saved_window_state.logical_position,
+            monitors,
+        );
+        return ManagedRestoreTarget {
+            monitor_info:              resolved_monitor.monitor_info,
+            logical_position:          resolved_monitor.logical_position,
+            monitor_resolution_source: resolved_monitor.monitor_resolution_source,
+            prepared_position:         PreparedPosition::Computed,
+        };
+    };
+
+    match captured_placement.monitor_snapshot.identity {
+        super::monitors::MonitorIdentity::Verified(id) => monitors.by_id(id).map_or_else(
+            || ManagedRestoreTarget {
+                monitor_info:              monitors.first(),
+                logical_position:          None,
+                monitor_resolution_source: MonitorResolutionSource::FallbackToPrimary,
+                prepared_position:         PreparedPosition::Computed,
+            },
+            |monitor_info| ManagedRestoreTarget {
+                monitor_info,
+                logical_position: saved_window_state.logical_position,
+                monitor_resolution_source: MonitorResolutionSource::Requested,
+                prepared_position: PreparedPosition::Retained(
+                    captured_placement.rebased_physical_position(monitor_info),
+                ),
+            },
+        ),
+        super::monitors::MonitorIdentity::Unverified => {
+            let resolved_monitor = restore::resolve_target_monitor_and_position(
+                saved_window_state.monitor,
+                saved_window_state.logical_position,
+                monitors,
+            );
+            let prepared_position = if matches!(
+                &resolved_monitor.monitor_resolution_source,
+                MonitorResolutionSource::Requested
+            ) {
+                PreparedPosition::Retained(
+                    captured_placement.rebased_physical_position(resolved_monitor.monitor_info),
+                )
+            } else {
+                PreparedPosition::Computed
+            };
+            ManagedRestoreTarget {
+                monitor_info: resolved_monitor.monitor_info,
+                logical_position: resolved_monitor.logical_position,
+                monitor_resolution_source: resolved_monitor.monitor_resolution_source,
+                prepared_position,
+            }
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monitors::MonitorId;
+    use crate::monitors::MonitorIdentity;
+    use crate::monitors::MonitorInfo;
+    use crate::persistence::CapturedWindowPosition;
+    use crate::persistence::SavedWindowMode;
+    use crate::restore::TargetPosition;
+
+    const CAPTURED_OFFSET: IVec2 = IVec2::new(100, 50);
+    const TARGET_ID: MonitorId = MonitorId::from_test_raw(7);
+    const ABSENT_ID: MonitorId = MonitorId::from_test_raw(8);
+
+    fn persisted() -> PersistedWindowState {
+        PersistedWindowState {
+            logical_position:  Some((10, 20)),
+            logical_width:     800,
+            logical_height:    600,
+            scale:             1.0,
+            monitor:           0,
+            saved_window_mode: SavedWindowMode::Windowed,
+            app_name:          "test".to_string(),
+        }
+    }
+
+    fn managed_removal_app(
+        managed_window_persistence: ManagedWindowPersistence,
+    ) -> (App, Entity, WindowKey) {
+        let mut app = App::new();
+        app.insert_resource(managed_window_persistence)
+            .init_resource::<ManagedWindowRegistry>()
+            .init_resource::<CapturedWindowStates>()
+            .add_observer(on_managed_window_removed);
+        let name = "secondary".to_string();
+        let window_key = WindowKey::Managed(name.clone());
+        let entity = app
+            .world_mut()
+            .spawn((Window::default(), ManagedWindow { name: name.clone() }))
+            .id();
+        {
+            let mut registry = app.world_mut().resource_mut::<ManagedWindowRegistry>();
+            registry.names.insert(name.clone());
+            registry.entities.insert(entity, name);
+        }
+        {
+            let mut states = app.world_mut().resource_mut::<CapturedWindowStates>();
+            states.seed(HashMap::from([(window_key.clone(), persisted())]));
+            states.bind(&window_key, entity);
+        }
+        (app, entity, window_key)
+    }
+
+    fn monitor(
+        identity: MonitorIdentity,
+        index: usize,
+        scale: f64,
+        physical_position: IVec2,
+    ) -> MonitorInfo {
+        MonitorInfo {
+            identity,
+            index,
+            scale,
+            physical_position,
+            physical_size: UVec2::new(1_920, 1_080),
+        }
+    }
+
+    fn captured_placement(
+        identity: MonitorIdentity,
+        index: usize,
+        scale: f64,
+        physical_position: IVec2,
+        position: CapturedWindowPosition,
+    ) -> CapturedWindowPlacement {
+        CapturedWindowPlacement {
+            monitor_snapshot: monitor(identity, index, scale, physical_position),
+            position,
+            logical_size: UVec2::new(800, 600),
+            saved_window_mode: SavedWindowMode::Windowed,
+            captured_scale: scale,
+        }
+    }
+
+    fn prepare_captured_managed_window(
+        monitors: Monitors,
+        captured_placement: CapturedWindowPlacement,
+    ) -> (App, Entity) {
+        let mut app = App::new();
+        app.insert_resource(monitors)
+            .insert_resource(WinitInfo::default())
+            .insert_resource(Platform::Windows)
+            .init_resource::<CapturedWindowStates>()
+            .add_observer(on_managed_window_load);
+        let previous_entity = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<CapturedWindowStates>()
+            .promote(
+                WindowKey::Managed("secondary".to_string()),
+                previous_entity,
+                captured_placement,
+            );
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                Window::default(),
+                ManagedWindow {
+                    name: "secondary".to_string(),
+                },
+            ))
+            .id();
+        app.world_mut().flush();
+        (app, entity)
+    }
+
+    #[test]
+    fn captured_verified_reopen_prepares_returned_identity_at_its_current_index() {
+        let returned_origin = IVec2::new(2_000, -200);
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                monitor(MonitorIdentity::Unverified, 0, 1.0, IVec2::ZERO),
+            ),
+            (
+                Entity::from_bits(2),
+                monitor(MonitorIdentity::Unverified, 1, 1.0, IVec2::new(-1_920, 0)),
+            ),
+            (
+                Entity::from_bits(3),
+                monitor(
+                    MonitorIdentity::Verified(TARGET_ID),
+                    2,
+                    2.0,
+                    returned_origin,
+                ),
+            ),
+        ]);
+        let captured = captured_placement(
+            MonitorIdentity::Verified(TARGET_ID),
+            1,
+            1.0,
+            IVec2::new(-1_920, 0),
+            CapturedWindowPosition::Restorable {
+                logical_offset: CAPTURED_OFFSET,
+            },
+        );
+
+        let (app, entity) = prepare_captured_managed_window(monitors, captured);
+        let target = app.world().get::<TargetPosition>(entity);
+
+        assert_eq!(target.map(|target| target.monitor_index), Some(2));
+        assert_eq!(target.map(|target| target.target_scale), Some(2.0));
+        assert_eq!(
+            target.and_then(|target| target.physical_position),
+            Some(returned_origin + CAPTURED_OFFSET * 2)
+        );
+        assert_eq!(
+            target.map(|target| target.physical_size),
+            Some(UVec2::new(1_600, 1_200))
+        );
+    }
+
+    #[test]
+    fn captured_verified_reopen_falls_back_when_identity_is_absent() {
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                monitor(MonitorIdentity::Unverified, 0, 2.0, IVec2::ZERO),
+            ),
+            (
+                Entity::from_bits(2),
+                monitor(MonitorIdentity::Unverified, 1, 1.0, IVec2::new(-1_920, 0)),
+            ),
+        ]);
+        let captured = captured_placement(
+            MonitorIdentity::Verified(ABSENT_ID),
+            1,
+            1.0,
+            IVec2::new(-1_920, 0),
+            CapturedWindowPosition::Restorable {
+                logical_offset: CAPTURED_OFFSET,
+            },
+        );
+
+        let (app, entity) = prepare_captured_managed_window(monitors, captured);
+        let target = app.world().get::<TargetPosition>(entity);
+
+        assert_eq!(target.map(|target| target.monitor_index), Some(0));
+        assert_eq!(target.map(|target| target.target_scale), Some(2.0));
+        assert_eq!(target.and_then(|target| target.physical_position), None);
+    }
+
+    #[test]
+    fn captured_unverified_reopen_retains_index_based_targeting() {
+        let indexed_origin = IVec2::new(-2_560, 300);
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                monitor(MonitorIdentity::Unverified, 0, 1.0, IVec2::ZERO),
+            ),
+            (
+                Entity::from_bits(2),
+                monitor(MonitorIdentity::Unverified, 1, 2.0, indexed_origin),
+            ),
+        ]);
+        let captured = captured_placement(
+            MonitorIdentity::Unverified,
+            1,
+            1.0,
+            IVec2::new(-1_920, 0),
+            CapturedWindowPosition::Restorable {
+                logical_offset: CAPTURED_OFFSET,
+            },
+        );
+
+        let (app, entity) = prepare_captured_managed_window(monitors, captured);
+        let target = app.world().get::<TargetPosition>(entity);
+
+        assert_eq!(target.map(|target| target.monitor_index), Some(1));
+        assert_eq!(
+            target.and_then(|target| target.physical_position),
+            Some(indexed_origin + CAPTURED_OFFSET * 2)
+        );
+    }
+
+    #[test]
+    fn captured_unverified_reopen_falls_back_without_retained_coordinate() {
+        let monitors = Monitors::from_test_monitors([(
+            Entity::from_bits(1),
+            monitor(MonitorIdentity::Unverified, 0, 2.0, IVec2::ZERO),
+        )]);
+        let captured = captured_placement(
+            MonitorIdentity::Unverified,
+            1,
+            1.0,
+            IVec2::new(-1_920, 0),
+            CapturedWindowPosition::Restorable {
+                logical_offset: CAPTURED_OFFSET,
+            },
+        );
+
+        let (app, entity) = prepare_captured_managed_window(monitors, captured);
+        let target = app.world().get::<TargetPosition>(entity);
+
+        assert_eq!(target.map(|target| target.monitor_index), Some(0));
+        assert_eq!(target.map(|target| target.target_scale), Some(2.0));
+        assert_eq!(target.and_then(|target| target.physical_position), None);
+    }
+
+    #[test]
+    fn captured_compositor_controlled_reopen_has_no_coordinate() {
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                monitor(MonitorIdentity::Unverified, 0, 1.0, IVec2::ZERO),
+            ),
+            (
+                Entity::from_bits(2),
+                monitor(
+                    MonitorIdentity::Verified(TARGET_ID),
+                    2,
+                    2.0,
+                    IVec2::new(2_000, -200),
+                ),
+            ),
+        ]);
+        let captured = captured_placement(
+            MonitorIdentity::Verified(TARGET_ID),
+            1,
+            1.0,
+            IVec2::new(-1_920, 0),
+            CapturedWindowPosition::CompositorControlled,
+        );
+
+        let (app, entity) = prepare_captured_managed_window(monitors, captured);
+        let target = app.world().get::<TargetPosition>(entity);
+
+        assert_eq!(target.map(|target| target.monitor_index), Some(2));
+        assert_eq!(target.and_then(|target| target.physical_position), None);
+    }
+
+    #[test]
+    fn managed_removal_remembers_absent_state_under_remember_all() {
+        let (mut app, entity, window_key) =
+            managed_removal_app(ManagedWindowPersistence::RememberAll);
+
+        app.world_mut().entity_mut(entity).remove::<ManagedWindow>();
+        app.world_mut().flush();
+
+        let entry = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .entry(&window_key);
+        assert!(entry.is_some());
+        assert_eq!(entry.and_then(|entry| entry.live), None);
+    }
+
+    #[test]
+    fn managed_removal_prunes_active_only_without_unbinding_primary() {
+        let (mut app, entity, managed_key) =
+            managed_removal_app(ManagedWindowPersistence::ActiveOnly);
+        {
+            let mut states = app.world_mut().resource_mut::<CapturedWindowStates>();
+            states.promote(
+                WindowKey::Primary,
+                entity,
+                CapturedWindowPlacement {
+                    monitor_snapshot:  MonitorInfo {
+                        identity:          MonitorIdentity::Unverified,
+                        index:             0,
+                        scale:             1.0,
+                        physical_position: IVec2::ZERO,
+                        physical_size:     UVec2::new(1_920, 1_080),
+                    },
+                    position:          CapturedWindowPosition::Restorable {
+                        logical_offset: IVec2::new(10, 20),
+                    },
+                    logical_size:      UVec2::new(800, 600),
+                    saved_window_mode: SavedWindowMode::Windowed,
+                    captured_scale:    1.0,
+                },
+            );
+        }
+        app.world_mut().entity_mut(entity).insert(PrimaryWindow);
+
+        app.world_mut().entity_mut(entity).remove::<ManagedWindow>();
+        app.world_mut().flush();
+
+        let states = app.world().resource::<CapturedWindowStates>();
+        assert!(states.entry(&managed_key).is_none());
+        assert_eq!(states.live_entity(&WindowKey::Primary), Some(entity));
     }
 }

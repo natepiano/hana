@@ -10,6 +10,7 @@ use std::ops::Deref;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::MonitorSelection;
+use bevy::window::OnMonitor;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowMode;
 use bevy::winit::WINIT_WINDOWS;
@@ -110,6 +111,41 @@ pub(super) fn clear_monitor_selection_inputs(
     commands
         .entity(removed.entity)
         .try_remove::<MonitorSelectionInputs>();
+}
+
+/// Install the exact monitor snapshot when Bevy inserts or replaces [`OnMonitor`].
+pub(super) fn install_current_monitor_from_association(
+    insert: On<Insert, OnMonitor>,
+    windows: Query<
+        (&Window, &OnMonitor, Option<&CurrentMonitor>),
+        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
+    >,
+    monitors: Res<Monitors>,
+    mut commands: Commands,
+) {
+    let Ok((window, on_monitor, existing)) = windows.get(insert.entity) else {
+        return;
+    };
+    let Some(monitor_info) = monitors
+        .iter()
+        .find(|monitor| monitor.entity == on_monitor.0)
+        .map(|monitor| *monitor.monitor_info)
+    else {
+        return;
+    };
+    let current_monitor = CurrentMonitor {
+        monitor_info,
+        effective_window_mode: compute_effective_window_mode(window, &monitor_info, &monitors),
+    };
+    if !current_monitor_changed(existing, &current_monitor) {
+        return;
+    }
+
+    debug!(
+        "[install_current_monitor_from_association] monitor_entity={:?} index={} scale={} effective_window_mode={:?}",
+        on_monitor.0, monitor_info.index, monitor_info.scale, current_monitor.effective_window_mode,
+    );
+    commands.entity(insert.entity).insert(current_monitor);
 }
 
 pub(super) fn remove_current_monitors_for_empty_topology(world: &mut World) {

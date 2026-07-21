@@ -7,6 +7,7 @@ mod topology;
 use bevy::prelude::*;
 pub use current_monitor::CurrentMonitor;
 use current_monitor::clear_monitor_selection_inputs;
+use current_monitor::install_current_monitor_from_association;
 pub(crate) use current_monitor::update_current_monitor;
 use identity::MonitorConfiguration;
 pub use identity::MonitorId;
@@ -33,6 +34,7 @@ impl Plugin for MonitorPlugin {
         app.insert_resource(configuration)
             .init_resource::<MonitorIdentityRegistry>()
             .add_observer(clear_monitor_selection_inputs)
+            .add_observer(install_current_monitor_from_association)
             .add_systems(
                 PreStartup,
                 init_monitors.in_set(ClerestoryPreStartupSet::MonitorsInitialized),
