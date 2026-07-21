@@ -1187,7 +1187,7 @@ polling.
 - No remaining phase became redundant or required merging, splitting, or
   reordering.
 
-### Phase 7 — Add one-shot registration and application-controlled recovery  · status: todo
+### Phase 7 — Add one-shot registration and application-controlled recovery  · status: done (`03a0efc6`)
 
 #### Work Order
 
@@ -1202,6 +1202,7 @@ Use this registration component:
 ```rust
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component)]
+#[type_path = "bevy_clerestory::recovery"]
 pub enum WindowRecovery {
     #[default]
     Disabled,
@@ -1273,8 +1274,17 @@ pub struct CancelWindowRecovery {
 }
 ```
 
-  The final derives/reflection surface is completed in Phase 11. Notifications
-  never echo `WindowRecovery`.
+  Every new public recovery component and event has the exact reflected path
+  `bevy_clerestory::recovery::<TypeName>` regardless of its private declaration
+  module. The final derives/reflection surface is completed in Phase 11.
+  Notifications never echo `WindowRecovery`; existing restore-result events
+  retain their `bevy_clerestory::events::<TypeName>` paths.
+- Begin the end-to-end consumer in `restore_after_reconnect`: register its
+  primary and managed secondary with `ApplicationControlled`, record accepted
+  registration plus pending/available events in the existing ordered trace, and
+  preserve `ExitCondition::DontExit`. This phase's example reports return
+  availability only; it does not request restore, create replacement content,
+  or exercise automatic return before the later phases implement those paths.
 - `ApplicationControlled` never creates/re-enables content and never applies a
   restore without an accepted `RestoreWindow`. It may retain a verified target
   on compositor-controlled platforms; supported size/mode can be applied later,
@@ -1310,6 +1320,10 @@ pub struct CancelWindowRecovery {
   freeze/cancel/promotion transitions.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — accepted native
   readiness and retained preparation identity.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs` — first
+  application-controlled recovery consumer and event trace.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Phase 7
+  unplug/replug verification steps and expected no-automatic-action behavior.
 
 **Constraints from prior phases:** Phase 5 owns all captured/persisted state;
 Phase 6 owns shared restore preparation and canonical replacement startup
@@ -1324,31 +1338,9 @@ until Bevy inserts its real `OnMonitor` relationship; registration must wait for
 the repaired exact association. Phase 6 treats `OnMonitor`, `CurrentMonitor`,
 and `NativeWindowReady` as one validated association and clears current-monitor
 state plus readiness when association validation fails or a non-primary managed
-role is removed.
-
-**Pending decision: Canonical reflected paths for the new recovery API**
-
-Actual problem:
-Phase 7 introduces public recovery types across several private files, so
-derived Bevy paths would leak their physical declaration modules and could
-change during later refactors.
-
-What exists now:
-- Existing monitor types preserve `bevy_clerestory::monitors::*` paths, while
-  existing restore result events keep their `bevy_clerestory::events::*` paths.
-- Phase 11 requires remote reflection and event type data but does not name
-  stable paths for Phase 7's new component and events.
-
-What should change:
-- Assign one canonical namespace to every new public recovery component and
-  event, preserve the existing result-event paths, and assert every exact path
-  in Phase 11.
-
-Recommendation:
-Use `bevy_clerestory::recovery::*` for all new recovery types and retain
-`bevy_clerestory::events::*` for existing restore results; add custom
-`TypePath` attributes when the types are introduced and exact assertions in
-Phase 11.
+role is removed. Public recovery types use stable
+`bevy_clerestory::recovery::<TypeName>` reflected paths rather than paths derived
+from their private declaration modules.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Pure and Bevy `App` tests cover first eligible baseline, same-bundle
@@ -1364,7 +1356,70 @@ association production test proves the initial fallback creates no recovery
 generation, `OnMonitor` repairs `CurrentMonitor`, and exactly one generation is
 then accepted for the real verified target. Rejected associations and
 non-primary managed-role removal clear both `CurrentMonitor` and
-`NativeWindowReady` before registration can become eligible.
+`NativeWindowReady` before registration can become eligible. A physical
+`restore_after_reconnect` run registers both windows only after their exact
+association is accepted, records one pending fact on target loss and one
+available fact on exact target return, keeps the process alive if both windows
+are removed, and performs no automatic reconstruction or restore.
+
+#### Retrospective
+
+**What worked:**
+
+- `recovery/registration.rs` and `recovery/application_controlled.rs` retain a
+  canonical generation across linked window deletion and emit one pending and
+  one available fact from installed topology revisions.
+- The production-order test covers late managed association, corrected capture,
+  exact acceptance, and zero idle native polling; all 136 crate tests pass.
+- The macOS run retained `MonitorId(1)` across entity `232v0` to `242v0` and an
+  index change from 1 to 2 without reconstructing either application window.
+
+**What deviated from the plan:**
+
+- Cancellation now removes every transient restore-attempt component, makes a
+  surviving hidden window visible, and permits a live `PersistedOnly` entry to
+  become writable on the next capture.
+- The probe adds recovery only after each window reports the selected monitor;
+  wrong-monitor startup associations cannot become accepted baselines.
+- Probe placement uses a one-time `ProbePlacementRequested` component consumed
+  by `Added<ProbePlacementRequested>` in `Update` instead of positioning both
+  windows in `Startup`.
+
+**Surprises:**
+
+- Mutating `Window.position` from the `OnMonitor` observer triggered by winit's
+  `Last` command flush occurs after `changed_windows` records its change tick,
+  so that mutation is not a usable runtime placement request.
+- A physical run exposed wrong-monitor registration that the startup smoke and
+  application tests could not reproduce without real native windows.
+
+**Implications for remaining phases:**
+
+- Later recovery behavior must treat the retained canonical generation and
+  frozen `CapturedWindowStates` entry as authoritative after the live entity is
+  removed.
+- Example phases must retain the association-confirmed registration boundary
+  and the one-time next-`Update` placement request; they must not restore the
+  old startup positioning system.
+- The macOS matrix must record that application-controlled reconnect publishes
+  availability while leaving both windows absent.
+
+### Phase 7 Review
+
+- Phase 8 now extends the shipped `FallbackAndReturnRecoveries` skeleton, stops
+  at internal restore intent, and covers cancellation/removal from every phase.
+- Phases 9–10 now replace Phase 7's transitional handlers with immutable
+  attempts and preserve cancellation cleanup plus durable diagnostics.
+- Phase 11 now completes reflection metadata, remote behavior, and docs for the
+  already-exported recovery API instead of redefining it.
+- Phase 12 now uses the diagnostic acceptance record before unplug, retains the
+  one-time placement boundary, and names the actual split example files and
+  trace targets.
+- Phase 13 now records the Hana editor behavior that its recovery integration
+  must selectively replace.
+- Phase 16 now preserves the Phase 7 application-controlled macOS result as a
+  separate physical evidence row.
+- No remaining phase required merging, splitting, or reordering.
 
 ### Phase 8 — Add automatic fallback-and-return transitions  · status: todo
 
@@ -1377,10 +1432,14 @@ recovery.
 
 **Spec:**
 
-- Implement private automatic phases for healthy, removal-pending,
+- Move and extend Phase 7's `FallbackAndReturnRecoveries`, `Healthy` phase, and
+  retained window shell from `registration.rs` into the automatic lifecycle.
+  Implement private automatic phases for healthy, removal-pending,
   fallback-settling, on-fallback, restoring, missing-live-window, and
   retryable-failure. Apply the same model to registered primary and secondary
-  windows.
+  windows, reuse one capability predicate for acceptance and rearming, and make
+  cancellation/removal terminate every automatic phase rather than only
+  `Healthy`.
 - Branch on the retained live binding after loss classification. A surviving
   window enters fallback settling; a window already deleted by `HasWindows`
   enters `missing-live-window` without observing or adopting a fallback that no
@@ -1399,12 +1458,15 @@ recovery.
   physical position when `Restorable`, logical size, and effective mode. Any
   tuple change resets the existing stability timer. It may observe live window
   geometry; it must not poll or rebuild native/global monitor metadata.
-- If the target returns before fallback settle, request restore from frozen
-  placement and reject later fallback messages. After settle, a later position,
-  size, or mode change is intervention: atomically adopt it, make persistence
-  writable, clear only the current return intent, and keep the registration.
-  It rearms only when the adopted placement has verified identity and a
-  supported return mechanism.
+- If the target returns before fallback settle, enqueue one internal restore
+  intent from frozen placement or enter a waiting-to-restore transition, then
+  reject later fallback messages. Phase 8 must not create `TargetPosition`,
+  apply geometry, or emit a restore result; Phase 9 consumes that intent through
+  the shared restore pipeline. After settle, a later position, size, or mode
+  change is intervention: atomically adopt it, make persistence writable, clear
+  only the current return intent, and keep the registration. It rearms only
+  when the adopted placement has verified identity and the shared capability
+  predicate accepts its return mechanism.
 - With zero displays, wait without creating. A different monitor returning
   first leaves a surviving OS fallback alone; a target-first return may proceed.
   A missing window is represented explicitly and no empty all-window query
@@ -1432,18 +1494,26 @@ recovery.
 
 **Constraints from prior phases:** Phase 7 supplies one-shot registrations,
 canonical keys, close/removal classification, policy-specific registry
-ownership, and one installed-snapshot evaluation per topology revision. Phase 5
-supplies typed position and atomic persistence transitions. Phase 4 proved the
-macOS primary and secondary can both be absent before the disconnect topology
-transition; that is a normal automatic lifecycle branch, not a failed lookup or
-evidence of user closure. `CapturedWindowStates` remains the only mutable
-placement owner throughout fallback settling and intervention.
+ownership, and one installed-snapshot evaluation per topology revision. Its
+`FallbackAndReturnRecoveries` already contains a `Healthy` entry for each
+accepted automatic generation; `RegisteredWindow` retains the copied `Window`
+shell only for this policy. Phase 7's cancellation currently removes `Healthy`
+entries, and its removal path advances only application-controlled recovery, so
+this phase must extend both operations across the complete automatic lifecycle.
+Phase 5 supplies typed position and atomic persistence transitions. Phase 4
+proved the macOS primary and secondary can both be absent before the disconnect
+topology transition; that is a normal automatic lifecycle branch, not a failed
+lookup or evidence of user closure. `CapturedWindowStates` remains the only
+mutable placement owner throughout fallback settling and intervention.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Table-driven transition tests cover primary/secondary loss, fallback settling
 and reset, target-before-settle, intervention/rearming, verified/unverified and
 Wayland capability branches, zero-display/non-target-first order, duplicate
-events, fallback-monitor loss, and missing live windows. A production-order
+events, fallback-monitor loss, missing live windows, and cancellation/removal
+from every automatic phase. Tests prove target return creates one internal
+restore intent without `TargetPosition`, geometry application, or a public
+result. A production-order
 test covers linked deletion before topology installation followed by target
 reconnect without fallback observation. Tests also prove an identity-only
 revision and a coalesced disconnect/connect revision each produce one automatic
@@ -1480,7 +1550,9 @@ enum RestoreOrigin {
   Derive exactly one canonical key from `PrimaryWindow` or
   `ManagedWindowRegistry`, reject both/neither, verify the current restorable
   phase, and accept either the surviving binding or one canonically bound
-  replacement.
+  replacement. Request acceptance, canonical replacement binding, and immutable
+  `RestoreAttempt` creation are one operation; no transitional handler may
+  advance lifecycle state without creating the attempt.
 - Resolve the target only by frozen `MonitorId`. If absent, leave intent pending
   with no false result. Read the target snapshot from installed `Monitors`; do
   not query native monitor metadata during preparation.
@@ -1521,7 +1593,12 @@ MonitorTopologyInstall
   tuple to one validator before public `WindowRestored` or
   `WindowRestoreMismatch`. Startup completion remains a separate origin; never
   derive a missing key from current markers or default an unknown entity to
-  primary.
+  primary. Replace Phase 7's transitional restored/mismatch observers: only the
+  private full-tuple validator may advance a runtime recovery lifecycle.
+- Extend Phase 7's cancellation finalizer when `RestoreAttempt` is introduced.
+  Cancellation must invalidate the attempt, remove preparation/target/X11 and
+  all other transient attempt state, make a surviving hidden window visible,
+  and retain durable `RestoreDiagnostics`.
 
 **Files:**
 
@@ -1553,7 +1630,13 @@ MonitorTopologyInstall
 
 **Constraints from prior phases:** Phase 6 supplies one staged builder and
 startup origin; `RestorePreparation` retains the canonical `WindowKey` until
-settling completes. Phase 7–8 supply canonical lifecycle phases and frozen intent.
+settling completes. Phase 7–8 supply canonical lifecycle phases and frozen
+intent. Phase 7's `on_restore_window` is intentionally transitional: it only
+finds an already-bound entity and changes application-controlled phase, while
+its restored/mismatch observers carry no private attempt identity. Phase 7's
+`cancel_restore` already removes preparation, target, and X11 transient state,
+makes a surviving hidden window visible, and retains durable diagnostics; this
+phase must preserve that behavior while adding `RestoreAttempt`.
 Phase 3 supplies topology revisions installed before recovery transitions;
 revision zero is the startup snapshot, identity-only changes may have no raw
 event, and multiple raw lifetime events may share one installed revision.
@@ -1570,6 +1653,7 @@ Topology-transition tests prove identity-only and coalesced replacement
 revisions invalidate or replan each attempt exactly once. A production-schedule
 test creates the ECS window before `OnMonitor`, then proves recovery observes
 only the repaired association and performs no native monitor metadata polling.
+Cancellation tests prove no attempt survives and durable diagnostics remain.
 
 ### Phase 10 — Harden retry, cleanup, and linked-despawn behavior  · status: todo
 
@@ -1615,9 +1699,10 @@ linked-deletion replacement path.
   reconnected still-verified target may supply changed geometry through its new
   Bevy monitor entity; create a new private attempt generation and recompute
   placement without extending the original deadline.
-- One finalizer removes every attempt-scoped component on success, mismatch,
-  timeout, cancellation, target loss, or replacement loss. Late results/DPI
-  messages from old attempts cannot advance a retry.
+- One finalizer removes every transient attempt component on success, mismatch,
+  timeout, cancellation, target loss, or replacement loss while retaining
+  durable `RestoreDiagnostics`. Late results/DPI messages from old attempts
+  cannot advance a retry.
 - Timeout covers winit creation, X11 compensation, DPI, fullscreen application,
   and settling, then enters the explicit retryable state.
 - Mismatch retains frozen target and usable fallback, ends the attempt, and
@@ -1657,7 +1742,9 @@ Phase 7 retains the copied policy, `FallbackAndReturn` window clone, canonical
 role, captured-state key, and close/cancel precedence independently of the live
 entity. Phase 8 supplies the explicit missing-live-window state. Phase 9
 provides immutable attempts, the ordered chain, one installed-snapshot
-evaluation per topology revision, and central completion validation.
+evaluation per topology revision, central completion validation, and
+cancellation cleanup for every transient attempt component while retaining
+durable diagnostics.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Table-driven tests cover cleanup at every stage, stale completions after retry,
@@ -1676,19 +1763,23 @@ and delayed `OnMonitor` repair cannot overwrite the frozen captured intent.
 
 #### Work Order
 
-**Goal:** Expose one registration-time recovery API whose events are factual,
-remotely observable/triggerable, and backed by the completed private lifecycle.
+**Goal:** Complete and verify the one registration-time recovery API whose
+events are factual, remotely observable/triggerable, and backed by the
+completed private lifecycle.
 
 **Spec:**
 
-- Publicly re-export `WindowRecovery` with `Disabled`,
+- Preserve Phase 7's public root re-export of `WindowRecovery` with `Disabled`,
   `ApplicationControlled`, and `FallbackAndReturn` for both primary and
   secondary managed windows. No role-specific marker types or mutable runtime
   policy surface.
-- Publicly expose `WindowRecoveryPending`, `WindowRecoveryAvailable`,
+- Preserve the public `WindowRecoveryPending`, `WindowRecoveryAvailable`,
   `RestoreWindow`, and `CancelWindowRecovery` with the exact fields introduced
   in Phase 7. Pending/available events report key/monitor facts only and never
   echo policy.
+- Preserve the exact `bevy_clerestory::recovery::<TypeName>` reflected path for
+  every new recovery component and event. Existing restore-result events remain
+  under `bevy_clerestory::events::<TypeName>`.
 - `RestoreWindow` remains an entity event with no public recovery ticket or
   caller key. `CancelWindowRecovery` remains global/keyed because the original
   entity may be gone.
@@ -1703,11 +1794,14 @@ remotely observable/triggerable, and backed by the completed private lifecycle.
   `bevy_clerestory::monitors::*` paths. Add only the missing reflected event
   type data and `AppTypeRegistry` coverage required for remote observation; do
   not duplicate or relocate the topology types.
-- Register `RecoveryPlugin` through Clerestory's normal plugin assembly and
-  document one-shot registration, cancellation, application ownership,
-  capability gating, and Wayland behavior. Document that an application using
-  reconnect recovery must remain alive with zero windows, normally through
-  `ExitCondition::DontExit`, and must implement explicit close-to-exit behavior.
+- Preserve the existing `RecoveryPlugin` registration through Clerestory's
+  normal plugin assembly. Finish the missing reflection metadata, remote
+  behavior, tests, and documentation without redefining the shipped types or
+  lifecycle. Document one-shot registration, cancellation, application
+  ownership, capability gating, and Wayland behavior. Document that an
+  application using reconnect recovery must remain alive with zero windows,
+  normally through `ExitCondition::DontExit`, and must implement explicit
+  close-to-exit behavior.
 
 **Files:**
 
@@ -1732,7 +1826,10 @@ exports and assigns exact reflected monitor paths to
 `topology.rs` owns their existing path regression. Phase 4 proved that
 registered entities may be gone before disconnect notification, so factual
 events and keyed cancellation must never require the former entity to remain
-alive.
+alive. Phase 7 assigned all new public recovery types stable
+`bevy_clerestory::recovery::<TypeName>` reflected paths, exported them from the
+crate root, and installed `RecoveryPlugin`. This phase adds only missing reflect
+metadata, registry/remote tests, and public documentation.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Public API tests cover primary and managed registration, all event payloads,
@@ -1741,7 +1838,9 @@ entity-derived restore identity, absent-key cancellation, and expected
 registration. Exact `TypePath` assertions include `MonitorConnected` and
 `MonitorDisconnected` alongside `CurrentMonitor`, `MonitorId`, `MonitorIdentity`,
 `MonitorInfo`, and `Monitors` under `bevy_clerestory::monitors::*`, plus
-`MonitorTopologyRevision` under the same namespace.
+`MonitorTopologyRevision` under the same namespace. Assertions also cover every
+new recovery type under `bevy_clerestory::recovery::*` and retain existing
+restore-result events under `bevy_clerestory::events::*`.
 
 ### Phase 12 — Complete the recovery example  · status: todo
 
@@ -1755,9 +1854,10 @@ policies while retaining its causal diagnostics.
 - Keep the raw sequence/timing/lifecycle trace from Phase 4.
 - Before unplug, record each registered window's `OnMonitor` entity and public
   `CurrentMonitor`, require both to match the same installed `MonitorInfo`, and
-  record the first pending event for that key/identity as proof registration
-  accepted the repaired association. Do not use a timer or private recovery
-  state for this precondition.
+  require exactly one diagnostic `recovery-accepted` record for that
+  key/identity as proof registration accepted the repaired association. A
+  pending event is a post-unplug loss fact, not a registration precondition. Do
+  not use a timer or private recovery state for this precondition.
 - Configure `WindowPlugin` with `ExitCondition::DontExit` and preserve explicit
   primary close-to-exit handling, so deleting every window during disconnect
   does not terminate the example before reconnect.
@@ -1790,6 +1890,14 @@ policies while retaining its causal diagnostics.
 - `crates/bevy_clerestory/Cargo.toml` — final example configuration.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs` — full
   consumer and retained trace.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — preserve
+  association-confirmed registration and the one-time placement request.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/recovery_trace.rs` —
+  recovery lifecycle trace records.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/trace.rs` — shared
+  ordered trace owner.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
+  monitor and recovery trace targets.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — complete
   script, expected branches, and matrix.
 - `crates/bevy_clerestory/README.md` — link the example.
@@ -1800,7 +1908,16 @@ by Phase 4. The example must not reach into private recovery state or duplicate
 automatic reconstruction; only its `ApplicationControlled` consumer creates
 application-owned content and a replacement entity. Phase 5 proved that visible
 placement can precede the correct saved/current monitor association, so the
-script must verify the association before unplug.
+script must verify the association before unplug. Phases 7–10 incrementally
+turn the raw probe into a recovery consumer as each behavior becomes available;
+this phase completes the combined policies, controls, documentation, and
+cross-platform script rather than starting the consumer from scratch. Preserve
+Phase 7's ordering: select and confirm `OnMonitor` before inserting
+`WindowRecovery`; when initial placement is wrong, insert one
+`ProbePlacementRequested` and consume it through
+`Added<ProbePlacementRequested>` in the next `Update`. Preserve both diagnostic
+routes, `bevy_clerestory::monitor_probe` and
+`bevy_clerestory::recovery_probe`.
 
 **Acceptance gate:** The example builds and its non-hardware logic is covered by
 Clerestory Test/Lint gates. On available hardware, the script completes
@@ -1810,7 +1927,8 @@ result handling, and cancellation without content resurrection. A cascade run
 keeps the process alive with no windows, creates exactly one primary and one
 secondary automatic replacement, and leaves the unregistered control absent.
 The retained trace proves each pre-unplug `OnMonitor`/`CurrentMonitor` pair
-matches the installed target before recovery begins.
+matches the installed target and has exactly one `recovery-accepted` record
+before recovery begins; pending records appear only after target loss.
 
 ### Phase 13 — Integrate Hana editor recovery  · status: todo
 
@@ -1865,7 +1983,12 @@ entity-scoped close/egui behavior without duplicating recovery state.
 process lifetime, single automatic replacement, and unregistered control
 behavior independently. Hana must consume only that public surface, must not
 duplicate Clerestory's replacement shell, and keeps the local override until
-Phase 21.
+Phase 21. Record the current Hana behavior before replacing it: it already uses
+`ExitCondition::DontExit`, creates a primary template, respawns on an empty
+window query, rebinds egui state, and exits when any window closes. Replace only
+the empty-query respawn and any-close boundaries required for canonical primary
+recovery and entity-scoped close handling; preserve the primary template and
+egui rebinding responsibilities in Hana.
 
 **Acceptance gate:** Hana phase-local Build, Test, and Lint are green, plus
 affected Clerestory gates if its API changes. Tests cover OS-relocated editor
@@ -2033,9 +2156,15 @@ example.
 
 **Spec:**
 
-- Retain Phase 4's completed raw Dell USB-C row as the initial causal record;
-  run the Phase 12 script on macOS and append completed-recovery rows rather
-  than replacing or reinterpreting that observation.
+- Retain Phase 4's completed raw Dell USB-C row as the initial causal record.
+  Also retain Phase 7's separate application-controlled row: primary and
+  secondary accepted `MonitorId(1)` on entity `232v0` at index 1; disconnect
+  emitted one pending fact for each key; reconnect installed entity `242v0` at
+  index 2 with the same `MonitorId(1)` and emitted one available fact for each
+  key; the process stayed alive and both application windows intentionally
+  remained absent. Run the Phase 12 script on macOS and append
+  completed-automatic-recovery rows without replacing or reinterpreting either
+  earlier observation.
 - Cover same-panel reconnect; same panel through another port/dock; a different
   same-model panel at the same position where available; simultaneous duplicate
   identities where available; identity change; lid close/open; repeated dock
@@ -2080,8 +2209,9 @@ example.
 baseline. Physical evidence may correct an implementation defect but must not
 weaken identity or capability gates. `MonitorId` is process-local and may be
 compared across entity lifetimes only inside one running `App`. Phase 4's raw
-macOS row remains valid evidence; this phase extends it with completed recovery
-behavior.
+macOS row remains valid evidence, and Phase 7's application-controlled row
+remains separate from Phase 12's automatic-return rows. This phase extends the
+matrix without recasting either earlier result.
 
 **Acceptance gate:** Every applicable macOS scenario has an evidence row and
 expected/actual result; unavailable hardware cases are explicitly marked rather

@@ -15,6 +15,10 @@ pub(crate) const PRIMARY_MONITOR_INDEX: usize = 0;
 // monitor probe
 #[cfg(feature = "monitor-probe")]
 pub(crate) const MONITOR_PROBE_TARGET: &str = "bevy_clerestory::monitor_probe";
+#[cfg(feature = "monitor-probe")]
+pub(crate) const RECOVERY_ACCEPTANCE_PRODUCER: &str = "Update::accept_eligible_registrations";
+#[cfg(feature = "monitor-probe")]
+pub(crate) const RECOVERY_PROBE_TARGET: &str = "bevy_clerestory::recovery_probe";
 
 // persisted state
 pub(crate) const CURRENT_STATE_VERSION: u8 = 2;

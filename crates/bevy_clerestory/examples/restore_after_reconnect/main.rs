@@ -2,6 +2,7 @@
 
 mod constants;
 mod lifecycle;
+mod recovery_trace;
 mod setup;
 mod trace;
 mod window_trace;
@@ -57,18 +58,17 @@ impl Plugin for HotplugProbePlugin {
             .add_observer(lifecycle::on_has_windows_despawned)
             .add_observer(trace::on_monitor_connected)
             .add_observer(trace::on_monitor_disconnected)
+            .add_observer(setup::place_and_register_probe_window)
+            .add_observer(recovery_trace::on_window_recovery_pending)
+            .add_observer(recovery_trace::on_window_recovery_available)
             .add_systems(
                 Startup,
-                (
-                    setup::spawn_secondary_window,
-                    setup::position_probe_windows,
-                    setup::trace_probe_session,
-                )
-                    .chain(),
+                (setup::spawn_secondary_window, setup::trace_probe_session).chain(),
             )
             .add_systems(
                 Update,
                 (
+                    setup::request_probe_window_placement,
                     window_trace::trace_os_window_events,
                     window_trace::trace_internal_window_messages,
                 ),

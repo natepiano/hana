@@ -8,7 +8,9 @@ mod winit_info;
 use bevy::prelude::*;
 pub(crate) use restore_attempt::NativeWindowReady;
 pub(crate) use restore_attempt::RestorePreparation;
-use restore_attempt::mark_native_window_ready;
+pub(crate) use restore_attempt::cancel_restore;
+use restore_attempt::clear_native_window_ready;
+pub(crate) use restore_attempt::mark_native_window_ready;
 pub(crate) use restore_attempt::prepare_restore_targets;
 pub(crate) use settle_state::check_restore_settling;
 pub(crate) use target_position::FullscreenRestoreState;
@@ -27,13 +29,14 @@ pub(crate) use winit_info::move_to_target_monitor;
 pub(crate) use winit_info::queue_primary_restore;
 
 use crate::ClerestoryPreStartupSet;
+use crate::ClerestoryUpdateSet;
 use crate::monitors;
-
 pub(crate) struct RestorePlugin;
 
 impl Plugin for RestorePlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(mark_native_window_ready);
+        app.add_observer(clear_native_window_ready);
 
         // X11 fullscreen: move window to target monitor before first event loop.
         // Must be chained (not `.after()`) so `apply_deferred` runs between
@@ -54,14 +57,20 @@ impl Plugin for RestorePlugin {
 
         app.add_systems(
             Update,
-            prepare_restore_targets.after(monitors::update_current_monitor),
+            prepare_restore_targets
+                .after(monitors::update_current_monitor)
+                .in_set(ClerestoryUpdateSet::RestorePreparation),
         );
 
         app.add_systems(
             Update,
             (
-                restore_windows.after(prepare_restore_targets),
-                check_restore_settling.after(restore_windows),
+                restore_windows
+                    .after(prepare_restore_targets)
+                    .in_set(ClerestoryUpdateSet::RestoreApplication),
+                check_restore_settling
+                    .after(restore_windows)
+                    .in_set(ClerestoryUpdateSet::RestoreSettling),
             )
                 .run_if(has_restoring_windows),
         );
