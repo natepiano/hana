@@ -803,12 +803,16 @@ pub(super) fn update_monitors(
 mod tests {
     use std::fs;
     use std::path::Path;
+    use std::time::Duration;
 
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::Registry;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::prelude::*;
     use bevy::reflect::TypePath;
+    use bevy::time::TimePlugin;
+    use bevy::time::TimeUpdateStrategy;
+    use bevy::window::MonitorSelection;
     use bevy::window::OnMonitor;
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
@@ -829,7 +833,10 @@ mod tests {
     use crate::ManagedWindow;
     use crate::ManagedWindowPersistence;
     use crate::WindowRecovery;
+    use crate::WindowRestoreMismatch;
+    use crate::WindowRestored;
     use crate::constants::SCALE_FACTOR_EPSILON;
+    use crate::constants::SETTLE_STABILITY_SECS;
     use crate::managed::ManagedWindowRegistry;
     use crate::managed::on_managed_window_added;
     use crate::managed::on_managed_window_load;
@@ -840,8 +847,11 @@ mod tests {
     use crate::persistence::CapturedWindowStates;
     use crate::persistence::InjectedWindowPositions;
     use crate::persistence::PersistencePlugin;
+    use crate::persistence::PersistenceWriteState;
     use crate::persistence::WindowKey;
+    use crate::recovery::FallbackAndReturnPhaseSnapshot;
     use crate::recovery::RecoveryPlugin;
+    use crate::recovery::fallback_and_return_snapshot;
     use crate::recovery::registration_snapshot;
     use crate::restore;
     use crate::restore::NativeWindowReady;
@@ -881,6 +891,12 @@ mod tests {
     struct DownstreamObservations {
         restore_current_monitors: usize,
         settle_current_monitors:  usize,
+    }
+
+    #[derive(Default, Resource)]
+    struct RecoveryObservations {
+        restored:   usize,
+        mismatched: usize,
     }
 
     #[derive(Resource)]
@@ -972,6 +988,20 @@ mod tests {
         observations.settle_current_monitors = windows.iter().count();
     }
 
+    fn observe_window_restored(
+        _: On<WindowRestored>,
+        mut observations: ResMut<RecoveryObservations>,
+    ) {
+        observations.restored += 1;
+    }
+
+    fn observe_window_restore_mismatch(
+        _: On<WindowRestoreMismatch>,
+        mut observations: ResMut<RecoveryObservations>,
+    ) {
+        observations.mismatched += 1;
+    }
+
     fn insert_scheduled_monitor_association(
         mut commands: Commands,
         association: Res<ScheduledMonitorAssociation>,
@@ -993,8 +1023,11 @@ mod tests {
             .init_resource::<InjectedCurrentMonitorSource>()
             .init_resource::<TopologyObservations>()
             .init_resource::<DownstreamObservations>()
+            .init_resource::<RecoveryObservations>()
             .add_observer(observe_connected)
             .add_observer(observe_disconnected)
+            .add_observer(observe_window_restored)
+            .add_observer(observe_window_restore_mismatch)
             .add_observer(current_monitor::clear_monitor_selection_inputs)
             .add_observer(current_monitor::install_current_monitor_from_association);
         #[cfg(feature = "monitor-probe")]
@@ -1407,6 +1440,155 @@ mod tests {
             .iter()
             .find(|monitor| monitor.entity == entity)
             .map(|monitor| *monitor.monitor_info)
+    }
+
+    fn spawn_accepted_automatic_primary(
+        app: &mut App,
+        target_entity: Entity,
+        target: MonitorInfo,
+        window_mode: WindowMode,
+        captured_position: Option<IVec2>,
+    ) -> Entity {
+        let fills_monitor = matches!(window_mode, WindowMode::BorderlessFullscreen(_));
+        let window_position = if fills_monitor {
+            target.physical_position
+        } else {
+            target.physical_position + IVec2::ONE
+        };
+        let mut window = Window {
+            mode: window_mode,
+            position: WindowPosition::At(window_position),
+            ..default()
+        };
+        if fills_monitor {
+            window
+                .resolution
+                .set_physical_resolution(target.physical_size.x, target.physical_size.y);
+        }
+        let window_entity = app
+            .world_mut()
+            .spawn((
+                window,
+                PrimaryWindow,
+                OnMonitor(target_entity),
+                WindowRecovery::FallbackAndReturn,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(window_position));
+        app.world_mut()
+            .resource_mut::<InjectedWindowPositions>()
+            .set(window_entity, captured_position);
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        assert_accepted_registration(app, &WindowKey::Primary, target);
+        window_entity
+    }
+
+    fn set_window_monitor(
+        app: &mut App,
+        window_entity: Entity,
+        monitor_info: MonitorInfo,
+        window_mode: WindowMode,
+    ) {
+        let fills_monitor = matches!(window_mode, WindowMode::BorderlessFullscreen(_));
+        let window_position = if fills_monitor {
+            monitor_info.physical_position
+        } else {
+            monitor_info.physical_position + IVec2::ONE
+        };
+        let changed = app
+            .world_mut()
+            .entity_mut(window_entity)
+            .get_mut::<Window>()
+            .map(|mut window| {
+                window.mode = window_mode;
+                window.position = WindowPosition::At(window_position);
+                if fills_monitor {
+                    window.resolution.set_physical_resolution(
+                        monitor_info.physical_size.x,
+                        monitor_info.physical_size.y,
+                    );
+                }
+            });
+        assert!(changed.is_some());
+        app.world_mut()
+            .resource_mut::<InjectedCurrentMonitorSource>()
+            .set_position(window_entity, Some(window_position));
+    }
+
+    fn assert_primary_capture_state(
+        app: &App,
+        expected_placement: &CapturedWindowPlacement,
+        expected_write_state: PersistenceWriteState,
+    ) {
+        let states = app.world().resource::<CapturedWindowStates>();
+        assert_eq!(
+            states.captured_placement(&WindowKey::Primary),
+            Some(expected_placement),
+        );
+        assert_eq!(
+            states
+                .entry(&WindowKey::Primary)
+                .map(|state| state.persistence),
+            Some(expected_write_state),
+        );
+    }
+
+    fn enter_retryable_failure(
+        app: &mut App,
+        window_entity: Entity,
+        target_entity: Entity,
+        fallback_entity: Entity,
+        fallback: MonitorInfo,
+    ) -> Result<MonitorInfo, String> {
+        set_window_monitor(
+            app,
+            window_entity,
+            fallback,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Index(fallback.index)),
+        );
+        remove_monitor(app, target_entity);
+        app.update();
+        let fallback = installed_monitor(app, fallback_entity)
+            .ok_or_else(|| "fallback monitor should remain installed".to_string())?;
+
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| snapshot.phase),
+            Some(FallbackAndReturnPhaseSnapshot::FallbackSettling),
+        );
+        assert_eq!(
+            app.world()
+                .get::<CurrentMonitor>(window_entity)
+                .map(|current_monitor| current_monitor.monitor_info),
+            Some(fallback),
+        );
+
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+            SETTLE_STABILITY_SECS,
+        )));
+        app.update();
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| snapshot.phase),
+            Some(FallbackAndReturnPhaseSnapshot::OnFallback),
+        );
+
+        set_window_monitor(app, window_entity, fallback, WindowMode::Windowed);
+        app.update();
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| (snapshot.phase, snapshot.fallback_monitor)),
+            Some((
+                FallbackAndReturnPhaseSnapshot::RetryableFailure,
+                Some(fallback)
+            )),
+        );
+        Ok(fallback)
     }
 
     fn assert_persisted_monitor(path: &Path, index: usize, scale: f64) -> Result<(), String> {
@@ -2287,6 +2469,198 @@ mod tests {
             installed_capture.rebased_physical_position(&returned_monitor),
             Some(RETURNED_MONITOR_POSITION + IVec2::new(320, 180))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn retryable_identity_revalidation_uses_production_schedule_order() -> Result<(), String> {
+        let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
+        let fallback_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+        let mut app = phase_seven_topology_app(state_file.path());
+        app.add_plugins(TimePlugin)
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        let target_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        let fallback_entity = spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            fallback_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        let target = installed_monitor(&app, target_entity)
+            .ok_or_else(|| "target monitor should be installed".to_string())?;
+        let fallback = installed_monitor(&app, fallback_entity)
+            .ok_or_else(|| "fallback monitor should be installed".to_string())?;
+        let window_entity = spawn_accepted_automatic_primary(
+            &mut app,
+            target_entity,
+            target,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Index(target.index)),
+            None,
+        );
+        let fallback = enter_retryable_failure(
+            &mut app,
+            window_entity,
+            target_entity,
+            fallback_entity,
+            fallback,
+        )?;
+
+        let adopted_placement = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .captured_placement(&WindowKey::Primary)
+            .cloned()
+            .ok_or_else(|| "retryable recovery should retain captured placement".to_string())?;
+        assert_primary_capture_state(&app, &adopted_placement, PersistenceWriteState::Writable);
+        let revision_before_revalidation = *app.world().resource::<MonitorTopologyRevision>();
+        app.world_mut()
+            .resource_mut::<InjectedMonitorEvidence>()
+            .evidence
+            .insert(
+                fallback_entity,
+                Err(OperatingSystemQueryError::StableIdentityProperty.into()),
+            );
+        app.world()
+            .resource::<MonitorConfiguration>()
+            .advance_for_test();
+
+        app.update();
+
+        let revalidated = installed_monitor(&app, fallback_entity)
+            .ok_or_else(|| "revalidated monitor should remain installed".to_string())?;
+        assert_ne!(revalidated.identity, fallback.identity);
+        assert_ne!(
+            *app.world().resource::<MonitorTopologyRevision>(),
+            revision_before_revalidation,
+        );
+        assert_eq!(
+            app.world()
+                .get::<CurrentMonitor>(window_entity)
+                .map(|current_monitor| current_monitor.monitor_info),
+            Some(revalidated),
+        );
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| {
+                (
+                    snapshot.phase,
+                    snapshot.fallback_monitor,
+                    snapshot.intent_count,
+                )
+            }),
+            Some((
+                FallbackAndReturnPhaseSnapshot::RetryableFailure,
+                Some(revalidated),
+                0,
+            )),
+        );
+        assert_primary_capture_state(&app, &adopted_placement, PersistenceWriteState::Writable);
+        Ok(())
+    }
+
+    #[test]
+    fn deleted_link_classifies_scheduled_loss_then_queues_one_internal_return() -> Result<(), String>
+    {
+        let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
+        let fallback_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
+        let mut app = phase_seven_topology_app(state_file.path());
+        let target_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            IVec2::ZERO,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        spawn_monitor(
+            &mut app,
+            PANEL_B_EVIDENCE,
+            fallback_position,
+            UVec2::new(MONITOR_WIDTH, MONITOR_HEIGHT),
+            DEFAULT_SCALE,
+        );
+        app.update();
+        let target = installed_monitor(&app, target_entity)
+            .ok_or_else(|| "target monitor should be installed".to_string())?;
+        let window_position = target.physical_position + IVec2::ONE;
+        let window_entity = spawn_accepted_automatic_primary(
+            &mut app,
+            target_entity,
+            target,
+            WindowMode::Windowed,
+            Some(window_position),
+        );
+        let retained_placement = app
+            .world()
+            .resource::<CapturedWindowStates>()
+            .captured_placement(&WindowKey::Primary)
+            .cloned()
+            .ok_or_else(|| "registered window should have captured placement".to_string())?;
+
+        app.world_mut().entity_mut(window_entity).remove::<Window>();
+        app.world_mut().flush();
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| (snapshot.phase, snapshot.fallback_monitor)),
+            Some((FallbackAndReturnPhaseSnapshot::RemovalPending, None)),
+        );
+        assert_primary_capture_state(&app, &retained_placement, PersistenceWriteState::Frozen);
+
+        remove_monitor(&mut app, target_entity);
+        app.update();
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery
+                .map(|snapshot| { (snapshot.phase, snapshot.fallback_monitor, snapshot.intent) }),
+            Some((
+                FallbackAndReturnPhaseSnapshot::MissingLiveWindow,
+                None,
+                None,
+            )),
+        );
+
+        let returned_entity = spawn_monitor(
+            &mut app,
+            PANEL_A_EVIDENCE,
+            RETURNED_MONITOR_POSITION,
+            RETURNED_MONITOR_SIZE,
+            DEFAULT_SCALE,
+        );
+        app.update();
+        let returned = installed_monitor(&app, returned_entity)
+            .ok_or_else(|| "returned target should be installed".to_string())?;
+        assert_eq!(returned.identity, target.identity);
+        let revision = *app.world().resource::<MonitorTopologyRevision>();
+        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| {
+                (
+                    snapshot.phase,
+                    snapshot.fallback_monitor,
+                    snapshot.intent_count,
+                    snapshot
+                        .intent
+                        .map(|intent| (intent.entity, intent.monitor, intent.revision)),
+                )
+            }),
+            Some((
+                FallbackAndReturnPhaseSnapshot::Restoring,
+                None,
+                1,
+                Some((None, returned, revision)),
+            )),
+        );
+        assert_primary_capture_state(&app, &retained_placement, PersistenceWriteState::Frozen);
+        let observations = app.world().resource::<RecoveryObservations>();
+        assert_eq!(observations.restored, 0);
+        assert_eq!(observations.mismatched, 0);
         Ok(())
     }
 

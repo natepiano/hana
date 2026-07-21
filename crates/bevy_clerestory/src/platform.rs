@@ -16,6 +16,8 @@ use bevy::window::WindowMode;
 use super::constants::SCALE_FACTOR_EPSILON;
 #[cfg(target_os = "linux")]
 use super::constants::WAYLAND_DISPLAY_ENVIRONMENT_VARIABLE;
+use super::persistence::CapturedWindowPosition;
+use super::persistence::SavedWindowMode;
 use super::restore::FullscreenRestoreState;
 use super::restore::MonitorScaleStrategy;
 use super::restore::WindowRestoreState;
@@ -34,6 +36,12 @@ pub enum Platform {
     X11,
     /// Linux running a Wayland session.
     Wayland,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReturnCapability {
+    Supported,
+    Unsupported,
 }
 
 impl Platform {
@@ -89,6 +97,29 @@ impl Platform {
     /// position API, and winit returns `(0, 0)`). All other platforms provide it.
     #[must_use]
     pub const fn position_available(self) -> bool { !matches!(self, Self::Wayland) }
+
+    /// Whether an automatic return can reproduce the captured placement.
+    #[must_use]
+    pub(crate) const fn fallback_return_capability(
+        self,
+        position: CapturedWindowPosition,
+        saved_window_mode: &SavedWindowMode,
+    ) -> ReturnCapability {
+        match (self, saved_window_mode, position) {
+            (_, SavedWindowMode::Fullscreen { .. }, _) => ReturnCapability::Unsupported,
+            (_, SavedWindowMode::Windowed, CapturedWindowPosition::Restorable { .. }) => {
+                ReturnCapability::Supported
+            },
+            (_, SavedWindowMode::Windowed, CapturedWindowPosition::CompositorControlled) => {
+                ReturnCapability::Unsupported
+            },
+            (
+                Self::MacOs | Self::Windows | Self::X11 | Self::Wayland,
+                SavedWindowMode::BorderlessFullscreen,
+                _,
+            ) => ReturnCapability::Supported,
+        }
+    }
 
     /// Whether the given target and actual window modes should be considered a match
     /// during settle comparison.
@@ -241,5 +272,87 @@ impl Platform {
     #[must_use]
     pub const fn needs_managed_scale_fixup(self) -> bool {
         matches!(self, Self::Windows | Self::MacOs | Self::X11)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_return_rejects_exclusive_fullscreen_on_every_platform() {
+        let restorable = CapturedWindowPosition::Restorable {
+            logical_offset: IVec2::ZERO,
+        };
+        let positions = [restorable, CapturedWindowPosition::CompositorControlled];
+
+        for platform in [
+            Platform::MacOs,
+            Platform::Windows,
+            Platform::X11,
+            Platform::Wayland,
+        ] {
+            for position in positions {
+                assert_eq!(
+                    platform.fallback_return_capability(
+                        position,
+                        &SavedWindowMode::Fullscreen { video_mode: None },
+                    ),
+                    ReturnCapability::Unsupported,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_windowed_return_requires_a_restorable_position() {
+        for platform in [
+            Platform::MacOs,
+            Platform::Windows,
+            Platform::X11,
+            Platform::Wayland,
+        ] {
+            assert_eq!(
+                platform.fallback_return_capability(
+                    CapturedWindowPosition::Restorable {
+                        logical_offset: IVec2::ZERO,
+                    },
+                    &SavedWindowMode::Windowed,
+                ),
+                ReturnCapability::Supported,
+            );
+            assert_eq!(
+                platform.fallback_return_capability(
+                    CapturedWindowPosition::CompositorControlled,
+                    &SavedWindowMode::Windowed,
+                ),
+                ReturnCapability::Unsupported,
+            );
+        }
+    }
+
+    #[test]
+    fn automatic_borderless_return_remains_monitor_targeted() {
+        let restorable = CapturedWindowPosition::Restorable {
+            logical_offset: IVec2::ZERO,
+        };
+        let positions = [restorable, CapturedWindowPosition::CompositorControlled];
+
+        for platform in [
+            Platform::MacOs,
+            Platform::Windows,
+            Platform::X11,
+            Platform::Wayland,
+        ] {
+            for position in positions {
+                assert_eq!(
+                    platform.fallback_return_capability(
+                        position,
+                        &SavedWindowMode::BorderlessFullscreen,
+                    ),
+                    ReturnCapability::Supported,
+                );
+            }
+        }
     }
 }

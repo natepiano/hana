@@ -8,6 +8,8 @@ use bevy::window::OnMonitor;
 use bevy::window::PrimaryWindow;
 
 use super::application_controlled::ApplicationControlledRecoveries;
+use super::fallback_and_return::AutomaticRestoreIntents;
+use super::fallback_and_return::FallbackAndReturnRecoveries;
 #[cfg(feature = "monitor-probe")]
 use super::monitor_probe::RecoveryAcceptanceProbeRecord;
 use crate::CancelWindowRecovery;
@@ -21,9 +23,8 @@ use crate::monitors::MonitorIdentity;
 use crate::monitors::MonitorInfo;
 use crate::monitors::MonitorTopologyRevision;
 use crate::monitors::Monitors;
-use crate::persistence::CapturedWindowPosition;
 use crate::persistence::CapturedWindowStates;
-use crate::persistence::SavedWindowMode;
+use crate::platform::ReturnCapability;
 use crate::restore;
 use crate::restore::NativeWindowReady;
 use crate::restore::RestorePreparation;
@@ -74,43 +75,6 @@ pub(super) struct RegisteredWindow {
     pub(super) target:        MonitorInfo,
     pub(super) entity:        Option<Entity>,
     pub(super) last_revision: Option<MonitorTopologyRevision>,
-    pub(super) window_shell:  Option<Window>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FallbackAndReturnPhase {
-    Healthy,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct FallbackAndReturnRecovery {
-    generation: RecoveryGeneration,
-    phase:      FallbackAndReturnPhase,
-}
-
-#[derive(Default, Resource)]
-pub(super) struct FallbackAndReturnRecoveries {
-    entries: HashMap<WindowKey, FallbackAndReturnRecovery>,
-}
-
-impl FallbackAndReturnRecoveries {
-    fn accept(&mut self, window_key: WindowKey, generation: RecoveryGeneration) {
-        self.entries.insert(
-            window_key,
-            FallbackAndReturnRecovery {
-                generation,
-                phase: FallbackAndReturnPhase::Healthy,
-            },
-        );
-    }
-
-    fn cancel(&mut self, window_key: &WindowKey, generation: RecoveryGeneration) {
-        if self.entries.get(window_key).is_some_and(|recovery| {
-            recovery.generation == generation && recovery.phase == FallbackAndReturnPhase::Healthy
-        }) {
-            self.entries.remove(window_key);
-        }
-    }
 }
 
 #[derive(Default, Resource)]
@@ -158,6 +122,10 @@ impl RecoveryRegistrations {
 
     pub(super) fn by_key(&self, window_key: &WindowKey) -> Option<&RegisteredWindow> {
         self.registered.get(window_key)
+    }
+
+    pub(super) fn by_key_mut(&mut self, window_key: &WindowKey) -> Option<&mut RegisteredWindow> {
+        self.registered.get_mut(window_key)
     }
 
     fn remove_key(&mut self, window_key: &WindowKey) -> Option<RegisteredWindow> {
@@ -244,35 +212,11 @@ fn canonical_window(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReturnCapability {
-    Supported,
-    Unsupported,
-}
-
-const fn fallback_return_capability(
-    position: CapturedWindowPosition,
-    saved_window_mode: &SavedWindowMode,
-    platform: crate::Platform,
-) -> ReturnCapability {
-    match position {
-        CapturedWindowPosition::Restorable { .. } => ReturnCapability::Supported,
-        CapturedWindowPosition::CompositorControlled => match saved_window_mode {
-            SavedWindowMode::Windowed => ReturnCapability::Unsupported,
-            SavedWindowMode::Fullscreen { .. } if platform.is_wayland() => {
-                ReturnCapability::Unsupported
-            },
-            SavedWindowMode::BorderlessFullscreen | SavedWindowMode::Fullscreen { .. } => {
-                ReturnCapability::Supported
-            },
-        },
-    }
-}
-
 pub(super) fn accept_eligible_registrations(
     mut registrations: ResMut<RecoveryRegistrations>,
     mut application_controlled: ResMut<ApplicationControlledRecoveries>,
     mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,
+    mut restore_intents: ResMut<AutomaticRestoreIntents>,
     candidates: Query<(
         &Window,
         &OnMonitor,
@@ -324,11 +268,8 @@ pub(super) fn accept_eligible_registrations(
             continue;
         }
         if pending_registration.policy == WindowRecovery::FallbackAndReturn
-            && fallback_return_capability(
-                placement.position,
-                &placement.saved_window_mode,
-                *platform,
-            ) != ReturnCapability::Supported
+            && platform.fallback_return_capability(placement.position, &placement.saved_window_mode)
+                != ReturnCapability::Supported
         {
             continue;
         }
@@ -343,8 +284,6 @@ pub(super) fn accept_eligible_registrations(
             target: installed_monitor,
             entity: Some(pending_registration.entity),
             last_revision: Some(*revision),
-            window_shell: (pending_registration.policy == WindowRecovery::FallbackAndReturn)
-                .then(|| window.clone()),
         };
         registrations.pending.remove(&pending_registration.entity);
         debug!(
@@ -352,15 +291,27 @@ pub(super) fn accept_eligible_registrations(
             registration.generation,
             registration.role,
             registration.target,
-            registration.window_shell.is_some(),
+            pending_registration.policy == WindowRecovery::FallbackAndReturn,
         );
+        if let Some(previous_registration) = registrations.by_key(&window_key).cloned() {
+            application_controlled.cancel(&window_key, previous_registration.generation);
+            fallback_and_return.cancel(
+                &window_key,
+                previous_registration.generation,
+                &mut restore_intents,
+            );
+        }
         registrations
             .registered
             .insert(window_key.clone(), registration);
         if pending_registration.policy == WindowRecovery::ApplicationControlled {
             application_controlled.accept(window_key.clone(), pending_registration.generation);
         } else {
-            fallback_and_return.accept(window_key.clone(), pending_registration.generation);
+            fallback_and_return.accept(
+                window_key.clone(),
+                pending_registration.generation,
+                window.clone(),
+            );
         }
         #[cfg(feature = "monitor-probe")]
         RecoveryAcceptanceProbeRecord {
@@ -381,6 +332,8 @@ pub(super) fn on_window_removed(
     removed: On<Remove, Window>,
     mut registrations: ResMut<RecoveryRegistrations>,
     mut application_controlled: ResMut<ApplicationControlledRecoveries>,
+    mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,
+    mut restore_intents: ResMut<AutomaticRestoreIntents>,
     mut captured_window_states: ResMut<CapturedWindowStates>,
 ) {
     registrations.pending.remove(&removed.entity);
@@ -390,6 +343,11 @@ pub(super) fn on_window_removed(
     registration.entity = None;
     captured_window_states.freeze(&registration.window_key);
     application_controlled.window_removed(&registration.window_key, registration.generation);
+    fallback_and_return.window_removed(
+        &registration.window_key,
+        registration.generation,
+        &mut restore_intents,
+    );
 }
 
 pub(super) fn on_cancel_window_recovery(
@@ -398,6 +356,7 @@ pub(super) fn on_cancel_window_recovery(
     mut registrations: ResMut<RecoveryRegistrations>,
     mut application_controlled: ResMut<ApplicationControlledRecoveries>,
     mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,
+    mut restore_intents: ResMut<AutomaticRestoreIntents>,
     managed_window_registry: Res<ManagedWindowRegistry>,
     primary_windows: Query<(), With<PrimaryWindow>>,
     managed_window_persistence: Res<ManagedWindowPersistence>,
@@ -414,7 +373,11 @@ pub(super) fn on_cancel_window_recovery(
     }
     if let Some(registration) = &registration {
         application_controlled.cancel(&cancel.window, registration.generation);
-        fallback_and_return.cancel(&cancel.window, registration.generation);
+        fallback_and_return.cancel(
+            &cancel.window,
+            registration.generation,
+            &mut restore_intents,
+        );
     }
     let entity = registration
         .as_ref()
@@ -474,6 +437,10 @@ mod tests {
     use crate::managed::on_managed_window_added;
     use crate::managed::on_managed_window_removed;
     use crate::persistence;
+    #[cfg(feature = "monitor-probe")]
+    use crate::persistence::CapturedWindowPosition;
+    #[cfg(feature = "monitor-probe")]
+    use crate::persistence::SavedWindowMode;
 
     #[cfg(feature = "monitor-probe")]
     mod example_probe {
@@ -664,6 +631,7 @@ mod tests {
             .init_resource::<RecoveryRegistrations>()
             .init_resource::<ApplicationControlledRecoveries>()
             .init_resource::<FallbackAndReturnRecoveries>()
+            .init_resource::<AutomaticRestoreIntents>()
             .add_observer(on_window_recovery_added)
             .add_observer(on_cancel_window_recovery);
         let entity = app

@@ -155,6 +155,7 @@ pub(crate) enum CapturedPlacement {
 pub(crate) enum PersistenceWriteState {
     Writable,
     Frozen,
+    CurrentCaptureSuppressed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,6 +188,21 @@ enum StartupLoadState {
 pub(crate) enum StateMutation {
     Unchanged,
     Changed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InterventionAdoption {
+    Accepted(StateMutation),
+    Rejected,
+}
+
+impl InterventionAdoption {
+    pub(crate) const fn mutation(self) -> Option<StateMutation> {
+        match self {
+            Self::Accepted(mutation) => Some(mutation),
+            Self::Rejected => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -290,6 +306,47 @@ impl CapturedWindowStates {
         }
     }
 
+    pub(crate) fn suppress_current_capture(&mut self, window_key: &WindowKey, entity: Entity) {
+        if let Some(entry) = self.entries.get_mut(window_key)
+            && entry.live == Some(LiveWindow { entity })
+        {
+            entry.persistence = PersistenceWriteState::CurrentCaptureSuppressed;
+        }
+    }
+
+    fn finish_capture_suppression(&mut self) {
+        for entry in self.entries.values_mut() {
+            if entry.persistence == PersistenceWriteState::CurrentCaptureSuppressed {
+                entry.persistence = PersistenceWriteState::Writable;
+            }
+        }
+    }
+
+    pub(crate) fn adopt_intervention(
+        &mut self,
+        window_key: &WindowKey,
+        entity: Entity,
+        placement: CapturedWindowPlacement,
+    ) -> InterventionAdoption {
+        let Some(entry) = self.entries.get_mut(window_key) else {
+            return InterventionAdoption::Rejected;
+        };
+        if entry.live != Some(LiveWindow { entity }) {
+            return InterventionAdoption::Rejected;
+        }
+
+        let placement = CapturedPlacement::Captured(placement);
+        let mutation = if entry.placement == placement {
+            StateMutation::Unchanged
+        } else {
+            entry.placement = placement;
+            self.dirty = DirtyState::Dirty;
+            StateMutation::Changed
+        };
+        entry.persistence = PersistenceWriteState::Writable;
+        InterventionAdoption::Accepted(mutation)
+    }
+
     pub(crate) fn cancel(
         &mut self,
         window_key: &WindowKey,
@@ -330,7 +387,7 @@ impl CapturedWindowStates {
         let Some(entry) = self.entries.get_mut(window_key) else {
             return StateMutation::Unchanged;
         };
-        if entry.persistence == PersistenceWriteState::Frozen {
+        if entry.persistence != PersistenceWriteState::Writable {
             return StateMutation::Unchanged;
         }
         match managed_window_persistence {
@@ -389,8 +446,13 @@ impl CapturedWindowStates {
 
         if let Some(entry) = self.entries.get_mut(&window_key) {
             entry.live = Some(LiveWindow { entity });
-            if entry.persistence == PersistenceWriteState::Frozen {
-                return StateMutation::Unchanged;
+            match entry.persistence {
+                PersistenceWriteState::Writable => {},
+                PersistenceWriteState::Frozen => return StateMutation::Unchanged,
+                PersistenceWriteState::CurrentCaptureSuppressed => {
+                    entry.persistence = PersistenceWriteState::Writable;
+                    return StateMutation::Unchanged;
+                },
             }
             if entry.placement == CapturedPlacement::Captured(placement.clone()) {
                 return StateMutation::Unchanged;
@@ -450,7 +512,7 @@ impl CapturedWindowStates {
 
         let previous_len = self.entries.len();
         self.entries.retain(|_, entry| {
-            entry.live.is_some() || entry.persistence == PersistenceWriteState::Frozen
+            entry.live.is_some() || entry.persistence != PersistenceWriteState::Writable
         });
         if self.entries.len() == previous_len {
             StateMutation::Unchanged
@@ -524,6 +586,10 @@ impl CapturedWindowStates {
     pub(crate) fn placement(&self, window_key: &WindowKey) -> Option<&CapturedPlacement> {
         self.entries.get(window_key).map(|entry| &entry.placement)
     }
+}
+
+pub(super) fn finish_capture_suppression(mut captured_window_states: ResMut<CapturedWindowStates>) {
+    captured_window_states.finish_capture_suppression();
 }
 
 pub(crate) fn on_primary_window_removed(
