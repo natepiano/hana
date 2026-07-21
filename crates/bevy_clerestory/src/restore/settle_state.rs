@@ -4,14 +4,13 @@
 //! to confirm the compositor delivered matching values (or detect mismatches).
 
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 use bevy::window::WindowMode;
 use bevy_kana::ToI32;
 use bevy_kana::ToU32;
 
+use super::RestorePreparation;
 use super::target_position::TargetPosition;
 use super::winit_info::X11FrameCompensated;
-use crate::ManagedWindow;
 use crate::Platform;
 use crate::WindowKey;
 use crate::constants::MILLIS_PER_SECOND;
@@ -212,22 +211,6 @@ fn detect_settle_change(
     }
 }
 
-/// Resolve the [`WindowKey`] for an entity — `Primary` if it has the `PrimaryWindow`
-/// marker, otherwise the `ManagedWindow` name (falling back to `Primary`).
-fn resolve_window_key(
-    entity: Entity,
-    primary_query: &Query<(), With<PrimaryWindow>>,
-    managed_query: &Query<&ManagedWindow>,
-) -> WindowKey {
-    if primary_query.get(entity).is_ok() {
-        WindowKey::Primary
-    } else if let Ok(managed) = managed_query.get(entity) {
-        WindowKey::Managed(managed.name.clone())
-    } else {
-        WindowKey::Primary
-    }
-}
-
 /// Check settling windows each frame using a two-timer approach.
 ///
 /// - **Stability timer** (200ms): resets whenever any compared value changes. If values stay stable
@@ -246,14 +229,14 @@ pub(crate) fn check_restore_settling(
             &mut TargetPosition,
             &Window,
             Option<&CurrentMonitor>,
+            &RestorePreparation,
         ),
         With<X11FrameCompensated>,
     >,
-    primary_query: Query<(), With<PrimaryWindow>>,
-    managed_query: Query<&ManagedWindow>,
     platform: Res<Platform>,
 ) {
-    for (entity, mut target_position, window, current_monitor) in &mut windows {
+    for (entity, mut target_position, window, current_monitor, restore_preparation) in &mut windows
+    {
         let target_window_mode = target_position
             .saved_window_mode
             .to_window_mode(target_position.monitor_index);
@@ -270,7 +253,7 @@ pub(crate) fn check_restore_settling(
             .position_available()
             .then_some(target_position.logical_position)
             .flatten();
-        let window_key = resolve_window_key(entity, &primary_query, &managed_query);
+        let window_key = restore_preparation.window_key().clone();
         let (current_snapshot, actual_scale) =
             build_actual_snapshot(window, current_monitor, *platform);
 
@@ -398,6 +381,7 @@ fn emit_settle_success(
             monitor_index: settle_target.monitor,
         })
         .remove::<TargetPosition>()
+        .remove::<RestorePreparation>()
         .remove::<X11FrameCompensated>();
 }
 
@@ -463,5 +447,6 @@ fn emit_settle_mismatch(
             actual_scale: settle_actual.scale,
         })
         .remove::<TargetPosition>()
+        .remove::<RestorePreparation>()
         .remove::<X11FrameCompensated>();
 }
