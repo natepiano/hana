@@ -1,10 +1,12 @@
 use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
+use bevy::window::OnMonitor;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowResolution;
 use bevy_clerestory::ManagedWindow;
 use bevy_clerestory::Monitors;
 use bevy_clerestory::Platform;
+use bevy_clerestory::WindowRecovery;
 
 use super::ProbeMonitorIndex;
 use super::SmokeExitFrame;
@@ -15,6 +17,9 @@ use super::trace::ProbeTrace;
 fn field(name: &str, value: impl std::fmt::Debug) -> (String, String) {
     (name.into(), format!("{value:?}"))
 }
+
+#[derive(Component)]
+pub(super) struct ProbePlacementRequested;
 
 pub(super) fn exit_after_smoke_frame(
     exit_frame: Option<Res<SmokeExitFrame>>,
@@ -40,10 +45,53 @@ pub(super) fn spawn_secondary_window(mut commands: Commands) {
     ));
 }
 
-pub(super) fn position_probe_windows(
+pub(super) fn place_and_register_probe_window(
+    insert: On<Insert, OnMonitor>,
     monitor_index: Res<ProbeMonitorIndex>,
     platform: Res<Platform>,
-    mut windows: Query<&mut Window, Or<(With<PrimaryWindow>, With<ManagedWindow>)>>,
+    monitors: Res<Monitors>,
+    windows: Query<
+        (
+            &OnMonitor,
+            Has<WindowRecovery>,
+            Has<ProbePlacementRequested>,
+        ),
+        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
+    >,
+    mut commands: Commands,
+) {
+    let Ok((on_monitor, registered, placement_requested)) = windows.get(insert.entity) else {
+        return;
+    };
+    let Some(current_monitor_index) = monitors
+        .iter()
+        .find(|monitor| monitor.entity == on_monitor.0)
+        .map(|monitor| monitor.monitor_info.index)
+    else {
+        return;
+    };
+    if current_monitor_index == monitor_index.0 {
+        if !registered {
+            commands
+                .entity(insert.entity)
+                .insert(WindowRecovery::ApplicationControlled);
+        }
+        return;
+    }
+    if platform.position_available()
+        && !placement_requested
+        && monitors.by_index(monitor_index.0).is_some()
+    {
+        commands
+            .entity(insert.entity)
+            .insert(ProbePlacementRequested);
+    }
+}
+
+pub(super) fn request_probe_window_placement(
+    monitor_index: Res<ProbeMonitorIndex>,
+    platform: Res<Platform>,
+    mut windows: Query<&mut Window, Added<ProbePlacementRequested>>,
 ) {
     for mut window in &mut windows {
         window.position = selected_window_position(*platform, monitor_index.0);

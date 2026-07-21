@@ -12,6 +12,7 @@ pub(crate) use current_monitor::InjectedCurrentMonitorSource;
 pub(crate) use current_monitor::NativeQueryActivity;
 use current_monitor::clear_monitor_selection_inputs;
 pub(crate) use current_monitor::current_monitor_from_association;
+pub(crate) use current_monitor::exact_monitor_association;
 pub(crate) use current_monitor::install_current_monitor_from_association;
 pub(crate) use current_monitor::update_current_monitor;
 use identity::MonitorConfiguration;
@@ -28,6 +29,7 @@ use topology::init_monitors;
 use topology::update_monitors;
 
 use crate::ClerestoryPreStartupSet;
+use crate::ClerestoryUpdateSet;
 use crate::Platform;
 
 /// Plugin that manages the `Monitors` resource.
@@ -44,6 +46,13 @@ impl Plugin for MonitorPlugin {
                 PreStartup,
                 init_monitors.in_set(ClerestoryPreStartupSet::MonitorsInitialized),
             )
-            .add_systems(Update, (update_monitors, update_current_monitor).chain());
+            .add_systems(
+                Update,
+                update_monitors.in_set(ClerestoryUpdateSet::MonitorTopology),
+            )
+            .add_systems(
+                Update,
+                update_current_monitor.in_set(ClerestoryUpdateSet::CurrentMonitor),
+            );
     }
 }

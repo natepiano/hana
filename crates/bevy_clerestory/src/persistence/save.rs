@@ -162,7 +162,7 @@ pub(crate) fn write_dirty_window_states(
     captured_window_states.mark_clean();
 }
 
-fn application_name() -> String {
+pub(super) fn application_name() -> String {
     current_exe()
         .ok()
         .and_then(|executable_path| {

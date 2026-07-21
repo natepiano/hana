@@ -34,6 +34,9 @@ pub(super) const KIND_MONITOR_CONNECTED: &str = "monitor-connected";
 pub(super) const KIND_MONITOR_DISCONNECTED: &str = "monitor-disconnected";
 pub(super) const KIND_MONITOR_TOPOLOGY: &str = "monitor-topology";
 pub(super) const KIND_PROBE_SESSION: &str = "probe-session";
+pub(super) const KIND_RECOVERY_ACCEPTED: &str = "recovery-accepted";
+pub(super) const KIND_RECOVERY_AVAILABLE: &str = "recovery-available";
+pub(super) const KIND_RECOVERY_PENDING: &str = "recovery-pending";
 pub(super) const KIND_WINDOW_COMPONENT_CHANGED: &str = "window-component-changed";
 pub(super) const KIND_WINDOW_CLOSED: &str = "window-closed";
 pub(super) const KIND_WINDOW_CLOSING: &str = "window-closing";
@@ -56,10 +59,13 @@ pub(super) const EXIT_AFTER_FRAME_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE
 pub(super) const MONITOR_INDEX_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_MONITOR_INDEX";
 pub(super) const MONITOR_PROBE_TARGET: &str = "bevy_clerestory::monitor_probe";
 pub(super) const PERSISTENCE_FILE_PREFIX: &str = "bevy-clerestory-hotplug-probe";
+pub(super) const RECOVERY_PROBE_TARGET: &str = "bevy_clerestory::recovery_probe";
 
 // producers
 pub(super) const PRODUCER_MONITOR_CONNECTED: &str = "observer::MonitorConnected";
 pub(super) const PRODUCER_MONITOR_DISCONNECTED: &str = "observer::MonitorDisconnected";
+pub(super) const PRODUCER_RECOVERY_AVAILABLE: &str = "observer::WindowRecoveryAvailable";
+pub(super) const PRODUCER_RECOVERY_PENDING: &str = "observer::WindowRecoveryPending";
 pub(super) const PRODUCER_POST_UPDATE_WINDOWS: &str = "PostUpdate::trace_window_component_changes";
 pub(super) const PRODUCER_STARTUP_SESSION: &str = "Startup::trace_probe_session";
 pub(super) const PRODUCER_UPDATE_INTERNAL_WINDOW_MESSAGES: &str =

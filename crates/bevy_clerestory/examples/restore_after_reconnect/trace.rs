@@ -186,6 +186,9 @@ struct MonitorProbeLayer {
 
 impl Layer<Registry> for MonitorProbeLayer {
     fn on_event(&self, event: &Event<'_>, _context: Context<'_, Registry>) {
+        let Some(kind) = probe_kind(event.metadata()) else {
+            return;
+        };
         let mut fields = MonitorProbeFields::default();
         event.record(&mut fields);
         self.trace.record(
@@ -193,19 +196,27 @@ impl Layer<Registry> for MonitorProbeLayer {
             fields
                 .producer
                 .unwrap_or_else(|| event.metadata().target().into()),
-            KIND_MONITOR_TOPOLOGY,
+            kind,
             fields.fields,
         );
     }
 }
 
-fn monitor_target(metadata: &bevy::log::tracing::Metadata<'_>) -> bool {
-    metadata.target() == MONITOR_PROBE_TARGET
+fn probe_kind(metadata: &bevy::log::tracing::Metadata<'_>) -> Option<&'static str> {
+    match metadata.target() {
+        MONITOR_PROBE_TARGET => Some(KIND_MONITOR_TOPOLOGY),
+        RECOVERY_PROBE_TARGET => Some(KIND_RECOVERY_ACCEPTED),
+        _ => None,
+    }
+}
+
+fn probe_target(metadata: &bevy::log::tracing::Metadata<'_>) -> bool {
+    probe_kind(metadata).is_some()
 }
 
 pub(crate) fn monitor_probe_layer(app: &mut App) -> Option<BoxedLayer> {
     let trace = app.world_mut().get_resource::<ProbeTrace>()?.clone();
     Some(Box::new(
-        MonitorProbeLayer { trace }.with_filter(FilterFn::new(monitor_target)),
+        MonitorProbeLayer { trace }.with_filter(FilterFn::new(probe_target)),
     ))
 }
