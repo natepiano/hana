@@ -6,7 +6,10 @@ mod target_position;
 mod winit_info;
 
 use bevy::prelude::*;
+use bevy::time::Virtual;
 pub(crate) use restore_attempt::NativeWindowReady;
+use restore_attempt::RestoreAttemptIds;
+pub(crate) use restore_attempt::RestoreDisposition;
 pub(crate) use restore_attempt::RestorePreparation;
 pub(crate) use restore_attempt::cancel_restore;
 use restore_attempt::clear_native_window_ready;
@@ -31,12 +34,16 @@ pub(crate) use winit_info::queue_primary_restore;
 use crate::ClerestoryPreStartupSet;
 use crate::ClerestoryUpdateSet;
 use crate::monitors;
+use crate::recovery;
 pub(crate) struct RestorePlugin;
 
 impl Plugin for RestorePlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(mark_native_window_ready);
-        app.add_observer(clear_native_window_ready);
+        app.init_resource::<RestoreAttemptIds>()
+            .init_resource::<Time<Virtual>>()
+            .add_observer(mark_native_window_ready)
+            .add_observer(clear_native_window_ready)
+            .add_observer(restore_attempt::validate_runtime_restore_completion);
 
         // X11 fullscreen: move window to target monitor before first event loop.
         // Must be chained (not `.after()`) so `apply_deferred` runs between
@@ -57,9 +64,26 @@ impl Plugin for RestorePlugin {
 
         app.add_systems(
             Update,
-            prepare_restore_targets
-                .after(monitors::update_current_monitor)
-                .in_set(ClerestoryUpdateSet::RestorePreparation),
+            (
+                (
+                    restore_attempt::accept_explicit_restore_requests,
+                    restore_attempt::accept_automatic_restore_intents,
+                    ApplyDeferred,
+                )
+                    .chain()
+                    .after(recovery::accept_eligible_registrations)
+                    .after(recovery::advance_fallback_windows)
+                    .in_set(ClerestoryUpdateSet::RecoveryWindow),
+                (
+                    restore_attempt::reject_stale_restore_attempts,
+                    ApplyDeferred,
+                    prepare_restore_targets,
+                    ApplyDeferred,
+                )
+                    .chain()
+                    .after(monitors::update_current_monitor)
+                    .in_set(ClerestoryUpdateSet::RestorePreparation),
+            ),
         );
 
         app.add_systems(
@@ -70,6 +94,9 @@ impl Plugin for RestorePlugin {
                     .in_set(ClerestoryUpdateSet::RestoreApplication),
                 check_restore_settling
                     .after(restore_windows)
+                    .in_set(ClerestoryUpdateSet::RestoreSettling),
+                ApplyDeferred
+                    .after(check_restore_settling)
                     .in_set(ClerestoryUpdateSet::RestoreSettling),
             )
                 .run_if(has_restoring_windows),

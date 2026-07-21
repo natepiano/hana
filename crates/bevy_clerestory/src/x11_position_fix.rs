@@ -26,6 +26,7 @@ use crate::constants::FRAME_EXTENT_PROPERTY_OFFSET;
 use crate::constants::FRAME_EXTENT_TOP_INDEX;
 use crate::constants::FRAME_EXTENTS_ATOM_NAME;
 use crate::restore::MonitorScaleStrategy;
+use crate::restore::RestorePreparation;
 use crate::restore::TargetPosition;
 use crate::restore::X11FrameCompensated;
 
@@ -44,7 +45,10 @@ pub(crate) struct X11FrameTop(i32);
 /// silently and retries next frame.
 pub(crate) fn compensate_target_position(
     mut commands: Commands,
-    mut windows: Query<(Entity, &mut TargetPosition), Without<X11FrameCompensated>>,
+    mut windows: Query<
+        (Entity, &mut TargetPosition),
+        (With<RestorePreparation>, Without<X11FrameCompensated>),
+    >,
     _: NonSendMarker,
 ) {
     for (entity, mut target) in &mut windows {
@@ -85,7 +89,7 @@ pub(crate) fn compensate_target_position(
 /// Same-scale (`ApplyUnchanged`) windowed restores only — cross-DPI strategies drive
 /// position through their own multi-phase move and tolerate the W6 offset.
 pub(crate) fn reapply_compensated_position(
-    mut windows: Query<(&TargetPosition, &X11FrameTop, &mut Window)>,
+    mut windows: Query<(&TargetPosition, &X11FrameTop, &mut Window), With<RestorePreparation>>,
 ) {
     for (target_position, physical_frame_top, mut window) in &mut windows {
         if target_position.settle_state.is_none() {

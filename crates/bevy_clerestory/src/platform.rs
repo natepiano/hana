@@ -260,8 +260,10 @@ impl Platform {
     ///   different scale than the primary's launch monitor recorded by `RestoreTargetBuilder` for
     ///   `TargetPosition::starting_scale`.
     ///
-    /// In all three cases the `starting_scale` assumption is wrong, so `restore_windows`
-    /// re-reads the window's actual `base_scale_factor()` and recomputes the strategy.
+    /// In all three cases the `starting_scale` assumption is wrong, so initial restore
+    /// preparation re-reads the window's actual `base_scale_factor()` and recomputes the strategy.
+    /// Once a two-phase strategy advances beyond `NeedInitialMove`, its stored starting scale and
+    /// strategy are retained until that restore finishes.
     ///
     /// Enabled for every non-Wayland platform. The recompute only runs when the
     /// measured scale differs from `starting_scale`, so on setups where all

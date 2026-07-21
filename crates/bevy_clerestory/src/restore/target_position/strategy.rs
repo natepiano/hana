@@ -1,5 +1,7 @@
 use bevy::prelude::Reflect;
 
+use crate::restore::restore_attempt::RestoreAttemptId;
+
 /// State for `MonitorScaleStrategy::HigherToLower` (high→low DPI restore).
 ///
 /// When restoring from a high-DPI to low-DPI monitor, we must set position BEFORE size
@@ -18,7 +20,10 @@ pub(crate) enum WindowRestoreState {
     /// (`PreStartup` `move_to_target_monitor` for primary, inline guard for managed).
     NeedInitialMove,
     /// Position applied with compensation, waiting for `ScaleChanged` message.
-    WaitingForScaleChange,
+    WaitingForScaleChange {
+        /// Runtime attempt that began this transition. Startup restore has no attempt ID.
+        attempt_id: Option<RestoreAttemptId>,
+    },
     /// Scale changed, ready to apply final size (position already set in phase 1).
     ApplySize,
 }
