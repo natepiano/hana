@@ -15,6 +15,7 @@ use super::PanelWidgetIndex;
 use super::PanelWidgets;
 use super::ScreenWidgetAnchorProxy;
 use super::ScreenWidgetAnchoredHere;
+use super::WidgetFocusable;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
@@ -210,6 +211,7 @@ fn spawn_widget(
         spawned = children
             .spawn((
                 PanelWidget::new(id),
+                WidgetFocusable,
                 WidgetOf::new(panel),
                 kind,
                 authored,

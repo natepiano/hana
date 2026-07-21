@@ -6,9 +6,13 @@
 //! Current controls:
 //!   D - Toggle the secondary button between enabled and disabled
 //!   H - Return to the camera home pose
+//!   N/P - Focus the next/previous widget
+//!   1/0 - Focus the first/last widget
+//!   A/C - Activate/cancel the focused widget
 
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -18,16 +22,22 @@ use fairy_dust::FairyDustCube;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_panel_material;
 use fairy_dust::cube_face_transform;
+use hana_diegetic::ActivateFocusedWidget;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
+use hana_diegetic::CancelFocusedWidget;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::El;
 use hana_diegetic::FitMax;
+use hana_diegetic::FocusFirstWidget;
+use hana_diegetic::FocusLastWidget;
+use hana_diegetic::FocusNextWidget;
+use hana_diegetic::FocusPreviousWidget;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Padding;
@@ -40,6 +50,7 @@ use hana_diegetic::PanelWidget;
 use hana_diegetic::PanelWidgetReader;
 use hana_diegetic::PanelWidgetWriter;
 use hana_diegetic::Px;
+use hana_diegetic::RequestWidgetFocus;
 use hana_diegetic::Sizing;
 use hana_diegetic::Slider;
 use hana_diegetic::SliderConfigError;
@@ -48,6 +59,7 @@ use hana_diegetic::SliderRange;
 use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
+use hana_diegetic::WidgetFocusChanged;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
 
@@ -62,9 +74,10 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 4] = [
+const DESCRIPTION_LINES: [&str; 5] = [
     "Hover each control; interaction changes are logged in the terminal.",
     "D changes the secondary button through PanelWidgetReader and PanelWidgetWriter.",
+    "N/P and 1/0 traverse focus; A/C route activate and cancel requests.",
     "The world status panel follows the level slider below the cube controls.",
     "The screen status panel follows the separate top-right screen widget.",
 ];
@@ -78,7 +91,14 @@ const PANEL_PADDING: Px = Px(12.0);
 const PANEL_RADIUS: Px = Px(10.0);
 const PANEL_TITLE: &str = "Widget Lab";
 const PANEL_WORLD_HEIGHT: f32 = 0.32;
+const FOCUS_STATUS_ID: &str = "focus-status";
+const FOCUS_STATUS_MEASURE: &str = "Focus: secondary-button";
+const FOCUS_STATUS_NONE: &str = "Focus: none";
+const FOCUS_STATUS_UNAVAILABLE: &str = "Focus: unavailable";
 const PRIMARY_BUTTON_ID: &str = "primary-button";
+const POINTER_STATUS_ID: &str = "pointer-status";
+const POINTER_STATUS_IDLE: &str = "Pointer: none";
+const POINTER_STATUS_MEASURE: &str = "Pressed: secondary-button";
 const SECONDARY_BUTTON_ID: &str = "secondary-button";
 const SECONDARY_CONTROL: &str = "D Toggle Secondary";
 const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
@@ -103,14 +123,12 @@ const STATUS_BORDER: Color = Color::srgba(0.20, 0.80, 0.68, 0.86);
 const STATUS_BORDER_WIDTH: Px = Px(1.0);
 const STATUS_COLOR: Color = Color::srgb(0.38, 0.94, 0.78);
 const STATUS_GAP: f32 = 0.012;
-const STATUS_ID: &str = "interaction-status";
-const STATUS_IDLE: &str = "Pointer: none";
-const STATUS_MAX_HEIGHT: Px = Px(40.0);
+const STATUS_LINE_GAP: Px = Px(4.0);
+const STATUS_MAX_HEIGHT: Px = Px(64.0);
 const STATUS_MAX_WIDTH: Px = Px(260.0);
-const STATUS_MEASURE: &str = "Pressed: secondary-button";
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = Px(7.0);
-const STATUS_WORLD_HEIGHT: f32 = 0.042;
+const STATUS_WORLD_HEIGHT: f32 = 0.066;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum SecondaryMode {
@@ -183,6 +201,9 @@ struct WidgetInteractionReadout;
 struct WidgetAnchorInstalled;
 
 #[derive(Component)]
+struct InitialWidgetFocusRequested;
+
+#[derive(Component)]
 struct ScreenWidgetLabPanel;
 
 #[derive(Component)]
@@ -223,6 +244,7 @@ fn main() {
         )
         .with_camera_control_panel()
         .init_resource::<SecondaryMode>()
+        .add_observer(report_widget_focus_changed)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
             Update,
@@ -230,10 +252,106 @@ fn main() {
                 anchor_interaction_readout,
                 anchor_screen_interaction_readout,
                 report_interaction_changes,
+                request_initial_widget_focus,
             ),
         )
+        .with_shortcut(KeyCode::KeyN, focus_next_widget)
+        .with_shortcut(KeyCode::KeyP, focus_previous_widget)
+        .with_shortcut(KeyCode::Digit1, focus_first_widget)
+        .with_shortcut(KeyCode::Digit0, focus_last_widget)
+        .with_shortcut(KeyCode::KeyA, activate_focused_widget)
+        .with_shortcut(KeyCode::KeyC, cancel_focused_widget)
         .with_shortcut(KeyCode::KeyD, toggle_secondary_button)
         .run();
+}
+
+fn request_initial_widget_focus(
+    mut commands: Commands,
+    panel: Single<Entity, (With<WidgetLabPanel>, Without<InitialWidgetFocusRequested>)>,
+    window: Single<Entity, With<PrimaryWindow>>,
+    reader: PanelWidgetReader,
+) {
+    let id = PanelElementId::named(PRIMARY_BUTTON_ID);
+    let Some(widget) = reader.entity(*panel, &id) else {
+        return;
+    };
+    commands.trigger(RequestWidgetFocus {
+        window: *window,
+        widget,
+    });
+    commands.entity(*panel).insert(InitialWidgetFocusRequested);
+}
+
+fn report_widget_focus_changed(
+    change: On<WidgetFocusChanged>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    widgets: Query<&PanelWidget>,
+    mut panel_text: PanelText,
+) {
+    info!(
+        "widgets: window {:?} focus changed from {:?} to {:?} ({:?})",
+        change.window, change.previous, change.current, change.cause
+    );
+
+    let focus_status = match change.current {
+        Some(entity) => widgets.get(entity).map_or_else(
+            |_| FOCUS_STATUS_UNAVAILABLE.to_owned(),
+            |widget| format!("Focus: {}", widget.id()),
+        ),
+        None => FOCUS_STATUS_NONE.to_owned(),
+    };
+    let Ok(readout) = readouts.single() else {
+        return;
+    };
+    if !panel_text.set_text(
+        readout,
+        &PanelElementId::named(FOCUS_STATUS_ID),
+        focus_status,
+    ) {
+        warn!("widgets: focus status has not been reified");
+    }
+}
+
+fn focus_next_widget(
+    window: Single<Entity, With<PrimaryWindow>>,
+    mut requests: MessageWriter<FocusNextWidget>,
+) {
+    requests.write(FocusNextWidget { window: *window });
+}
+
+fn focus_previous_widget(
+    window: Single<Entity, With<PrimaryWindow>>,
+    mut requests: MessageWriter<FocusPreviousWidget>,
+) {
+    requests.write(FocusPreviousWidget { window: *window });
+}
+
+fn focus_first_widget(
+    window: Single<Entity, With<PrimaryWindow>>,
+    mut requests: MessageWriter<FocusFirstWidget>,
+) {
+    requests.write(FocusFirstWidget { window: *window });
+}
+
+fn focus_last_widget(
+    window: Single<Entity, With<PrimaryWindow>>,
+    mut requests: MessageWriter<FocusLastWidget>,
+) {
+    requests.write(FocusLastWidget { window: *window });
+}
+
+fn activate_focused_widget(
+    window: Single<Entity, With<PrimaryWindow>>,
+    mut requests: MessageWriter<ActivateFocusedWidget>,
+) {
+    requests.write(ActivateFocusedWidget { window: *window });
+}
+
+fn cancel_focused_widget(
+    window: Single<Entity, With<PrimaryWindow>>,
+    mut requests: MessageWriter<CancelFocusedWidget>,
+) {
+    requests.write(CancelFocusedWidget { window: *window });
 }
 
 fn anchor_screen_interaction_readout(
@@ -496,10 +614,11 @@ fn widget_tree(slider: Slider) -> LayoutTree {
 
 fn interaction_status_tree() -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .padding(Padding::all(STATUS_PADDING))
+            .gap(STATUS_LINE_GAP)
             .alignment(AlignX::Center, AlignY::Center)
             .background(STATUS_BACKGROUND)
             .border(Border::all(STATUS_BORDER_WIDTH, STATUS_BORDER))
@@ -507,11 +626,19 @@ fn interaction_status_tree() -> LayoutTree {
     );
     builder.text(
         Text::new(
-            STATUS_IDLE,
+            POINTER_STATUS_IDLE,
             TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
         )
-        .id(STATUS_ID)
-        .measure_as(STATUS_MEASURE),
+        .id(POINTER_STATUS_ID)
+        .measure_as(POINTER_STATUS_MEASURE),
+    );
+    builder.text(
+        Text::new(
+            FOCUS_STATUS_NONE,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        )
+        .id(FOCUS_STATUS_ID)
+        .measure_as(FOCUS_STATUS_MEASURE),
     );
     builder.build()
 }
@@ -588,8 +715,8 @@ fn report_interaction_changes(
     if world_interaction_changes.were_observed()
         && !panel_text.set_text(
             *readout,
-            &PanelElementId::named(STATUS_ID),
-            active_status.as_deref().unwrap_or(STATUS_IDLE),
+            &PanelElementId::named(POINTER_STATUS_ID),
+            active_status.as_deref().unwrap_or(POINTER_STATUS_IDLE),
         )
     {
         warn!("widgets: interaction status has not been reified");

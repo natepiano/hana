@@ -36,6 +36,7 @@ pub(crate) use anchoring::ResolvedScreenPanelPosition;
 pub(crate) use anchoring::WidgetOwnerLayout;
 pub use arrangement::ArrangedPanel;
 use bevy::ecs::schedule::ApplyDeferred;
+use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
@@ -129,6 +130,7 @@ use crate::layout::ShapedTextCache;
 use crate::layout::Sidedness;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::WidgetFocusAuthority;
 use crate::widgets::WidgetInteractivity;
 
 /// System sets for ordering panel work and its cross-module dependencies.
@@ -211,6 +213,10 @@ impl Plugin for HeadlessLayoutPlugin {
             ShapeMaterial,
         );
 
+        app.add_observer(
+            lifecycle::finalize_panel_focus_before_despawn
+                .run_if(resource_exists::<WidgetFocusAuthority>),
+        );
         app.add_observer(lifecycle::finalize_orphaned_panel_owned)
             .add_observer(lifecycle::teardown_panel_role)
             .init_resource::<DiegeticPerfStats>()

@@ -51,12 +51,14 @@ use crate::render::ResolvedSdfSurfaceRegistry;
 use crate::screen_space;
 use crate::screen_space::ScreenSpaceCamera;
 use crate::screen_space::ScreenSpaceLight;
+use crate::widgets;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::PanelWidgets;
 use crate::widgets::ScreenWidgetAnchorProxy;
 use crate::widgets::ScreenWidgetAnchoredHere;
 use crate::widgets::ScreenWidgetAnchoredTo;
+use crate::widgets::WidgetFocusAuthority;
 use crate::widgets::WidgetInteractivity;
 
 /// Identifies the panel role that created and owns one runtime entity.
@@ -204,6 +206,7 @@ pub(super) fn teardown_panel_role(
     lights: Query<(Entity, &ScreenSpaceLight)>,
     primary: Query<Entity, With<PrimaryWindow>>,
     mut resolved_surfaces: Option<ResMut<ResolvedSdfSurfaceRegistry>>,
+    mut focus_authority: Option<ResMut<WidgetFocusAuthority>>,
     mut commands: Commands,
 ) {
     let entity = trigger.entity;
@@ -221,6 +224,10 @@ pub(super) fn teardown_panel_role(
     );
     if let Some(resolved_surfaces) = resolved_surfaces.as_deref_mut() {
         resolved_surfaces.remove_panel(entity);
+    }
+
+    if let Some(focus_authority) = focus_authority.as_deref_mut() {
+        widgets::finalize_panel_focus(entity, focus_authority, &mut commands);
     }
 
     finalize_widget_anchor_state(
@@ -273,6 +280,14 @@ pub(super) fn teardown_panel_role(
         ScreenWidgetAnchoredTo,
     )>();
     render::remove_panel_shape_relationship(&mut panel_entity);
+}
+
+pub(super) fn finalize_panel_focus_before_despawn(
+    trigger: On<Despawn, DiegeticPanel>,
+    mut focus_authority: ResMut<WidgetFocusAuthority>,
+    mut commands: Commands,
+) {
+    widgets::finalize_panel_focus(trigger.entity, &mut focus_authority, &mut commands);
 }
 
 fn finalize_widget_anchor_state(
