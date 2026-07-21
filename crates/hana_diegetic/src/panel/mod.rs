@@ -29,25 +29,29 @@ pub use anchor_geometry::PanelPlane;
 pub use anchor_geometry::PanelScreenBounds;
 pub use anchor_geometry::ResolvedPanelAnchorGeometry;
 pub(crate) use anchor_geometry::screen_anchor_position;
-pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
+pub use anchoring::PanelAttachment;
 pub(crate) use anchoring::PanelAttachmentAuthored;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
+pub(crate) use anchoring::WidgetOwnerLayout;
 pub use arrangement::ArrangedPanel;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
 pub use builder::PanelBuildError;
+pub use builder::PanelEntity;
+pub use builder::PanelEntityReader;
+pub use builder::Screen;
+pub use builder::WidgetEntity;
+pub use builder::World;
 pub use conversion::PanelProjectionError;
 pub use conversion::PanelProjectionParam;
 pub use conversion::PanelScreenConversion;
-pub use conversion::PanelScreenConversionParam;
 pub use conversion::PanelScreenHandoff;
 pub use conversion::PanelScreenProjection;
 pub use conversion::PanelScreenTarget;
 pub use conversion::PanelWorldConversion;
-pub use conversion::PanelWorldConversionParam;
 pub use conversion::PanelWorldProjection;
 pub use conversion::PanelWorldTarget;
 pub use conversion::SavedPanelScreenState;
@@ -213,13 +217,12 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<ShapedTextCache>()
             .init_resource::<PanelDefaults>()
             .init_resource::<ResolveDiagnostics>()
-            .add_observer(coordinate_space::sync_panel_space_on_add)
+            .add_observer(coordinate_space::sync_panel_space_on_insert)
             .add_observer(hana_valence::on_member_added)
             .add_observer(hana_valence::on_member_removed)
             .add_observer(arrangement::cleanup_panel_member_placement)
             .add_observer(anchoring::on_panel_attachment_inserted)
             .add_observer(anchoring::on_panel_attachment_removed)
-            .add_observer(anchoring::on_panel_space_changed)
             .configure_sets(
                 Update,
                 (
@@ -233,13 +236,7 @@ impl Plugin for HeadlessLayoutPlugin {
                 Update,
                 (
                     ApplyDeferred.in_set(PanelSystems::ApplyTreeChanges),
-                    (
-                        ApplyDeferred,
-                        diegetic_panel::apply_pending_panel_conversions,
-                        ApplyDeferred,
-                    )
-                        .chain()
-                        .in_set(PanelSystems::ApplyConversions),
+                    ApplyDeferred.in_set(PanelSystems::ApplyConversions),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),

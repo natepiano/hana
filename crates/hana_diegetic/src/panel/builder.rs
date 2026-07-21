@@ -4,6 +4,7 @@
 use std::marker::PhantomData;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 use sealed::CanBuild;
@@ -12,6 +13,7 @@ use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
 use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use super::constants::MIN_PANEL_WORLD_HEIGHT;
 use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::PanelSpace;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::diegetic_panel::DiegeticPanel;
@@ -60,11 +62,100 @@ pub enum PanelBuildError {
 
 // ── Typestate marker types ──────────────────────────────────────────────────
 
-/// Marker: panel is placed in 3D world space.
+/// Marker for world-space panel and widget identities.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct World;
 
-/// Marker: panel renders as a screen overlay.
+/// Marker for screen-space panel and widget identities.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Screen;
+
+/// Opaque identity for a live panel in coordinate space `Space`.
+///
+/// Obtain handles through [`PanelEntityReader`]. After a queued coordinate-space
+/// conversion applies, reacquire a handle for the destination space through the
+/// reader.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PanelEntity<Space> {
+    entity: Entity,
+    space:  PanelSpace,
+    marker: PhantomData<fn() -> Space>,
+}
+
+impl<Space> PanelEntity<Space> {
+    /// Returns the underlying Bevy entity for unrelated ECS work.
+    #[must_use]
+    pub const fn entity(&self) -> Entity { self.entity }
+
+    pub(crate) const fn from_validated(entity: Entity, space: PanelSpace) -> Self {
+        Self {
+            entity,
+            space,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) const fn expected_space(&self) -> PanelSpace { self.space }
+}
+
+/// Opaque identity for a live widget owned by a panel in coordinate space
+/// `Space`.
+///
+/// Obtain widget handles through
+/// [`PanelWidgetReader::typed_entity`](crate::PanelWidgetReader::typed_entity).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WidgetEntity<Space> {
+    entity: Entity,
+    owner:  Entity,
+    space:  PanelSpace,
+    marker: PhantomData<fn() -> Space>,
+}
+
+impl<Space> WidgetEntity<Space> {
+    /// Returns the underlying Bevy entity for unrelated ECS work.
+    #[must_use]
+    pub const fn entity(&self) -> Entity { self.entity }
+
+    pub(crate) const fn from_validated(entity: Entity, owner: Entity, space: PanelSpace) -> Self {
+        Self {
+            entity,
+            owner,
+            space,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) const fn owner(&self) -> Entity { self.owner }
+
+    pub(crate) const fn expected_space(&self) -> PanelSpace { self.space }
+}
+
+/// Read-only lookup that mints typed identities for live panels.
+#[derive(SystemParam)]
+pub struct PanelEntityReader<'w, 's> {
+    panels: Query<'w, 's, &'static DiegeticPanel>,
+}
+
+impl PanelEntityReader<'_, '_> {
+    /// Returns a world-space handle when `entity` is currently a world panel.
+    #[must_use]
+    pub fn world(&self, entity: Entity) -> Option<PanelEntity<World>> {
+        self.panel(entity, PanelSpace::World)
+            .map(|()| PanelEntity::from_validated(entity, PanelSpace::World))
+    }
+
+    /// Returns a screen-space handle when `entity` is currently a screen panel.
+    #[must_use]
+    pub fn screen(&self, entity: Entity) -> Option<PanelEntity<Screen>> {
+        self.panel(entity, PanelSpace::Screen)
+            .map(|()| PanelEntity::from_validated(entity, PanelSpace::Screen))
+    }
+
+    fn panel(&self, entity: Entity, expected: PanelSpace) -> Option<()> {
+        let panel = self.panels.get(entity).ok()?;
+        (PanelSpace::from(panel.coordinate_space()) == expected).then_some(())
+    }
+}
 
 /// Marker: builder needs `.size()` or `.paper()` before `.layout()` or `.build()`.
 pub struct NeedsSize;

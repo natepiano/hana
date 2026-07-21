@@ -7,18 +7,23 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 
+use super::PanelProjectionError;
 use super::PanelScreenConversion;
 use super::PanelScreenHandoff;
 use super::PanelWorldConversion;
 use super::ResolvedScreenPanelPosition;
 use super::SavedPanelWorldState;
+use super::anchoring;
+use super::anchoring::PanelAttachment;
 use super::apply_screen_conversion;
 use super::apply_screen_root_sizing;
 use super::apply_world_conversion;
 use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
 use super::builder::PanelBuildError;
+use super::builder::PanelEntity;
 use super::builder::Screen;
+use super::builder::WidgetEntity;
 use super::builder::World;
 use super::constants::PANEL_RESIZE_EPSILON;
 use super::conversion;
@@ -60,8 +65,10 @@ use crate::render::DrawOrder;
 use crate::render::HairlineFade;
 use crate::widgets;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetOf;
 
 /// Source tree plus the revision token used by derived tree caches.
 #[derive(Clone, Default)]
@@ -176,6 +183,7 @@ impl From<TreeRevision> for u64 {
     DiegeticPanelChangeClassification,
     LastPanelDimensions,
     PanelPrecomposeCache,
+    PanelSpace,
     PanelWidgetIndex,
     ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
@@ -601,12 +609,41 @@ impl DiegeticPanel {
 
 /// Extension methods for mutating diegetic panels through [`Commands`].
 ///
-/// This trait is an ergonomic wrapper around panel mutations that need more
-/// schedule coordination than a plain `&mut DiegeticPanel` method can provide.
-/// Tree replacement records a pending layout-change classification, and
-/// coordinate-space conversions are applied by the panel pipeline before layout
-/// and screen placement run. Keeping the wrapper here lets callers use a focused
-/// panel API without learning those internal components or schedule fences.
+/// Attachment and conversion operations queued on one `Commands` value apply in
+/// call order. Every operation validates the live panel and attachment graph at
+/// execution; a conflict emits a warning and leaves that operation's state
+/// unchanged.
+///
+/// `PanelEntity<World>` accepts only world panel or widget targets, and
+/// `PanelEntity<Screen>` accepts only screen targets.
+///
+/// ```compile_fail
+/// use bevy::prelude::Commands;
+/// use hana_diegetic::{Anchor, DiegeticPanelCommands, PanelAttachment};
+/// use hana_diegetic::{PanelEntity, Screen, World};
+///
+/// fn cross_space_panel(
+///     mut commands: Commands<'_, '_>,
+///     source: PanelEntity<World>,
+///     target: PanelEntity<Screen>,
+/// ) {
+///     let authored = PanelAttachment::new(Anchor::Center, Anchor::Center);
+///     commands.attach_to_panel(source, target, authored);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use bevy::prelude::Commands;
+/// use hana_diegetic::{DiegeticPanelCommands, PanelEntity, Screen, WidgetEntity, World};
+///
+/// fn cross_space_widget_retarget(
+///     mut commands: Commands<'_, '_>,
+///     source: PanelEntity<Screen>,
+///     target: WidgetEntity<World>,
+/// ) {
+///     commands.retarget_to_widget(source, target);
+/// }
+/// ```
 pub trait DiegeticPanelCommands {
     /// Queues a layout-tree replacement that records whether the change is
     /// visual-only or layout-affecting.
@@ -624,56 +661,148 @@ pub trait DiegeticPanelCommands {
     /// invalid widget declaration. A rejected tree queues no replacement.
     fn set_tree(&mut self, entity: Entity, tree: LayoutTree) -> Result<(), PanelBuildError>;
 
-    /// Starts an animated conversion of an existing world panel to screen space.
+    /// Attaches `source` to a panel in the same coordinate space.
+    fn attach_to_panel<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: PanelEntity<Space>,
+        authored: PanelAttachment,
+    );
+
+    /// Attaches `source` to a widget in the same coordinate space.
+    fn attach_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+        authored: PanelAttachment,
+    );
+
+    /// Retargets an existing attachment to a panel in the same coordinate space.
+    fn retarget_to_panel<Space>(&mut self, source: PanelEntity<Space>, target: PanelEntity<Space>);
+
+    /// Retargets an existing attachment to a widget in the same coordinate space.
+    fn retarget_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+    );
+
+    /// Detaches `source` and removes its authored offset.
+    fn detach<Space>(&mut self, source: PanelEntity<Space>);
+
+    /// Prepares a world panel for an animated screen handoff without claiming a
+    /// screen-space identity.
     ///
-    /// The panel remains world-space, but its visual source is normalized to the
-    /// screen conversion's pixel sizing so the final handoff can switch cameras
-    /// without rebuilding the visual tree. The final handoff should use
-    /// [`Self::finish_panel_to_screen`].
-    fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn begin_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>;
 
-    /// Queues a resolved conversion of an existing panel to screen space.
+    /// Finishes an animated world-to-screen handoff.
     ///
-    /// `conversion` can be a [`PanelScreenConversion`] or any type that converts
-    /// into one, including [`PanelScreenProjection`](super::PanelScreenProjection).
-    /// This is the advanced resolved-data path; higher-level callers should
-    /// prefer [`PanelScreenConversionParam::to_screen_at`](super::PanelScreenConversionParam::to_screen_at).
-    fn finish_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn finish_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>;
 
-    /// Queues a resolved conversion of an existing panel to screen space without
-    /// saving a screen handoff camera.
+    /// Queues a resolved world-to-screen conversion without saving a handoff
+    /// camera.
     ///
-    /// This is primarily for advanced callers applying their own saved-state
-    /// policy.
-    fn apply_panel_screen_conversion<C>(&mut self, entity: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn apply_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>;
 
-    /// Queues a resolved conversion of an existing panel to world space.
+    /// Queues a resolved screen-to-world conversion.
     ///
-    /// This is the advanced resolved-data path; higher-level callers should
-    /// prefer [`PanelWorldConversionParam::to_world`](super::PanelWorldConversionParam::to_world)
-    /// or [`PanelWorldConversionParam::to_world_at`](super::PanelWorldConversionParam::to_world_at).
-    fn apply_panel_world_conversion<C>(&mut self, entity: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn apply_to_world<C>(
+        &mut self,
+        panel: PanelEntity<Screen>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelWorldConversion>;
 }
 
-#[derive(Component, Clone)]
-pub(super) enum PendingPanelConversion {
+#[derive(Clone)]
+pub(super) enum PanelConversionOperation {
     BeginScreen {
+        panel:      Entity,
         camera:     Entity,
         conversion: PanelScreenConversion,
     },
     Screen {
+        panel:      Entity,
         camera:     Option<Entity>,
         conversion: PanelScreenConversion,
     },
-    World(PanelWorldConversion),
+    World {
+        panel:      Entity,
+        conversion: PanelWorldConversion,
+    },
+}
+
+impl PanelConversionOperation {
+    const fn panel(&self) -> Entity {
+        match self {
+            Self::BeginScreen { panel, .. }
+            | Self::Screen { panel, .. }
+            | Self::World { panel, .. } => *panel,
+        }
+    }
+
+    const fn expected_space(&self) -> PanelSpace {
+        match self {
+            Self::BeginScreen { .. } | Self::Screen { .. } => PanelSpace::World,
+            Self::World { .. } => PanelSpace::Screen,
+        }
+    }
+
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::BeginScreen { .. } => "begin world-to-screen conversion",
+            Self::Screen {
+                camera: Some(_), ..
+            } => "finish world-to-screen conversion",
+            Self::Screen { camera: None, .. } => "world-to-screen conversion",
+            Self::World { .. } => "screen-to-world conversion",
+        }
+    }
+
+    const fn camera(&self) -> Option<Entity> {
+        match self {
+            Self::BeginScreen { camera, .. } => Some(*camera),
+            Self::Screen { camera, .. } => *camera,
+            Self::World { .. } => None,
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -728,43 +857,123 @@ impl DiegeticPanelCommands for Commands<'_, '_> {
         Ok(())
     }
 
-    fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    fn attach_to_panel<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: PanelEntity<Space>,
+        authored: PanelAttachment,
+    ) {
+        anchoring::queue_attach_to_panel(self, source, target, authored);
+    }
+
+    fn attach_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+        authored: PanelAttachment,
+    ) {
+        anchoring::queue_attach_to_widget(self, source, target, authored);
+    }
+
+    fn retarget_to_panel<Space>(&mut self, source: PanelEntity<Space>, target: PanelEntity<Space>) {
+        anchoring::queue_retarget_to_panel(self, source, target);
+    }
+
+    fn retarget_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+    ) {
+        anchoring::queue_retarget_to_widget(self, source, target);
+    }
+
+    fn detach<Space>(&mut self, source: PanelEntity<Space>) {
+        anchoring::queue_detach(self, source);
+    }
+
+    fn begin_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>,
     {
-        self.entity(entity)
-            .insert(PendingPanelConversion::BeginScreen {
+        let conversion = conversion.into();
+        validate_screen_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::BeginScreen {
+                panel: panel.entity(),
                 camera,
-                conversion: conversion.into(),
-            });
+                conversion,
+            },
+        );
+        Ok(())
     }
 
-    fn finish_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    fn finish_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>,
     {
-        self.entity(entity).insert(PendingPanelConversion::Screen {
-            camera:     Some(camera),
-            conversion: conversion.into(),
-        });
+        let conversion = conversion.into();
+        validate_screen_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::Screen {
+                panel: panel.entity(),
+                camera: Some(camera),
+                conversion,
+            },
+        );
+        Ok(())
     }
 
-    fn apply_panel_screen_conversion<C>(&mut self, entity: Entity, conversion: C)
+    fn apply_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>,
     {
-        self.entity(entity).insert(PendingPanelConversion::Screen {
-            camera:     None,
-            conversion: conversion.into(),
-        });
+        let conversion = conversion.into();
+        validate_screen_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::Screen {
+                panel: panel.entity(),
+                camera: None,
+                conversion,
+            },
+        );
+        Ok(())
     }
 
-    fn apply_panel_world_conversion<C>(&mut self, entity: Entity, conversion: C)
+    fn apply_to_world<C>(
+        &mut self,
+        panel: PanelEntity<Screen>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelWorldConversion>,
     {
-        self.entity(entity)
-            .insert(PendingPanelConversion::World(conversion.into()));
+        let conversion = conversion.into();
+        validate_world_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::World {
+                panel: panel.entity(),
+                conversion,
+            },
+        );
+        Ok(())
     }
 }
 
@@ -803,15 +1012,16 @@ pub(crate) fn apply_precompose_helper_panel(
     widget_index.clear();
 }
 
-pub(super) fn apply_pending_panel_conversions(
+pub(super) fn apply_panel_conversion_operation(
+    In(operation): In<PanelConversionOperation>,
     defaults: Res<PanelDefaults>,
     mut commands: Commands,
     primary: Query<Entity, With<PrimaryWindow>>,
     windows: Query<&Window>,
     cameras: Query<&GlobalTransform, With<Camera>>,
+    attachments: Query<(Entity, &super::PanelAttachmentAuthored)>,
+    widgets: Query<&WidgetOf, With<PanelWidget>>,
     mut panels: Query<(
-        Entity,
-        &PendingPanelConversion,
         &mut DiegeticPanel,
         &mut PanelWidgetIndex,
         &mut Transform,
@@ -825,9 +1035,8 @@ pub(super) fn apply_pending_panel_conversions(
         Option<&RenderLayers>,
     )>,
 ) {
-    for (
-        entity,
-        pending,
+    let entity = operation.panel();
+    let Ok((
         mut panel,
         mut widget_index,
         mut transform,
@@ -839,49 +1048,69 @@ pub(super) fn apply_pending_panel_conversions(
         saved,
         prepared_screen,
         source_render_layers,
-    ) in &mut panels
-    {
-        let source = ScreenConversionSource {
-            defaults: &defaults,
-            font_resolved,
-            lighting_resolved,
-            sidedness_resolved,
-            render_layers: source_render_layers,
-        };
-        match pending.clone() {
-            PendingPanelConversion::BeginScreen { camera, conversion } => {
-                begin_panel_to_screen_now(
-                    entity,
-                    camera,
-                    conversion,
-                    &mut commands,
-                    &cameras,
-                    &mut panel,
-                    &mut widget_index,
-                    &transform,
-                    &mut classification,
-                    saved,
-                    source,
-                );
-            },
-            PendingPanelConversion::Screen { camera, conversion } => {
-                apply_panel_screen_conversion_now(
-                    entity,
-                    camera,
-                    conversion,
-                    &mut commands,
-                    &primary,
-                    &windows,
-                    &cameras,
-                    &mut panel,
-                    &mut widget_index,
-                    &mut transform,
-                    &mut resolved_position,
-                    source,
-                    prepared_screen,
-                );
-            },
-            PendingPanelConversion::World(conversion) => apply_panel_world_conversion_now(
+    )) = panels.get_mut(entity)
+    else {
+        warn_rejected_conversion(
+            &operation,
+            "panel is missing or conversion state is incomplete",
+        );
+        return;
+    };
+    if PanelSpace::from(panel.coordinate_space()) != operation.expected_space() {
+        warn_rejected_conversion(&operation, "panel coordinate space changed");
+        return;
+    }
+    if let Some(rejection) = conversion_attachment_rejection(entity, &attachments, &widgets) {
+        warn_rejected_conversion_conflict(&operation, rejection);
+        return;
+    }
+
+    let source = ScreenConversionSource {
+        defaults: &defaults,
+        font_resolved,
+        lighting_resolved,
+        sidedness_resolved,
+        render_layers: source_render_layers,
+    };
+    match operation {
+        PanelConversionOperation::BeginScreen {
+            camera, conversion, ..
+        } => {
+            begin_panel_to_screen_now(
+                entity,
+                camera,
+                conversion,
+                &mut commands,
+                &cameras,
+                &mut panel,
+                &mut widget_index,
+                &transform,
+                &mut classification,
+                saved,
+                source,
+            );
+        },
+        PanelConversionOperation::Screen {
+            camera, conversion, ..
+        } => {
+            apply_panel_screen_conversion_now(
+                entity,
+                camera,
+                conversion,
+                &mut commands,
+                &primary,
+                &windows,
+                &cameras,
+                &mut panel,
+                &mut widget_index,
+                &mut transform,
+                &mut resolved_position,
+                source,
+                prepared_screen,
+            );
+        },
+        PanelConversionOperation::World { conversion, .. } => {
+            apply_panel_world_conversion_now(
                 entity,
                 conversion,
                 &mut commands,
@@ -891,9 +1120,82 @@ pub(super) fn apply_pending_panel_conversions(
                 &mut classification,
                 saved,
                 &mut resolved_position,
-            ),
+            );
+        },
+    }
+}
+
+fn conversion_attachment_rejection(
+    panel: Entity,
+    attachments: &Query<(Entity, &super::PanelAttachmentAuthored)>,
+    widgets: &Query<&WidgetOf, With<PanelWidget>>,
+) -> Option<PanelConversionAttachmentConflict> {
+    if let Ok((_, authored)) = attachments.get(panel) {
+        return Some(PanelConversionAttachmentConflict::Outgoing {
+            target: authored.target(),
+        });
+    }
+    for (source, authored) in attachments {
+        let target = authored.target();
+        if target == panel {
+            return Some(PanelConversionAttachmentConflict::IncomingPanel { source });
         }
-        commands.entity(entity).remove::<PendingPanelConversion>();
+        if widgets
+            .get(target)
+            .is_ok_and(|widget_of| widget_of.panel() == panel)
+        {
+            return Some(PanelConversionAttachmentConflict::IncomingWidget {
+                source,
+                widget: target,
+            });
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+enum PanelConversionAttachmentConflict {
+    Outgoing { target: Entity },
+    IncomingPanel { source: Entity },
+    IncomingWidget { source: Entity, widget: Entity },
+}
+
+fn warn_rejected_conversion(operation: &PanelConversionOperation, reason: &str) {
+    let panel = operation.panel();
+    if let Some(camera) = operation.camera() {
+        warn!(
+            "panel operation `{}` rejected for panel {panel:?} and camera {camera:?}: {reason}",
+            operation.name(),
+        );
+    } else {
+        warn!(
+            "panel operation `{}` rejected for panel {panel:?}: {reason}",
+            operation.name(),
+        );
+    }
+}
+
+fn warn_rejected_conversion_conflict(
+    operation: &PanelConversionOperation,
+    conflict: PanelConversionAttachmentConflict,
+) {
+    let panel = operation.panel();
+    match conflict {
+        PanelConversionAttachmentConflict::Outgoing { target } => warn!(
+            "panel operation `{}` rejected for panel {panel:?}: outgoing attachment targets \
+             {target:?}",
+            operation.name(),
+        ),
+        PanelConversionAttachmentConflict::IncomingPanel { source } => warn!(
+            "panel operation `{}` rejected for panel {panel:?}: attachment source {source:?} \
+             targets the panel",
+            operation.name(),
+        ),
+        PanelConversionAttachmentConflict::IncomingWidget { source, widget } => warn!(
+            "panel operation `{}` rejected for panel {panel:?}: attachment source {source:?} \
+             targets owned widget {widget:?}",
+            operation.name(),
+        ),
     }
 }
 
@@ -1541,6 +1843,7 @@ impl DiegeticPanel {
     reason = "tests should panic if fixture panel construction fails"
 )]
 mod tests {
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
@@ -1551,8 +1854,8 @@ mod tests {
     use super::DiegeticPanelChangeClassification;
     use super::DiegeticPanelCommands;
     use super::PanelScreenHandoff;
+    use super::PanelSpace;
     use super::PanelTree;
-    use super::PendingPanelConversion;
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
@@ -1565,6 +1868,7 @@ mod tests {
     use crate::Mm;
     use crate::PanelBuildError;
     use crate::PanelElementId;
+    use crate::PanelEntity;
     use crate::PanelScreenConversion;
     use crate::TextStyle;
     use crate::Unit;
@@ -1925,9 +2229,16 @@ mod tests {
         let conversion =
             PanelScreenConversion::at_pixels(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0));
 
+        let owner = PanelEntity::from_validated(entity, PanelSpace::World);
         app.world_mut()
-            .commands()
-            .begin_panel_to_screen(entity, camera, conversion.clone());
+            .run_system_once({
+                let conversion = conversion.clone();
+                move |mut conversions: Commands| {
+                    conversions.begin_to_screen(owner, camera, conversion.clone())
+                }
+            })
+            .expect("screen preparation system runs")
+            .expect("screen preparation is valid");
         app.update();
 
         let panel = app
@@ -1959,8 +2270,11 @@ mod tests {
         );
 
         app.world_mut()
-            .commands()
-            .finish_panel_to_screen(entity, camera, conversion);
+            .run_system_once(move |mut conversions: Commands| {
+                conversions.finish_to_screen(owner, camera, conversion.clone())
+            })
+            .expect("screen conversion system runs")
+            .expect("screen conversion is valid");
         app.update();
 
         let panel = app
@@ -2007,9 +2321,13 @@ mod tests {
             PanelScreenConversion::at_pixels(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0))
                 .window(WindowRef::Entity(window));
 
+        let owner = PanelEntity::from_validated(entity, PanelSpace::World);
         app.world_mut()
-            .commands()
-            .apply_panel_screen_conversion(entity, conversion);
+            .run_system_once(move |mut conversions: Commands| {
+                conversions.apply_to_screen(owner, conversion.clone())
+            })
+            .expect("screen conversion system runs")
+            .expect("screen conversion is valid");
         app.update();
 
         let panel = app
@@ -2017,7 +2335,6 @@ mod tests {
             .get::<DiegeticPanel>(entity)
             .expect("panel should still exist");
         assert!(panel.coordinate_space().is_screen());
-        assert!(app.world().get::<PendingPanelConversion>(entity).is_none());
         let transform = app
             .world()
             .get::<Transform>(entity)

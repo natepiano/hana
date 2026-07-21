@@ -1,9 +1,8 @@
 //! Screen-space panel attachment resolution.
 
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 use hana_valence::AnchorPose;
-use hana_valence::AttachmentResolveCandidate;
 use hana_valence::AttachmentResolveDiagnostics;
 
 use super::AnchorResolveSkip;
@@ -12,53 +11,56 @@ use super::placement;
 use super::placement::ScreenAttachmentPlacer;
 use super::rect;
 use super::window;
-use crate::panel::DiegeticPanel;
 use crate::panel::PanelAnchorOffset;
 use crate::panel::PanelAttachmentAuthored;
 use crate::panel::ResolvedScreenPanelPosition;
+use crate::screen_space::CandidateQueries;
 
 pub(crate) type AnchorResolveDiagnostics = AttachmentResolveDiagnostics<AnchorResolveSkip>;
 
 /// Resolves screen-space panel attachments for this frame.
-pub(crate) fn resolve_screen_space_panel_attachments(
+pub(super) fn resolve_screen_space_panel_attachments(
     windows: Query<(Entity, &Window)>,
-    primary: Query<Entity, With<PrimaryWindow>>,
-    entities: Query<()>,
     attachments: Query<(Entity, &PanelAttachmentAuthored, &PanelAnchorOffset)>,
     anchor_poses: Query<(Entity, &AnchorPose)>,
-    panels: Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
-    transforms: Query<&Transform>,
+    candidate_queries: CandidateQueries,
     mut resolved_positions: Query<&mut ResolvedScreenPanelPosition>,
     mut diagnostics: ResMut<AnchorResolveDiagnostics>,
 ) {
     let window_sizes = window::window_size_lookup(&windows);
-    let mut desired_placements = placement::desired_placement_map(&panels);
-    let mut depths = placement::panel_depths(&panels, &resolved_positions, &transforms);
+    let mut desired_placements = placement::desired_placement_map(&candidate_queries.panels);
+    let mut depths = placement::panel_depths(
+        &candidate_queries.panels,
+        &resolved_positions,
+        &candidate_queries.transforms,
+    );
     let anchor_poses = placement::panel_anchor_pose_map(&anchor_poses);
     let attachments_by_source = placement::screen_attachment_map(&attachments);
+    let widget_proxies = placement::screen_widget_proxy_map(
+        &candidate_queries.proxy_placements,
+        &candidate_queries.transforms,
+    );
     let mut rects = rect::screen_panel_rects(
-        &panels,
+        &candidate_queries.panels,
         &resolved_positions,
-        &transforms,
-        &primary,
+        &candidate_queries.transforms,
+        &candidate_queries.primary,
         &window_sizes,
     );
-    let candidates =
-        candidate::classify_candidates(&attachments, &panels, &entities, &primary, &window_sizes)
-            .into_iter()
-            .filter(|candidate| match candidate {
-                AttachmentResolveCandidate::Active { source, target, .. } => {
-                    rects.contains_key(source) && rects.contains_key(target)
-                },
-                AttachmentResolveCandidate::Skipped { .. } => true,
-            })
-            .collect();
+    let mut candidates = candidate::proxy_candidates(&candidate_queries);
+    candidates.extend(candidate::classify_candidates(
+        &attachments,
+        &candidate_queries,
+        &window_sizes,
+    ));
     let mut placer = ScreenAttachmentPlacer {
         rects:              &mut rects,
         desired_placements: &mut desired_placements,
         depths:             &mut depths,
         anchor_poses:       &anchor_poses,
         attachments:        &attachments_by_source,
+        widget_proxies:     &widget_proxies,
+        resolved_depths:    HashSet::default(),
     };
     hana_valence::resolve_attachments(
         candidates,
@@ -78,19 +80,31 @@ mod tests {
     use std::f32::consts::FRAC_PI_2;
     use std::sync::Arc;
 
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
     use hana_valence::AnchorPose;
+    use hana_valence::ResolvedAnchorGeometry;
 
     use super::AnchorResolveDiagnostics;
     use super::AnchorResolveSkip;
-    use crate::AnchoredToPanel;
+    use crate::Button;
+    use crate::DiegeticPanelCommands as _;
+    use crate::El;
     use crate::Fit;
     use crate::HeadlessLayoutPlugin;
+    use crate::LayoutBuilder;
+    use crate::LayoutTree;
     use crate::PanelAnchorOffset;
+    use crate::PanelAttachment;
     use crate::PanelDimensionsChanged;
+    use crate::PanelElementId;
+    use crate::PanelEntityReader;
     use crate::PanelSystems;
+    use crate::PanelWidget;
+    use crate::PanelWidgetReader;
+    use crate::PanelWidgets;
     use crate::Pt;
     use crate::Px;
     use crate::ScreenPosition;
@@ -100,10 +114,38 @@ mod tests {
     use crate::layout::TextStyle;
     use crate::panel::DiegeticPanel;
     use crate::panel::PanelAttachmentAuthored;
+    use crate::panel::PanelComponentOwnership;
     use crate::panel::ResolvedScreenPanelPosition;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::screen_space::ScreenSpaceSystems;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::ScreenWidgetAnchorProxy;
+    use crate::widgets::ScreenWidgetAnchoredHere;
+    use crate::widgets::ScreenWidgetAnchoredTo;
+    use crate::widgets::WidgetAnchorRect;
+    use crate::widgets::WidgetOf;
+    use crate::widgets::WidgetSystems;
+
+    #[derive(Bundle)]
+    struct TestAttachment {
+        authored: PanelAttachmentAuthored,
+        offset:   PanelAnchorOffset,
+    }
+
+    impl TestAttachment {
+        const fn new(target: Entity, source: Anchor, target_anchor: Anchor) -> Self {
+            Self {
+                authored: PanelAttachmentAuthored::new(target, source, target_anchor),
+                offset:   PanelAnchorOffset::ZERO,
+            }
+        }
+
+        const fn with_offset(mut self, offset: PanelAnchorOffset) -> Self {
+            self.offset = offset;
+            self
+        }
+    }
+    use crate::widgets::WidgetsPlugin;
 
     #[derive(Component)]
     struct SourcePanel;
@@ -116,6 +158,20 @@ mod tests {
         source: Entity,
         target: Entity,
         done:   bool,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    enum WidgetAttachmentWriteState {
+        #[default]
+        Pending,
+        Applied,
+    }
+
+    #[derive(Resource)]
+    struct WidgetAttachmentWrite {
+        owner:  Entity,
+        source: Entity,
+        state:  WidgetAttachmentWriteState,
     }
 
     #[derive(Resource, Default)]
@@ -133,8 +189,7 @@ mod tests {
                 line_height: measure.size,
             }),
         });
-        app.add_plugins(HeadlessLayoutPlugin);
-        app.add_plugins(ScreenSpacePlugin);
+        app.add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ScreenSpacePlugin));
         app.world_mut().spawn((
             Window {
                 resolution: (800_u32, 600_u32).into(),
@@ -183,6 +238,106 @@ mod tests {
             .expect("fit screen panel builds")
     }
 
+    fn widget_tree(width: f32) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(200.0, 100.0);
+        builder.with(
+            El::new()
+                .size(Px(width), Px(30.0))
+                .button("target", Button::new()),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn screen_widget_panel(width: f32, screen_position: Vec2) -> DiegeticPanel {
+        DiegeticPanel::screen()
+            .size(Px(200.0), Px(100.0))
+            .anchor(Anchor::TopLeft)
+            .screen_position(screen_position.x, screen_position.y)
+            .with_tree(widget_tree(width))
+            .build()
+            .expect("screen widget panel builds")
+    }
+
+    fn screen_attachment_source(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::splat(20.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id()
+    }
+
+    fn widget_entity(app: &App, panel: Entity) -> Entity {
+        app.world()
+            .get::<PanelWidgets>(panel)
+            .into_iter()
+            .flat_map(PanelWidgets::iter)
+            .find(|widget| {
+                app.world()
+                    .get::<PanelWidget>(*widget)
+                    .is_some_and(|panel_widget| {
+                        panel_widget.id() == &PanelElementId::named("target")
+                    })
+            })
+            .expect("target widget is reified")
+    }
+
+    fn attach_to_screen_widget(
+        app: &mut App,
+        source: Entity,
+        owner: Entity,
+        widget: Entity,
+        authored: PanelAttachment,
+    ) {
+        let target_id = PanelElementId::named("target");
+        app.world_mut()
+            .run_system_once(
+                move |panels: PanelEntityReader,
+                      widgets: PanelWidgetReader,
+                      mut commands: Commands| {
+                    let source = panels
+                        .screen(source)
+                        .expect("source has a screen panel handle");
+                    let owner = panels
+                        .screen(owner)
+                        .expect("owner has a screen panel handle");
+                    let target = widgets
+                        .typed_entity(owner, &target_id)
+                        .expect("target has a screen widget handle");
+                    assert_eq!(target.entity(), widget);
+                    commands.attach_to_widget(source, target, authored);
+                },
+            )
+            .expect("screen widget attachment system runs");
+    }
+
+    fn queue_widget_attachment(
+        panel_entities: PanelEntityReader,
+        reader: PanelWidgetReader,
+        mut attachments: Commands,
+        mut write: ResMut<WidgetAttachmentWrite>,
+    ) {
+        if matches!(write.state, WidgetAttachmentWriteState::Applied) {
+            return;
+        }
+        let id = PanelElementId::named("target");
+        let Some(owner) = panel_entities.screen(write.owner) else {
+            return;
+        };
+        let Some(source) = panel_entities.screen(write.source) else {
+            return;
+        };
+        let Some(widget) = reader.typed_entity(owner, &id) else {
+            return;
+        };
+        let authored = PanelAttachment::new(Anchor::TopLeft, Anchor::BottomRight)
+            .with_offset(PanelAnchorOffset::new(Px(4.0), Px(7.0)));
+        attachments.attach_to_widget(source, widget, authored);
+        write.state = WidgetAttachmentWriteState::Applied;
+    }
+
     fn assert_close(actual: f32, expected: f32) {
         assert!(
             (actual - expected).abs() < ASSERT_CLOSE_EPSILON,
@@ -228,6 +383,25 @@ mod tests {
                 && entry.reason == reason),
             "missing current diagnostic {reason:?}",
         );
+    }
+
+    fn assert_diagnostic_count(
+        app: &App,
+        source: Entity,
+        target: Entity,
+        reason: AnchorResolveSkip,
+        expected_count: u32,
+    ) {
+        let matching = app
+            .world()
+            .resource::<AnchorResolveDiagnostics>()
+            .entries()
+            .filter(|entry| {
+                entry.source == source && entry.target == target && entry.reason == reason
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].count, expected_count);
     }
 
     fn resolved_anchor_position(app: &App, entity: Entity) -> Option<Vec2> {
@@ -346,7 +520,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
             ))
             .id();
@@ -376,7 +550,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
                 AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
@@ -415,7 +589,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::Center, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::BottomRight, Anchor::TopRight)
+                TestAttachment::new(target, Anchor::BottomRight, Anchor::TopRight)
                     .with_offset(PanelAnchorOffset::new(Px(5.0), Px(2.0))),
             ))
             .id();
@@ -444,7 +618,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::Center, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::BottomRight, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::BottomRight, Anchor::BottomLeft),
                 AnchorPose {
                     rotation:    Quat::IDENTITY,
                     translation: Vec3::ZERO,
@@ -489,7 +663,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
                 AnchorPose {
                     rotation:    Quat::from_rotation_x(FRAC_PI_2),
@@ -526,7 +700,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
             ))
             .id();
@@ -550,16 +724,22 @@ mod tests {
         event: On<PanelDimensionsChanged>,
         sources: Query<(), With<SourcePanel>>,
         dependents: Query<Entity, With<DependentPanel>>,
-        mut commands: Commands,
+        panel_entities: PanelEntityReader,
+        mut attachments: Commands,
     ) {
         if sources.get(event.event().entity).is_err() {
             return;
         }
         for dependent in &dependents {
-            commands.entity(dependent).insert(
-                AnchoredToPanel::new(event.event().entity, Anchor::TopLeft, Anchor::BottomLeft)
-                    .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
-            );
+            let Some(source) = panel_entities.screen(dependent) else {
+                continue;
+            };
+            let Some(target) = panel_entities.screen(event.event().entity) else {
+                continue;
+            };
+            let authored = PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft)
+                .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0)));
+            attachments.attach_to_panel(source, target, authored);
         }
     }
 
@@ -596,15 +776,25 @@ mod tests {
         assert_translation(&app, dependent, Vec2::new(-300.0, 159.0));
     }
 
-    fn queue_attachment_once(mut commands: Commands, mut write: ResMut<AttachmentWrite>) {
+    fn queue_attachment_once(
+        panel_entities: PanelEntityReader,
+        mut attachments: Commands,
+        mut write: ResMut<AttachmentWrite>,
+    ) {
         if write.done {
             return;
         }
-        commands.entity(write.source).insert(AnchoredToPanel::new(
-            write.target,
-            Anchor::TopLeft,
-            Anchor::BottomLeft,
-        ));
+        let Some(source) = panel_entities.screen(write.source) else {
+            return;
+        };
+        let Some(target) = panel_entities.screen(write.target) else {
+            return;
+        };
+        attachments.attach_to_panel(
+            source,
+            target,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft),
+        );
         write.done = true;
     }
 
@@ -695,7 +885,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomRight),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomRight),
             ))
             .id();
 
@@ -746,7 +936,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::TopLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::TopLeft),
             ))
             .id();
 
@@ -788,7 +978,7 @@ mod tests {
                     Anchor::TopLeft,
                     Vec2::new(0.0, 0.0),
                 ),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
 
@@ -812,7 +1002,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
 
@@ -820,7 +1010,7 @@ mod tests {
         assert_translation(&app, source, Vec2::new(-300.0, 160.0));
 
         app.world_mut().entity_mut(source).insert(
-            AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+            TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                 .with_offset(PanelAnchorOffset::new(Pt(12.0), Px(2.0))),
         );
         app.update();
@@ -849,7 +1039,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0)).with_z(Px(5.0))),
             ))
             .id();
@@ -877,7 +1067,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::ZERO.with_z(Px(5.0))),
                 AnchorPose {
                     rotation:    Quat::IDENTITY,
@@ -895,7 +1085,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(source)
-            .insert(AnchoredToPanel::new(
+            .insert(TestAttachment::new(
                 target,
                 Anchor::TopLeft,
                 Anchor::BottomLeft,
@@ -923,7 +1113,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(root, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::ZERO.with_z(Px(2.0))),
             ))
             .id();
@@ -931,7 +1121,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(25.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(middle, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(middle, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::ZERO.with_z(Px(3.0))),
             ))
             .id();
@@ -957,7 +1147,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::ZERO.with_z(Px(5.0))),
             ))
             .id();
@@ -969,7 +1159,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(source)
-            .remove::<AnchoredToPanel>();
+            .remove::<TestAttachment>();
         app.update();
 
         assert_eq!(resolved_depth(&app, source), None);
@@ -991,7 +1181,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft),
                 AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::ZERO,
@@ -1031,7 +1221,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
             ))
             .id();
@@ -1063,7 +1253,7 @@ mod tests {
                     Anchor::TopLeft,
                     Vec2::new(20.0, 30.0),
                 ),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
 
@@ -1072,49 +1262,11 @@ mod tests {
 
         app.world_mut()
             .entity_mut(source)
-            .remove::<AnchoredToPanel>();
+            .remove::<TestAttachment>();
         app.update();
 
         assert_eq!(resolved_anchor_position(&app, source), None);
         assert_translation(&app, source, Vec2::new(-380.0, 270.0));
-    }
-
-    #[test]
-    fn source_coordinate_space_transition_clears_screen_override() {
-        let mut app = app_with_window();
-        let target = app
-            .world_mut()
-            .spawn(fixed_screen_panel(
-                Vec2::new(200.0, 40.0),
-                Anchor::TopLeft,
-                Vec2::new(100.0, 100.0),
-            ))
-            .id();
-        let source = app
-            .world_mut()
-            .spawn((
-                fixed_screen_panel(
-                    Vec2::new(50.0, 10.0),
-                    Anchor::TopLeft,
-                    Vec2::new(20.0, 30.0),
-                ),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
-            ))
-            .id();
-
-        app.update();
-        assert_translation(&app, source, Vec2::new(-300.0, 160.0));
-
-        let world_panel = DiegeticPanel::world()
-            .size(Px(50.0), Px(10.0))
-            .world_height(1.0)
-            .layout(|_| {})
-            .build()
-            .expect("world panel builds");
-        app.world_mut().entity_mut(source).insert(world_panel);
-        app.update();
-
-        assert_eq!(resolved_anchor_position(&app, source), None);
     }
 
     #[test]
@@ -1144,7 +1296,7 @@ mod tests {
                     Anchor::TopLeft,
                     Vec2::new(20.0, 30.0),
                 ),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
 
@@ -1178,14 +1330,14 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(root_a, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(root_a, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
         let leaf = app
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(25.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(middle, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(middle, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
 
@@ -1195,7 +1347,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(middle)
-            .insert(AnchoredToPanel::new(
+            .insert(TestAttachment::new(
                 root_b,
                 Anchor::TopLeft,
                 Anchor::BottomLeft,
@@ -1221,7 +1373,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::TopLeft),
+                TestAttachment::new(root, Anchor::TopLeft, Anchor::TopLeft),
                 AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::ZERO,
@@ -1232,7 +1384,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(25.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::TopLeft)
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::TopLeft)
                     .with_offset(PanelAnchorOffset::new(Px(5.0), Px(2.0))),
             ))
             .id();
@@ -1266,7 +1418,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(root, Anchor::TopLeft, Anchor::BottomLeft),
                 AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::ZERO,
@@ -1277,7 +1429,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(25.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(middle, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(middle, Anchor::TopLeft, Anchor::BottomLeft),
                 AnchorPose {
                     rotation:    Quat::from_rotation_z(-FRAC_PI_2),
                     translation: Vec3::ZERO,
@@ -1321,7 +1473,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
-                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(target, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
 
@@ -1329,7 +1481,7 @@ mod tests {
         app.update();
         app.world_mut()
             .entity_mut(source)
-            .remove::<AnchoredToPanel>();
+            .remove::<TestAttachment>();
         app.update();
         app.update();
 
@@ -1370,7 +1522,7 @@ mod tests {
             .world_mut()
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
-                AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(root, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
         let cycle_a = app
@@ -1389,12 +1541,12 @@ mod tests {
                     Anchor::TopLeft,
                     Vec2::new(40.0, 40.0),
                 ),
-                AnchoredToPanel::new(cycle_a, Anchor::TopLeft, Anchor::BottomLeft),
+                TestAttachment::new(cycle_a, Anchor::TopLeft, Anchor::BottomLeft),
             ))
             .id();
         app.world_mut()
             .entity_mut(cycle_a)
-            .insert(AnchoredToPanel::new(
+            .insert(TestAttachment::new(
                 cycle_b,
                 Anchor::TopLeft,
                 Anchor::BottomLeft,
@@ -1407,5 +1559,472 @@ mod tests {
         assert_translation(&app, cycle_b, Vec2::new(-360.0, 260.0));
         assert_current_diagnostic(&app, cycle_a, cycle_b, AnchorResolveSkip::Cycle);
         assert_current_diagnostic(&app, cycle_b, cycle_a, AnchorResolveSkip::Cycle);
+    }
+
+    #[test]
+    fn queued_attachment_to_new_widget_resolves_after_both_command_fences() {
+        let mut app = app_with_window();
+        let owner = app
+            .world_mut()
+            .spawn(screen_widget_panel(60.0, Vec2::new(120.0, 90.0)))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(40.0, 12.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id();
+        app.insert_resource(WidgetAttachmentWrite {
+            owner,
+            source,
+            state: WidgetAttachmentWriteState::Pending,
+        });
+        app.add_systems(
+            Update,
+            queue_widget_attachment
+                .after(WidgetSystems::ReifyCommandsApplied)
+                .before(ScreenSpaceSystems::FlushObserverCommands),
+        );
+
+        app.update();
+
+        let widget = widget_entity(&app, owner);
+        assert!(resolved_anchor_position(&app, source).is_some());
+        assert_eq!(
+            app.world()
+                .get::<ScreenWidgetAnchoredTo>(source)
+                .map(|relation| relation.target()),
+            Some(widget),
+        );
+        assert!(app.world().get::<ScreenWidgetAnchorProxy>(widget).is_some());
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_some());
+
+        let first_position = resolved_anchor_position(&app, source);
+        app.world_mut()
+            .commands()
+            .set_tree(owner, widget_tree(110.0))
+            .expect("replacement widget tree is valid");
+        app.update();
+
+        assert_eq!(widget_entity(&app, owner), widget);
+        assert_ne!(resolved_anchor_position(&app, source), first_position);
+    }
+
+    #[test]
+    fn owner_widget_dependent_chain_uses_current_owner_rect_and_not_widget_global() {
+        let mut app = app_with_window();
+        let root = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(100.0, 20.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 80.0),
+            ))
+            .id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                screen_widget_panel(80.0, Vec2::ZERO),
+                TestAttachment::new(root, Anchor::TopLeft, Anchor::BottomLeft),
+                AnchorPose {
+                    rotation:    Quat::from_rotation_z(FRAC_PI_2),
+                    translation: Vec3::ZERO,
+                },
+                Transform::from_scale(Vec3::new(1.5, 0.75, 1.0)),
+            ))
+            .id();
+        app.update();
+        let widget = widget_entity(&app, owner);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(GlobalTransform::from_translation(Vec3::splat(9_000.0)));
+        let source = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(40.0, 12.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id();
+        attach_to_screen_widget(
+            &mut app,
+            source,
+            owner,
+            widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomRight)
+                .with_offset(PanelAnchorOffset::new(Px(6.0), Px(9.0))),
+        );
+
+        app.update();
+
+        let owner_position =
+            resolved_anchor_position(&app, owner).expect("attached owner has a resolved position");
+        let owner_transform = app
+            .world()
+            .get::<Transform>(owner)
+            .expect("owner has a transform");
+        let anchor_rect = *app
+            .world()
+            .get::<WidgetAnchorRect>(widget)
+            .expect("widget has local anchor geometry");
+        let angle = super::super::screen_in_plane_angle(owner_transform.rotation);
+        let scale = owner_transform.scale.truncate();
+        let center = owner_position
+            + super::super::rotate_screen_offset(
+                Vec2::new(
+                    anchor_rect.panel_offset().x * scale.x,
+                    -anchor_rect.panel_offset().y * scale.y,
+                ),
+                angle,
+            );
+        let size = anchor_rect.size() * scale.abs();
+        let (right, bottom) = Anchor::BottomRight.offset(size.x, size.y);
+        let (center_x, center_y) = Anchor::Center.offset(size.x, size.y);
+        let expected = center
+            + super::super::rotate_screen_offset(
+                Vec2::new(right - center_x, bottom - center_y),
+                angle,
+            )
+            + super::super::rotate_screen_offset(Vec2::new(6.0, 9.0) * scale, angle);
+        assert_vec2_close(
+            resolved_anchor_position(&app, source).expect("dependent has a resolved position"),
+            expected,
+        );
+        assert!(expected.length() < 1_000.0);
+    }
+
+    #[test]
+    fn mirrored_owner_scale_reflects_widget_target_anchor_before_rotation() {
+        let mut app = app_with_window();
+        let root = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(100.0, 20.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 80.0),
+            ))
+            .id();
+        let owner = app
+            .world_mut()
+            .spawn((
+                screen_widget_panel(80.0, Vec2::ZERO),
+                TestAttachment::new(root, Anchor::TopLeft, Anchor::BottomLeft),
+                AnchorPose {
+                    rotation:    Quat::from_rotation_z(FRAC_PI_2),
+                    translation: Vec3::ZERO,
+                },
+                Transform::from_scale(Vec3::new(-1.5, 0.75, 1.0)),
+            ))
+            .id();
+        app.update();
+        let widget = widget_entity(&app, owner);
+        let source = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(40.0, 12.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id();
+        attach_to_screen_widget(
+            &mut app,
+            source,
+            owner,
+            widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomRight)
+                .with_offset(PanelAnchorOffset::new(Px(6.0), Px(9.0))),
+        );
+
+        app.update();
+
+        let owner_position =
+            resolved_anchor_position(&app, owner).expect("attached owner has a resolved position");
+        let owner_transform = app
+            .world()
+            .get::<Transform>(owner)
+            .expect("owner has a transform");
+        let anchor_rect = *app
+            .world()
+            .get::<WidgetAnchorRect>(widget)
+            .expect("widget has local anchor geometry");
+        assert_ne!(anchor_rect.panel_offset().truncate(), Vec2::ZERO);
+        let angle = super::super::screen_in_plane_angle(owner_transform.rotation);
+        let scale = owner_transform.scale.truncate();
+        let center = owner_position
+            + super::super::rotate_screen_offset(
+                Vec2::new(
+                    anchor_rect.panel_offset().x * scale.x,
+                    -anchor_rect.panel_offset().y * scale.y,
+                ),
+                angle,
+            );
+        let size = anchor_rect.size() * scale.abs();
+        let (right, bottom) = Anchor::BottomRight.offset(size.x, size.y);
+        let (center_x, center_y) = Anchor::Center.offset(size.x, size.y);
+        let authored_corner = Vec2::new(right - center_x, bottom - center_y) * scale.signum();
+        let expected = center
+            + super::super::rotate_screen_offset(authored_corner, angle)
+            + super::super::rotate_screen_offset(Vec2::new(6.0, 9.0) * scale, angle);
+        assert_vec2_close(
+            resolved_anchor_position(&app, source).expect("dependent has a resolved position"),
+            expected,
+        );
+    }
+
+    #[test]
+    fn screen_widget_demand_is_multiplicity_aware_and_retargets_exactly() {
+        let mut app = app_with_window();
+        let first_owner = app
+            .world_mut()
+            .spawn(screen_widget_panel(60.0, Vec2::new(100.0, 80.0)))
+            .id();
+        let second_owner = app
+            .world_mut()
+            .spawn(screen_widget_panel(90.0, Vec2::new(400.0, 80.0)))
+            .id();
+        app.update();
+        let first_widget = widget_entity(&app, first_owner);
+        let second_widget = widget_entity(&app, second_owner);
+        let first_source = screen_attachment_source(&mut app);
+        let second_source = screen_attachment_source(&mut app);
+        attach_to_screen_widget(
+            &mut app,
+            first_source,
+            first_owner,
+            first_widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft),
+        );
+        attach_to_screen_widget(
+            &mut app,
+            second_source,
+            first_owner,
+            first_widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomRight),
+        );
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<ScreenWidgetAnchoredHere>(first_widget)
+                .map(RelationshipTarget::len),
+            Some(2),
+        );
+        app.world_mut()
+            .run_system_once(
+                move |entities: PanelEntityReader, mut attachments: Commands| {
+                    let source = entities
+                        .screen(first_source)
+                        .expect("first source has a screen handle");
+                    attachments.detach(source);
+                },
+            )
+            .expect("detach system runs");
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<ScreenWidgetAnchoredHere>(first_widget)
+                .map(RelationshipTarget::len),
+            Some(1),
+        );
+        assert!(
+            app.world()
+                .get::<ResolvedAnchorGeometry>(first_widget)
+                .is_some()
+        );
+
+        app.world_mut()
+            .run_system_once(
+                move |entities: PanelEntityReader,
+                      widgets: PanelWidgetReader,
+                      mut attachments: Commands| {
+                    let source = entities
+                        .screen(second_source)
+                        .expect("second source has a screen handle");
+                    let owner = entities
+                        .screen(second_owner)
+                        .expect("second owner has a screen handle");
+                    let target = widgets
+                        .typed_entity(owner, &PanelElementId::named("target"))
+                        .expect("second target has a screen handle");
+                    assert_eq!(target.entity(), second_widget);
+                    attachments.retarget_to_widget(source, target);
+                },
+            )
+            .expect("retarget system runs");
+        app.update();
+        assert!(
+            app.world()
+                .get::<ScreenWidgetAnchoredHere>(first_widget)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<ResolvedAnchorGeometry>(first_widget)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<ScreenWidgetAnchoredHere>(second_widget)
+                .is_some_and(|demand| demand.contains(&second_source))
+        );
+    }
+
+    #[test]
+    fn missing_widget_geometry_diagnostic_deduplicates_by_key() {
+        let mut app = app_with_window();
+        let owner = app
+            .world_mut()
+            .spawn(screen_widget_panel(60.0, Vec2::new(100.0, 80.0)))
+            .id();
+        app.update();
+        let widget = widget_entity(&app, owner);
+        let source = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::splat(20.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id();
+        attach_to_screen_widget(
+            &mut app,
+            source,
+            owner,
+            widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft),
+        );
+        app.update();
+        app.world_mut()
+            .entity_mut(widget)
+            .remove::<ResolvedAnchorGeometry>();
+
+        app.update();
+        app.update();
+
+        assert_diagnostic_count(
+            &app,
+            source,
+            widget,
+            AnchorResolveSkip::TargetGeometryMissing,
+            2,
+        );
+    }
+
+    #[test]
+    fn missing_widget_owner_uses_owner_diagnostic() {
+        let mut app = app_with_window();
+        let owner = app
+            .world_mut()
+            .spawn(screen_widget_panel(60.0, Vec2::new(100.0, 80.0)))
+            .id();
+        app.update();
+        let widget = widget_entity(&app, owner);
+        let source = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::splat(20.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id();
+        attach_to_screen_widget(
+            &mut app,
+            source,
+            owner,
+            widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft),
+        );
+        app.update();
+        app.world_mut().entity_mut(widget).remove::<WidgetOf>();
+
+        app.update();
+        app.update();
+
+        assert_current_diagnostic(&app, source, widget, AnchorResolveSkip::TargetOwnerMissing);
+        assert_diagnostic_count(
+            &app,
+            source,
+            widget,
+            AnchorResolveSkip::TargetOwnerMissing,
+            2,
+        );
+    }
+
+    #[test]
+    fn final_screen_demand_cleans_owned_widget_state_without_public_owner_relation() {
+        let mut app = app_with_window();
+        let owner = app
+            .world_mut()
+            .spawn(screen_widget_panel(60.0, Vec2::new(100.0, 80.0)))
+            .id();
+        app.update();
+        let widget = widget_entity(&app, owner);
+        let source = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::splat(20.0),
+                Anchor::TopLeft,
+                Vec2::ZERO,
+            ))
+            .id();
+        attach_to_screen_widget(
+            &mut app,
+            source,
+            owner,
+            widget,
+            PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft),
+        );
+        app.update();
+
+        assert!(app.world().get::<ScreenWidgetAnchorProxy>(widget).is_some());
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_some());
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<ScreenWidgetAnchorProxy>>(widget)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<ResolvedAnchorGeometry>>(widget)
+                .is_some()
+        );
+
+        app.world_mut().entity_mut(widget).remove::<WidgetOf>();
+        app.update();
+        assert_current_diagnostic(&app, source, widget, AnchorResolveSkip::TargetOwnerMissing);
+
+        app.world_mut()
+            .run_system_once(move |panels: PanelEntityReader, mut commands: Commands| {
+                let source = panels
+                    .screen(source)
+                    .expect("source has a screen panel handle");
+                commands.detach(source);
+            })
+            .expect("screen widget detach system runs");
+        app.update();
+
+        assert!(app.world().get_entity(owner).is_ok());
+        assert!(app.world().get_entity(widget).is_ok());
+        assert!(app.world().get_entity(source).is_ok());
+        assert!(app.world().get::<WidgetOf>(widget).is_none());
+        assert!(
+            app.world()
+                .get::<ScreenWidgetAnchoredHere>(widget)
+                .is_none()
+        );
+        assert!(app.world().get::<ScreenWidgetAnchorProxy>(widget).is_none());
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_none());
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<ScreenWidgetAnchorProxy>>(widget)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<ResolvedAnchorGeometry>>(widget)
+                .is_none()
+        );
     }
 }

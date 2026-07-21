@@ -3,16 +3,16 @@
 ## What it is
 
 Panel anchoring is declarative placement of a panel source relative to another
-entity in `hana_diegetic`. Callers insert an `AnchoredToPanel` bundle that names
-the source panel anchor, the target anchor, and an optional
-`PanelAnchorOffset`. A world source may target a world panel or a reified world
-widget. Screen widget targets remain Phase 4.5 work. The bundle feeds two
-coordinate-space adapters:
+entity in `hana_diegetic`. Callers use `DiegeticPanelCommands` methods on Bevy
+`Commands` with typed `PanelEntity<Space>` and `WidgetEntity<Space>` handles. `PanelAttachment` names
+the source and target anchors plus an optional `PanelAnchorOffset`. The shared
+`Space` parameter makes every supported source/target pair same-space before it
+can reach the ECS. The checked mutation feeds two coordinate-space adapters:
 
 - world panels lower into `hana_valence::AnchoredTo` and are placed by
   `hana_valence::resolve_anchors`;
-- screen panels retain the shared panel authoring, currently require a panel
-  target, and are placed by the screen-space adapter over
+- screen panels retain the shared panel authoring, accept same-window screen
+  panels and widgets, and are placed by the screen-space adapter over
   `hana_valence::resolve_attachments`.
 
 Both paths use `hana_valence::AnchorPose` for animated rotation and translation.
@@ -21,36 +21,52 @@ compute panel width or height. The shape-agnostic contracts behind this adapter
 are documented in
 [hana_valence anchoring and arrangements](../../hana_valence/as-built/anchoring-and-arrangements.md).
 
-The public panel-specific surface is `AnchoredToPanel`, `PanelAnchorOffset`,
-`PanelSpace`, and `ArrangedPanel`. There is no panel-specific public
-relationship, reverse index, pose type, or graph resolver. Read-only panel
-geometry APIs such as `PanelAnchorGeometryParam`, `PanelScreenBounds`,
-`PanelPlane`, and `ResolvedPanelAnchorGeometry` serve callers, while world
-attachment placement reads the Hana Valence geometry component.
+The public attachment surface is `PanelEntity<World>`, `PanelEntity<Screen>`,
+`WidgetEntity<World>`, `WidgetEntity<Screen>`, `DiegeticPanelCommands`,
+`PanelAttachment`, and `PanelAnchorOffset`. `PanelEntityReader` checks a live
+panel before minting a typed panel handle. `PanelWidgetReader::typed_entity`
+does the same for a widget, its owner, and the owner's authoritative widget
+index. A non-identical tree replacement clears that index immediately, so an
+old widget handle becomes invalid before the obsolete entity is later removed
+by reification. Both handle families expose
+`entity()` for unrelated ECS work but have no public unchecked constructor.
+There is no panel-specific public relationship, reverse index, target-handle
+family, pose type, or graph resolver. `PanelSpace` remains a runtime
+classification rather than the attachment authoring boundary. It is required on
+every panel and synchronized on whole-component replacement and conversion so
+`PanelWidgetReader` can check a typed owner without conflicting with a
+simultaneous mutable `PanelWidgetWriter` query.
 
 ## How it works
 
 ### Shared authoring
 
 [`panel/anchoring.rs`](../../../crates/hana_diegetic/src/panel/anchoring.rs)
-defines the insert-only public bundle:
+defines the checked public mutation surface:
 
 ```rust
-AnchoredToPanel::new(target, source_anchor, target_anchor)
-    .with_offset(offset)
+let authored = PanelAttachment::new(source_anchor, target_anchor)
+    .with_offset(offset);
+commands.attach_to_widget(source, target_widget, authored);
 ```
 
-Inserting it writes a private immutable `PanelAttachmentAuthored` component and
-a mutable `PanelAnchorOffset`. `PanelAttachmentAuthored` is the one authoring
-record read by both coordinate-space adapters. Its target may be a world panel
-or reified world widget on the world path; the screen path still accepts only a
-screen panel. It is not a Bevy relationship and is deliberately not public or
-reflectively mutable.
+`attach_to_panel` and `attach_to_widget` require the source and target to carry
+the same `Space` type. `retarget_to_panel` and `retarget_to_widget` enforce the
+same rule, while `detach` accepts only the typed source. Every operation checks
+that each handle still matches the live `DiegeticPanel`, `PanelWidget`, and
+`WidgetOf` state and the owner's current widget index when the queued operation
+applies. A stale handle or graph
+conflict emits a warning and changes none of that operation's attachment state.
+Attachment and conversion calls made through one `Commands` value apply in the
+order written.
 
-`AnchoredToPanel` is a bundle rather than a queryable component. Runtime
-retargeting reinserts a complete replacement bundle, and removal removes the
-bundle. This preserves one public authoring shape without exposing the private
-screen/world lowering state.
+A successful attach writes a private immutable `PanelAttachmentAuthored`
+component and a mutable `PanelAnchorOffset`. `PanelAttachmentAuthored` is the
+one authoring record read by both coordinate-space adapters. It is not a public
+Bevy relationship and is not reflectively mutable. Public retargeting replaces
+the private target while keeping the authored anchors and offset; public detach
+removes both authoring components. Direct application mutation of private
+lowering components is outside the supported contract.
 
 ### World panels
 
@@ -116,49 +132,85 @@ the anchoring observer adds or removes world-only relation state.
 ### Screen panels
 
 Screen panels keep `PanelAttachmentAuthored` and `PanelAnchorOffset` but do not
-carry the world `hana_valence::AnchoredTo`. The screen resolver currently
-requires a same-window screen-panel target; adding screen widget targets is
-Phase 4.5 work. It builds screen rectangles and calls
-`hana_valence::resolve_attachments` for target-before-source ordering, cycle
-detection, skipped-dependency propagation, fallback, and bounded diagnostics.
-Its placement callback retains window, viewport, logical-pixel, and draw-depth
-math inside `hana_diegetic`.
+carry the world `hana_valence::AnchoredTo`. A target may be a same-window screen
+panel or a widget owned by one. Widget attachment lowering installs a private
+`ScreenWidgetAnchoredTo` / `ScreenWidgetAnchoredHere` relationship. The reverse
+membership changes in the same queued operation as `PanelAttachmentAuthored`.
+Retargeting removes the source from its old widget and adds it to its new target
+before the next queued panel operation runs. The membership is screen geometry
+demand and supports any number of dependent panels; removing the final source
+retires only screen proxy state unless world demand still needs the shared
+geometry.
+
+Each demanded screen widget contributes a synthetic resolver edge from the
+widget to its owning panel. The placement callback resolves the owner first,
+then derives the widget viewport rectangle from `WidgetAnchorRect`, the
+owner's current `ScreenPanelRect`, and the owner's current scale and in-plane
+rotation. It does not read the widget's `GlobalTransform`. Real attachment
+edges continue to target the widget entity, so
+`hana_valence::resolve_attachments` orders owner panel, widget proxy, and
+dependent panel in one graph pass.
+
+The screen adapter calls `hana_valence::resolve_attachments` for
+target-before-source ordering, cycle detection, skipped-dependency
+propagation, fallback, and bounded diagnostics. Its placement callback retains
+window, viewport, logical-pixel, and draw-depth math inside `hana_diegetic`.
+Missing widget ownership, geometry, transforms, and windows are reported with
+the same source/target/reason diagnostic keys as panel attachment failures.
 
 The screen adapter reads `hana_valence::AnchorPose`. Translation x/y is applied
 in the flat screen plane, positive pose y is converted to screen-down
 coordinates, z participates in resolved draw depth, and rotation is projected
 to a single in-plane z angle. Out-of-plane rotation has no screen effect.
 
-`ResolvedScreenPanelPosition` is the private output seam between attachment
+`ResolvedScreenPanelPosition` is the private output boundary between attachment
 resolution and `position_screen_space_panels`. Its optional position, depth,
 and rotation fields are cleared on fallback. Depth and rotation capture the
 authored `Transform` values when the resolver first takes ownership and restore
 them when ownership ends.
 
-The screen resolver runs in `Update` after final screen dimensions and observer
-commands, then `position_screen_space_panels` applies its output. A screen pose
+The screen resolver runs in `Update` after final screen dimensions, widget
+reification, and observer commands. Screen relationship synchronization is
+followed by `ScreenSpaceSystems::WidgetDemandCommandsApplied`; geometry
+publication and its command flush complete before
+`PanelSystems::ResolvePanelAttachments`. Checked screen-widget attachment
+commands also seed the initial proxy and geometry in their deferred batch, so a
+newly reified target is available at that same fence.
+`position_screen_space_panels` then applies the resolver output. A screen pose
 writer that needs same-frame placement must run before
-`PanelSystems::ResolvePanelAttachments`. `PanelSystems::AnimateAnchorPose` is a
-`PostUpdate` ordering point for the world resolver, so writes there become
-visible to the screen path on the next `Update`.
+`PanelSystems::ResolvePanelAttachments`.
+`PanelSystems::AnimateAnchorPose` is a `PostUpdate` ordering point for the world
+resolver, so writes there become visible to the screen path on the next
+`Update`.
 
 ### Coordinate-space changes
 
 `DiegeticPanel.coordinate_space` remains authoritative for sizing and
-conversion. Because conversion mutates that field in place, it cannot drive a
-component observer directly. `PanelSpace` mirrors only the `World`/`Screen`
-discriminant and is reinserted at panel spawn and conversion apply points.
+conversion. Public world-to-screen and screen-to-world methods on
+`DiegeticPanelCommands` take a typed source handle and return `Result` for
+immediate conversion-recipe validation. The queued operation then validates
+that the handle still matches the live panel before mutating it. No conversion
+method returns a destination-space handle before the operation applies; callers
+reacquire that handle through `PanelEntityReader` after the command fence. Raw
+command-level conversion helpers are crate-private.
 
-`On<Insert, PanelSpace>` reconciles attachment state:
+Conversion is rejected when the panel has an outgoing attachment, another
+panel targets the panel, or another panel targets one of its widgets. Rejection
+queues no conversion. The supported graph change is explicit:
 
-- moving to screen removes `AnchoredTo`, `ResolvedAnchorOffset`, and captured
-  world-attachment pose;
-- moving to world recreates the lowered relation and resumes world offset
-  lowering.
+```text
+queue detach for affected sources
+    -> queue conversions in the required order on the same Commands value
+    -> command fence / conversion handoff
+    -> reacquire destination handles through PanelEntityReader
+    -> reattach
+```
 
-Every writer of `DiegeticPanel.coordinate_space` must update `PanelSpace` in the
-same operation. The possible removal of this mirrored state is tracked in the
-[Hana Valence future-work backlog](../../hana_valence/future-work.md).
+This rule keeps the lowering state single-space. Conversion therefore does not
+repair cross-space authoring, restore an invalid relation, or reconcile direct
+application mutation of private lowering components. Ordinary library-owned
+teardown still removes Hana-owned world and screen state while preserving an
+application replacement under the component ownership records.
 
 ### Panel arrangements
 
@@ -176,17 +228,21 @@ Valence relation. Linear arrangements do not represent branching panel nets.
 
 ## Invariants
 
-- `AnchoredToPanel` is insert-only authoring, not a public relationship
-  component. World and screen placement share its private authored record;
-  only the world path currently accepts a reified widget target.
+- Public authoring uses `DiegeticPanelCommands` on Bevy `Commands`; raw `Entity` is not accepted
+  for attachment, retarget, detach, or checked conversion.
+- `PanelEntity<Space>` and `WidgetEntity<Space>` are the only public typed
+  identity families. Handles are opaque, may become stale, and are revalidated
+  at every checked mutation.
+- World and screen placement share one private authored record and accept only
+  panel or widget targets in the source's coordinate space.
 - A screen panel must not carry the lowered world `hana_valence::AnchoredTo`.
 - A world attachment is resolved only by `hana_valence::resolve_anchors`, which
   is the sole transform writer for that anchored source.
 - World panel geometry is entity-local, centered, expressed in authored units,
   and never transform-baked.
-- World widget geometry and its owner-panel resolver bridge exist only while
-  world demand is nonempty. Widget geometry remains widget-local and is not
-  refilled by transform changes.
+- The world widget-to-panel resolver bridge exists only while world demand is
+  nonempty. Shared widget geometry remains while either world or screen demand
+  is nonempty, stays widget-local, and is not refilled by transform changes.
 - Panel unit conversion, DPI handling, target-relative sizing, and y-axis
   lowering remain outside `hana_valence`.
 - `PanelAnchorOffset` is mutable live input. The lowered world
@@ -195,12 +251,13 @@ Valence relation. Linear arrangements do not represent branching panel nets.
   pose while `Hinge` is present.
 - Screen placement owns only the optional position/depth/rotation outputs it
   resolved and restores authored state when those outputs clear.
-- Screen attachments require a live screen-panel target in the same window;
-  screen widget targets remain Phase 4.5 work. Cross-space and cross-window
-  edges diagnose and fall back.
+- Screen attachments require a live screen panel or a widget owned by one.
+  Same-space authoring is enforced by typed handles; cross-window placement is
+  still checked at runtime and diagnoses through the screen adapter.
 - Attachments are not `ChildOf` parenting and do not couple source lifetime to
   target lifetime.
-- `PanelSpace` and `DiegeticPanel.coordinate_space` must remain synchronized.
+- A panel participating anywhere in an attachment graph cannot convert until
+  an earlier queued operation has detached the affected placement.
 
 ## Calibration and gotchas
 
@@ -220,18 +277,20 @@ Valence relation. Linear arrangements do not represent branching panel nets.
   coherent.
 - `PanelScreenBounds::point` remains axis-aligned. Oriented screen anchor math
   is intentionally private to screen placement.
-- Geometry fill for a non-world panel is a no-op. Correctness depends on
-  `PanelSpace` reconciliation removing its world relation, not on deleting a
-  retained geometry component.
+- Geometry fill for a non-world panel is a no-op. Checked conversion and typed
+  authoring prevent a supported screen source from retaining a world relation.
 - Resolver diagnostics are bounded, but repeated persistent skips currently
   emit a warning every frame.
 
 ## Why it is this way
 
-The public bundle is separate from the stored world relation because one
-panel-facing API feeds two coordinate-space positioners. Inserting a world
-relation for screen panels would send them through the 3D resolver without
-world geometry and produce persistent false diagnostics.
+The public checked mutation is separate from the stored world relation because
+one panel-facing API feeds two coordinate-space positioners. A raw entity route
+could express cross-space graphs that neither resolver owns, so the authoring
+boundary carries space in opaque identities and rejects stale handles before
+lowering. Inserting a world relation for screen panels would send them through
+the 3D resolver without world geometry and produce persistent false
+diagnostics.
 
 World anchoring delegates geometry-independent placement to Hana Valence so
 panels, tiles, and other shapes share relationship hooks, dependency ordering,

@@ -281,21 +281,25 @@ The fill system runs on `Changed<DiegeticPanel>`, never `Changed<Transform>`,
 and mutates existing geometry in place to retain allocations.
 
 [`panel/anchoring.rs`](../../../crates/hana_diegetic/src/panel/anchoring.rs)
-exposes `AnchoredToPanel`, an insert-only bundle containing private shared
-authoring plus `PanelAnchorOffset`. It is not a queryable relationship
-component. The internal `PanelAttachmentAuthored` is consumed by two
-positioners:
+supports attachment methods on `DiegeticPanelCommands` for Bevy `Commands`. Callers obtain checked
+`PanelEntity<World>` / `PanelEntity<Screen>` handles and matching typed panel or
+widget targets before attaching, retargeting, or detaching. The public
+`PanelAttachment` value carries the two anchors and `PanelAnchorOffset`; the
+internal `PanelAttachmentAuthored` record is consumed by two positioners:
 
 - World panels receive a stored `hana_valence::AnchoredTo`, a per-frame lowered
   `ResolvedAnchorOffset`, and placement through `resolve_anchors`.
-- Screen panels keep only the shared authoring and are placed by the
-  screen-space resolver. They do not carry the world relation.
+- Screen panels keep only the shared authoring and are placed against screen
+  panels or reified screen widgets by the screen-space resolver. They do not
+  carry the world relation.
 
-`PanelSpace` mirrors the panel's coordinate-space discriminant so in-place
-world/screen conversions can reconcile the relation. Moving to screen removes
-world-only anchoring state; moving to world recreates it. World attachment
-insertion captures the authored local transform, and removing the attachment
-restores that transform.
+Checked world/screen conversion refuses any panel that is an attachment source,
+is targeted by another panel, or owns a targeted widget. Callers detach the
+affected placements and queue conversions in order on the same `Commands`
+value, then reacquire destination-space handles after the command fence and
+reattach. World attachment insertion captures
+the authored local transform, and removing the attachment restores that
+transform.
 
 World offset lowering resolves `PanelAnchorOffset` units against the live
 target size and transform, then converts panel-local positive-down y to
@@ -306,8 +310,10 @@ The screen path in
 [`screen_space/anchoring`](../../../crates/hana_diegetic/src/screen_space/anchoring)
 uses `PanelAttachmentAuthored` to classify candidates, delegates graph ordering
 and diagnostics to `hana_valence::resolve_attachments`, and performs
-viewport/window placement in its own callback. It supports in-plane
-`AnchorPose` rotation and translation without inserting a world `AnchoredTo`.
+viewport/window placement in its own callback. Reified widget targets contribute
+a private widget-to-owner dependency so the owner is placed before the widget
+and its dependent. The path supports in-plane `AnchorPose` rotation and
+translation without inserting a world `AnchoredTo`.
 
 [`panel/arrangement.rs`](../../../crates/hana_diegetic/src/panel/arrangement.rs)
 exposes the insert-only `ArrangedPanel` wrapper and adapts `QuadTiling`

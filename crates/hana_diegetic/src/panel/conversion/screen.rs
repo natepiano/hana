@@ -1,12 +1,10 @@
 //! Screen conversion target builder and recipes.
 
 use bevy::camera::visibility::RenderLayers;
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 
 use super::PanelProjectionError;
-use super::projection::PanelProjectionParam;
 use super::projection::PanelScreenProjection;
 use crate::layout;
 use crate::layout::Anchor;
@@ -18,7 +16,6 @@ use crate::layout::Unit;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
-use crate::panel::DiegeticPanelCommands;
 use crate::panel::ScreenPosition;
 use crate::panel::builder::Screen;
 use crate::panel::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
@@ -214,56 +211,6 @@ impl From<PanelScreenProjection> for PanelScreenConversion {
         Self::at_pixels(projection.anchor_position, projection.size)
             .rotation(projection.rotation)
             .window(WindowRef::Entity(projection.window))
-    }
-}
-
-/// Mutable helper for projecting a panel and queuing a screen conversion in one call.
-#[derive(SystemParam)]
-pub struct PanelScreenConversionParam<'w, 's> {
-    projections: PanelProjectionParam<'w, 's>,
-    commands:    Commands<'w, 's>,
-}
-
-impl PanelScreenConversionParam<'_, '_> {
-    /// Projects `panel` through `camera` and queues a matching screen conversion.
-    ///
-    /// Returns the source projection used for the conversion.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PanelProjectionError`] if the panel cannot be projected.
-    pub fn to_screen(
-        &mut self,
-        panel: Entity,
-        camera: Entity,
-    ) -> Result<PanelScreenProjection, PanelProjectionError> {
-        let projection = self.projections.project_to_screen(panel, camera)?;
-        self.commands
-            .finish_panel_to_screen(panel, camera, projection);
-        Ok(projection)
-    }
-
-    /// Projects `panel` through `camera` and queues a conversion to `target`.
-    ///
-    /// Returns the source projection used to resolve defaults.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PanelProjectionError`] if the panel cannot be projected or the
-    /// target cannot be resolved to a positive finite screen size.
-    pub fn to_screen_at(
-        &mut self,
-        panel: Entity,
-        camera: Entity,
-        target: PanelScreenTarget,
-    ) -> Result<PanelScreenProjection, PanelProjectionError> {
-        let projection = self.projections.project_to_screen(panel, camera)?;
-        let conversion = self
-            .projections
-            .conversion_for_screen_projection(panel, projection, target)?;
-        self.commands
-            .finish_panel_to_screen(panel, camera, conversion);
-        Ok(projection)
     }
 }
 

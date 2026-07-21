@@ -216,17 +216,22 @@ mod tests {
     use bevy::picking::pointer::update_pointer_map;
     use bevy::prelude::*;
     use bevy::transform::TransformPlugin;
+    use bevy::window::PrimaryWindow;
     use bevy::window::WindowRef;
 
     use super::camera_order;
+    use crate::Anchor;
     use crate::Button;
     use crate::DiegeticPanel;
     use crate::El;
+    use crate::FitMax;
     use crate::HeadlessLayoutPlugin;
     use crate::LayoutBuilder;
     use crate::Mm;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
+    use crate::Px;
+    use crate::Sizing;
     use crate::cascade;
     use crate::cascade::SdfMaterial;
     use crate::panel::ComputedDiegeticPanel;
@@ -234,6 +239,7 @@ mod tests {
     use crate::render;
     use crate::render::PanelGeometryPlugin;
     use crate::render::PanelInteractionMesh;
+    use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::ComputedWidgetRecord;
     use crate::widgets::WidgetsPlugin;
@@ -242,6 +248,15 @@ mod tests {
     const LARGE_CAMERA_ORDER: isize = 1_isize << 40;
     #[cfg(target_pointer_width = "64")]
     const LARGE_CAMERA_ORDER_F32: f32 = 1_099_511_627_776.0;
+    const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
+    const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
+    const SCREEN_PANEL_SETTLE_UPDATES: usize = 4;
+    const SCREEN_SPACER_WIDTH: f32 = 200.0;
+    const SCREEN_TARGET_HEIGHT: f32 = 40.0;
+    const SCREEN_TARGET_ID: &str = "screen-target";
+    const SCREEN_TARGET_WIDTH: f32 = 40.0;
+    const SCREEN_TEST_WINDOW_HEIGHT: u32 = 700;
+    const SCREEN_TEST_WINDOW_WIDTH: u32 = 1000;
 
     #[test]
     fn camera_order_preserves_common_signed_values() {
@@ -303,6 +318,19 @@ mod tests {
         app
     }
 
+    fn screen_picking_app() -> App {
+        let mut app = picking_app();
+        app.add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((
+            Window {
+                resolution: (SCREEN_TEST_WINDOW_WIDTH, SCREEN_TEST_WINDOW_HEIGHT).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app
+    }
+
     fn spawn_picking_panel(app: &mut App) -> Entity {
         let mut layout = LayoutBuilder::new(100.0, 50.0);
         layout.with(El::row().size(20.0, 10.0).clip(), |layout| {
@@ -350,6 +378,30 @@ mod tests {
             .with_tree(layout.build())
             .build()
             .expect("panel builds");
+        app.world_mut().spawn(panel).id()
+    }
+
+    fn spawn_dynamic_screen_picking_panel(app: &mut App) -> Entity {
+        let mut layout = LayoutBuilder::with_root(El::row().width(Sizing::FIT).height(Sizing::FIT));
+        layout.with(
+            El::new().size(SCREEN_SPACER_WIDTH, SCREEN_TARGET_HEIGHT),
+            |_| {},
+        );
+        layout.with(
+            El::new()
+                .size(SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT)
+                .button(SCREEN_TARGET_ID, Button::new()),
+            |_| {},
+        );
+        let panel = DiegeticPanel::screen()
+            .size(
+                FitMax(SCREEN_PANEL_MAX_WIDTH.into()),
+                FitMax(SCREEN_PANEL_MAX_HEIGHT.into()),
+            )
+            .anchor(Anchor::TopRight)
+            .with_tree(layout.build())
+            .build()
+            .expect("dynamic screen panel builds");
         app.world_mut().spawn(panel).id()
     }
 
@@ -551,15 +603,133 @@ mod tests {
         origin: Vec3,
         direction: Dir3,
     ) -> Vec<PointerHits> {
-        scene.app.world_mut().resource_mut::<RayMap>().map.insert(
-            RayId::new(scene.camera, scene.pointer),
-            Ray3d::new(origin, direction),
-        );
-        scene.app.update();
+        cast_ray(
+            &mut scene.app,
+            cursor,
+            scene.camera,
+            scene.pointer,
+            origin,
+            direction,
+        )
+    }
+
+    fn cast_ray(
+        app: &mut App,
+        cursor: &mut MessageCursor<PointerHits>,
+        camera: Entity,
+        pointer: PointerId,
+        origin: Vec3,
+        direction: Dir3,
+    ) -> Vec<PointerHits> {
+        app.world_mut()
+            .resource_mut::<RayMap>()
+            .map
+            .insert(RayId::new(camera, pointer), Ray3d::new(origin, direction));
+        app.update();
         cursor
-            .read(scene.app.world().resource::<Messages<PointerHits>>())
+            .read(app.world().resource::<Messages<PointerHits>>())
             .cloned()
             .collect()
+    }
+
+    #[test]
+    fn dynamic_fitmax_screen_panel_uses_resolved_interaction_geometry_for_widget_rays() {
+        let mut app = screen_picking_app();
+        let panel = spawn_dynamic_screen_picking_panel(&mut app);
+        for _ in 0..SCREEN_PANEL_SETTLE_UPDATES {
+            app.update();
+        }
+
+        let widget = resolve_widget(&mut app, panel, SCREEN_TARGET_ID);
+        let interaction = interaction_mesh(&mut app, panel);
+        let panel_component = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .expect("dynamic screen panel remains live");
+        let panel_size = Vec2::new(panel_component.width(), panel_component.height());
+        let (anchor_x, anchor_y) = panel_component.anchor_offsets();
+        let expected_center = Vec2::new(
+            panel_size.x.mul_add(0.5, -anchor_x),
+            panel_size.y.mul_add(-0.5, anchor_y),
+        );
+        let interaction_component = app
+            .world()
+            .get::<PanelInteractionMesh>(interaction)
+            .expect("production interaction mesh should remain live");
+        assert!(
+            *interaction_component == PanelInteractionMesh::new(panel_size, expected_center),
+            "interaction metadata should use resolved screen dimensions",
+        );
+        let interaction_transform = app
+            .world()
+            .get::<Transform>(interaction)
+            .expect("production interaction mesh should have a local transform");
+        assert_eq!(
+            [
+                interaction_transform.translation.x.to_bits(),
+                interaction_transform.translation.y.to_bits(),
+            ],
+            [expected_center.x.to_bits(), expected_center.y.to_bits()],
+        );
+
+        let target_hit = record_center_world(&app, panel, SCREEN_TARGET_ID);
+        let target_rect = widget_record(&app, panel, SCREEN_TARGET_ID).rect();
+        let outside_point = Vec2::new(
+            target_rect.x * 0.5,
+            target_rect.height.mul_add(0.5, target_rect.y),
+        );
+        assert!(!target_rect.contains(outside_point));
+        let outside_hit = panel_point_to_world(&app, panel, (outside_point.x, outside_point.y));
+        let (camera, pointer) = spawn_picking_input(&mut app);
+        let interaction_layers = app
+            .world()
+            .get::<RenderLayers>(interaction)
+            .cloned()
+            .expect("screen interaction mesh should inherit render layers");
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(interaction_layers);
+        let mut cursor = MessageCursor::<PointerHits>::default();
+
+        let target_hits = cast_ray(
+            &mut app,
+            &mut cursor,
+            camera,
+            pointer,
+            target_hit + Vec3::Z,
+            Dir3::NEG_Z,
+        );
+        assert_eq!(target_hits.len(), 1);
+        assert!(
+            target_hits[0]
+                .picks
+                .iter()
+                .any(|(entity, _)| *entity == widget),
+        );
+        assert!(
+            target_hits[0]
+                .picks
+                .iter()
+                .any(|(entity, _)| *entity == panel),
+        );
+        assert!(
+            !target_hits[0]
+                .picks
+                .iter()
+                .any(|(entity, _)| *entity == interaction),
+        );
+
+        let outside_hits = cast_ray(
+            &mut app,
+            &mut cursor,
+            camera,
+            pointer,
+            outside_hit + Vec3::Z,
+            Dir3::NEG_Z,
+        );
+        assert_eq!(outside_hits.len(), 1);
+        assert_eq!(outside_hits[0].picks.len(), 1);
+        assert_eq!(outside_hits[0].picks[0].0, panel);
     }
 
     #[test]

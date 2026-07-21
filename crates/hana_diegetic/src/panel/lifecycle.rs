@@ -14,7 +14,6 @@ use hana_valence::Member;
 use hana_valence::ResolvedAnchorGeometry;
 use hana_valence::ResolvedAnchorOffset;
 
-use super::AnchoredToPanel;
 use super::ComputedDiegeticPanel;
 use super::DiegeticPanel;
 use super::DiegeticPanelChangeClassification;
@@ -28,7 +27,6 @@ use super::ResolvedScreenPanelPosition;
 use super::SavedPanelScreenState;
 use super::SavedPanelWorldState;
 use super::anchoring::AnchoredWorldPanelPose;
-use super::diegetic_panel::PendingPanelConversion;
 use super::diegetic_panel::PreparedPanelScreenConversion;
 use super::diegetic_panel::ScaledLayoutTreeCache;
 use crate::cascade::Cascade;
@@ -56,6 +54,9 @@ use crate::screen_space::ScreenSpaceLight;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::PanelWidgets;
+use crate::widgets::ScreenWidgetAnchorProxy;
+use crate::widgets::ScreenWidgetAnchoredHere;
+use crate::widgets::ScreenWidgetAnchoredTo;
 use crate::widgets::WidgetInteractivity;
 
 /// Identifies the panel role that created and owns one runtime entity.
@@ -101,6 +102,8 @@ impl<T: Component> PanelComponentOwnership<T> {
     pub(crate) fn owns(&self, owner: Entity, current: Tick) -> bool {
         self.owner == owner && self.written_tick == current
     }
+
+    pub(crate) const fn owner(&self) -> Entity { self.owner }
 }
 
 #[derive(Clone, Component)]
@@ -191,9 +194,11 @@ pub(super) fn teardown_panel_role(
     trigger: On<Remove, DiegeticPanel>,
     panels: Query<(Entity, &DiegeticPanel)>,
     owned_entities: Query<(Entity, &PanelOwned)>,
-    widget_demands: Query<&AnchoredHere, With<PanelWidget>>,
+    world_widget_demands: Query<&AnchoredHere, With<PanelWidget>>,
+    screen_widget_demands: Query<&ScreenWidgetAnchoredHere, With<PanelWidget>>,
     authored_attachments: Query<&PanelAttachmentAuthored>,
     world_attachments: Query<&AnchoredTo>,
+    screen_attachments: Query<&ScreenWidgetAnchoredTo>,
     parents: Query<&ChildOf>,
     cameras: Query<(Entity, &ScreenSpaceCamera)>,
     lights: Query<(Entity, &ScreenSpaceLight)>,
@@ -221,9 +226,11 @@ pub(super) fn teardown_panel_role(
     finalize_widget_anchor_state(
         entity,
         &owned_entities,
-        &widget_demands,
+        &world_widget_demands,
+        &screen_widget_demands,
         &authored_attachments,
         &world_attachments,
+        &screen_attachments,
         &mut commands,
     );
 
@@ -251,7 +258,6 @@ pub(super) fn teardown_panel_role(
         ResolvedScreenPanelPosition,
         ScaledLayoutTreeCache,
         PanelSpace,
-        PendingPanelConversion,
         PreparedPanelScreenConversion,
     )>();
     panel_entity.remove::<(
@@ -264,6 +270,7 @@ pub(super) fn teardown_panel_role(
         SavedPanelWorldState,
         PanelWidgets,
         PanelTextRuns,
+        ScreenWidgetAnchoredTo,
     )>();
     render::remove_panel_shape_relationship(&mut panel_entity);
 }
@@ -271,33 +278,58 @@ pub(super) fn teardown_panel_role(
 fn finalize_widget_anchor_state(
     panel: Entity,
     owned_entities: &Query<(Entity, &PanelOwned)>,
-    widget_demands: &Query<&AnchoredHere, With<PanelWidget>>,
+    world_widget_demands: &Query<&AnchoredHere, With<PanelWidget>>,
+    screen_widget_demands: &Query<&ScreenWidgetAnchoredHere, With<PanelWidget>>,
     authored_attachments: &Query<&PanelAttachmentAuthored>,
     world_attachments: &Query<&AnchoredTo>,
+    screen_attachments: &Query<&ScreenWidgetAnchoredTo>,
     commands: &mut Commands<'_, '_>,
 ) {
     for (widget, ownership) in owned_entities {
         if ownership.owner() != panel {
             continue;
         }
-        let Ok(demand) = widget_demands.get(widget) else {
-            continue;
-        };
-        for dependent in demand.iter() {
+        let mut dependents = world_widget_demands
+            .get(widget)
+            .ok()
+            .into_iter()
+            .flat_map(AnchoredHere::iter)
+            .collect::<HashSet<_>>();
+        dependents.extend(
+            screen_widget_demands
+                .get(widget)
+                .ok()
+                .into_iter()
+                .flat_map(ScreenWidgetAnchoredHere::iter),
+        );
+        for dependent in dependents {
             let authored_targets_widget = authored_attachments
                 .get(dependent)
                 .is_ok_and(|attachment| attachment.target() == widget);
             let world_targets_widget = world_attachments
                 .get(dependent)
                 .is_ok_and(|attachment| attachment.target() == widget);
+            let screen_targets_widget = screen_attachments
+                .get(dependent)
+                .is_ok_and(|attachment| attachment.target() == widget);
             if authored_targets_widget {
-                commands.entity(dependent).remove::<AnchoredToPanel>();
-            } else if world_targets_widget {
-                commands.entity(dependent).remove::<AnchoredTo>();
+                commands
+                    .entity(dependent)
+                    .remove::<(PanelAttachmentAuthored, PanelAnchorOffset)>();
+            } else {
+                if world_targets_widget {
+                    commands.entity(dependent).remove::<AnchoredTo>();
+                }
+                if screen_targets_widget {
+                    commands
+                        .entity(dependent)
+                        .remove::<ScreenWidgetAnchoredTo>();
+                }
             }
         }
         remove_owned_component::<AnchoredTo>(commands, panel, widget);
         remove_owned_component::<ResolvedAnchorGeometry>(commands, panel, widget);
+        remove_owned_component::<ScreenWidgetAnchorProxy>(commands, panel, widget);
     }
 }
 
@@ -772,12 +804,15 @@ mod tests {
     use crate::LayoutBuilder;
     use crate::LayoutTree;
     use crate::Mm;
+    use crate::PanelAttachment;
     use crate::PanelDraw;
     use crate::PanelElementId;
+    use crate::PanelEntityReader;
     use crate::PanelLine;
     use crate::PanelPoint;
     use crate::PanelWidget;
     use crate::PanelWidgetReader;
+    use crate::Px;
     use crate::TextStyle;
     use crate::Unit;
     use crate::WidgetOf;
@@ -787,6 +822,8 @@ mod tests {
     use crate::cascade::FontUnit;
     use crate::cascade::Resolved;
     use crate::cascade::TextAlpha;
+    use crate::layout::Anchor;
+    use crate::panel::PanelAttachmentAuthored;
     use crate::panel::PanelOwned;
     use crate::panel::arrangement::PanelArrangementRuntime;
     use crate::render::AntiAlias;
@@ -801,6 +838,9 @@ mod tests {
     use crate::text::TextPlugin;
     use crate::widgets::PanelWidgetIndex;
     use crate::widgets::PanelWidgets;
+    use crate::widgets::ScreenWidgetAnchorProxy;
+    use crate::widgets::ScreenWidgetAnchoredHere;
+    use crate::widgets::ScreenWidgetAnchoredTo;
     use crate::widgets::WidgetInteractivity;
     use crate::widgets::WidgetsPlugin;
 
@@ -1334,6 +1374,100 @@ mod tests {
             },
         );
         builder.build()
+    }
+
+    fn widget_anchor_teardown_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, TransformPlugin))
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ScreenSpacePlugin));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app
+    }
+
+    fn anchor_teardown_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().size(20.0, 10.0).button("target", Button::new()),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn screen_widget_owner_role_teardown_detaches_application_dependent() {
+        let mut app = widget_anchor_teardown_app();
+        let owner_panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .anchor(Anchor::TopLeft)
+            .with_tree(anchor_teardown_tree())
+            .build()
+            .expect("screen owner should build");
+        let owner = app.world_mut().spawn((owner_panel, ApplicationState)).id();
+        app.update();
+        let widget = resolve_widget(&mut app, owner, "target");
+        let dependent_panel = DiegeticPanel::screen()
+            .size(Px(30.0), Px(10.0))
+            .anchor(Anchor::TopLeft)
+            .layout(|_| {})
+            .build()
+            .expect("screen dependent should build");
+        let dependent = app
+            .world_mut()
+            .spawn((dependent_panel, ApplicationState))
+            .id();
+        let target_id = PanelElementId::named("target");
+        app.world_mut()
+            .run_system_once(
+                move |panels: PanelEntityReader,
+                      widgets: PanelWidgetReader,
+                      mut commands: Commands| {
+                    let source = panels
+                        .screen(dependent)
+                        .expect("dependent is a screen panel");
+                    let owner = panels.screen(owner).expect("owner is a screen panel");
+                    let target = widgets
+                        .typed_entity(owner, &target_id)
+                        .expect("target is a screen widget");
+                    commands.attach_to_widget(
+                        source,
+                        target,
+                        PanelAttachment::new(Anchor::TopLeft, Anchor::BottomLeft),
+                    );
+                },
+            )
+            .expect("attachment system runs");
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<ScreenWidgetAnchoredHere>(widget)
+                .is_some_and(|demand| demand.contains(&dependent))
+        );
+        assert!(app.world().get::<ScreenWidgetAnchorProxy>(widget).is_some());
+        assert!(app.world().get::<ResolvedAnchorGeometry>(widget).is_some());
+        assert!(
+            app.world()
+                .get::<ScreenWidgetAnchoredTo>(dependent)
+                .is_some()
+        );
+
+        app.world_mut().entity_mut(owner).remove::<DiegeticPanel>();
+        app.update();
+
+        let world = app.world();
+        assert!(world.get_entity(owner).is_ok());
+        assert!(world.get::<ApplicationState>(owner).is_some());
+        assert!(world.get_entity(widget).is_err());
+        assert!(world.get_entity(dependent).is_ok());
+        assert!(world.get::<ApplicationState>(dependent).is_some());
+        assert!(world.get::<PanelAttachmentAuthored>(dependent).is_none());
+        assert!(world.get::<ScreenWidgetAnchoredTo>(dependent).is_none());
+        assert!(!world.iter_entities().any(|entity| {
+            entity
+                .get::<PanelOwned>()
+                .is_some_and(|ownership| ownership.owner() == owner)
+        }));
     }
 
     #[test]
