@@ -1421,7 +1421,7 @@ are removed, and performs no automatic reconstruction or restore.
   separate physical evidence row.
 - No remaining phase required merging, splitting, or reordering.
 
-### Phase 8 — Add automatic fallback-and-return transitions  · status: todo
+### Phase 8 — Add automatic fallback-and-return transitions  · status: done (`e4dd2acf`)
 
 #### Work Order
 
@@ -1519,6 +1519,63 @@ reconnect without fallback observation. Tests also prove an identity-only
 revision and a coalesced disconnect/connect revision each produce one automatic
 topology transition.
 
+#### Retrospective
+
+**What worked:**
+
+- `recovery/fallback_and_return.rs` now owns the full automatic lifecycle while
+  `CapturedWindowStates` remains the only authoritative placement owner.
+- Production-order tests exercise the real topology, recovery, current-monitor,
+  and fallback sets; all 166 Clerestory tests pass.
+- A macOS physical run accepted both windows on `MonitorId(1)`, classified their
+  linked deletion, emitted one pending fact per key, and recognized the same ID
+  on reconnect without reconstructing before Phase 9.
+
+**What deviated from the plan:**
+
+- `FallbackObservation` retains the matching monitor entity as private evidence
+  so an identity refresh on that entity does not look like user intervention.
+- `PersistenceWriteState::CurrentCaptureSuppressed` consumes the one scheduled
+  capture that follows an identity-only refresh, then restores normal writes.
+- Production-order regression coverage lives beside the existing injected
+  topology harness and uses test-only automatic-lifecycle snapshots.
+
+**Surprises:**
+
+- A fallback monitor can keep the same Bevy entity while its verified identity
+  becomes unverified; current-monitor refresh and recovery must agree on that
+  transition within one update.
+- On macOS, unplugging the selected display deleted both linked windows before
+  Clerestory installed the disconnect revision, making `MissingLiveWindow` the
+  physical path for both primary and managed windows in this run.
+
+**Implications for remaining phases:**
+
+- Phase 9 must consume exactly one `AutomaticRestoreIntent`; its entity is
+  absent when linked deletion occurred and present when the OS kept the window.
+- Phase 10 must reconstruct an absent window from the frozen keyed placement and
+  retained registration generation rather than from fallback observations.
+- Phase 12 must replace the probe's temporary application-controlled behavior
+  with automatic recovery and trace the results produced after Phases 9–10.
+
+### Phase 8 Review
+
+- Phase 9 now consumes only automatic intents that already have a live entity,
+  carries the recovery generation through a checked attempt ID and controllable
+  deadline, and leaves reconstruction/retry hardening to Phase 10.
+- Phase 10 now names the remaining-monitor, zero-monitor, and target-first
+  reconstruction branches and requires `bind_and_freeze` before any capture or
+  association repair.
+- Phase 12 now uses two reconnect cycles so application-controlled cancellation
+  does not conflict with automatic return, and its Work Order names every trace
+  source file it changes.
+- Phase 15 is now an audit of regressions shipped by earlier phases and permits
+  new code only for a concrete Hana-discovered or coverage gap.
+- Phase 16 preserves the Phase 8 macOS automatic-policy row; Phases 16–18 now
+  separate unsupported automatic exclusive fullscreen from explicit/startup
+  fullscreen restore tests.
+- Phases 11, 13–14, and 19–21 remain dispatch-ready without further changes.
+
 ### Phase 9 — Execute runtime restore attempts  · status: todo
 
 #### Work Order
@@ -1535,9 +1592,10 @@ struct RestoreAttempt {
     id: RestoreAttemptId,
     window_key: WindowKey,
     entity: Entity,
+    generation: RecoveryGeneration,
     expected_monitor: MonitorId,
     topology_revision: MonitorTopologyRevision,
-    deadline: Instant,
+    deadline: Duration,
 }
 
 enum RestoreOrigin {
@@ -1553,11 +1611,18 @@ enum RestoreOrigin {
   replacement. Request acceptance, canonical replacement binding, and immutable
   `RestoreAttempt` creation are one operation; no transitional handler may
   advance lifecycle state without creating the attempt.
+- Consume an `AutomaticRestoreIntent` in this phase only when its retained
+  entity is present. Convert that key, entity, recovery generation, target, and
+  topology revision into exactly one `RestoreAttempt`. Leave an entityless
+  automatic intent pending and unchanged for Phase 10 to create and canonically
+  bind its replacement shell; Phase 9 must not reconstruct that window.
 - Resolve the target only by frozen `MonitorId`. If absent, leave intent pending
   with no false result. Read the target snapshot from installed `Monitors`; do
   not query native monitor metadata during preparation.
-- Start one attempt deadline at request acceptance, before winit or
-  `TargetPosition` necessarily exists. Preserve the full attempt tuple through
+- Allocate `RestoreAttemptId` from one checked, non-reused counter for the
+  running `App`. Start one deadline from `Time<Virtual>::elapsed()` at request
+  acceptance, before winit or `TargetPosition` necessarily exists, so tests can
+  advance it without sleeping. Preserve the full attempt tuple through
   preparation, X11 compensation, application, DPI changes, and settling.
 - Extend Phase 6's prepared state with `RestoreOrigin::Recovery`; use the same
   builder and `restore_windows` path as startup. Retain
@@ -1585,12 +1650,14 @@ MonitorTopologyInstall
   it with a native polling system.
 - `RecoveryTopologyTransitions` reads the already-installed `Monitors` snapshot
   once for each new `MonitorTopologyRevision`; it never counts raw topology
-  events. Attempt invalidation/replanning therefore sees identity-only changes
-  and treats a disconnect/connect pair from one install as one topology input.
+  events. Before application, reject a stale attempt whose expected monitor or
+  recorded revision no longer matches the installed snapshot. Phase 10 owns
+  topology-churn replanning and treats a disconnect/connect pair from one
+  install as one topology input.
 - Preserve the entity on every `WindowScaleFactorChanged` message and advance
   only the matching entity, attempt, phase, and reported/live target scale.
 - Runtime settling submits a private completion containing the full attempt
-  tuple to one validator before public `WindowRestored` or
+  tuple, including the recovery generation, to one validator before public `WindowRestored` or
   `WindowRestoreMismatch`. Startup completion remains a separate origin; never
   derive a missing key from current markers or default an unknown entity to
   primary. Replace Phase 7's transitional restored/mismatch observers: only the
@@ -1631,7 +1698,11 @@ MonitorTopologyInstall
 **Constraints from prior phases:** Phase 6 supplies one staged builder and
 startup origin; `RestorePreparation` retains the canonical `WindowKey` until
 settling completes. Phase 7–8 supply canonical lifecycle phases and frozen
-intent. Phase 7's `on_restore_window` is intentionally transitional: it only
+intent. Phase 8's `AutomaticRestoreIntent` is keyed by the canonical window and
+recovery generation and carries an optional live entity plus the returned
+monitor snapshot/revision. An entityless intent is valid after linked deletion
+and remains owned by the automatic lifecycle until Phase 10 binds a shell.
+Phase 7's `on_restore_window` is intentionally transitional: it only
 finds an already-bound entity and changes application-controlled phase, while
 its restored/mismatch observers carry no private attempt identity. Phase 7's
 `cancel_restore` already removes preparation, target, and X11 transient state,
@@ -1644,13 +1715,16 @@ Phase 5 supplies the late-`OnMonitor` repair and sole captured-placement owner;
 runtime attempts consume both rather than adding native metadata reads.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
-Bevy `App` tests prove surviving and canonical replacement requests produce the
-same `TargetPosition` as startup, target absence remains pending, ordered
+Bevy `App` tests prove surviving automatic requests and canonically bound
+application-controlled replacement requests produce the same `TargetPosition`
+as startup, while an entityless automatic intent remains pending without
+`TargetPosition` until Phase 10. Target absence remains pending, ordered
 flushes expose components to the next consumer, successful settle validates the
-complete tuple and removes preparation only through the validator/finalizer,
+complete tuple including generation and removes preparation only through the validator/finalizer,
 and concurrent cross-DPI restores advance only the addressed entity.
-Topology-transition tests prove identity-only and coalesced replacement
-revisions invalidate or replan each attempt exactly once. A production-schedule
+Topology-transition tests prove a stale expected monitor or topology revision
+cannot reach application; Phase 10 covers retry/replanning on identity-only and
+coalesced replacement revisions. A production-schedule
 test creates the ECS window before `OnMonitor`, then proves recovery observes
 only the repaired association and performs no native monitor metadata polling.
 Cancellation tests prove no attempt survives and durable diagnostics remain.
@@ -1670,17 +1744,21 @@ linked-deletion replacement path.
   entities still linked and deletes them before Clerestory installs the
   disconnect topology.
 - For an unmarked missing window owned by a copied `FallbackAndReturn`
-  generation, use the retained cloned `Window` and canonical primary or managed
-  role to spawn exactly one replacement shell when a fallback monitor exists.
-  Select that fallback through the existing `Monitors::first()`/
-  `PRIMARY_MONITOR_INDEX` resolver used by startup restore; never select an
-  arbitrary available monitor.
+  generation, follow two literal branches. When any non-target monitor remains,
+  immediately use the retained cloned `Window` and canonical primary or managed
+  role to spawn exactly one replacement shell, bind it to that generation, and
+  enter fallback settling. Select the monitor through the existing
+  `Monitors::first()`/`PRIMARY_MONITOR_INDEX` resolver used by startup restore;
+  never select an arbitrary available monitor. When zero monitors remain,
+  create nothing and retain the entityless automatic state. If the target is
+  the first monitor to return, create and bind the shell directly for restore
+  instead of manufacturing a fallback observation.
   Bind that entity to the existing `WindowKey` and recovery generation before
   startup restore or persistence can observe it; do not add `WindowRecovery`
   again or create a second registration generation.
-- Freeze and rebind the existing `CapturedWindowStates` key before the
-  replacement's initial default placement or later `OnMonitor` repair can reach
-  persistence. Neither value may overwrite the original return intent.
+- Call `CapturedWindowStates::bind_and_freeze` before the replacement's initial
+  default placement, capture, or later `OnMonitor` repair can reach persistence.
+  None of those values may overwrite the original return intent.
 - The replacement shell contains window configuration only. Clerestory never
   copies cameras, UI, rendered content, or other application components.
   `ApplicationControlled` stores no Clerestory-owned `Window` clone; those
@@ -1690,8 +1768,8 @@ linked-deletion replacement path.
   examples and consumers must configure `ExitCondition::DontExit`; explicit
   close handling remains responsible for terminating the application after a
   real user close.
-- Before application or settle, revalidate entity, key, attempt ID, expected
-  monitor, and topology revision.
+- Before application or settle, revalidate entity, key, recovery generation,
+  attempt ID, expected monitor, and topology revision.
 - On each new installed `MonitorTopologyRevision`, process attempts once before
   window transitions. Target loss returns the lifecycle to waiting. An
   identity-only revision with no raw event still invalidates or replans the
@@ -1744,7 +1822,10 @@ entity. Phase 8 supplies the explicit missing-live-window state. Phase 9
 provides immutable attempts, the ordered chain, one installed-snapshot
 evaluation per topology revision, central completion validation, and
 cancellation cleanup for every transient attempt component while retaining
-durable diagnostics.
+durable diagnostics. Phase 8's entityless `AutomaticRestoreIntent` and retained
+registration generation remain authoritative until this phase binds exactly
+one shell; a replacement generation invalidates the old intent and any attempt
+derived from it.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Table-driven tests cover cleanup at every stage, stale completions after retry,
@@ -1753,11 +1834,13 @@ target loss/return, mismatch/no-frame-loop, timeout, zero displays,
 target-first/non-target-first/coalesced order, identity-only revisions without
 raw events, and cancellation/replacement loss. Production-schedule tests delete
 both primary and secondary entities before disconnect topology installation,
-keep the app running with zero windows, create and canonically bind exactly one
-replacement shell for each eligible `FallbackAndReturn` generation, and create
-none for application-controlled, cancelled, closed, disabled, or unregistered
-windows. Primary and managed replacement tests prove initial default placement
-and delayed `OnMonitor` repair cannot overwrite the frozen captured intent.
+keep the app running with zero windows, and cover both reconstruction branches:
+a remaining fallback immediately receives exactly one canonically bound shell,
+while zero monitors creates none and a target-first return creates one shell
+directly for restore. Tests create none for application-controlled, cancelled,
+closed, disabled, or unregistered windows. Primary and managed replacement
+tests prove `bind_and_freeze`, initial default placement, capture, and delayed
+`OnMonitor` repair cannot overwrite the frozen captured intent.
 
 ### Phase 11 — Publish the reflected recovery API  · status: todo
 
@@ -1868,9 +1951,13 @@ policies while retaining its causal diagnostics.
 - Add one unregistered control window on the selected monitor. It must remain
   deleted after a linked cascade and reconnect, proving the recovery registry
   never resurrects arbitrary windows.
-- Exercise pending/available observation, surviving canonical restore,
-  replacement creation with exactly one canonical identity, result handling,
-  cancellation while absent, and proof that later reconnect creates nothing.
+- Exercise two explicit reconnect cycles. In the first, restore both automatic
+  windows and the application-controlled window, covering surviving canonical
+  restore, exactly-one replacement binding, pending/available observation, and
+  restored/mismatch result handling. In the second, disconnect again, cancel
+  only the application-controlled key while it is absent, and prove that key
+  and the unregistered control do not return while both automatic windows still
+  follow their configured return behavior.
 - For automatic return, verify target reconnect without intervention returns
   an eligible window and post-settle movement/resize/mode change keeps the
   adopted fallback. Verify unverified identity and Wayland windowed capability
@@ -1892,10 +1979,14 @@ policies while retaining its causal diagnostics.
   consumer and retained trace.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — preserve
   association-confirmed registration and the one-time placement request.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/lifecycle.rs` —
+  retained monitor/window relationship and deletion trace.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/recovery_trace.rs` —
-  recovery lifecycle trace records.
+  pending, available, restored, and mismatch records.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/trace.rs` — shared
   ordered trace owner.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/window_trace.rs` —
+  native/internal window events and component transition trace.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   monitor and recovery trace targets.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — complete
@@ -1923,7 +2014,9 @@ routes, `bevy_clerestory::monitor_probe` and
 Clerestory Test/Lint gates. On available hardware, the script completes
 automatic primary/secondary return or the documented unarmed branch,
 intervention adoption, application-controlled surviving/replacement restore,
-result handling, and cancellation without content resurrection. A cascade run
+result handling, and the two-cycle cancellation proof without content
+resurrection. The second cycle leaves the cancelled application-controlled key
+and unregistered control absent while automatic windows still return. A cascade run
 keeps the process alive with no windows, creates exactly one primary and one
 secondary automatic replacement, and leaves the unregistered control absent.
 The retained trace proves each pre-unplug `OnMonitor`/`CurrentMonitor` pair
@@ -2074,8 +2167,8 @@ transition.
 
 #### Work Order
 
-**Goal:** Stabilize the Clerestory/Hana boundary after both real consumer passes
-and prove all hardware-independent acceptance behavior.
+**Goal:** Audit and stabilize the Clerestory/Hana boundary after both real
+consumer passes, reusing the regressions already added by earlier phases.
 
 **Spec:**
 
@@ -2084,15 +2177,16 @@ and prove all hardware-independent acceptance behavior.
   state. Do not absorb Hana content/capture/UI lifecycle.
 - Ensure the local Hana override still targets this checkout while corrections
   are tested.
-- Complete test coverage for immediate topology observers, identity ambiguity,
-  first eligible registration, persistence promotion/freezing/projection,
-  primary/secondary and both policies, attempt cleanup/retry, concurrent DPI,
-  reflected public events, zero displays, linked deletion before topology,
-  zero-window process survival, exactly-one automatic replacement,
-  unregistered non-reconstruction, delayed `OnMonitor` repair before the first
-  eligible recovery baseline, rejected-association and managed-role-removal
-  cleanup of `CurrentMonitor` plus `NativeWindowReady`, zero native monitor
-  polling across those paths, and Wayland capability gating.
+- Inventory the tests shipped by Phases 1–14 against immediate topology
+  observers, identity ambiguity, first eligible registration, persistence
+  promotion/freezing/projection, primary/secondary and both policies, attempt
+  cleanup/retry, concurrent DPI, reflected events, zero displays, linked
+  deletion before topology, zero-window survival, exactly-one replacement,
+  unregistered non-reconstruction, delayed `OnMonitor` repair, readiness
+  cleanup, zero native monitor polling, and Wayland capability gating. Rerun
+  those tests; add code or a new regression only for a concrete gap exposed by
+  the inventory or the Hana consumers. Do not reimplement an already-covered
+  behavior as a second convergence pass.
 - Run full workspace tests/build/lint in both workspaces, not only package-local
   gates.
 - Update public README and unreleased changelog to the stabilized API and
@@ -2101,31 +2195,8 @@ and prove all hardware-independent acceptance behavior.
 
 **Files:**
 
-- `crates/bevy_clerestory/src/monitors/identity/mod.rs` — final identity surface
-  and internal ownership.
-- `crates/bevy_clerestory/src/monitors/identity/native.rs` — final native
-  evidence feedback.
-- `crates/bevy_clerestory/src/monitors/identity/registry.rs` — final ambiguity,
-  interner, and instance-cache feedback.
-- `crates/bevy_clerestory/src/monitors/identity/configuration/` — final native
-  generation-notification feedback in the owning target module.
-- `crates/bevy_clerestory/src/monitors/topology.rs` — final lifetime/identity
-  topology feedback.
-- `crates/bevy_clerestory/src/monitors/current_monitor.rs` — final exact
-  association and readiness cleanup coverage.
-- `crates/bevy_clerestory/src/managed.rs` — final managed-role readiness cleanup
-  coverage.
-- `crates/bevy_clerestory/src/persistence/captured_window_state.rs` — final
-  persistence feedback.
-- `crates/bevy_clerestory/src/recovery/mod.rs` — final public API.
-- `crates/bevy_clerestory/src/recovery/registration.rs` — final canonical
-  registration.
-- `crates/bevy_clerestory/src/recovery/application_controlled.rs` — final
-  explicit lifecycle.
-- `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — final automatic
-  lifecycle.
-- `crates/bevy_clerestory/src/restore/restore_attempt.rs` — final runtime
-  attempt behavior.
+- Files explicitly named by the Phase 13–14 retrospectives — change only the
+  owner of concrete cross-workspace feedback recorded there.
 - `crates/bevy_clerestory/README.md` — stabilized public docs.
 - `crates/bevy_clerestory/CHANGELOG.md` — unreleased entry.
 - `../hana/Cargo.toml` and `../hana/Cargo.lock` — retain local checkout.
@@ -2136,7 +2207,12 @@ and prove all hardware-independent acceptance behavior.
 
 **Constraints from prior phases:** Phase review must propagate the exact API
 feedback and changed signatures from Phases 13–14 here. The design boundary and
-all public behavior are otherwise fixed.
+all public behavior are otherwise fixed. Phase 8 already supplies production-
+order coverage for same-entity identity refresh and linked deletion before
+topology installation, with `CurrentCaptureSuppressed` protecting the frozen
+placement and no native/global monitor metadata polling. Phases 9–12 own the
+remaining attempt and reconstruction regressions; this phase audits and reruns
+them instead of replacing their owners.
 
 **Acceptance gate:** In both workspaces, final CI-parity Build, full workspace
 Test, and full `clippy` skill gates are green. The Hana dependency resolves to
@@ -2144,7 +2220,8 @@ this checkout, all named hardware-independent cases pass, and docs contain no
 claim that requires unrecorded physical evidence. Readiness regression tests
 construct monitor relationships from entities in the same test `World` and
 prove rejected associations and managed-role removal perform no native monitor
-polling.
+polling. The final report maps each required behavior to its existing or newly
+added test and names any Hana-discovered correction.
 
 ### Phase 16 — Record the macOS physical matrix  · status: todo
 
@@ -2162,9 +2239,13 @@ example.
   emitted one pending fact for each key; reconnect installed entity `242v0` at
   index 2 with the same `MonitorId(1)` and emitted one available fact for each
   key; the process stayed alive and both application windows intentionally
-  remained absent. Run the Phase 12 script on macOS and append
-  completed-automatic-recovery rows without replacing or reinterpreting either
-  earlier observation.
+  remained absent. Also retain Phase 8's automatic-policy row: both windows
+  accepted `MonitorId(1)` on entity `233v0` at index 1, linked deletion emitted
+  one pending fact per key before topology revision 1, reconnect installed
+  entity `243v0` at index 2 with the same ID in revision 2, and no window was
+  reconstructed because Phases 9–10 were not yet implemented. Run the Phase 12
+  script on macOS and append completed-automatic-recovery rows without
+  replacing or reinterpreting any earlier observation.
 - Cover same-panel reconnect; same panel through another port/dock; a different
   same-model panel at the same position where available; simultaneous duplicate
   identities where available; identity change; lid close/open; repeated dock
@@ -2184,6 +2265,9 @@ example.
 - Verify an arrangement-only change does not initiate recovery and record when
   it produces no Clerestory monitor-lifetime signal. A fallback intervention
   cancels only the current return intent.
+- Automatic exclusive-fullscreen recovery is expected to remain unarmed. Test
+  any explicit or startup exclusive-fullscreen restore separately rather than
+  counting it as automatic return.
 - If physical behavior exposes a defect, fix only the named monitor/recovery/
   restore owner, add an automated regression where possible, rerun Clerestory
   gates, and record the corrected result.
@@ -2210,8 +2294,9 @@ baseline. Physical evidence may correct an implementation defect but must not
 weaken identity or capability gates. `MonitorId` is process-local and may be
 compared across entity lifetimes only inside one running `App`. Phase 4's raw
 macOS row remains valid evidence, and Phase 7's application-controlled row
-remains separate from Phase 12's automatic-return rows. This phase extends the
-matrix without recasting either earlier result.
+and Phase 8's pre-execution automatic row remain separate from Phase 12's
+completed automatic-return rows. This phase extends the matrix without
+recasting any earlier result.
 
 **Acceptance gate:** Every applicable macOS scenario has an evidence row and
 expected/actual result; unavailable hardware cases are explicitly marked rather
@@ -2235,8 +2320,9 @@ fullscreen, and entity-scoped real DPI behavior.
   or duplicated.
 - Compare `MonitorId` only across entity lifetimes in one running `App`; record
   evidence rather than token equality across separate runs.
-- Verify concurrent cross-DPI windows cannot advance each other's attempts and
-  exclusive-fullscreen surface creation/restore remains correct.
+- Verify concurrent cross-DPI windows cannot advance each other's attempts.
+  Automatic exclusive-fullscreen recovery remains unarmed; exercise explicit
+  or startup exclusive-fullscreen surface creation/restore as a separate row.
 - Record entity survival versus linked cascade, removal versus installed
   topology order, zero-window process survival, replacement entity/key, and the
   unregistered control outcome. Use the surviving-relocation branch when that
@@ -2292,6 +2378,8 @@ placement, fullscreen, intervention, and DPI behavior.
   fullscreen, zero displays, non-target-first return, and rapid hotplug. Record
   unchanged-entity arrangement/resolution/scale cases as the documented
   no-refresh limitation rather than recovery transitions.
+- Treat exclusive fullscreen as a separate explicit/startup restore row;
+  automatic exclusive-fullscreen recovery is expected to remain unarmed.
 - Prove `X11FrameCompensated` remains between preparation and application and
   the thin primary `PreStartup` flush still matches runtime placement.
 - Record linked-cascade versus surviving relocation, removal versus installed
