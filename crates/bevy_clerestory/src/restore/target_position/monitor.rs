@@ -1,6 +1,7 @@
 use crate::monitors::MonitorInfo;
 use crate::monitors::Monitors;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MonitorResolutionSource {
     Requested,
     FallbackToPrimary,

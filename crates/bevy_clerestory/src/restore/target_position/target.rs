@@ -10,6 +10,18 @@ use crate::persistence::PersistedWindowState;
 use crate::persistence::SavedWindowMode;
 use crate::restore::settle_state::SettleState;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PreparedWindowPosition {
+    PersistedCoordinate(IVec2),
+    PersistedWithoutCoordinate,
+    CapturedRestorable {
+        physical_position: IVec2,
+        logical_position:  IVec2,
+    },
+    CompositorControlled,
+    TargetUnavailable,
+}
+
 /// Holds the target window state during the restore process.
 ///
 /// Values converted from saved state are stored as `IVec2`, `UVec2`,
@@ -121,7 +133,7 @@ pub(crate) struct RestoreDiagnostics {
 pub(crate) fn compute_target_position(
     saved_window_state: &PersistedWindowState,
     target_info: &MonitorInfo,
-    logical_fallback_position: Option<(i32, i32)>,
+    prepared_window_position: PreparedWindowPosition,
     physical_decoration: UVec2,
     starting_scale: f64,
     platform: Platform,
@@ -135,23 +147,34 @@ pub(crate) fn compute_target_position(
 
     let physical_outer_width = physical_width + physical_decoration.x;
     let physical_outer_height = physical_height + physical_decoration.y;
-    let physical_position = logical_fallback_position.map(|(x, y)| {
-        // Convert logical position to physical using the target monitor's scale factor.
-        let physical_x = (f64::from(x) * target_scale).round().to_i32();
-        let physical_y = (f64::from(y) * target_scale).round().to_i32();
-        clamp_position_to_monitor(
-            physical_x,
-            physical_y,
-            target_info,
-            physical_outer_width,
-            physical_outer_height,
-            platform,
-        )
-    });
+    let (physical_position, logical_position) = match prepared_window_position {
+        PreparedWindowPosition::PersistedCoordinate(logical_position) => {
+            let physical_position = clamp_position_to_monitor(
+                (f64::from(logical_position.x) * target_scale)
+                    .round()
+                    .to_i32(),
+                (f64::from(logical_position.y) * target_scale)
+                    .round()
+                    .to_i32(),
+                target_info,
+                physical_outer_width,
+                physical_outer_height,
+                platform,
+            );
+            (Some(physical_position), Some(logical_position))
+        },
+        PreparedWindowPosition::CapturedRestorable {
+            physical_position,
+            logical_position,
+        } => (Some(physical_position), Some(logical_position)),
+        PreparedWindowPosition::PersistedWithoutCoordinate
+        | PreparedWindowPosition::CompositorControlled
+        | PreparedWindowPosition::TargetUnavailable => (None, None),
+    };
 
     TargetPosition {
         physical_position,
-        logical_position: logical_fallback_position.map(|(x, y)| IVec2::new(x, y)),
+        logical_position,
         physical_size: UVec2::new(physical_width, physical_height),
         logical_size: UVec2::new(
             saved_window_state.logical_width,

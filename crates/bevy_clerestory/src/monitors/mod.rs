@@ -6,8 +6,13 @@ mod topology;
 
 use bevy::prelude::*;
 pub use current_monitor::CurrentMonitor;
+#[cfg(test)]
+pub(crate) use current_monitor::InjectedCurrentMonitorSource;
+#[cfg(test)]
+pub(crate) use current_monitor::NativeQueryActivity;
 use current_monitor::clear_monitor_selection_inputs;
-use current_monitor::install_current_monitor_from_association;
+pub(crate) use current_monitor::current_monitor_from_association;
+pub(crate) use current_monitor::install_current_monitor_from_association;
 pub(crate) use current_monitor::update_current_monitor;
 use identity::MonitorConfiguration;
 pub use identity::MonitorId;
