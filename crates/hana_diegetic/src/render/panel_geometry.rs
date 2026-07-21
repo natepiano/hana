@@ -37,15 +37,15 @@ use crate::panel::DiegeticPanel;
 use crate::panel::PanelOwned;
 
 /// The invisible full-panel interaction quad (Geometry mode only), tagged with
-/// its world size and center so a rebuild can leave it untouched when the panel
-/// has not resized. Its material is a local picking-only invisible asset, not a
-/// source material resolved from `SdfMaterial`. Both pairs are stored as `f32`
-/// bit patterns for exact equality.
+/// its panel-local size and center so a rebuild can leave it untouched when the
+/// panel has not resized. Its material is a local picking-only invisible asset,
+/// not a source material resolved from `SdfMaterial`. Both pairs are stored as
+/// `f32` bit patterns for exact equality.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PanelInteractionMesh {
-    /// World size (width, height).
+    /// Panel-local size (width, height).
     size:   [u32; 2],
-    /// World-space transform center (x, y).
+    /// Panel-local transform center (x, y).
     center: [u32; 2],
 }
 
@@ -323,7 +323,7 @@ pub(crate) struct PanelReconcileContext<'a> {
 }
 
 /// Reconciles the invisible full-panel interaction quad: it is respawned only
-/// when the panel's world size or center changed, and left untouched otherwise.
+/// when the panel-local size or center changed, and left untouched otherwise.
 fn reconcile_interaction_mesh(
     context: &PanelReconcileContext<'_>,
     old_interaction: &Query<(Entity, &PanelOwned, &PanelInteractionMesh)>,
@@ -331,12 +331,12 @@ fn reconcile_interaction_mesh(
     materials: &mut Assets<StandardMaterial>,
     commands: &mut Commands,
 ) {
-    let world_size = Vec2::new(context.panel.world_width(), context.panel.world_height());
+    let panel_size = interaction_mesh_size(context.panel);
     let center = Vec2::new(
-        world_size.x.mul_add(0.5, -context.anchor_x),
-        world_size.y.mul_add(-0.5, context.anchor_y),
+        panel_size.x.mul_add(0.5, -context.anchor_x),
+        panel_size.y.mul_add(-0.5, context.anchor_y),
     );
-    let interaction = PanelInteractionMesh::new(world_size, center);
+    let interaction = PanelInteractionMesh::new(panel_size, center);
     let existing = old_interaction
         .iter()
         .find(|(_, ownership, _)| ownership.owner() == context.panel_entity);
@@ -346,7 +346,7 @@ fn reconcile_interaction_mesh(
             commands.entity(entity).despawn();
             spawn_interaction_mesh(
                 interaction,
-                world_size,
+                panel_size,
                 center,
                 context,
                 meshes,
@@ -357,7 +357,7 @@ fn reconcile_interaction_mesh(
         None => {
             spawn_interaction_mesh(
                 interaction,
-                world_size,
+                panel_size,
                 center,
                 context,
                 meshes,
@@ -366,6 +366,13 @@ fn reconcile_interaction_mesh(
             );
         },
     }
+}
+
+fn interaction_mesh_size(panel: &DiegeticPanel) -> Vec2 {
+    if panel.coordinate_space().is_screen() {
+        return Vec2::new(panel.width(), panel.height());
+    }
+    Vec2::new(panel.world_width(), panel.world_height())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

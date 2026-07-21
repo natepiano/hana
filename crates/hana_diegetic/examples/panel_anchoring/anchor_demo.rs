@@ -11,7 +11,6 @@ use fairy_dust::TitleChipActivation;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::Border;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
@@ -24,9 +23,11 @@ use hana_diegetic::Mm;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorGeometryParam;
 use hana_diegetic::PanelAnchorOffset;
+use hana_diegetic::PanelAttachment;
 use hana_diegetic::PanelCircle;
 use hana_diegetic::PanelCoord;
 use hana_diegetic::PanelDraw;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::PanelPoint;
 use hana_diegetic::PanelShape;
 use hana_diegetic::ResolvedPanelAnchorGeometry;
@@ -55,6 +56,12 @@ use crate::scene::ModeMorph;
 #[derive(Component)]
 pub(crate) struct AnchorTile {
     pub(crate) order: usize,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FanAttachmentState {
+    target:   Entity,
+    authored: PanelAttachment,
 }
 
 /// Number of tiles in the anchor chain (capabilities `1`/`2`); `+`/`-` change it
@@ -460,13 +467,8 @@ fn spawn_tile(
         Transform::from_translation(initial_position),
         Visibility::default(),
     ));
-    if let Some(parent) = parent {
-        if mode != HINGE_CHAIN_INDEX {
-            tile.insert(fan_anchoring_relation(parent, selection));
-        }
-        if animating {
-            tile.insert(AnchorPose::default());
-        }
+    if parent.is_some() && animating {
+        tile.insert(AnchorPose::default());
     }
     Some(tile.id())
 }
@@ -818,11 +820,64 @@ pub(crate) fn cycle_anchor_selection(
     // Re-anchor every dependent onto its predecessor with the new selection. The
     // info panel rebuilds in `reconcile_info_panel`; the tile trees (markers +
     // depth labels) rebuild in `reconcile_panels`, which eases the markers.
-    for order in 1..live {
-        let mut tile_entity = commands.entity(by_order[order]);
-        tile_entity.insert(fan_anchoring_relation(by_order[order - 1], next));
+    for entity in by_order.iter().take(live).skip(1) {
         if eased && transition.active {
-            tile_entity.insert(AnchorPose::default());
+            commands.entity(*entity).insert(AnchorPose::default());
+        }
+    }
+}
+
+/// Keeps the fan's checked same-space attachments synchronized with the current
+/// mode and anchor selection.
+pub(crate) fn reconcile_fan_attachments(
+    active: Res<ActiveCapability>,
+    morph: Res<ModeMorph>,
+    selection: Res<AnchorSelection>,
+    tiles: Query<(Entity, &AnchorTile, Option<&FanAttachmentState>)>,
+    panel_entities: PanelEntityReader,
+    mut commands: Commands,
+) {
+    if morph.active() {
+        return;
+    }
+    let mut by_order = [Entity::PLACEHOLDER; ANCHOR_MAX_TILES];
+    let mut states = [None; ANCHOR_MAX_TILES];
+    for (entity, tile, state) in &tiles {
+        if tile.order < ANCHOR_MAX_TILES {
+            by_order[tile.order] = entity;
+            states[tile.order] = state.copied();
+        }
+    }
+    let fan_active = active.index != HINGE_CHAIN_INDEX;
+    for order in 0..ANCHOR_MAX_TILES {
+        let entity = by_order[order];
+        if entity == Entity::PLACEHOLDER {
+            continue;
+        }
+        let desired = (fan_active && order > 0).then(|| FanAttachmentState {
+            target:   by_order[order - 1],
+            authored: fan_attachment(*selection),
+        });
+        if states[order] == desired {
+            continue;
+        }
+        let Some(source) = panel_entities.world(entity) else {
+            continue;
+        };
+        match desired {
+            Some(desired) => {
+                let Some(target) = panel_entities.world(desired.target) else {
+                    continue;
+                };
+                commands.attach_to_panel(source, target, desired.authored);
+                commands.entity(entity).insert(desired);
+            },
+            None => {
+                if states[order].is_some() {
+                    commands.detach(source);
+                    commands.entity(entity).remove::<FanAttachmentState>();
+                }
+            },
         }
     }
 }
@@ -1198,11 +1253,8 @@ fn eased_anchor_world(
 /// The fan relation gluing a tile onto its parent: the selected source anchor is
 /// pinned to the parent's target anchor with the current depth offset.
 /// `apply_panel_member_placements` emits hinge relations instead.
-pub(crate) fn fan_anchoring_relation(
-    target: Entity,
-    selection: AnchorSelection,
-) -> AnchoredToPanel {
-    AnchoredToPanel::new(target, selection.source_anchor(), selection.target_anchor())
+pub(crate) fn fan_attachment(selection: AnchorSelection) -> PanelAttachment {
+    PanelAttachment::new(selection.source_anchor(), selection.target_anchor())
         .with_offset(PanelAnchorOffset::ZERO.with_z(Mm(selection.depth_mm)))
 }
 

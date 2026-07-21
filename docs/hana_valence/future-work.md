@@ -32,17 +32,6 @@
   nets.
 - **`NetClosure` validator** — optionally check that a net's topology and
   target angles close.
-- **Widgets handoff** — bind Phase 1 of
-  [widgets.md](../hana_diegetic/widgets.md) to valence. Widget reification
-  publishes `ResolvedAnchorGeometry` on materialized widget entities only while
-  they are actual targets. World demand comes from `Has<AnchoredHere>`; screen
-  demand needs a private diegetic marker maintained from
-  `PanelAttachmentAuthored`, because screen sources deliberately do not carry
-  the world relation. Widget-side sugar mirrors `AnchoredToPanel::new` but takes
-  the widget's existing `PanelElementId`, resolved internally to the stable
-  entity. Reification also publishes screen rects from widget bounds plus the
-  parent `ResolvedScreenPanelPosition`, feeding the screen attachment path for
-  screen-space tooltips. Add a cleanup sweep when a panel leaves screen space.
 - **Tetrahedron example** — add four triangles reusing the triangle geometry
   and generic `TilingRule` dispatch. This was the optional Phase 9 stretch and
   was not implemented.

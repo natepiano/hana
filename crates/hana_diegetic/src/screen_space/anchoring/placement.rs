@@ -1,6 +1,7 @@
 //! Placement writes for resolved screen-space panel attachments.
 
 use bevy::platform::collections::HashMap;
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use hana_valence::AnchorPose;
 use hana_valence::AttachmentResolveAction;
@@ -16,6 +17,11 @@ use crate::panel::PanelAnchorOffset;
 use crate::panel::PanelAttachmentAuthored;
 use crate::panel::PanelScreenBounds;
 use crate::panel::ResolvedScreenPanelPosition;
+use crate::widgets::PanelWidget;
+use crate::widgets::ScreenWidgetAnchorProxy;
+use crate::widgets::ScreenWidgetAnchoredHere;
+use crate::widgets::WidgetAnchorRect;
+use crate::widgets::WidgetOf;
 
 /// Per-frame resolver output for one panel: fields stay `None` on fallback so
 /// the panel returns to its configured position and authored transform fields.
@@ -75,6 +81,46 @@ pub(super) fn panel_anchor_pose_map(
     pose_by_entity
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ScreenWidgetProxyPlacement {
+    owner:           Entity,
+    anchor_rect:     WidgetAnchorRect,
+    owner_transform: Transform,
+}
+
+pub(super) fn screen_widget_proxy_map(
+    widgets: &Query<
+        (
+            Entity,
+            &WidgetOf,
+            &WidgetAnchorRect,
+            &ScreenWidgetAnchoredHere,
+        ),
+        (With<PanelWidget>, With<ScreenWidgetAnchorProxy>),
+    >,
+    transforms: &Query<&Transform>,
+) -> HashMap<Entity, ScreenWidgetProxyPlacement> {
+    let mut proxies = HashMap::default();
+    for (widget, widget_of, anchor_rect, demand) in widgets {
+        if demand.is_empty() {
+            continue;
+        }
+        let owner = widget_of.panel();
+        let Ok(owner_transform) = transforms.get(owner) else {
+            continue;
+        };
+        proxies.insert(
+            widget,
+            ScreenWidgetProxyPlacement {
+                owner,
+                anchor_rect: *anchor_rect,
+                owner_transform: *owner_transform,
+            },
+        );
+    }
+    proxies
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ScreenAttachment {
     source_anchor: Anchor,
@@ -125,6 +171,8 @@ pub(super) struct ScreenAttachmentPlacer<'a> {
     pub(super) depths:             &'a mut HashMap<Entity, f32>,
     pub(super) anchor_poses:       &'a HashMap<Entity, AnchorPose>,
     pub(super) attachments:        &'a HashMap<Entity, ScreenAttachment>,
+    pub(super) widget_proxies:     &'a HashMap<Entity, ScreenWidgetProxyPlacement>,
+    pub(super) resolved_depths:    HashSet<Entity>,
 }
 
 impl ScreenAttachmentPlacer<'_> {
@@ -137,7 +185,13 @@ impl ScreenAttachmentPlacer<'_> {
                 source,
                 target,
                 attachment: _,
-            } => self.place(source, target),
+            } => {
+                if self.widget_proxies.contains_key(&source) {
+                    self.place_widget_proxy(source, target)
+                } else {
+                    self.place_panel(source, target)
+                }
+            },
             AttachmentResolveAction::Fallback { source } => {
                 self.fallback(source);
                 Ok(())
@@ -145,30 +199,31 @@ impl ScreenAttachmentPlacer<'_> {
         }
     }
 
-    fn place(&mut self, source: Entity, target: Entity) -> Result<(), AnchorResolveSkip> {
+    fn place_panel(&mut self, source: Entity, target: Entity) -> Result<(), AnchorResolveSkip> {
         let Some(target_rect) = self.rects.get(&target).copied() else {
-            return Err(AnchorResolveSkip::TargetWithoutPanel);
+            return Err(AnchorResolveSkip::TargetGeometryMissing);
         };
         let Some(source_rect) = self.rects.get(&source).copied() else {
-            return Err(AnchorResolveSkip::SourceWithoutPanel);
+            return Err(AnchorResolveSkip::SourceGeometryMissing);
         };
         let Some(attachment) = self.attachments.get(&source).copied() else {
             return Err(AnchorResolveSkip::SourceWithoutPanel);
         };
         let Some(target_bounds) = target_rect.bounds() else {
-            return Err(AnchorResolveSkip::TargetWithoutPanel);
+            return Err(AnchorResolveSkip::TargetGeometryMissing);
         };
         let Some(source_bounds) = source_rect.bounds() else {
-            return Err(AnchorResolveSkip::SourceWithoutPanel);
+            return Err(AnchorResolveSkip::SourceGeometryMissing);
         };
 
         let anchor_pose = self.anchor_poses.get(&source).copied();
         let pose_translation = anchor_pose.map_or(Vec3::ZERO, |pose| pose.translation);
         let pose_angle = anchor_pose.map(|pose| screen_in_plane_angle(pose.rotation));
         let offset = attachment.offset.to_layout_units(target_rect.layout_unit());
+        let target_local_offset = offset.truncate() * target_rect.layout_scale();
         let target_point =
             oriented_anchor_point(target_rect, target_bounds, attachment.target_anchor)
-                + rotate_screen_offset(offset.truncate(), target_rect.angle())
+                + rotate_screen_offset(target_local_offset, target_rect.angle())
                 + Vec2::new(pose_translation.x, -pose_translation.y);
         let source_offset = source_bounds.anchor_offset(attachment.source_anchor);
         let panel_offset = source_bounds.anchor_offset(source_rect.anchor);
@@ -193,6 +248,39 @@ impl ScreenAttachmentPlacer<'_> {
         Ok(())
     }
 
+    fn place_widget_proxy(
+        &mut self,
+        widget: Entity,
+        owner: Entity,
+    ) -> Result<(), AnchorResolveSkip> {
+        let Some(proxy) = self.widget_proxies.get(&widget).copied() else {
+            return Err(AnchorResolveSkip::TargetGeometryMissing);
+        };
+        if proxy.owner != owner {
+            return Err(AnchorResolveSkip::TargetOwnerMissing);
+        }
+        let Some(owner_rect) = self.rects.get(&owner).copied() else {
+            return Err(AnchorResolveSkip::TargetGeometryMissing);
+        };
+        let Some(widget_rect) =
+            ScreenPanelRect::from_widget(owner_rect, proxy.anchor_rect, &proxy.owner_transform)
+        else {
+            return Err(AnchorResolveSkip::TargetTransformMissing);
+        };
+        self.rects.insert(widget, widget_rect);
+        if let Some(owner_depth) = self.depths.get(&owner).copied() {
+            self.depths.insert(widget, owner_depth);
+        }
+        if self
+            .desired_placements
+            .get(&owner)
+            .is_some_and(|desired| desired.depth.is_some())
+        {
+            self.resolved_depths.insert(widget);
+        }
+        Ok(())
+    }
+
     /// Resolves depth as the target's depth plus the authored z inputs.
     ///
     /// Depth resolves only when the attachment or pose authors z, or when the
@@ -208,13 +296,15 @@ impl ScreenAttachmentPlacer<'_> {
         let target_depth_resolved = self
             .desired_placements
             .get(&target)
-            .is_some_and(|desired| desired.depth.is_some());
+            .is_some_and(|desired| desired.depth.is_some())
+            || self.resolved_depths.contains(&target);
         if !authors_depth && !target_depth_resolved {
             return None;
         }
         let target_depth = self.depths.get(&target).copied().unwrap_or(0.0);
         let depth = target_depth + offset_z;
         self.depths.insert(source, depth);
+        self.resolved_depths.insert(source);
         Some(depth)
     }
 
@@ -227,7 +317,9 @@ impl ScreenAttachmentPlacer<'_> {
 fn oriented_anchor_point(rect: ScreenPanelRect, bounds: PanelScreenBounds, anchor: Anchor) -> Vec2 {
     let resolved_anchor_offset = bounds.anchor_offset(anchor);
     let panel_offset = bounds.anchor_offset(rect.anchor);
-    rect.anchor_position + rotate_screen_offset(resolved_anchor_offset - panel_offset, rect.angle())
+    let authored_anchor_offset =
+        (resolved_anchor_offset - panel_offset) * rect.layout_scale().signum();
+    rect.anchor_position + rotate_screen_offset(authored_anchor_offset, rect.angle())
 }
 
 pub(super) const fn screen_attachment_resolve_reasons()

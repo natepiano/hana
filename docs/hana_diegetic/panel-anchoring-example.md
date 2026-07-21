@@ -13,7 +13,7 @@ Show panel anchors as exact layout constraints and as readable geometry for
 animation, across world and screen space, in one keyboard-driven scene.
 
 The example should stay visual and focused: relations remain point-to-point,
-animation writes `PanelAnchorPose`, and the resolver remains the only
+animation writes `hana_valence::AnchorPose`, and the resolver remains the only
 `Transform` writer for attached panels.
 
 ## Current State
@@ -95,7 +95,7 @@ attachment resolution:
 - Writes before the resolver affect the current frame; writes after the resolver
   affect the next frame.
 - Active relations stay active during animation. Animation writes
-  `PanelAnchorPose`, not `Transform`.
+  `AnchorPose`, not `Transform`.
 
 The `anchor_animation` test filter covers the same-frame and next-frame ordering
 contract.
@@ -105,7 +105,7 @@ contract.
 Scene:
 
 - a world-space chain of anchor tiles
-- each dependent tile is attached with `AnchoredToPanel`
+- each dependent tile is attached through `DiegeticPanelCommands` on Bevy `Commands`
 - the selected source and target anchor positions are shown in the panel layout
 - optional gizmo links show separated anchor points when depth is non-zero
 
@@ -115,7 +115,7 @@ Behavior:
 - depth changes via `[` / `]`
 - tile count changes via `+` / `-`
 - markers can be hidden or shown with `O`
-- relation changes are eased visually with `PanelAnchorPose`
+- relation changes are eased visually with `AnchorPose`
 
 Purpose:
 
@@ -128,7 +128,7 @@ Purpose:
 Scene:
 
 - the same anchor fan as capability `1`
-- each anchored tile can carry `PanelAnchorPose`
+- each anchored tile can carry `AnchorPose`
 
 Behavior:
 
@@ -136,7 +136,7 @@ Behavior:
 - pressing `2` again reverses toward a full-turn rest state
 - `P` / `Space` freezes or resumes an in-flight envelope
 - depth remains under manual `[` / `]` control
-- the relation stays active; spin is a normal-axis `PanelAnchorPose` rotation
+- the relation stays active; spin is a normal-axis `AnchorPose` rotation
 
 Purpose:
 
@@ -149,7 +149,7 @@ Purpose:
 Scene:
 
 - the same persistent tiles morph from the fan into an edge-to-edge strip
-- each dependent tile carries a right-axis `PanelAnchorPose` hinge rotation
+- each dependent tile carries a right-axis `AnchorPose` hinge rotation
 - the chain can fold as an accordion or coil, leaning front or back
 
 Behavior:
@@ -165,7 +165,7 @@ Behavior:
 Purpose:
 
 - proves chained attachments resolve with per-link pose rotation
-- demonstrates hinge motion without extending `AnchoredToPanel` beyond point
+- demonstrates hinge motion without extending `PanelAttachment` beyond point
   snapping
 - shows child hinge rotations compounding relative to each parent's resolved
   plane
@@ -178,7 +178,7 @@ Scene:
 
 - a screen panel anchored to another screen panel
 - the dependent is a leaf
-- the dependent carries `PanelAnchorPose`
+- the dependent carries `AnchorPose`
 
 Behavior:
 
@@ -191,7 +191,7 @@ Behavior:
 
 Purpose:
 
-- demonstrates the screen interpretation of `PanelAnchorPose`
+- demonstrates the screen interpretation of `AnchorPose`
 - exercises Phase 7 Layer 1 behavior in an interactive scene
 - makes "locked to the screen plane" visible
 
@@ -230,8 +230,8 @@ surface. Get explicit API approval before adding public fairy_dust API.
 
 ## Boundaries
 
-- Do not make animation part of `AnchoredToPanel`.
-- Do not extend `AnchoredToPanel` beyond point-to-point snapping for hinge
+- Do not make animation part of `PanelAttachment`.
+- Do not extend `PanelAttachment` beyond point-to-point snapping for hinge
   motion.
 - Do not mix editable-field popup tracking into this example task. If same-frame
   popup tracking for world-anchored editable fields becomes required, handle it

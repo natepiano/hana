@@ -22,6 +22,17 @@ pub(super) fn rotate_screen_offset(offset: Vec2, angle: f32) -> Vec2 {
     )
 }
 
+pub(super) fn project_panel_local_offset(panel_local: Vec2, scale: Vec2, angle: f32) -> Vec2 {
+    let scaled_screen = Vec2::new(panel_local.x * scale.x, -panel_local.y * scale.y);
+    rotate_screen_offset(scaled_screen, angle)
+}
+
+pub(super) fn screen_panel_scale(transform: &Transform) -> Option<Vec2> {
+    let scale = transform.scale.truncate();
+    (scale.is_finite() && scale.x.abs() > f32::EPSILON && scale.y.abs() > f32::EPSILON)
+        .then_some(scale)
+}
+
 #[cfg(test)]
 mod tests {
     use std::f32::consts::FRAC_PI_2;

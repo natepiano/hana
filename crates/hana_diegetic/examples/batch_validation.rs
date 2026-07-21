@@ -39,7 +39,6 @@ use fairy_dust::screen_panel_material;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::BatchSummary;
 use hana_diegetic::Border;
 use hana_diegetic::CalloutCap;
@@ -58,9 +57,11 @@ use hana_diegetic::LineStyle;
 use hana_diegetic::Mm;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorOffset;
+use hana_diegetic::PanelAttachment;
 use hana_diegetic::PanelCircle;
 use hana_diegetic::PanelCoord;
 use hana_diegetic::PanelDraw;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::PanelLine;
 use hana_diegetic::PanelPoint;
 use hana_diegetic::Px;
@@ -1245,65 +1246,85 @@ fn build_tonemapping_selector_panel(
 // Pins the alpha selector's top-right corner just under the stats panel's
 // bottom-right, so the diagnostics controls stay grouped on the right edge. Two
 // observers cover either spawn order.
-fn alpha_selector_stats_anchor(stats_panel: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(stats_panel, Anchor::TopRight, Anchor::BottomRight)
+fn alpha_selector_stats_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
 }
 
 fn anchor_alpha_selector_when_added(
     trigger: On<Add, AlphaSelectorPanel>,
     stats_panels: Query<Entity, With<BatchValidationStatsPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
     let Ok(stats_panel) = stats_panels.single() else {
         return;
     };
-    commands
-        .entity(trigger.entity)
-        .insert(alpha_selector_stats_anchor(stats_panel));
+    let (Some(source), Some(target)) = (
+        panel_entities.screen(trigger.entity),
+        panel_entities.screen(stats_panel),
+    ) else {
+        return;
+    };
+    attachments.attach_to_panel(source, target, alpha_selector_stats_attachment());
 }
 
 fn anchor_alpha_selector_when_stats_added(
     trigger: On<Add, BatchValidationStatsPanel>,
     selectors: Query<Entity, With<AlphaSelectorPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
+    let Some(target) = panel_entities.screen(trigger.entity) else {
+        return;
+    };
     for selector in &selectors {
-        commands
-            .entity(selector)
-            .insert(alpha_selector_stats_anchor(trigger.entity));
+        let Some(source) = panel_entities.screen(selector) else {
+            continue;
+        };
+        attachments.attach_to_panel(source, target, alpha_selector_stats_attachment());
     }
 }
 
 // Pins the tonemapping selector's top-right corner just under the alpha
 // selector's bottom-right, so both diagnostic controls move as one stack.
-fn tonemapping_selector_alpha_anchor(alpha_selector: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(alpha_selector, Anchor::TopRight, Anchor::BottomRight)
+fn tonemapping_selector_alpha_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
 }
 
 fn anchor_tonemapping_selector_when_added(
     trigger: On<Add, TonemappingSelectorPanel>,
     alpha_selectors: Query<Entity, With<AlphaSelectorPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
     let Ok(alpha_selector) = alpha_selectors.single() else {
         return;
     };
-    commands
-        .entity(trigger.entity)
-        .insert(tonemapping_selector_alpha_anchor(alpha_selector));
+    let (Some(source), Some(target)) = (
+        panel_entities.screen(trigger.entity),
+        panel_entities.screen(alpha_selector),
+    ) else {
+        return;
+    };
+    attachments.attach_to_panel(source, target, tonemapping_selector_alpha_attachment());
 }
 
 fn anchor_tonemapping_selector_when_alpha_added(
     trigger: On<Add, AlphaSelectorPanel>,
     tonemapping_selectors: Query<Entity, With<TonemappingSelectorPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
+    let Some(target) = panel_entities.screen(trigger.entity) else {
+        return;
+    };
     for selector in &tonemapping_selectors {
-        commands
-            .entity(selector)
-            .insert(tonemapping_selector_alpha_anchor(trigger.entity));
+        let Some(source) = panel_entities.screen(selector) else {
+            continue;
+        };
+        attachments.attach_to_panel(source, target, tonemapping_selector_alpha_attachment());
     }
 }
 

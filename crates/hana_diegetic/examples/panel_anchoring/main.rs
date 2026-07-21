@@ -50,6 +50,7 @@ use crate::anchor_demo::drive_anchor_pose;
 use crate::anchor_demo::flash_activation;
 use crate::anchor_demo::handle_anchor_count_input;
 use crate::anchor_demo::reconcile_anchor_chain;
+use crate::anchor_demo::reconcile_fan_attachments;
 use crate::anchor_demo::reconcile_panels;
 use crate::anchor_demo::toggle_animation_pause;
 use crate::anchor_demo::toggle_autofit;
@@ -220,6 +221,9 @@ fn configure_panel_anchoring_systems(
                     .after(advance_animations)
                     .after(advance_mode_morph)
                     .after(reconcile_anchor_chain),
+                reconcile_fan_attachments
+                    .after(reconcile_hinge_arrangement)
+                    .after(cycle_anchor_selection),
                 // Runs after the chain reconciles so a just-spawned tile is in
                 // the panel union this frame; the home cube it reads is updated
                 // by fairy_dust's camera-home systems (at most one frame stale).

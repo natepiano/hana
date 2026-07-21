@@ -4,6 +4,7 @@ use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use super::projection;
 use super::screen_in_plane_angle;
 use super::window;
 use crate::layout::Anchor;
@@ -13,6 +14,7 @@ use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelScreenBounds;
 use crate::panel::ResolvedScreenPanelPosition;
+use crate::widgets::WidgetAnchorRect;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ScreenPanelRect {
@@ -21,6 +23,7 @@ pub(super) struct ScreenPanelRect {
     size:                       Vec2,
     angle:                      f32,
     bounds:                     Option<PanelScreenBounds>,
+    layout_scale:               Vec2,
     layout_unit:                Unit,
 }
 
@@ -36,6 +39,7 @@ impl ScreenPanelRect {
             size,
             angle,
             bounds: Some(bounds),
+            layout_scale: Vec2::ONE,
             layout_unit: panel.layout_unit(),
         })
     }
@@ -44,7 +48,32 @@ impl ScreenPanelRect {
 
     pub(super) const fn layout_unit(self) -> Unit { self.layout_unit }
 
+    pub(super) const fn layout_scale(self) -> Vec2 { self.layout_scale }
+
     pub(super) const fn angle(self) -> f32 { self.angle }
+
+    pub(super) fn from_widget(
+        owner: Self,
+        widget: WidgetAnchorRect,
+        owner_transform: &Transform,
+    ) -> Option<Self> {
+        let scale = projection::screen_panel_scale(owner_transform)?;
+        let panel_offset = widget.panel_offset().truncate();
+        let anchor_position = owner.anchor_position
+            + projection::project_panel_local_offset(panel_offset, scale, owner.angle);
+        let size = widget.size() * scale.abs();
+        let bounds =
+            PanelScreenBounds::from_anchor_position(anchor_position, Anchor::Center, size).ok()?;
+        Some(Self {
+            anchor_position,
+            anchor: Anchor::Center,
+            size,
+            angle: owner.angle,
+            bounds: Some(bounds),
+            layout_scale: scale,
+            layout_unit: owner.layout_unit,
+        })
+    }
 
     pub(super) fn with_anchor_position_and_angle(
         self,

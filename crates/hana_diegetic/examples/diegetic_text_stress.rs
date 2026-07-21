@@ -74,7 +74,6 @@ use fairy_dust::screen_panel_frame;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::AntiAlias;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticPerfStats;
@@ -86,6 +85,8 @@ use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorOffset;
+use hana_diegetic::PanelAttachment;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::Px;
 use hana_diegetic::Sizing;
 use hana_diegetic::StableTransparency;
@@ -1198,34 +1199,44 @@ fn spawn_batch_stats_overlay(
     }
 }
 
-fn status_panel_pipeline_anchor(gpu_pipeline_panel: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(gpu_pipeline_panel, Anchor::BottomLeft, Anchor::TopLeft)
+fn status_panel_pipeline_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::BottomLeft, Anchor::TopLeft)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(-5.0)))
 }
 
 fn anchor_status_panel_when_gpu_pipeline_added(
     trigger: On<Add, GpuPipelinePanel>,
     status_panels: Query<Entity, With<StatusPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
+    let Some(target) = panel_entities.screen(trigger.entity) else {
+        return;
+    };
     for status_panel in &status_panels {
-        commands
-            .entity(status_panel)
-            .insert(status_panel_pipeline_anchor(trigger.entity));
+        let Some(source) = panel_entities.screen(status_panel) else {
+            continue;
+        };
+        attachments.attach_to_panel(source, target, status_panel_pipeline_attachment());
     }
 }
 
 fn anchor_status_panel_when_status_panel_added(
     trigger: On<Add, StatusPanel>,
     gpu_pipeline_panels: Query<Entity, With<GpuPipelinePanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
     let Ok(gpu_pipeline_panel) = gpu_pipeline_panels.single() else {
         return;
     };
-    commands
-        .entity(trigger.entity)
-        .insert(status_panel_pipeline_anchor(gpu_pipeline_panel));
+    let (Some(source), Some(target)) = (
+        panel_entities.screen(trigger.entity),
+        panel_entities.screen(gpu_pipeline_panel),
+    ) else {
+        return;
+    };
+    attachments.attach_to_panel(source, target, status_panel_pipeline_attachment());
 }
 
 fn status_label_style() -> TextStyle {

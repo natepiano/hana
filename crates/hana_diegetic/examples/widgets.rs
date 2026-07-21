@@ -21,18 +21,20 @@ use fairy_dust::cube_face_transform;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::El;
 use hana_diegetic::FitMax;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorOffset;
+use hana_diegetic::PanelAttachment;
 use hana_diegetic::PanelElementId;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::PanelText;
 use hana_diegetic::PanelWidget;
 use hana_diegetic::PanelWidgetReader;
@@ -60,10 +62,11 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 3] = [
+const DESCRIPTION_LINES: [&str; 4] = [
     "Hover each control; interaction changes are logged in the terminal.",
     "D changes the secondary button through PanelWidgetReader and PanelWidgetWriter.",
-    "The status panel uses AnchoredToPanel to follow the level slider.",
+    "The world status panel follows the level slider below the cube controls.",
+    "The screen status panel follows the separate top-right screen widget.",
 ];
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
 const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
@@ -78,6 +81,14 @@ const PANEL_WORLD_HEIGHT: f32 = 0.32;
 const PRIMARY_BUTTON_ID: &str = "primary-button";
 const SECONDARY_BUTTON_ID: &str = "secondary-button";
 const SECONDARY_CONTROL: &str = "D Toggle Secondary";
+const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
+const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
+const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
+const SCREEN_READOUT_COLOR: Color = Color::srgb(1.0, 0.78, 0.32);
+const SCREEN_READOUT_ID: &str = "screen-anchor-status";
+const SCREEN_READOUT_TEXT: &str = "^ Attached panel";
+const SCREEN_TARGET_ID: &str = "screen-target-button";
+const SCREEN_TARGET_LABEL: &str = "Target widget";
 const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
 const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
 const SLIDER_HEIGHT: Px = Px(36.0);
@@ -171,6 +182,15 @@ struct WidgetInteractionReadout;
 #[derive(Component)]
 struct WidgetAnchorInstalled;
 
+#[derive(Component)]
+struct ScreenWidgetLabPanel;
+
+#[derive(Component)]
+struct ScreenWidgetInteractionReadout;
+
+#[derive(Component)]
+struct ScreenWidgetAnchorInstalled;
+
 fn main() {
     // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -206,10 +226,45 @@ fn main() {
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
             Update,
-            (anchor_interaction_readout, report_interaction_changes),
+            (
+                anchor_interaction_readout,
+                anchor_screen_interaction_readout,
+                report_interaction_changes,
+            ),
         )
         .with_shortcut(KeyCode::KeyD, toggle_secondary_button)
         .run();
+}
+
+fn anchor_screen_interaction_readout(
+    mut commands: Commands,
+    panel: Single<Entity, With<ScreenWidgetLabPanel>>,
+    readout: Single<
+        Entity,
+        (
+            With<ScreenWidgetInteractionReadout>,
+            Without<ScreenWidgetAnchorInstalled>,
+        ),
+    >,
+    reader: PanelWidgetReader,
+    panel_entities: PanelEntityReader,
+) {
+    let id = PanelElementId::named(SCREEN_TARGET_ID);
+    let Some(owner) = panel_entities.screen(*panel) else {
+        return;
+    };
+    let Some(source) = panel_entities.screen(*readout) else {
+        return;
+    };
+    let Some(widget) = reader.typed_entity(owner, &id) else {
+        return;
+    };
+    let authored = PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET));
+    commands.attach_to_widget(source, widget, authored);
+    commands
+        .entity(*readout)
+        .insert(ScreenWidgetAnchorInstalled);
 }
 
 fn anchor_interaction_readout(
@@ -223,16 +278,22 @@ fn anchor_interaction_readout(
         ),
     >,
     reader: PanelWidgetReader,
+    panel_entities: PanelEntityReader,
 ) {
     let id = PanelElementId::named(SLIDER_ID);
-    let Some(widget) = reader.entity(*panel, &id) else {
+    let Some(owner) = panel_entities.world(*panel) else {
         return;
     };
-    commands.entity(*readout).insert((
-        AnchoredToPanel::new(widget, Anchor::TopCenter, Anchor::BottomCenter)
-            .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET)),
-        WidgetAnchorInstalled,
-    ));
+    let Some(source) = panel_entities.world(*readout) else {
+        return;
+    };
+    let Some(widget) = reader.typed_entity(owner, &id) else {
+        return;
+    };
+    let authored = PanelAttachment::new(Anchor::TopCenter, Anchor::BottomCenter)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET));
+    commands.attach_to_widget(source, widget, authored);
+    commands.entity(*readout).insert(WidgetAnchorInstalled);
 }
 
 fn spawn_widget_lab(
@@ -267,8 +328,28 @@ fn spawn_widget_lab(
         .world_height(STATUS_WORLD_HEIGHT)
         .anchor(Anchor::Center)
         .material(material.clone())
-        .text_material(material)
+        .text_material(material.clone())
         .with_tree(interaction_status_tree())
+        .build();
+    let screen_panel = DiegeticPanel::screen()
+        .size(
+            FitMax(SCREEN_PANEL_MAX_WIDTH.into()),
+            FitMax(SCREEN_PANEL_MAX_HEIGHT.into()),
+        )
+        .anchor(Anchor::TopRight)
+        .material(material.clone())
+        .text_material(material.clone())
+        .with_tree(screen_widget_tree())
+        .build();
+    let screen_readout = DiegeticPanel::screen()
+        .size(
+            FitMax(STATUS_MAX_WIDTH.into()),
+            FitMax(STATUS_MAX_HEIGHT.into()),
+        )
+        .anchor(Anchor::TopRight)
+        .material(material.clone())
+        .text_material(material)
+        .with_tree(screen_interaction_status_tree())
         .build();
 
     match panel {
@@ -295,6 +376,68 @@ fn spawn_widget_lab(
         },
         Err(error) => error!("widgets: failed to build widget panel: {error}"),
     }
+
+    match (screen_panel, screen_readout) {
+        (Ok(screen_panel), Ok(screen_readout)) => {
+            commands.spawn((
+                Name::new("Screen widget target panel"),
+                ScreenWidgetLabPanel,
+                screen_panel,
+            ));
+            commands.spawn((
+                Name::new("Screen widget attachment readout"),
+                ScreenWidgetInteractionReadout,
+                screen_readout,
+            ));
+        },
+        (Err(error), _) => error!("widgets: failed to build screen widget panel: {error}"),
+        (_, Err(error)) => error!("widgets: failed to build screen widget readout: {error}"),
+    }
+}
+
+fn screen_widget_tree() -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::column()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(PANEL_PADDING))
+            .gap(CONTROL_GAP)
+            .background(PANEL_BACKGROUND)
+            .border(Border::all(PANEL_BORDER_WIDTH, SCREEN_READOUT_COLOR))
+            .corner_radius(CornerRadius::all(PANEL_RADIUS)),
+    );
+    builder.text((
+        "Screen anchoring",
+        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(SCREEN_READOUT_COLOR),
+    ));
+    add_button(
+        &mut builder,
+        SCREEN_TARGET_ID,
+        SCREEN_TARGET_LABEL,
+        SCREEN_CONTROL_WIDTH,
+    );
+    builder.build()
+}
+
+fn screen_interaction_status_tree() -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(STATUS_PADDING))
+            .alignment(AlignX::Center, AlignY::Center)
+            .background(STATUS_BACKGROUND)
+            .border(Border::all(STATUS_BORDER_WIDTH, SCREEN_READOUT_COLOR))
+            .corner_radius(CornerRadius::all(STATUS_RADIUS)),
+    );
+    builder.text(
+        Text::new(
+            SCREEN_READOUT_TEXT,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(SCREEN_READOUT_COLOR),
+        )
+        .id(SCREEN_READOUT_ID),
+    );
+    builder.build()
 }
 
 fn slider_declaration() -> Result<Slider, SliderConfigError> {
@@ -320,8 +463,18 @@ fn widget_tree(slider: Slider) -> LayoutTree {
         PANEL_TITLE,
         TextStyle::new(fairy_dust::TITLE_SIZE).with_color(fairy_dust::TITLE_COLOR),
     ));
-    add_button(&mut builder, PRIMARY_BUTTON_ID, "Primary button");
-    add_button(&mut builder, SECONDARY_BUTTON_ID, "Secondary button");
+    add_button(
+        &mut builder,
+        PRIMARY_BUTTON_ID,
+        "Primary button",
+        CONTROL_WIDTH,
+    );
+    add_button(
+        &mut builder,
+        SECONDARY_BUTTON_ID,
+        "Secondary button",
+        CONTROL_WIDTH,
+    );
     builder.with(
         El::new()
             .size(CONTROL_WIDTH, SLIDER_HEIGHT)
@@ -375,10 +528,10 @@ fn interaction_status_transform() -> Transform {
     transform
 }
 
-fn add_button(builder: &mut LayoutBuilder, id: &'static str, label: &'static str) {
+fn add_button(builder: &mut LayoutBuilder, id: &'static str, label: &'static str, width: Px) {
     builder.with(
         El::new()
-            .size(CONTROL_WIDTH, BUTTON_HEIGHT)
+            .size(width, BUTTON_HEIGHT)
             .padding(Padding::all(CONTROL_PADDING))
             .alignment(AlignX::Center, AlignY::Center)
             .background(BUTTON_FILL)
@@ -396,25 +549,33 @@ fn add_button(builder: &mut LayoutBuilder, id: &'static str, label: &'static str
 
 fn report_interaction_changes(
     panel: Single<Entity, With<WidgetLabPanel>>,
+    screen_panel: Single<Entity, With<ScreenWidgetLabPanel>>,
     readout: Single<Entity, With<WidgetInteractionReadout>>,
     widgets: Query<(&PanelWidget, &WidgetOf, Ref<PickingInteraction>)>,
     mut panel_text: PanelText,
 ) {
-    let mut interaction_changes = InteractionChanges::None;
+    let mut world_interaction_changes = InteractionChanges::None;
     let mut active_priority = InteractionPriority::None;
     let mut active_status = None;
 
     for (widget, widget_of, interaction) in &widgets {
-        if widget_of.panel() != *panel {
+        let owner = widget_of.panel();
+        if owner != *panel && owner != *screen_panel {
             continue;
         }
-        if interaction.is_changed() {
-            interaction_changes.observe();
+        let interaction_changed = interaction.is_changed();
+        if interaction_changed {
             info!(
                 "widgets: {} interaction changed to {:?}",
                 widget.id(),
                 *interaction
             );
+        }
+        if owner != *panel {
+            continue;
+        }
+        if interaction_changed {
+            world_interaction_changes.observe();
         }
 
         let priority = InteractionPriority::from(*interaction);
@@ -424,7 +585,7 @@ fn report_interaction_changes(
         }
     }
 
-    if interaction_changes.were_observed()
+    if world_interaction_changes.were_observed()
         && !panel_text.set_text(
             *readout,
             &PanelElementId::named(STATUS_ID),

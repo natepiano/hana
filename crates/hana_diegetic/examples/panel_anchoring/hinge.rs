@@ -18,7 +18,6 @@ use fairy_dust::ControlActivation;
 use fairy_dust::TitleChipActivation;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::ArrangedPanel;
 use hana_diegetic::Border;
 use hana_diegetic::El;
@@ -360,13 +359,9 @@ pub(crate) fn reconcile_hinge_arrangement(
     let fold = hinge.committed_fold();
     let lean = hinge.committed_lean();
     let mut root_commands = commands.entity(root);
-    root_commands.insert(QuadTiling).remove::<(
-        AnchoredToPanel,
-        Hinge,
-        Member,
-        MemberIndex,
-        PendingMemberPlacement,
-    )>();
+    root_commands
+        .insert(QuadTiling)
+        .remove::<(Hinge, Member, MemberIndex, PendingMemberPlacement)>();
     match hinge.committed_arrangement() {
         ChainArrangement::Accordion => {
             root_commands
@@ -389,7 +384,6 @@ pub(crate) fn reconcile_hinge_arrangement(
         };
         let belongs_to_root = member.is_some_and(|member| member.arrangement == root);
         let mut tile_commands = commands.entity(entity);
-        tile_commands.remove::<AnchoredToPanel>();
         if !belongs_to_root {
             if member.is_some() {
                 tile_commands.remove::<(Member, MemberIndex, PendingMemberPlacement, Hinge)>();

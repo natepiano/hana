@@ -23,7 +23,7 @@ The GPU meter example:
 - width spans to the camera panel's bottom-left
 - height stays `Fit`
 
-## Why this is not `AnchoredToPanel`
+## Why this is not a panel attachment
 
 A point attachment pins one point:
 

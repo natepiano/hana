@@ -1,12 +1,10 @@
 //! World conversion target builder and recipes.
 
-use bevy::ecs::system::SystemParam;
 use bevy::math::primitives::InfinitePlane3d;
 use bevy::prelude::*;
 
 use super::PanelProjectionError;
 use super::PanelScreenConversion;
-use super::projection::PanelProjectionParam;
 use super::projection::PanelScreenProjection;
 use super::projection::PanelWorldProjection;
 use crate::layout::Anchor;
@@ -15,7 +13,6 @@ use crate::layout::Sizing;
 use crate::layout::Unit;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
-use crate::panel::DiegeticPanelCommands;
 use crate::panel::PanelSizing;
 use crate::panel::builder::World;
 use crate::panel::sizing::CompatibleUnits;
@@ -241,48 +238,6 @@ impl From<PanelWorldProjection> for PanelWorldConversion {
             world_height:        projection.world_height,
             restore_saved_world: projection.restore_saved_world,
         }
-    }
-}
-
-/// Mutable helper for projecting a panel and queuing a world conversion in one call.
-#[derive(SystemParam)]
-pub struct PanelWorldConversionParam<'w, 's> {
-    projections: PanelProjectionParam<'w, 's>,
-    commands:    Commands<'w, 's>,
-}
-
-impl PanelWorldConversionParam<'_, '_> {
-    /// Projects `panel` through its saved screen handoff and queues a world conversion.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PanelProjectionError`] if the panel has no saved handoff, no
-    /// saved world state, or projection fails.
-    pub fn to_world(
-        &mut self,
-        panel: Entity,
-    ) -> Result<PanelWorldProjection, PanelProjectionError> {
-        let projection = self.projections.project_to_saved_world(panel)?;
-        self.commands
-            .apply_panel_world_conversion(panel, projection.clone());
-        Ok(projection)
-    }
-
-    /// Projects `panel` through `camera` and queues a conversion to `target`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PanelProjectionError`] if projection or target resolution fails.
-    pub fn to_world_at(
-        &mut self,
-        panel: Entity,
-        camera: Entity,
-        target: PanelWorldTarget,
-    ) -> Result<PanelWorldProjection, PanelProjectionError> {
-        let projection = self.projections.project_to_world(panel, camera, target)?;
-        self.commands
-            .apply_panel_world_conversion(panel, projection.clone());
-        Ok(projection)
     }
 }
 

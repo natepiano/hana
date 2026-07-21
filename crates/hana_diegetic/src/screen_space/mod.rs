@@ -13,6 +13,7 @@ use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::ApplyDeferred;
+use bevy::ecs::system::SystemParam;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
@@ -22,6 +23,7 @@ use constants::SCREEN_SPACE_CAMERA_FAR;
 use constants::SCREEN_SPACE_CAMERA_Z;
 use constants::SCREEN_SPACE_LIGHT_ILLUMINANCE;
 use constants::SCREEN_SPACE_PANEL_RESIZE_EPSILON;
+use hana_valence::ResolvedAnchorGeometry;
 
 use crate::layout::Sizing;
 use crate::panel;
@@ -34,6 +36,13 @@ use crate::panel::PanelSystems;
 use crate::panel::ResolvedScreenPanelPosition;
 use crate::panel::ScreenPosition;
 use crate::render::PanelChildSystems;
+use crate::widgets;
+use crate::widgets::PanelWidget;
+use crate::widgets::ScreenWidgetAnchorProxy;
+use crate::widgets::ScreenWidgetAnchoredHere;
+use crate::widgets::WidgetAnchorRect;
+use crate::widgets::WidgetOf;
+use crate::widgets::WidgetSystems;
 
 /// Marker on overlay cameras spawned by the screen-space system. Carries the
 /// `(camera_order, render_layers, window)` triple so observers can match
@@ -56,6 +65,53 @@ pub(crate) enum ScreenSpaceSystems {
     ResolveDimensions,
     FlushDimensionObservers,
     FlushObserverCommands,
+    WidgetDemandCommandsApplied,
+}
+
+#[derive(SystemParam)]
+struct CandidateQueries<'w, 's> {
+    panels: Query<'w, 's, (Entity, &'static DiegeticPanel), With<ResolvedScreenPanelPosition>>,
+    widgets: Query<
+        'w,
+        's,
+        (
+            Option<&'static WidgetOf>,
+            Option<&'static WidgetAnchorRect>,
+            Option<&'static ScreenWidgetAnchoredHere>,
+            Option<&'static ScreenWidgetAnchorProxy>,
+        ),
+        With<PanelWidget>,
+    >,
+    proxy_candidates: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static WidgetOf,
+            &'static WidgetAnchorRect,
+            &'static ScreenWidgetAnchoredHere,
+        ),
+        (
+            With<PanelWidget>,
+            With<ScreenWidgetAnchorProxy>,
+            With<ResolvedAnchorGeometry>,
+        ),
+    >,
+    proxy_placements: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static WidgetOf,
+            &'static WidgetAnchorRect,
+            &'static ScreenWidgetAnchoredHere,
+        ),
+        (With<PanelWidget>, With<ScreenWidgetAnchorProxy>),
+    >,
+    geometry:         Query<'w, 's, (), With<ResolvedAnchorGeometry>>,
+    transforms:       Query<'w, 's, &'static Transform>,
+    entities:         Query<'w, 's, ()>,
+    primary:          Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
 pub(crate) struct ScreenSpacePlugin;
@@ -64,6 +120,8 @@ impl Plugin for ScreenSpacePlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(setup_screen_space_view)
             .add_observer(cleanup_screen_space_on_window_close)
+            .add_observer(widgets::on_screen_widget_demand_added)
+            .add_observer(widgets::on_screen_widget_demand_removed)
             .init_resource::<AnchorResolveDiagnostics>()
             .configure_sets(
                 Update,
@@ -73,8 +131,11 @@ impl Plugin for ScreenSpacePlugin {
                         .after(ScreenSpaceSystems::ResolveDimensions),
                     ScreenSpaceSystems::FlushObserverCommands
                         .after(ScreenSpaceSystems::FlushDimensionObservers),
-                    PanelSystems::ResolvePanelAttachments
+                    ScreenSpaceSystems::WidgetDemandCommandsApplied
                         .after(ScreenSpaceSystems::FlushObserverCommands)
+                        .after(WidgetSystems::ReifyCommandsApplied),
+                    PanelSystems::ResolvePanelAttachments
+                        .after(ScreenSpaceSystems::WidgetDemandCommandsApplied)
                         .before(PanelSystems::PositionScreenSpace),
                     PanelSystems::PositionScreenSpace.after(PanelSystems::ResolvePanelAttachments),
                 ),
@@ -89,6 +150,11 @@ impl Plugin for ScreenSpacePlugin {
                         .in_set(ScreenSpaceSystems::ResolveDimensions),
                     ApplyDeferred.in_set(ScreenSpaceSystems::FlushDimensionObservers),
                     ApplyDeferred.in_set(ScreenSpaceSystems::FlushObserverCommands),
+                    ApplyDeferred.in_set(ScreenSpaceSystems::WidgetDemandCommandsApplied),
+                    (widgets::update_screen_anchor_geometry, ApplyDeferred)
+                        .chain()
+                        .after(ScreenSpaceSystems::WidgetDemandCommandsApplied)
+                        .before(PanelSystems::ResolvePanelAttachments),
                     anchoring::resolve_screen_space_panel_attachments
                         .in_set(PanelSystems::ResolvePanelAttachments),
                     position_screen_space_panels.in_set(PanelSystems::PositionScreenSpace),

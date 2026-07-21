@@ -12,6 +12,7 @@
 //!   D - Jump the screen-authored panel back to screen space.
 //!   H - Return the camera home.
 
+use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowReceiver;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -36,12 +37,11 @@ use hana_diegetic::LayoutTree;
 use hana_diegetic::Mm;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelBuildError;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::PanelProjectionParam;
 use hana_diegetic::PanelScreenConversion;
-use hana_diegetic::PanelScreenConversionParam;
 use hana_diegetic::PanelScreenTarget;
 use hana_diegetic::PanelSystems;
-use hana_diegetic::PanelWorldConversionParam;
 use hana_diegetic::PanelWorldTarget;
 use hana_diegetic::Px;
 use hana_diegetic::SavedPanelWorldState;
@@ -476,6 +476,12 @@ fn request_screen_panel_to_screen_immediate(mut request: ResMut<PanelConversionR
     request.request(PanelConversionRequest::SCREEN_TO_SCREEN_IMMEDIATE);
 }
 
+#[derive(SystemParam)]
+struct ConversionParams<'w, 's> {
+    panel_entities: PanelEntityReader<'w, 's>,
+    projections:    PanelProjectionParam<'w, 's>,
+}
+
 fn execute_panel_conversion_requests(
     panels: Res<DemoPanels>,
     mut request: ResMut<PanelConversionRequest>,
@@ -497,9 +503,7 @@ fn execute_panel_conversion_requests(
     transitions: Query<(), With<PanelTransition>>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     windows: Query<&Window>,
-    projections: PanelProjectionParam,
-    mut screen_conversions: PanelScreenConversionParam,
-    mut world_conversions: PanelWorldConversionParam,
+    conversions: ConversionParams,
     mut highlights: ResMut<OperationHighlights>,
     mut commands: Commands,
 ) {
@@ -510,7 +514,8 @@ fn execute_panel_conversion_requests(
             &world_panels,
             &primary_window,
             &windows,
-            &projections,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut commands,
         ),
         PanelConversionRequest::WORLD_TO_WORLD => animate_world_panel_to_world(
@@ -519,21 +524,23 @@ fn execute_panel_conversion_requests(
             &saved_states,
             &homes,
             &transitions,
-            &projections,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut commands,
         ),
         PanelConversionRequest::SCREEN_TO_WORLD => animate_screen_panel_to_world(
             &panels,
             &cameras,
             &screen_panels,
-            &projections,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut commands,
         ),
         PanelConversionRequest::SCREEN_TO_SCREEN => animate_screen_panel_to_screen(
             &panels,
             &cameras,
             &screen_panels_with_home,
-            &projections,
+            &conversions.projections,
             &mut commands,
         ),
         PanelConversionRequest::WORLD_TO_SCREEN_IMMEDIATE => jump_world_panel_to_screen(
@@ -542,15 +549,19 @@ fn execute_panel_conversion_requests(
             &world_panels,
             &primary_window,
             &windows,
-            &mut screen_conversions,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut highlights,
+            &mut commands,
         ),
         PanelConversionRequest::WORLD_TO_WORLD_IMMEDIATE => jump_world_panel_to_world(
             &panels,
             &world_panels,
             &transitions,
-            &mut world_conversions,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut highlights,
+            &mut commands,
         ),
         PanelConversionRequest::WORLD_TO_ORIGINAL_IMMEDIATE => jump_world_panel_to_original(
             &panels,
@@ -558,7 +569,8 @@ fn execute_panel_conversion_requests(
             &saved_states,
             &homes,
             &transitions,
-            &projections,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut highlights,
             &mut commands,
         ),
@@ -566,7 +578,8 @@ fn execute_panel_conversion_requests(
             &panels,
             &cameras,
             &screen_panels,
-            &projections,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut highlights,
             &mut commands,
         ),
@@ -574,8 +587,10 @@ fn execute_panel_conversion_requests(
             &panels,
             &cameras,
             &screen_panels_with_home,
-            &mut screen_conversions,
+            &conversions.panel_entities,
+            &conversions.projections,
             &mut highlights,
+            &mut commands,
         ),
         PanelConversionRequest::NONE => {},
         action => {
@@ -593,6 +608,7 @@ fn animate_world_panel_to_screen(
     >,
     primary_window: &Query<Entity, With<PrimaryWindow>>,
     windows: &Query<&Window>,
+    panel_entities: &PanelEntityReader,
     projections: &PanelProjectionParam,
     commands: &mut Commands,
 ) {
@@ -634,7 +650,13 @@ fn animate_world_panel_to_screen(
         "screen_world_panel_conversion: 1 world panel -> screen start={:?} target={:?} scale={:?}",
         transform.translation, target.translation, target.scale
     );
-    commands.begin_panel_to_screen(panels.world, camera, screen.clone());
+    let Some(source) = panel_entities.world(panels.world) else {
+        return;
+    };
+    if let Err(error) = commands.begin_to_screen(source, camera, screen.clone()) {
+        warn!("screen_world_panel_conversion: world-to-screen preparation failed: {error}");
+        return;
+    }
     commands.entity(panels.world).insert(PanelTransition::new(
         OperationKey::AnimateWorldToScreen,
         *transform,
@@ -655,6 +677,7 @@ fn animate_world_panel_to_world(
     saved_states: &Query<&SavedPanelWorldState>,
     homes: &Query<&WorldPanelHome>,
     transitions: &Query<(), With<PanelTransition>>,
+    panel_entities: &PanelEntityReader,
     projections: &PanelProjectionParam,
     commands: &mut Commands,
 ) {
@@ -687,7 +710,13 @@ fn animate_world_panel_to_world(
         "screen_world_panel_conversion: 2 world panel -> saved start={:?} target={:?} scale={:?}",
         start.transform.translation, target.translation, target.scale
     );
-    commands.apply_panel_world_conversion(panels.world, start.clone());
+    let Some(source) = panel_entities.screen(panels.world) else {
+        return;
+    };
+    if let Err(error) = commands.apply_to_world(source, start.clone()) {
+        warn!("screen_world_panel_conversion: saved world handoff failed: {error}");
+        return;
+    }
     commands.entity(panels.world).insert(PanelTransition::new(
         OperationKey::AnimateWorldToWorld,
         start.transform,
@@ -703,6 +732,7 @@ fn animate_screen_panel_to_world(
         (&DiegeticPanel, Option<&ScreenPanelHome>),
         (With<ScreenAuthoredPanel>, Without<PanelTransition>),
     >,
+    panel_entities: &PanelEntityReader,
     projections: &PanelProjectionParam,
     commands: &mut Commands,
 ) {
@@ -749,7 +779,13 @@ fn animate_screen_panel_to_world(
         "screen_world_panel_conversion: A screen panel -> world start={:?} target={:?} scale={:?}",
         start.transform.translation, target.translation, target.scale
     );
-    commands.apply_panel_world_conversion(panels.screen, start.clone());
+    let Some(source) = panel_entities.screen(panels.screen) else {
+        return;
+    };
+    if let Err(error) = commands.apply_to_world(source, start.clone()) {
+        warn!("screen_world_panel_conversion: screen-to-world handoff failed: {error}");
+        return;
+    }
     commands.entity(panels.screen).insert(PanelTransition::new(
         OperationKey::AnimateScreenToWorld,
         start.transform,
@@ -832,8 +868,10 @@ fn jump_world_panel_to_screen(
     >,
     primary_window: &Query<Entity, With<PrimaryWindow>>,
     windows: &Query<&Window>,
-    screen_conversions: &mut PanelScreenConversionParam,
+    panel_entities: &PanelEntityReader,
+    projections: &PanelProjectionParam,
     highlights: &mut OperationHighlights,
+    commands: &mut Commands,
 ) {
     let Ok((panel, _)) = panel_query.get(panels.world) else {
         return;
@@ -850,8 +888,18 @@ fn jump_world_panel_to_screen(
         );
         return;
     };
-    match screen_conversions.to_screen_at(panels.world, camera, screen_target) {
-        Ok(_) => {
+    let Some(source) = panel_entities.world(panels.world) else {
+        return;
+    };
+    match projections.project_to_screen_target(panels.world, camera, screen_target) {
+        Ok(conversion) => {
+            if let Err(error) = commands.finish_to_screen(source, camera, conversion) {
+                warn!(
+                    "screen_world_panel_conversion: immediate world-to-screen conversion is \
+                     invalid: {error}"
+                );
+                return;
+            }
             info!("screen_world_panel_conversion: 4 immediate world panel -> screen");
             highlights.flash(OperationKey::ImmediateWorldToScreen);
         },
@@ -868,8 +916,10 @@ fn jump_world_panel_to_world(
         (With<WorldAuthoredPanel>, Without<PanelTransition>),
     >,
     transitions: &Query<(), With<PanelTransition>>,
-    world_conversions: &mut PanelWorldConversionParam,
+    panel_entities: &PanelEntityReader,
+    projections: &PanelProjectionParam,
     highlights: &mut OperationHighlights,
+    commands: &mut Commands,
 ) {
     if transitions.contains(panels.world) {
         return;
@@ -880,8 +930,18 @@ fn jump_world_panel_to_world(
     if !panel.coordinate_space().is_screen() {
         return;
     }
-    match world_conversions.to_world(panels.world) {
-        Ok(_) => {
+    let Some(source) = panel_entities.screen(panels.world) else {
+        return;
+    };
+    match projections.project_to_saved_world(panels.world) {
+        Ok(projection) => {
+            if let Err(error) = commands.apply_to_world(source, projection) {
+                warn!(
+                    "screen_world_panel_conversion: immediate saved-world conversion is invalid: \
+                     {error}"
+                );
+                return;
+            }
             info!("screen_world_panel_conversion: 3 immediate world panel -> handoff world");
             highlights.flash(OperationKey::ImmediateWorldToWorld);
         },
@@ -902,6 +962,7 @@ fn jump_world_panel_to_original(
     saved_states: &Query<&SavedPanelWorldState>,
     homes: &Query<&WorldPanelHome>,
     transitions: &Query<(), With<PanelTransition>>,
+    panel_entities: &PanelEntityReader,
     projections: &PanelProjectionParam,
     highlights: &mut OperationHighlights,
     commands: &mut Commands,
@@ -933,7 +994,13 @@ fn jump_world_panel_to_original(
     };
     projection.transform = home_transform;
     projection.size = saved.world_size();
-    commands.apply_panel_world_conversion(panels.world, projection);
+    let Some(source) = panel_entities.screen(panels.world) else {
+        return;
+    };
+    if let Err(error) = commands.apply_to_world(source, projection) {
+        warn!("screen_world_panel_conversion: original-world conversion failed: {error}");
+        return;
+    }
     info!("screen_world_panel_conversion: 5 immediate world panel -> original world");
     highlights.flash(OperationKey::ImmediateWorldToOriginal);
 }
@@ -945,6 +1012,7 @@ fn jump_screen_panel_to_world(
         (&DiegeticPanel, Option<&ScreenPanelHome>),
         (With<ScreenAuthoredPanel>, Without<PanelTransition>),
     >,
+    panel_entities: &PanelEntityReader,
     projections: &PanelProjectionParam,
     highlights: &mut OperationHighlights,
     commands: &mut Commands,
@@ -979,7 +1047,13 @@ fn jump_screen_panel_to_world(
         },
     };
     projection.transform = screen_panel_world_destination(final_transform, projection.size);
-    commands.apply_panel_world_conversion(panels.screen, projection);
+    let Some(source) = panel_entities.screen(panels.screen) else {
+        return;
+    };
+    if let Err(error) = commands.apply_to_world(source, projection) {
+        warn!("screen_world_panel_conversion: immediate screen-to-world failed: {error}");
+        return;
+    }
     info!("screen_world_panel_conversion: C immediate screen panel -> world");
     highlights.flash(OperationKey::ImmediateScreenToWorld);
 }
@@ -991,8 +1065,10 @@ fn jump_screen_panel_to_screen(
         (&DiegeticPanel, &Transform, &ScreenPanelHome),
         (With<ScreenAuthoredPanel>, Without<PanelTransition>),
     >,
-    screen_conversions: &mut PanelScreenConversionParam,
+    panel_entities: &PanelEntityReader,
+    projections: &PanelProjectionParam,
     highlights: &mut OperationHighlights,
+    commands: &mut Commands,
 ) {
     let Ok((panel, _, home)) = panel_query.get(panels.screen) else {
         return;
@@ -1003,12 +1079,22 @@ fn jump_screen_panel_to_screen(
     let Ok((camera, _)) = cameras.single() else {
         return;
     };
-    match screen_conversions.to_screen_at(
+    let Some(source) = panel_entities.world(panels.screen) else {
+        return;
+    };
+    match projections.project_to_screen_target(
         panels.screen,
         camera,
         screen_target_from_home(panel, home),
     ) {
-        Ok(_) => {
+        Ok(conversion) => {
+            if let Err(error) = commands.finish_to_screen(source, camera, conversion) {
+                warn!(
+                    "screen_world_panel_conversion: immediate screen return conversion is \
+                     invalid: {error}"
+                );
+                return;
+            }
             info!("screen_world_panel_conversion: D immediate screen panel -> screen");
             highlights.flash(OperationKey::ImmediateScreenToScreen);
         },
@@ -1051,6 +1137,7 @@ fn screen_target_from_home(panel: &DiegeticPanel, home: &ScreenPanelHome) -> Pan
 
 fn animate_panel_transitions(
     time: Res<Time>,
+    panel_entities: PanelEntityReader,
     mut commands: Commands,
     mut transitions: Query<(Entity, &mut Transform, &mut PanelTransition)>,
 ) {
@@ -1069,7 +1156,13 @@ fn animate_panel_transitions(
         match transition.finish.clone() {
             FinishAction::ApplyScreen { camera, conversion } => {
                 info!("screen_world_panel_conversion: applying screen conversion to {entity:?}");
-                commands.finish_panel_to_screen(entity, camera, conversion);
+                if let Some(source) = panel_entities.world(entity) {
+                    if let Err(error) = commands.finish_to_screen(source, camera, conversion) {
+                        warn!("screen_world_panel_conversion: screen handoff failed: {error}");
+                    }
+                } else {
+                    warn!("screen_world_panel_conversion: transition source is no longer world");
+                }
             },
             FinishAction::None => {},
         }

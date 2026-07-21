@@ -21,8 +21,15 @@
   their independent responsibilities.
 - `LineStyle::hairline_fade_value` is replaced by
   `LineStyle::hairline_fade_override` for public override inspection.
-- `AnchoredToPanel` is now an insert-only bundle, not a queryable component. Query `hana_valence::AnchoredTo` for world-space panel attachments that have been lowered into the shared resolver.
+- `AnchoredToPanel` has been removed. Attach, retarget, and detach through
+  `DiegeticPanelCommands` on Bevy `Commands` using same-space `PanelEntity<Space>` and
+  `WidgetEntity<Space>` handles. Query `hana_valence::AnchoredTo` only for
+  world-space attachments after they have been lowered into the shared
+  resolver.
 - `PanelsAnchoredHere` has moved to `hana_valence::AnchoredHere`, and the diegetic re-export has been removed.
 - `PanelAnchorPose` has moved to `hana_valence::AnchorPose`.
-- `Anchor::TopLeft` authoring and `AnchoredToPanel::new` call sites are unchanged.
+- Public world/screen conversion now uses `DiegeticPanelCommands` methods on the
+  same Bevy `Commands` value as attachment changes. Calls retain written order,
+  and conversion is rejected while the panel, or one of its widgets,
+  participates in an attachment.
 - Apps driving panel hinges with `HingeAngleLens` must order `TweenSystemSet::ApplyTween` before `hana_valence::hinge_to_pose`. Moving `TweenSystemSet::ApplyTween` is app-global and retimes every tween in the app, not just valence lens tweens.
