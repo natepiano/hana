@@ -8,10 +8,12 @@ mod save;
 mod window_state;
 
 use bevy::prelude::*;
+pub(crate) use captured_window_state::CapturedPlacement;
 pub(crate) use captured_window_state::CapturedWindowPlacement;
 #[cfg(test)]
 pub(crate) use captured_window_state::CapturedWindowPosition;
 pub(crate) use captured_window_state::CapturedWindowStates;
+pub(crate) use captured_window_state::RebasedCapturedPosition;
 pub use format::WindowKey;
 pub(crate) use load::get_default_state_path;
 pub(crate) use load::get_state_path_for_app;

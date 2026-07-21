@@ -21,6 +21,15 @@ pub(crate) enum CapturedWindowPosition {
     CompositorControlled,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RebasedCapturedPosition {
+    Restorable {
+        physical_position: IVec2,
+        logical_position:  IVec2,
+    },
+    CompositorControlled,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CapturedWindowPlacement {
     pub(crate) monitor_snapshot:  MonitorInfo,
@@ -69,34 +78,56 @@ impl CapturedWindowPlacement {
     }
 
     #[must_use]
-    pub(crate) fn rebased_physical_position(&self, live_monitor: &MonitorInfo) -> Option<IVec2> {
+    pub(crate) fn rebased_position(&self, live_monitor: &MonitorInfo) -> RebasedCapturedPosition {
         match self.position {
-            CapturedWindowPosition::Restorable { logical_offset } => Some(IVec2::new(
-                live_monitor.physical_position.x
-                    + (f64::from(logical_offset.x) * live_monitor.scale)
-                        .round()
-                        .to_i32(),
-                live_monitor.physical_position.y
-                    + (f64::from(logical_offset.y) * live_monitor.scale)
-                        .round()
-                        .to_i32(),
-            )),
-            CapturedWindowPosition::CompositorControlled => None,
+            CapturedWindowPosition::Restorable { logical_offset } => {
+                RebasedCapturedPosition::Restorable {
+                    physical_position: IVec2::new(
+                        live_monitor.physical_position.x
+                            + (f64::from(logical_offset.x) * live_monitor.scale)
+                                .round()
+                                .to_i32(),
+                        live_monitor.physical_position.y
+                            + (f64::from(logical_offset.y) * live_monitor.scale)
+                                .round()
+                                .to_i32(),
+                    ),
+                    logical_position:  self.persisted_logical_position(logical_offset),
+                }
+            },
+            CapturedWindowPosition::CompositorControlled => {
+                RebasedCapturedPosition::CompositorControlled
+            },
         }
     }
 
-    fn project(&self, app_name: &str) -> PersistedWindowState {
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn rebased_physical_position(&self, live_monitor: &MonitorInfo) -> Option<IVec2> {
+        match self.rebased_position(live_monitor) {
+            RebasedCapturedPosition::Restorable {
+                physical_position, ..
+            } => Some(physical_position),
+            RebasedCapturedPosition::CompositorControlled => None,
+        }
+    }
+
+    fn persisted_logical_position(&self, logical_offset: IVec2) -> IVec2 {
+        let logical_monitor_origin = IVec2::new(
+            (f64::from(self.monitor_snapshot.physical_position.x) / self.captured_scale)
+                .round()
+                .to_i32(),
+            (f64::from(self.monitor_snapshot.physical_position.y) / self.captured_scale)
+                .round()
+                .to_i32(),
+        );
+        logical_monitor_origin + logical_offset
+    }
+
+    pub(crate) fn project(&self, app_name: &str) -> PersistedWindowState {
         let logical_position = match self.position {
             CapturedWindowPosition::Restorable { logical_offset } => {
-                let logical_monitor_origin = IVec2::new(
-                    (f64::from(self.monitor_snapshot.physical_position.x) / self.captured_scale)
-                        .round()
-                        .to_i32(),
-                    (f64::from(self.monitor_snapshot.physical_position.y) / self.captured_scale)
-                        .round()
-                        .to_i32(),
-                );
-                let adapter_position = logical_monitor_origin + logical_offset;
+                let adapter_position = self.persisted_logical_position(logical_offset);
                 Some((adapter_position.x, adapter_position.y))
             },
             CapturedWindowPosition::CompositorControlled => None,
@@ -204,6 +235,7 @@ impl CapturedWindowStates {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn persisted(&self, window_key: &WindowKey) -> Option<&PersistedWindowState> {
         let entry = self.entries.get(window_key)?;
         match &entry.placement {
@@ -213,6 +245,7 @@ impl CapturedWindowStates {
     }
 
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn restore_state(&self, window_key: &WindowKey) -> Option<PersistedWindowState> {
         let entry = self.entries.get(window_key)?;
         Some(match &entry.placement {
@@ -221,10 +254,25 @@ impl CapturedWindowStates {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn bind(&mut self, window_key: &WindowKey, entity: Entity) {
         if let Some(entry) = self.entries.get_mut(window_key) {
             entry.live = Some(LiveWindow { entity });
         }
+    }
+
+    pub(crate) fn bind_and_freeze(&mut self, window_key: &WindowKey, entity: Entity) -> bool {
+        let Some(entry) = self.entries.get_mut(window_key) else {
+            return false;
+        };
+        entry.live = Some(LiveWindow { entity });
+        entry.persistence = PersistenceWriteState::Frozen;
+        true
+    }
+
+    #[must_use]
+    pub(crate) fn is_bound_to(&self, window_key: &WindowKey, entity: Entity) -> bool {
+        self.entries.get(window_key).and_then(|entry| entry.live) == Some(LiveWindow { entity })
     }
 
     pub(crate) fn unbind(&mut self, window_key: &WindowKey, entity: Entity) {
@@ -243,6 +291,7 @@ impl CapturedWindowStates {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn freeze(&mut self, window_key: &WindowKey) {
         if let Some(entry) = self.entries.get_mut(window_key) {
             entry.persistence = PersistenceWriteState::Frozen;
@@ -384,6 +433,7 @@ impl CapturedWindowStates {
             .map(|live| live.entity)
     }
 
+    #[cfg(test)]
     pub(crate) fn captured_placement(
         &self,
         window_key: &WindowKey,
@@ -393,6 +443,11 @@ impl CapturedWindowStates {
             CapturedPlacement::PersistedOnly(_) => None,
             CapturedPlacement::Captured(placement) => Some(placement),
         }
+    }
+
+    #[must_use]
+    pub(crate) fn placement(&self, window_key: &WindowKey) -> Option<&CapturedPlacement> {
+        self.entries.get(window_key).map(|entry| &entry.placement)
     }
 }
 

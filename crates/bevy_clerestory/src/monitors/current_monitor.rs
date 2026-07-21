@@ -24,6 +24,7 @@ use crate::constants::MONITOR_SOURCE_EXISTING;
 use crate::constants::MONITOR_SOURCE_FALLBACK;
 use crate::constants::MONITOR_SOURCE_POSITION;
 use crate::constants::MONITOR_SOURCE_WINIT;
+use crate::restore::RestorePreparation;
 
 /// Component storing the current monitor and effective window mode.
 ///
@@ -89,9 +90,17 @@ impl MonitorSelectionInputs {
 }
 
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct NativeQueryActivity {
+    pub(crate) window_map:       usize,
+    pub(crate) monitor_metadata: usize,
+}
+
+#[cfg(test)]
 #[derive(Default, Resource)]
 pub(crate) struct InjectedCurrentMonitorSource {
     positions:   HashMap<Entity, Option<IVec2>>,
+    activity:    NativeQueryActivity,
     pub lookups: usize,
 }
 
@@ -101,7 +110,15 @@ impl InjectedCurrentMonitorSource {
         self.positions.insert(entity, position);
     }
 
-    pub(super) const fn reset_activity(&mut self) { self.lookups = 0; }
+    pub(crate) const fn activity(&self) -> NativeQueryActivity { self.activity }
+
+    pub(super) const fn reset_activity(&mut self) {
+        self.activity = NativeQueryActivity {
+            window_map:       0,
+            monitor_metadata: 0,
+        };
+        self.lookups = 0;
+    }
 }
 
 pub(super) fn clear_monitor_selection_inputs(
@@ -114,7 +131,7 @@ pub(super) fn clear_monitor_selection_inputs(
 }
 
 /// Install the exact monitor snapshot when Bevy inserts or replaces [`OnMonitor`].
-pub(super) fn install_current_monitor_from_association(
+pub(crate) fn install_current_monitor_from_association(
     insert: On<Insert, OnMonitor>,
     windows: Query<
         (&Window, &OnMonitor, Option<&CurrentMonitor>),
@@ -126,16 +143,9 @@ pub(super) fn install_current_monitor_from_association(
     let Ok((window, on_monitor, existing)) = windows.get(insert.entity) else {
         return;
     };
-    let Some(monitor_info) = monitors
-        .iter()
-        .find(|monitor| monitor.entity == on_monitor.0)
-        .map(|monitor| *monitor.monitor_info)
+    let Some(current_monitor) = current_monitor_from_association(window, on_monitor, &monitors)
     else {
         return;
-    };
-    let current_monitor = CurrentMonitor {
-        monitor_info,
-        effective_window_mode: compute_effective_window_mode(window, &monitor_info, &monitors),
     };
     if !current_monitor_changed(existing, &current_monitor) {
         return;
@@ -143,9 +153,27 @@ pub(super) fn install_current_monitor_from_association(
 
     debug!(
         "[install_current_monitor_from_association] monitor_entity={:?} index={} scale={} effective_window_mode={:?}",
-        on_monitor.0, monitor_info.index, monitor_info.scale, current_monitor.effective_window_mode,
+        on_monitor.0,
+        current_monitor.index,
+        current_monitor.scale,
+        current_monitor.effective_window_mode,
     );
     commands.entity(insert.entity).insert(current_monitor);
+}
+
+pub(crate) fn current_monitor_from_association(
+    window: &Window,
+    on_monitor: &OnMonitor,
+    monitors: &Monitors,
+) -> Option<CurrentMonitor> {
+    let monitor_info = monitors
+        .iter()
+        .find(|monitor| monitor.entity == on_monitor.0)
+        .map(|monitor| *monitor.monitor_info)?;
+    Some(CurrentMonitor {
+        monitor_info,
+        effective_window_mode: compute_effective_window_mode(window, &monitor_info, monitors),
+    })
 }
 
 pub(super) fn remove_current_monitors_for_empty_topology(world: &mut World) {
@@ -178,6 +206,7 @@ pub(crate) fn update_current_monitor(
             Option<&MonitorSelectionInputs>,
             Has<PrimaryWindow>,
             Has<ManagedWindow>,
+            Has<RestorePreparation>,
         ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
@@ -190,7 +219,11 @@ pub(crate) fn update_current_monitor(
     }
 
     let topology_changed = monitors.is_changed();
-    for (entity, window, existing, previous_inputs, primary, managed) in &windows {
+    for (entity, window, existing, previous_inputs, primary, managed, restoring) in &windows {
+        if restoring {
+            continue;
+        }
+
         let registration = match (primary, managed) {
             (true, false) => WindowRegistration::Primary,
             (false, true) => WindowRegistration::Managed,
@@ -272,12 +305,11 @@ fn winit_detect_monitor(
 ) -> Option<MonitorInfo> {
     #[cfg(test)]
     if let Some(source) = injected_source {
+        source.activity.window_map += 1;
         source.lookups += 1;
-        return source
-            .positions
-            .get(&entity)
-            .copied()
-            .flatten()
+        let current_monitor_position = source.positions.get(&entity).copied()?;
+        source.activity.monitor_metadata += 1;
+        return current_monitor_position
             .and_then(|position| monitors.at(position.x, position.y))
             .copied();
     }
@@ -521,8 +553,11 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<InjectedCurrentMonitorSource>()
-                .lookups,
-            1
+                .activity(),
+            NativeQueryActivity {
+                window_map:       1,
+                monitor_metadata: 1,
+            }
         );
 
         app.update();
@@ -530,8 +565,11 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<InjectedCurrentMonitorSource>()
-                .lookups,
-            1
+                .activity(),
+            NativeQueryActivity {
+                window_map:       1,
+                monitor_metadata: 1,
+            }
         );
     }
 

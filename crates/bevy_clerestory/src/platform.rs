@@ -226,8 +226,8 @@ impl Platform {
     ///   where the parent/launching window is.
     /// - **macOS / X11**: the primary window migrates to its own restore target during startup, so
     ///   a secondary window spawned alongside it is born on the primary's post-move monitor — a
-    ///   different scale than the primary's launch monitor that `restore_managed_window` sampled
-    ///   for `starting_scale`.
+    ///   different scale than the primary's launch monitor recorded by `RestoreTargetBuilder` for
+    ///   `TargetPosition::starting_scale`.
     ///
     /// In all three cases the `starting_scale` assumption is wrong, so `restore_windows`
     /// re-reads the window's actual `base_scale_factor()` and recomputes the strategy.

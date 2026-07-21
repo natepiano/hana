@@ -1048,7 +1048,7 @@ index-based targeting and compositor-controlled no-coordinate behavior.
 - No remaining phase became redundant or required merging or reordering;
   Phases 11, 13–14, and 16–21 needed no change.
 
-### Phase 6 — Unify staged restore preparation  · status: todo
+### Phase 6 — Unify staged restore preparation  · status: done (`78695654`)
 
 #### Work Order
 
@@ -1137,6 +1137,56 @@ The same tests preserve exact-ID targeting, both coordinate-free fallback
 branches, one-read state ownership, and delayed native-window readiness without
 polling.
 
+#### Retrospective
+
+**What worked:**
+
+- `RestoreTargetBuilder` and `PreparedWindowPosition` now give primary startup,
+  managed startup, and future runtime callers one target-preparation path.
+- `CapturedWindowStates::bind_and_freeze` protects the one-read placement before
+  preparation waits for an accepted `OnMonitor` association.
+- The shared path passed 113 tests, and the macOS smoke associated both probe
+  windows with the same external monitor entity.
+
+**What deviated from the plan:**
+
+- Shared target preparation remained in `restore/restore_attempt.rs`; no
+  additional extraction into `restore/target_position/application.rs` was
+  necessary.
+- `CurrentMonitor` and `NativeWindowReady` now clear together when an
+  association is rejected or a non-primary managed role is removed.
+- `restore/settle_state.rs` now retains the prepared `WindowKey` through
+  `RestorePreparation` instead of reconstructing ownership from window markers.
+
+**Surprises:**
+
+- Late managed opt-in could otherwise inherit stale readiness from an unresolved
+  `OnMonitor` entity and prepare against the wrong monitor snapshot.
+- Exact association tests must install monitor entities created by the test
+  `World`; placeholder entity IDs cannot satisfy Bevy relationships.
+
+**Implications for remaining phases:**
+
+- Phase 7 baseline acceptance must treat `OnMonitor`, `CurrentMonitor`, and
+  `NativeWindowReady` as one validated association and clear the pair on role
+  removal or rejection.
+- Runtime preparation must extend `RestoreOrigin` while retaining its canonical
+  `WindowKey`, and must continue to wait without native monitor polling.
+- Remaining tests that construct monitor relationships must use live entity IDs
+  from the same `World` as the window.
+
+### Phase 6 Review
+
+- Phase 7 now requires accepted `NativeWindowReady` alongside an exact
+  `OnMonitor`/`CurrentMonitor` match and tests stale-state cleanup before
+  registration.
+- Phase 9 now retains the prepared canonical `WindowKey` through runtime settle
+  and removes preparation only through validated completion or finalization.
+- Phase 15 now carries the rejected-association and managed-role-removal
+  regressions into the final cross-workspace gate with zero native polling.
+- No remaining phase became redundant or required merging, splitting, or
+  reordering.
+
 ### Phase 7 — Add one-shot registration and application-controlled recovery  · status: todo
 
 #### Work Order
@@ -1166,11 +1216,13 @@ pub enum WindowRecovery {
   rearming until a new component-add generation.
 - Accept a baseline only after exactly one canonical identity
   (`PrimaryWindow` or authoritative `ManagedWindowRegistry`), a healthy live
-  winit window and exact monitor entity, complete verified `CurrentMonitor`,
-  completed startup restore, and—for `FallbackAndReturn` only—a supported
-  return mechanism. `OnMonitor.0` must name an entity in the installed
-  `Monitors` snapshot, and `CurrentMonitor.monitor_info` must equal that exact
-  entity's installed snapshot; an initial default fallback is not eligible.
+  winit window, accepted `NativeWindowReady`, exact monitor entity, complete
+  verified `CurrentMonitor`, completed startup restore, and—for
+  `FallbackAndReturn` only—a supported return mechanism. `OnMonitor.0` must
+  name an entity in the installed `Monitors` snapshot, and
+  `CurrentMonitor.monitor_info` must equal that exact entity's installed
+  snapshot; an initial default fallback or stale readiness token is not
+  eligible.
 - Same-bundle managed registration waits for name deduplication. Reject both or
   neither canonical identity.
 - Retain the canonical key, copied policy generation, verified target facts,
@@ -1242,6 +1294,8 @@ pub struct CancelWindowRecovery {
   around monitor and persistence sets.
 - `crates/bevy_clerestory/src/monitors/mod.rs` — expose the installed-topology
   schedule boundary to recovery without exposing private producer state.
+- `crates/bevy_clerestory/src/monitors/current_monitor.rs` — exact association
+  validation and readiness cleanup boundary.
 - `crates/bevy_clerestory/src/events.rs` — integrate existing result types with
   recovery lifecycle facts.
 - `crates/bevy_clerestory/src/managed.rs` — canonical replacement binding and
@@ -1254,6 +1308,8 @@ pub struct CancelWindowRecovery {
   phases and transitions.
 - `crates/bevy_clerestory/src/persistence/captured_window_state.rs` — per-key
   freeze/cancel/promotion transitions.
+- `crates/bevy_clerestory/src/restore/restore_attempt.rs` — accepted native
+  readiness and retained preparation identity.
 
 **Constraints from prior phases:** Phase 5 owns all captured/persisted state;
 Phase 6 owns shared restore preparation and canonical replacement startup
@@ -1265,7 +1321,10 @@ the disconnect topology and event exist, so entity removal must preserve the
 copied registration and captured entry for later classification. Phase 5 also
 proved that a managed ECS window can carry an initial fallback `CurrentMonitor`
 until Bevy inserts its real `OnMonitor` relationship; registration must wait for
-the repaired exact association.
+the repaired exact association. Phase 6 treats `OnMonitor`, `CurrentMonitor`,
+and `NativeWindowReady` as one validated association and clears current-monitor
+state plus readiness when association validation fails or a non-primary managed
+role is removed.
 
 **Pending decision: Canonical reflected paths for the new recovery API**
 
@@ -1303,7 +1362,9 @@ transitions, and primary/secondary linked deletion before topology installation
 without loss of recovery state under either persistence mode. A delayed
 association production test proves the initial fallback creates no recovery
 generation, `OnMonitor` repairs `CurrentMonitor`, and exactly one generation is
-then accepted for the real verified target.
+then accepted for the real verified target. Rejected associations and
+non-primary managed-role removal clear both `CurrentMonitor` and
+`NativeWindowReady` before registration can become eligible.
 
 ### Phase 8 — Add automatic fallback-and-return transitions  · status: todo
 
@@ -1427,7 +1488,9 @@ enum RestoreOrigin {
   `TargetPosition` necessarily exists. Preserve the full attempt tuple through
   preparation, X11 compensation, application, DPI changes, and settling.
 - Extend Phase 6's prepared state with `RestoreOrigin::Recovery`; use the same
-  builder and `restore_windows` path as startup.
+  builder and `restore_windows` path as startup. Retain
+  `RestorePreparation`'s canonical `WindowKey` through runtime settling and
+  remove the preparation only through validated completion or finalization.
 - Configure and flush this chain:
 
 ```text
@@ -1485,9 +1548,12 @@ MonitorTopologyInstall
 - `crates/bevy_clerestory/src/windows_dpi_fix.rs` — entity/attempt-scoped DPI.
 - `crates/bevy_clerestory/src/x11_position_fix.rs` — attempt-aware
   compensation.
+- `crates/bevy_clerestory/src/persistence/mod.rs` — order persistence projection
+  after validated restore completion.
 
 **Constraints from prior phases:** Phase 6 supplies one staged builder and
-startup origin. Phase 7–8 supply canonical lifecycle phases and frozen intent.
+startup origin; `RestorePreparation` retains the canonical `WindowKey` until
+settling completes. Phase 7–8 supply canonical lifecycle phases and frozen intent.
 Phase 3 supplies topology revisions installed before recovery transitions;
 revision zero is the startup snapshot, identity-only changes may have no raw
 event, and multiple raw lifetime events may share one installed revision.
@@ -1498,8 +1564,9 @@ runtime attempts consume both rather than adding native metadata reads.
 Bevy `App` tests prove surviving and canonical replacement requests produce the
 same `TargetPosition` as startup, target absence remains pending, ordered
 flushes expose components to the next consumer, successful settle validates the
-complete tuple, and concurrent cross-DPI restores advance only the addressed
-entity. Topology-transition tests prove identity-only and coalesced replacement
+complete tuple and removes preparation only through the validator/finalizer,
+and concurrent cross-DPI restores advance only the addressed entity.
+Topology-transition tests prove identity-only and coalesced replacement
 revisions invalidate or replan each attempt exactly once. A production-schedule
 test creates the ECS window before `OnMonitor`, then proves recovery observes
 only the repaired association and performs no native monitor metadata polling.
@@ -1900,8 +1967,9 @@ and prove all hardware-independent acceptance behavior.
   reflected public events, zero displays, linked deletion before topology,
   zero-window process survival, exactly-one automatic replacement,
   unregistered non-reconstruction, delayed `OnMonitor` repair before the first
-  eligible recovery baseline, zero native monitor polling across that repair,
-  and Wayland capability gating.
+  eligible recovery baseline, rejected-association and managed-role-removal
+  cleanup of `CurrentMonitor` plus `NativeWindowReady`, zero native monitor
+  polling across those paths, and Wayland capability gating.
 - Run full workspace tests/build/lint in both workspaces, not only package-local
   gates.
 - Update public README and unreleased changelog to the stabilized API and
@@ -1920,6 +1988,10 @@ and prove all hardware-independent acceptance behavior.
   generation-notification feedback in the owning target module.
 - `crates/bevy_clerestory/src/monitors/topology.rs` — final lifetime/identity
   topology feedback.
+- `crates/bevy_clerestory/src/monitors/current_monitor.rs` — final exact
+  association and readiness cleanup coverage.
+- `crates/bevy_clerestory/src/managed.rs` — final managed-role readiness cleanup
+  coverage.
 - `crates/bevy_clerestory/src/persistence/captured_window_state.rs` — final
   persistence feedback.
 - `crates/bevy_clerestory/src/recovery/mod.rs` — final public API.
@@ -1946,7 +2018,10 @@ all public behavior are otherwise fixed.
 **Acceptance gate:** In both workspaces, final CI-parity Build, full workspace
 Test, and full `clippy` skill gates are green. The Hana dependency resolves to
 this checkout, all named hardware-independent cases pass, and docs contain no
-claim that requires unrecorded physical evidence.
+claim that requires unrecorded physical evidence. Readiness regression tests
+construct monitor relationships from entities in the same test `World` and
+prove rejected associations and managed-role removal perform no native monitor
+polling.
 
 ### Phase 16 — Record the macOS physical matrix  · status: todo
 

@@ -231,7 +231,9 @@ impl Plugin for WindowManagerPluginCustomPath {
         app.add_systems(
             Update,
             (
-                x11_position_fix::compensate_target_position,
+                x11_position_fix::compensate_target_position
+                    .after(restore::prepare_restore_targets)
+                    .before(restore::restore_windows),
                 // Re-apply the compensated position once the window is mapped: bevy 0.19
                 // can ignore the first `set_outer_position` request while the X11 window is
                 // unmapped, while a mapped window's `Window.position` readback matches the
