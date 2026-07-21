@@ -1,6 +1,4 @@
-//! Window state persistence.
-//!
-//! Saves window position, size, and mode to the state file on change.
+//! Dirty-batch capture, projection, and persistence writes.
 
 use std::collections::HashMap;
 use std::env::current_exe;
@@ -16,379 +14,188 @@ use bevy::window::PrimaryWindow;
     all(target_os = "linux", feature = "workaround-winit-4443")
 ))]
 use bevy::winit::WINIT_WINDOWS;
-use bevy_kana::ToI32;
-use bevy_kana::ToU32;
 
+use super::CapturedWindowPlacement;
+use super::CapturedWindowStates;
+use super::PersistedWindowState;
+use super::WindowKey;
 use super::format;
-use super::format::WindowKey;
-use super::load;
-use super::window_state::SavedWindowMode;
-use super::window_state::WindowState;
 use crate::ManagedWindow;
-use crate::ManagedWindowPersistence;
-use crate::constants::DEFAULT_SCALE_FACTOR;
-use crate::constants::PRIMARY_MONITOR_INDEX;
+use crate::Platform;
+use crate::WindowRestored;
 use crate::monitors::CurrentMonitor;
-use crate::monitors::Monitors;
 use crate::restore_window_config::RestoreWindowConfig;
 
-/// Cached window state for change detection comparison.
-#[derive(Default)]
-struct CachedWindowState {
-    physical_position: Option<IVec2>,
-    logical_size:      UVec2,
-    saved_window_mode: Option<SavedWindowMode>,
-    monitor:           Option<usize>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StateFileWrite {
+    Written,
+    Failed,
 }
 
-/// Newtype wrapper around the change-detection cache so the inner
-/// `CachedWindowState` stays private to this module while still being usable
-/// as a `Local<_>` system parameter in `save_window_state`.
-#[derive(Default)]
-pub(crate) struct WindowStateCache(HashMap<Entity, CachedWindowState>);
-
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
-enum StateWrite {
-    #[default]
-    NotNeeded,
-    Needed,
+#[cfg(test)]
+#[derive(Default, Resource)]
+pub(crate) struct InjectedWindowPositions {
+    positions:   HashMap<Entity, Option<IVec2>>,
+    pub lookups: usize,
 }
 
-/// Save all window states to the given path.
-pub(crate) fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {
+#[cfg(test)]
+impl InjectedWindowPositions {
+    pub(crate) fn set(&mut self, entity: Entity, position: Option<IVec2>) {
+        self.positions.insert(entity, position);
+    }
+
+    pub(crate) const fn reset_activity(&mut self) { self.lookups = 0; }
+
+    fn get(&mut self, entity: Entity) -> Option<IVec2> {
+        self.lookups += 1;
+        self.positions.get(&entity).copied().flatten()
+    }
+}
+
+pub(super) fn save_all_states(
+    path: &Path,
+    states: &HashMap<WindowKey, PersistedWindowState>,
+) -> StateFileWrite {
     if let Some(parent) = path.parent()
-        && let Err(e) = create_dir_all(parent)
+        && let Err(error) = create_dir_all(parent)
     {
-        warn!("[save_all_states] Failed to create directory {parent:?}: {e}");
-        return;
+        warn!("[save_all_states] Failed to create directory {parent:?}: {error}");
+        return StateFileWrite::Failed;
     }
-    match format::encode(states) {
-        Ok(contents) => {
-            if let Err(e) = write(path, &contents) {
-                warn!("[save_all_states] Failed to write state file {path:?}: {e}");
-            }
+    let contents = match format::encode(states) {
+        Ok(contents) => contents,
+        Err(error) => {
+            warn!("[save_all_states] Failed to serialize state: {error}");
+            return StateFileWrite::Failed;
         },
-        Err(e) => {
-            warn!("[save_all_states] Failed to serialize state: {e}");
-        },
+    };
+    if let Err(error) = write(path, &contents) {
+        warn!("[save_all_states] Failed to write state file {path:?}: {error}");
+        StateFileWrite::Failed
+    } else {
+        StateFileWrite::Written
     }
 }
 
-/// Build state from all currently-active windows and write it to the state file.
-///
-/// Iterates every primary and managed window, captures position/size/monitor/mode,
-/// and writes the full persisted state map in one shot. Used by the
-/// `ActiveOnly` persistence mode so that the file always reflects exactly which
-/// windows are open right now.
-///
-/// `exclude_entity` allows callers (e.g., `On<Remove>` observers) to skip an entity
-/// whose component is still visible in the query but is being removed.
-pub(crate) fn save_active_window_state(
-    config: &RestoreWindowConfig,
-    monitors: &Monitors,
-    all_windows: &Query<
-        (
-            Entity,
-            &Window,
-            Option<&CurrentMonitor>,
-            Option<&ManagedWindow>,
-        ),
-        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
-    >,
-    primary_query: &Query<(), With<PrimaryWindow>>,
-    exclude_entity: Option<Entity>,
-) {
-    if monitors.is_empty() {
-        return;
-    }
-
-    let app_name = current_exe()
-        .ok()
-        .and_then(|executable_path| {
-            executable_path
-                .file_stem()
-                .and_then(|file_stem| file_stem.to_str())
-                .map(String::from)
-        })
-        .unwrap_or_default();
-
-    let mut states = HashMap::new();
-
-    for (entity, window, existing_monitor, managed) in all_windows {
-        if exclude_entity == Some(entity) {
-            continue;
-        }
-
-        let window_key = if primary_query.get(entity).is_ok() {
-            WindowKey::Primary
-        } else if let Some(managed_window) = managed {
-            WindowKey::Managed(managed_window.name.clone())
-        } else {
-            continue;
-        };
-
-        let physical_position = get_window_position(entity, window);
-
-        let (monitor_index, monitor_scale) = existing_monitor.map_or_else(
-            || {
-                let monitor_info = monitors.first();
-                (monitor_info.index, monitor_info.scale)
-            },
-            |current_monitor| (current_monitor.index, current_monitor.scale),
-        );
-        let saved_window_mode: SavedWindowMode = existing_monitor.map_or_else(
-            || (&window.mode).into(),
-            |current_monitor| (&current_monitor.effective_window_mode).into(),
-        );
-        let logical_position = physical_position.map(|physical_position| {
-            let logical_x = (f64::from(physical_position.x) / monitor_scale)
-                .round()
-                .to_i32();
-            let logical_y = (f64::from(physical_position.y) / monitor_scale)
-                .round()
-                .to_i32();
-            (logical_x, logical_y)
-        });
-        states.insert(
-            window_key,
-            WindowState {
-                logical_position,
-                logical_width: window.resolution.width().to_u32(),
-                logical_height: window.resolution.height().to_u32(),
-                scale: monitor_scale,
-                monitor: monitor_index,
-                saved_window_mode,
-                app_name: app_name.clone(),
-            },
-        );
-    }
-
-    save_all_states(&config.path, &states);
-}
-
-/// Persist window states using the `RememberAll` strategy: load existing file,
-/// merge with cached entries, and save. Preserves entries for closed windows.
-fn persist_remember_all(
-    config: &RestoreWindowConfig,
-    monitors: &Monitors,
-    cached: &WindowStateCache,
-    all_windows: &Query<
-        (
-            Entity,
-            &Window,
-            Option<&CurrentMonitor>,
-            Option<&ManagedWindow>,
-        ),
-        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
-    >,
-    primary_query: &Query<(), With<PrimaryWindow>>,
-) {
-    let app_name = current_exe()
-        .ok()
-        .and_then(|executable_path| {
-            executable_path
-                .file_stem()
-                .and_then(|file_stem| file_stem.to_str())
-                .map(String::from)
-        })
-        .unwrap_or_default();
-
-    let mut states = load::load_all_states(&config.path).unwrap_or_default();
-
-    // `WindowStateCache` entries refresh the persisted `WindowState` map.
-    for (entity, entry) in &cached.0 {
-        let window_key = if primary_query.get(*entity).is_ok() {
-            WindowKey::Primary
-        } else if let Ok((_, _, _, Some(managed))) = all_windows.get(*entity) {
-            WindowKey::Managed(managed.name.clone())
-        } else {
-            // Entity may have been despawned - skip stale cached entry
-            continue;
-        };
-
-        if let Some(saved_window_mode) = &entry.saved_window_mode {
-            let monitor_index = entry.monitor.unwrap_or(PRIMARY_MONITOR_INDEX);
-            let monitor_scale = monitors
-                .by_index(monitor_index)
-                .map_or(DEFAULT_SCALE_FACTOR, |monitor| monitor.scale);
-            let logical_position = entry.physical_position.map(|physical_position| {
-                let logical_x = (f64::from(physical_position.x) / monitor_scale)
-                    .round()
-                    .to_i32();
-                let logical_y = (f64::from(physical_position.y) / monitor_scale)
-                    .round()
-                    .to_i32();
-                (logical_x, logical_y)
-            });
-            states.insert(
-                window_key,
-                WindowState {
-                    logical_position,
-                    logical_width: entry.logical_size.x,
-                    logical_height: entry.logical_size.y,
-                    scale: monitor_scale,
-                    monitor: monitor_index,
-                    saved_window_mode: saved_window_mode.clone(),
-                    app_name: app_name.clone(),
-                },
-            );
-        }
-    }
-
-    save_all_states(&config.path, &states);
-}
-
-/// Save window state when position, size, or mode changes. Runs only when not restoring.
-///
-/// Handles both the primary window and any `ManagedWindow` entities. Uses
-/// `ManagedWindowPersistence` to decide whether closed windows keep their saved state.
-pub(crate) fn save_window_state(
-    restore_window_config: Res<RestoreWindowConfig>,
-    monitors: Res<Monitors>,
-    managed_window_persistence: Res<ManagedWindowPersistence>,
+/// Capture changed primary and managed windows from their installed [`CurrentMonitor`].
+pub(super) fn capture_changed_windows(
     windows: Query<
         (
             Entity,
             &Window,
-            Option<&CurrentMonitor>,
+            &CurrentMonitor,
             Option<&ManagedWindow>,
+            Has<PrimaryWindow>,
         ),
         (
             Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
             Or<(Changed<Window>, Changed<CurrentMonitor>)>,
         ),
     >,
-    all_windows: Query<
-        (
-            Entity,
-            &Window,
-            Option<&CurrentMonitor>,
-            Option<&ManagedWindow>,
-        ),
-        Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
-    >,
-    primary_query: Query<(), With<PrimaryWindow>>,
-    mut cached: Local<WindowStateCache>,
+    platform: Res<Platform>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
+    #[cfg(test)] mut injected_positions: Option<ResMut<InjectedWindowPositions>>,
     _: NonSendMarker,
 ) {
-    // An empty `Monitors` resource leaves no monitor index or scale for `WindowState`.
-    if monitors.is_empty() {
-        return;
-    }
-
-    let mut state_write = StateWrite::NotNeeded;
-
-    for (window_entity, window, existing_monitor, managed) in &windows {
-        // `WindowKey` selects the primary slot or a `ManagedWindow::name` entry.
-        let window_key = if primary_query.get(window_entity).is_ok() {
+    for (entity, window, current_monitor, managed_window, primary) in &windows {
+        #[cfg(test)]
+        captured_window_states.record_window_scan();
+        let window_key = if primary {
             WindowKey::Primary
-        } else if let Some(managed_window) = managed {
+        } else if let Some(managed_window) = managed_window {
             WindowKey::Managed(managed_window.name.clone())
         } else {
             continue;
         };
-
-        // `get_window_position` returns the physical position saved in `WindowState`.
-        let physical_position = get_window_position(window_entity, window);
-
-        let physical_width = window.resolution.physical_width();
-        let physical_height = window.resolution.physical_height();
-        let logical_width = window.resolution.width().to_u32();
-        let logical_height = window.resolution.height().to_u32();
-        let resolution_scale = window.resolution.scale_factor();
-
-        // `CurrentMonitor` from `update_current_monitor` supplies monitor scale and saved mode.
-        let (monitor_index, monitor_scale) = existing_monitor.map_or_else(
-            || {
-                let monitor_info = monitors.first();
-                (monitor_info.index, monitor_info.scale)
-            },
-            |current_monitor| (current_monitor.index, current_monitor.scale),
+        let physical_position = capture_window_position(
+            entity,
+            window,
+            *platform,
+            #[cfg(test)]
+            injected_positions.as_deref_mut(),
         );
-        let saved_window_mode: SavedWindowMode = existing_monitor.map_or_else(
-            || (&window.mode).into(),
-            |current_monitor| (&current_monitor.effective_window_mode).into(),
-        );
-
-        let cached_window_state = cached.0.entry(window_entity).or_default();
-
-        // `WindowStateCache` suppresses writes until position, size, mode, or monitor changes.
-        let position_changed = cached_window_state.physical_position != physical_position;
-        let size_changed =
-            cached_window_state.logical_size != UVec2::new(logical_width, logical_height);
-        let mode_changed =
-            cached_window_state.saved_window_mode.as_ref() != Some(&saved_window_mode);
-        let monitor_changed = cached_window_state.monitor != Some(monitor_index);
-        if !position_changed && !size_changed && !mode_changed && !monitor_changed {
-            continue;
-        }
-
-        debug!(
-            "[save_window_state] [{window_key}] SAVE DETAIL: position={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} resolution_scale={resolution_scale} monitor={monitor_index} mode={saved_window_mode:?}",
-        );
-
-        // When `monitor_changed`, log the cached monitor index and scale transition.
-        if monitor_changed {
-            let previous_scale = cached_window_state
-                .monitor
-                .and_then(|monitor_index| monitors.by_index(monitor_index))
-                .map(|monitor| monitor.scale);
-            debug!(
-                "[save_window_state] [{window_key}] MONITOR CHANGE: {:?} (scale={previous_scale:?}) -> {monitor_index} (scale={monitor_scale})",
-                cached_window_state.monitor,
-            );
-        }
-
-        // `WindowStateCache` stores the values just written to `WindowState`.
-        cached_window_state.physical_position = physical_position;
-        cached_window_state.logical_size = UVec2::new(logical_width, logical_height);
-        cached_window_state.saved_window_mode = Some(saved_window_mode.clone());
-        cached_window_state.monitor = Some(monitor_index);
-
-        state_write = StateWrite::Needed;
-
-        debug!(
-            "[save_window_state] [{window_key}] position={physical_position:?} logical={logical_width}x{logical_height} physical={physical_width}x{physical_height} monitor={monitor_index} scale={monitor_scale} mode={saved_window_mode:?}",
-        );
-    }
-
-    if state_write == StateWrite::NotNeeded {
-        return;
-    }
-
-    match *managed_window_persistence {
-        ManagedWindowPersistence::ActiveOnly => {
-            // `save_active_window_state` rebuilds persisted state from active windows.
-            save_active_window_state(
-                &restore_window_config,
-                &monitors,
-                &all_windows,
-                &primary_query,
-                None,
-            );
-        },
-        ManagedWindowPersistence::RememberAll => {
-            persist_remember_all(
-                &restore_window_config,
-                &monitors,
-                &cached,
-                &all_windows,
-                &primary_query,
-            );
-        },
+        let placement =
+            CapturedWindowPlacement::capture(window, current_monitor, physical_position, *platform);
+        captured_window_states.capture(window_key, entity, placement);
     }
 }
 
-/// Get window position from the OS via winit, falling back to `Window.position`.
-///
-/// On macOS, `Window.position` stays `Automatic` even after the OS places the window,
-/// so we must query winit directly. On Linux with W5 workaround, we also use winit
-/// to get `outer_position` (frame origin). On other platforms, `Window.position` suffices.
+/// Promote a successfully restored adapter entry to a live captured placement.
+pub(super) fn on_window_restored(
+    restored: On<WindowRestored>,
+    windows: Query<(&Window, &CurrentMonitor)>,
+    platform: Res<Platform>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
+    #[cfg(test)] mut injected_positions: Option<ResMut<InjectedWindowPositions>>,
+) {
+    let Ok((window, current_monitor)) = windows.get(restored.entity) else {
+        return;
+    };
+    let physical_position = capture_window_position(
+        restored.entity,
+        window,
+        *platform,
+        #[cfg(test)]
+        injected_positions.as_deref_mut(),
+    );
+    let placement =
+        CapturedWindowPlacement::capture(window, current_monitor, physical_position, *platform);
+    captured_window_states.promote(restored.window_key.clone(), restored.entity, placement);
+}
+
+/// Project and write one whole-map batch when captured state is dirty.
+pub(crate) fn write_dirty_window_states(
+    config: Res<RestoreWindowConfig>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
+) {
+    if !captured_window_states.is_dirty() {
+        return;
+    }
+
+    #[cfg(test)]
+    captured_window_states.record_projection();
+    let states = captured_window_states.project(&application_name());
+    #[cfg(test)]
+    captured_window_states.record_write();
+    save_all_states(&config.path, &states);
+    captured_window_states.mark_clean();
+}
+
+fn application_name() -> String {
+    current_exe()
+        .ok()
+        .and_then(|executable_path| {
+            executable_path
+                .file_stem()
+                .and_then(|file_stem| file_stem.to_str())
+                .map(String::from)
+        })
+        .unwrap_or_default()
+}
+
+fn capture_window_position(
+    entity: Entity,
+    window: &Window,
+    platform: Platform,
+    #[cfg(test)] injected_positions: Option<&mut InjectedWindowPositions>,
+) -> Option<IVec2> {
+    #[cfg(test)]
+    if let Some(injected_positions) = injected_positions {
+        return injected_positions.get(entity);
+    }
+    get_window_position(entity, window, platform)
+}
+
+/// Get the window position without querying or refreshing monitor metadata.
 #[cfg(any(
     target_os = "macos",
     all(target_os = "linux", feature = "workaround-winit-4443")
 ))]
-pub(super) fn get_window_position(entity: Entity, _: &Window) -> Option<IVec2> {
+pub(super) fn get_window_position(entity: Entity, _: &Window, platform: Platform) -> Option<IVec2> {
+    if !platform.position_available() {
+        return None;
+    }
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         let winit_window = winit_windows.get_window(entity)?;
@@ -404,9 +211,111 @@ pub(super) fn get_window_position(entity: Entity, _: &Window) -> Option<IVec2> {
     target_os = "macos",
     all(target_os = "linux", feature = "workaround-winit-4443")
 )))]
-pub(super) const fn get_window_position(_: Entity, window: &Window) -> Option<IVec2> {
+pub(super) const fn get_window_position(
+    _: Entity,
+    window: &Window,
+    platform: Platform,
+) -> Option<IVec2> {
+    if !platform.position_available() {
+        return None;
+    }
     match window.position {
         WindowPosition::At(position) => Some(position),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, reason = "tests should panic on unexpected values")]
+mod tests {
+    use tempfile::NamedTempFile;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::monitors::MonitorIdentity;
+    use crate::monitors::MonitorInfo;
+    use crate::persistence::CapturedWindowPosition;
+    use crate::persistence::SavedWindowMode;
+
+    fn placement() -> CapturedWindowPlacement {
+        CapturedWindowPlacement {
+            monitor_snapshot:  MonitorInfo {
+                identity:          MonitorIdentity::Unverified,
+                index:             0,
+                scale:             1.0,
+                physical_position: IVec2::ZERO,
+                physical_size:     UVec2::new(1_920, 1_080),
+            },
+            position:          CapturedWindowPosition::Restorable {
+                logical_offset: IVec2::new(40, 60),
+            },
+            logical_size:      UVec2::new(800, 600),
+            saved_window_mode: SavedWindowMode::Windowed,
+            captured_scale:    1.0,
+        }
+    }
+
+    #[test]
+    fn dirty_batch_projects_and_writes_once() {
+        let file = NamedTempFile::new();
+        assert!(file.is_ok(), "temporary state file should be available");
+        let file = file.unwrap_or_else(|error| panic!("failed to create state file: {error}"));
+        let mut world = World::new();
+        let mut states = CapturedWindowStates::default();
+        states.capture(WindowKey::Primary, Entity::PLACEHOLDER, placement());
+        states.reset_activity();
+        world.insert_resource(states);
+        world.insert_resource(RestoreWindowConfig {
+            path: file.path().to_path_buf(),
+        });
+        let mut schedule = Schedule::default();
+        schedule.add_systems(write_dirty_window_states);
+
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let states = world.resource::<CapturedWindowStates>();
+        assert_eq!(states.activity().projections, 1);
+        assert_eq!(states.activity().writes, 1);
+        assert!(!states.is_dirty());
+    }
+
+    #[test]
+    fn failed_write_consumes_batch_until_another_mutation() {
+        let directory = tempdir();
+        assert!(directory.is_ok(), "temporary directory should be available");
+        let directory = directory
+            .unwrap_or_else(|error| panic!("failed to create temporary directory: {error}"));
+        let mut world = World::new();
+        let mut states = CapturedWindowStates::default();
+        states.capture(WindowKey::Primary, Entity::PLACEHOLDER, placement());
+        states.reset_activity();
+        world.insert_resource(states);
+        world.insert_resource(RestoreWindowConfig {
+            path: directory.path().to_path_buf(),
+        });
+        let mut schedule = Schedule::default();
+        schedule.add_systems(write_dirty_window_states);
+
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let states = world.resource::<CapturedWindowStates>();
+        assert_eq!(states.activity().projections, 1);
+        assert_eq!(states.activity().writes, 1);
+        assert!(!states.is_dirty());
+
+        let mut changed = placement();
+        changed.logical_size.x += 1;
+        world.resource_mut::<CapturedWindowStates>().capture(
+            WindowKey::Primary,
+            Entity::PLACEHOLDER,
+            changed,
+        );
+        schedule.run(&mut world);
+
+        let states = world.resource::<CapturedWindowStates>();
+        assert_eq!(states.activity().projections, 2);
+        assert_eq!(states.activity().writes, 2);
     }
 }

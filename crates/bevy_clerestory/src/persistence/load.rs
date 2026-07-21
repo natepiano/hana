@@ -6,16 +6,19 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+use bevy::prelude::*;
 use dirs::config_dir;
 
+use super::CapturedWindowStates;
 use super::constants::EXAMPLES_DIRECTORY_NAME;
 use super::constants::RON_EXTENSION;
 use super::format;
 use super::format::WindowKey;
+use super::window_state::PersistedWindowState;
 #[cfg(test)]
 use super::window_state::SavedWindowMode;
-use super::window_state::WindowState;
 use crate::constants::STATE_FILE;
+use crate::restore_window_config::RestoreWindowConfig;
 
 /// Get the default state file path using the executable name.
 ///
@@ -50,10 +53,24 @@ pub(crate) fn get_state_path_for_app(app_name: &str) -> Option<PathBuf> {
 /// Load all window states from the given path.
 ///
 /// Supports migration from the old single-window format: if the file contains
-/// a single `WindowState`, it is wrapped as `{"primary": state}`.
-pub(crate) fn load_all_states(path: &Path) -> Option<HashMap<WindowKey, WindowState>> {
+/// a single `PersistedWindowState`, it is wrapped as `{"primary": state}`.
+pub(super) fn load_all_states(path: &Path) -> Option<HashMap<WindowKey, PersistedWindowState>> {
     let contents = fs::read_to_string(path).ok()?;
     format::decode(&contents)
+}
+
+/// Seed [`CapturedWindowStates`] from the state file once during `PreStartup`.
+pub(super) fn load_captured_window_states(
+    config: Res<RestoreWindowConfig>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
+) {
+    if captured_window_states.startup_was_read() {
+        return;
+    }
+    #[cfg(test)]
+    captured_window_states.record_file_read();
+    let persisted = load_all_states(&config.path).unwrap_or_default();
+    captured_window_states.seed(persisted);
 }
 
 #[cfg(test)]
@@ -62,18 +79,22 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
 
+    use bevy::ecs::schedule::Schedule;
+    use bevy::ecs::world::World;
     use tempfile::NamedTempFile;
 
+    use super::PersistedWindowState;
     use super::SavedWindowMode;
     use super::WindowKey;
-    use super::WindowState;
     use crate::constants::CURRENT_STATE_VERSION;
     use crate::constants::DEFAULT_SCALE_FACTOR;
+    use crate::persistence::CapturedWindowStates;
     use crate::persistence::load;
     use crate::persistence::save;
+    use crate::restore_window_config::RestoreWindowConfig;
 
-    fn sample_state() -> WindowState {
-        WindowState {
+    fn sample_state() -> PersistedWindowState {
+        PersistedWindowState {
             logical_position:  Some((10, 20)),
             logical_width:     800,
             logical_height:    600,
@@ -143,5 +164,32 @@ mod tests {
             contents.contains("logical_width: 800"),
             "expected rewritten file to contain logical_width"
         );
+    }
+
+    #[test]
+    fn startup_loader_reads_and_seeds_once() {
+        let file = match NamedTempFile::new() {
+            Ok(file) => file,
+            Err(error) => panic!("failed to create temp file: {error}"),
+        };
+        save::save_all_states(
+            file.path(),
+            &HashMap::from([(WindowKey::Primary, sample_state())]),
+        );
+
+        let mut world = World::new();
+        world.insert_resource(RestoreWindowConfig {
+            path: file.path().to_path_buf(),
+        });
+        world.init_resource::<CapturedWindowStates>();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(load::load_captured_window_states);
+
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let captured = world.resource::<CapturedWindowStates>();
+        assert_eq!(captured.activity().file_reads, 1);
+        assert!(captured.persisted(&WindowKey::Primary).is_some());
     }
 }

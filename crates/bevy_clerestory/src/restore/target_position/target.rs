@@ -6,8 +6,8 @@ use super::strategy::FullscreenRestoreState;
 use super::strategy::MonitorScaleStrategy;
 use crate::Platform;
 use crate::monitors::MonitorInfo;
+use crate::persistence::PersistedWindowState;
 use crate::persistence::SavedWindowMode;
-use crate::persistence::WindowState;
 use crate::restore::settle_state::SettleState;
 
 /// Holds the target window state during the restore process.
@@ -119,7 +119,7 @@ pub(crate) struct RestoreDiagnostics {
 /// Compute a `TargetPosition` from saved state and a resolved target monitor.
 #[must_use]
 pub(crate) fn compute_target_position(
-    saved_window_state: &WindowState,
+    saved_window_state: &PersistedWindowState,
     target_info: &MonitorInfo,
     logical_fallback_position: Option<(i32, i32)>,
     physical_decoration: UVec2,
