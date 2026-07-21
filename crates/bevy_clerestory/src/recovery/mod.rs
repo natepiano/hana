@@ -6,18 +6,26 @@ mod fallback_and_return;
 mod monitor_probe;
 mod registration;
 
-use application_controlled::ApplicationControlledRecoveries;
+pub(crate) use application_controlled::ApplicationControlledRecoveries;
+pub(crate) use application_controlled::ExplicitRestoreRequests;
 use bevy::prelude::*;
 use bevy::window::ExitSystems;
 use bevy::window::close_when_requested;
-use fallback_and_return::AutomaticRestoreIntents;
+pub(crate) use fallback_and_return::AutomaticRestoreIntent;
+pub(crate) use fallback_and_return::AutomaticRestoreIntents;
 #[cfg(test)]
 pub(crate) use fallback_and_return::FallbackAndReturnPhaseSnapshot;
-use fallback_and_return::FallbackAndReturnRecoveries;
+pub(crate) use fallback_and_return::FallbackAndReturnRecoveries;
+pub(crate) use fallback_and_return::advance_fallback_windows;
 #[cfg(test)]
 pub(crate) use fallback_and_return::fallback_and_return_snapshot;
-use registration::RecoveryRegistrations;
+pub(crate) use registration::CanonicalWindowRole;
+pub(crate) use registration::PrimaryPresence;
+pub(crate) use registration::RecoveryGeneration;
+pub(crate) use registration::RecoveryRegistrations;
 pub use registration::WindowRecovery;
+pub(crate) use registration::accept_eligible_registrations;
+pub(crate) use registration::canonical_window;
 #[cfg(test)]
 pub(crate) use registration::registration_snapshot;
 
@@ -34,7 +42,8 @@ impl Plugin for RecoveryPlugin {
         app.init_resource::<RecoveryRegistrations>()
             .init_resource::<FallbackAndReturnRecoveries>()
             .init_resource::<AutomaticRestoreIntents>()
-            .init_resource::<ApplicationControlledRecoveries>();
+            .init_resource::<ApplicationControlledRecoveries>()
+            .init_resource::<ExplicitRestoreRequests>();
         let existing_recoveries: Vec<_> = {
             let mut query = app.world_mut().query::<(Entity, &WindowRecovery)>();
             query
@@ -53,13 +62,12 @@ impl Plugin for RecoveryPlugin {
             .add_observer(registration::on_window_removed)
             .add_observer(registration::on_cancel_window_recovery)
             .add_observer(application_controlled::on_restore_window)
-            .add_observer(application_controlled::on_window_restored)
-            .add_observer(application_controlled::on_window_restore_mismatch)
             .add_systems(
                 Update,
                 (
                     application_controlled::evaluate_topology,
                     fallback_and_return::evaluate_topology,
+                    ApplyDeferred,
                 )
                     .chain()
                     .in_set(ClerestoryUpdateSet::RecoveryTopology),
@@ -69,6 +77,7 @@ impl Plugin for RecoveryPlugin {
                 (
                     registration::accept_eligible_registrations,
                     fallback_and_return::advance_fallback_windows,
+                    ApplyDeferred,
                 )
                     .chain()
                     .in_set(ClerestoryUpdateSet::RecoveryWindow),

@@ -113,7 +113,7 @@ impl InjectedCurrentMonitorSource {
 
     pub(crate) const fn activity(&self) -> NativeQueryActivity { self.activity }
 
-    pub(super) const fn reset_activity(&mut self) {
+    pub(crate) const fn reset_activity(&mut self) {
         self.activity = NativeQueryActivity {
             window_map:       0,
             monitor_metadata: 0,
@@ -135,13 +135,19 @@ pub(super) fn clear_monitor_selection_inputs(
 pub(crate) fn install_current_monitor_from_association(
     insert: On<Insert, OnMonitor>,
     windows: Query<
-        (&Window, &OnMonitor, Option<&CurrentMonitor>),
+        (
+            &Window,
+            &OnMonitor,
+            Option<&CurrentMonitor>,
+            Has<PrimaryWindow>,
+            Has<ManagedWindow>,
+        ),
         Or<(With<PrimaryWindow>, With<ManagedWindow>)>,
     >,
     monitors: Res<Monitors>,
     mut commands: Commands,
 ) {
-    let Ok((window, on_monitor, existing)) = windows.get(insert.entity) else {
+    let Ok((window, on_monitor, existing, primary, managed)) = windows.get(insert.entity) else {
         return;
     };
     let Some(current_monitor) = current_monitor_from_association(window, on_monitor, &monitors)
@@ -159,7 +165,16 @@ pub(crate) fn install_current_monitor_from_association(
         current_monitor.scale,
         current_monitor.effective_window_mode,
     );
-    commands.entity(insert.entity).insert(current_monitor);
+    let registration = match (primary, managed) {
+        (true, false) => WindowRegistration::Primary,
+        (false, true) => WindowRegistration::Managed,
+        (true, true) => WindowRegistration::PrimaryAndManaged,
+        (false, false) => WindowRegistration::Unmanaged,
+    };
+    commands.entity(insert.entity).insert((
+        current_monitor,
+        MonitorSelectionInputs::from_window(window, registration),
+    ));
 }
 
 pub(crate) fn current_monitor_from_association(
@@ -219,6 +234,7 @@ pub(crate) fn update_current_monitor(
             &Window,
             Option<&CurrentMonitor>,
             Option<&MonitorSelectionInputs>,
+            Option<&OnMonitor>,
             Has<PrimaryWindow>,
             Has<ManagedWindow>,
             Has<RestorePreparation>,
@@ -234,7 +250,9 @@ pub(crate) fn update_current_monitor(
     }
 
     let topology_changed = monitors.is_changed();
-    for (entity, window, existing, previous_inputs, primary, managed, restoring) in &windows {
+    for (entity, window, existing, previous_inputs, on_monitor, primary, managed, restoring) in
+        &windows
+    {
         if restoring {
             continue;
         }
@@ -246,7 +264,16 @@ pub(crate) fn update_current_monitor(
             (false, false) => WindowRegistration::Unmanaged,
         };
         let current_inputs = MonitorSelectionInputs::from_window(window, registration);
-        if !topology_changed && existing.is_some() && previous_inputs == Some(&current_inputs) {
+        let exact_association =
+            on_monitor
+                .zip(existing)
+                .is_some_and(|(on_monitor, current_monitor)| {
+                    exact_monitor_association(on_monitor, current_monitor, &monitors).is_some()
+                });
+        if existing.is_some()
+            && previous_inputs == Some(&current_inputs)
+            && (!topology_changed || exact_association)
+        {
             continue;
         }
 

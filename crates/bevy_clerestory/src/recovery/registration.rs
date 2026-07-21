@@ -44,7 +44,12 @@ pub enum WindowRecovery {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct RecoveryGeneration(u64);
+pub(crate) struct RecoveryGeneration(u64);
+
+#[cfg(test)]
+impl RecoveryGeneration {
+    pub(crate) const fn from_test_raw(raw: u64) -> Self { Self(raw) }
+}
 
 #[derive(Clone, Debug)]
 struct PendingRegistration {
@@ -54,31 +59,31 @@ struct PendingRegistration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum CanonicalWindowRole {
+pub(crate) enum CanonicalWindowRole {
     Primary,
     Managed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PrimaryPresence {
+pub(crate) enum PrimaryPresence {
     Present,
     Absent,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct RegisteredWindow {
-    pub(super) generation:    RecoveryGeneration,
-    pub(super) policy:        WindowRecovery,
-    pub(super) role:          CanonicalWindowRole,
-    pub(super) window_key:    WindowKey,
-    pub(super) monitor_id:    MonitorId,
-    pub(super) target:        MonitorInfo,
-    pub(super) entity:        Option<Entity>,
-    pub(super) last_revision: Option<MonitorTopologyRevision>,
+pub(crate) struct RegisteredWindow {
+    pub(crate) generation:    RecoveryGeneration,
+    pub(crate) policy:        WindowRecovery,
+    pub(crate) role:          CanonicalWindowRole,
+    pub(crate) window_key:    WindowKey,
+    pub(crate) monitor_id:    MonitorId,
+    pub(crate) target:        MonitorInfo,
+    pub(crate) entity:        Option<Entity>,
+    pub(crate) last_revision: Option<MonitorTopologyRevision>,
 }
 
 #[derive(Default, Resource)]
-pub(super) struct RecoveryRegistrations {
+pub(crate) struct RecoveryRegistrations {
     next_generation: u64,
     pending:         HashMap<Entity, PendingRegistration>,
     registered:      HashMap<WindowKey, RegisteredWindow>,
@@ -110,6 +115,7 @@ impl RecoveryRegistrations {
         self.registered.values_mut()
     }
 
+    #[cfg(test)]
     pub(super) fn registered(&self) -> impl Iterator<Item = &RegisteredWindow> {
         self.registered.values()
     }
@@ -120,11 +126,11 @@ impl RecoveryRegistrations {
             .find(|registration| registration.entity == Some(entity))
     }
 
-    pub(super) fn by_key(&self, window_key: &WindowKey) -> Option<&RegisteredWindow> {
+    pub(crate) fn by_key(&self, window_key: &WindowKey) -> Option<&RegisteredWindow> {
         self.registered.get(window_key)
     }
 
-    pub(super) fn by_key_mut(&mut self, window_key: &WindowKey) -> Option<&mut RegisteredWindow> {
+    pub(crate) fn by_key_mut(&mut self, window_key: &WindowKey) -> Option<&mut RegisteredWindow> {
         self.registered.get_mut(window_key)
     }
 
@@ -195,7 +201,7 @@ pub(super) fn on_window_recovery_added(
     registrations.begin(add.entity, policy);
 }
 
-fn canonical_window(
+pub(crate) fn canonical_window(
     entity: Entity,
     primary: PrimaryPresence,
     managed_window_registry: &ManagedWindowRegistry,
@@ -212,7 +218,7 @@ fn canonical_window(
     }
 }
 
-pub(super) fn accept_eligible_registrations(
+pub(crate) fn accept_eligible_registrations(
     mut registrations: ResMut<RecoveryRegistrations>,
     mut application_controlled: ResMut<ApplicationControlledRecoveries>,
     mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,

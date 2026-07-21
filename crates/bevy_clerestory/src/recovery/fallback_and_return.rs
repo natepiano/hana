@@ -25,6 +25,7 @@ use crate::persistence::CapturedWindowPosition;
 use crate::persistence::CapturedWindowStates;
 use crate::persistence::SavedWindowMode;
 use crate::platform::ReturnCapability;
+use crate::restore::RestoreDisposition;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ObservedPosition {
@@ -117,16 +118,17 @@ enum FallbackAndReturnPhase {
 
 #[derive(Clone, Debug)]
 struct FallbackAndReturnRecovery {
-    generation:           RecoveryGeneration,
-    phase:                FallbackAndReturnPhase,
-    notification:         Option<MonitorId>,
-    window_shell:         Window,
+    generation:              RecoveryGeneration,
+    phase:                   FallbackAndReturnPhase,
+    notification:            Option<MonitorId>,
+    window_shell:            Window,
+    fallback_before_restore: Option<FallbackObservation>,
     #[cfg(test)]
-    topology_evaluations: usize,
+    topology_evaluations:    usize,
 }
 
 #[derive(Default, Resource)]
-pub(super) struct FallbackAndReturnRecoveries {
+pub(crate) struct FallbackAndReturnRecoveries {
     entries: HashMap<WindowKey, FallbackAndReturnRecovery>,
 }
 
@@ -142,6 +144,7 @@ impl FallbackAndReturnRecoveries {
             phase: FallbackAndReturnPhase::Healthy,
             notification: None,
             window_shell,
+            fallback_before_restore: None,
             #[cfg(test)]
             topology_evaluations: 0,
         };
@@ -202,6 +205,88 @@ impl FallbackAndReturnRecoveries {
         }
         restore_intents.clear(window_key, generation);
     }
+
+    pub(crate) fn can_begin_restore(
+        &self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+    ) -> bool {
+        self.entries.get(window_key).is_some_and(|recovery| {
+            recovery.generation == generation
+                && matches!(
+                    recovery.phase,
+                    FallbackAndReturnPhase::RemovalPending
+                        | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
+                            return_intent: ReturnIntent::Active,
+                            ..
+                        })
+                        | FallbackAndReturnPhase::OnFallback(_)
+                        | FallbackAndReturnPhase::MissingLiveWindow(ReturnIntent::Active)
+                )
+        })
+    }
+
+    pub(crate) fn begin_restore(
+        &mut self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+    ) -> bool {
+        let Some(recovery) = self.entries.get_mut(window_key) else {
+            return false;
+        };
+        if recovery.generation != generation {
+            return false;
+        }
+        recovery.fallback_before_restore = match &recovery.phase {
+            FallbackAndReturnPhase::OnFallback(observation)
+            | FallbackAndReturnPhase::RetryableFailure(observation) => Some(observation.clone()),
+            FallbackAndReturnPhase::FallbackSettling(settling) => settling.observation.clone(),
+            FallbackAndReturnPhase::Healthy
+            | FallbackAndReturnPhase::RemovalPending
+            | FallbackAndReturnPhase::Restoring
+            | FallbackAndReturnPhase::MissingLiveWindow(_) => None,
+        };
+        if !matches!(
+            recovery.phase,
+            FallbackAndReturnPhase::RemovalPending
+                | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
+                    return_intent: ReturnIntent::Active,
+                    ..
+                })
+                | FallbackAndReturnPhase::OnFallback(_)
+                | FallbackAndReturnPhase::MissingLiveWindow(ReturnIntent::Active)
+        ) {
+            recovery.fallback_before_restore = None;
+            return false;
+        }
+        recovery.phase = FallbackAndReturnPhase::Restoring;
+        true
+    }
+
+    pub(crate) fn finish_restore(
+        &mut self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+        entity: Entity,
+        disposition: RestoreDisposition,
+    ) -> bool {
+        let Some(recovery) = self.entries.get_mut(window_key) else {
+            return false;
+        };
+        if recovery.generation != generation || recovery.phase != FallbackAndReturnPhase::Restoring
+        {
+            return false;
+        }
+        recovery.phase = match disposition {
+            RestoreDisposition::Succeeded => FallbackAndReturnPhase::Healthy,
+            RestoreDisposition::Failed => recovery.fallback_before_restore.take().map_or_else(
+                || fallback_phase(Some(entity), ReturnIntent::Active),
+                FallbackAndReturnPhase::RetryableFailure,
+            ),
+        };
+        recovery.fallback_before_restore = None;
+        true
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -218,7 +303,7 @@ pub(crate) struct AutomaticRestoreIntents {
 }
 
 impl AutomaticRestoreIntents {
-    fn enqueue(
+    pub(crate) fn enqueue(
         &mut self,
         window_key: WindowKey,
         generation: RecoveryGeneration,
@@ -252,6 +337,14 @@ impl AutomaticRestoreIntents {
         {
             self.entries.remove(window_key);
         }
+    }
+
+    pub(crate) fn pending(&self) -> impl Iterator<Item = (&WindowKey, &AutomaticRestoreIntent)> {
+        self.entries.iter()
+    }
+
+    pub(crate) fn consume(&mut self, window_key: &WindowKey, generation: RecoveryGeneration) {
+        self.clear(window_key, generation);
     }
 
     #[cfg(test)]
@@ -298,7 +391,7 @@ pub(crate) fn fallback_and_return_snapshot(
         .resource::<FallbackAndReturnRecoveries>()
         .entries
         .get(window_key)?;
-    let (phase, fallback_monitor) = match &recovery.phase {
+    let (mut phase, fallback_monitor) = match &recovery.phase {
         FallbackAndReturnPhase::Healthy => (FallbackAndReturnPhaseSnapshot::Healthy, None),
         FallbackAndReturnPhase::RemovalPending => {
             (FallbackAndReturnPhaseSnapshot::RemovalPending, None)
@@ -344,6 +437,9 @@ pub(crate) fn fallback_and_return_snapshot(
                 monitor:  intent.monitor,
                 revision: intent.revision,
             });
+    if phase == FallbackAndReturnPhaseSnapshot::MissingLiveWindow && intent.is_some() {
+        phase = FallbackAndReturnPhaseSnapshot::Restoring;
+    }
     Some(FallbackAndReturnSnapshot {
         phase,
         fallback_monitor,
@@ -433,7 +529,6 @@ pub(super) fn evaluate_topology(
                         monitor,
                         *revision,
                     );
-                    recovery.phase = FallbackAndReturnPhase::Restoring;
                 },
                 FallbackAndReturnPhase::Healthy
                 | FallbackAndReturnPhase::Restoring
@@ -551,7 +646,7 @@ fn adopt_user_placement(
     }
 }
 
-pub(super) fn advance_fallback_windows(
+pub(crate) fn advance_fallback_windows(
     time: Option<Res<Time<Virtual>>>,
     platform: Res<crate::Platform>,
     revision: Res<MonitorTopologyRevision>,
@@ -1102,7 +1197,10 @@ mod tests {
             .resource::<RecoveryRegistrations>()
             .by_key(&test_app.window_key)
             .map(|registration| registration.generation);
-        assert!(matches!(phase(test_app), FallbackAndReturnPhase::Restoring));
+        assert!(matches!(
+            phase(test_app),
+            FallbackAndReturnPhase::FallbackSettling(_)
+        ));
         assert_eq!(
             test_app
                 .app
@@ -2290,7 +2388,7 @@ mod tests {
         test_app.app.update();
         assert!(matches!(
             phase(&test_app),
-            FallbackAndReturnPhase::Restoring
+            FallbackAndReturnPhase::OnFallback(_)
         ));
 
         test_app
@@ -2332,7 +2430,7 @@ mod tests {
 
         assert!(matches!(
             phase(&test_app),
-            FallbackAndReturnPhase::Restoring
+            FallbackAndReturnPhase::MissingLiveWindow(_)
         ));
         let intent = test_app
             .app
@@ -2395,7 +2493,10 @@ mod tests {
             recovery.topology_evaluations,
             evaluations_before_replacement + 1,
         );
-        assert!(matches!(recovery.phase, FallbackAndReturnPhase::Restoring));
+        assert!(matches!(
+            recovery.phase,
+            FallbackAndReturnPhase::FallbackSettling(_)
+        ));
         assert_eq!(
             test_app
                 .app
@@ -2483,7 +2584,7 @@ mod tests {
         );
         assert!(matches!(
             phase(&test_app),
-            FallbackAndReturnPhase::Restoring
+            FallbackAndReturnPhase::OnFallback(_)
         ));
         assert_eq!(
             test_app

@@ -11,13 +11,12 @@ use crate::RestoreWindow;
 use crate::WindowKey;
 use crate::WindowRecoveryAvailable;
 use crate::WindowRecoveryPending;
-use crate::WindowRestoreMismatch;
-use crate::WindowRestored;
 use crate::monitors::MonitorId;
 use crate::monitors::MonitorInfo;
 use crate::monitors::MonitorTopologyRevision;
 use crate::monitors::Monitors;
 use crate::persistence::CapturedWindowStates;
+use crate::restore::RestoreDisposition;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ApplicationControlledPhase {
@@ -43,8 +42,17 @@ enum ApplicationControlledNotification {
 }
 
 #[derive(Default, Resource)]
-pub(super) struct ApplicationControlledRecoveries {
+pub(crate) struct ApplicationControlledRecoveries {
     entries: HashMap<WindowKey, ApplicationControlledRecovery>,
+}
+
+#[derive(Default, Resource)]
+pub(crate) struct ExplicitRestoreRequests {
+    entities: Vec<Entity>,
+}
+
+impl ExplicitRestoreRequests {
+    pub(crate) fn drain(&mut self) -> impl Iterator<Item = Entity> + '_ { self.entities.drain(..) }
 }
 
 impl ApplicationControlledRecoveries {
@@ -80,6 +88,87 @@ impl ApplicationControlledRecoveries {
         {
             self.entries.remove(window_key);
         }
+    }
+
+    pub(crate) fn can_begin_restore(
+        &self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+    ) -> bool {
+        self.entries.get(window_key).is_some_and(|recovery| {
+            recovery.generation == generation
+                && matches!(
+                    recovery.phase,
+                    ApplicationControlledPhase::TargetAvailable
+                        | ApplicationControlledPhase::RetryableFailure
+                )
+        })
+    }
+
+    pub(crate) fn begin_restore(
+        &mut self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+    ) -> bool {
+        let Some(recovery) = self.entries.get_mut(window_key) else {
+            return false;
+        };
+        if recovery.generation != generation
+            || !matches!(
+                recovery.phase,
+                ApplicationControlledPhase::TargetAvailable
+                    | ApplicationControlledPhase::RetryableFailure
+            )
+        {
+            return false;
+        }
+        recovery.phase = ApplicationControlledPhase::Restoring;
+        true
+    }
+
+    pub(crate) fn finish_restore(
+        &mut self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+        disposition: RestoreDisposition,
+    ) -> bool {
+        let Some(recovery) = self.entries.get_mut(window_key) else {
+            return false;
+        };
+        if recovery.generation != generation
+            || recovery.phase != ApplicationControlledPhase::Restoring
+        {
+            return false;
+        }
+        recovery.phase = match disposition {
+            RestoreDisposition::Succeeded => ApplicationControlledPhase::Healthy,
+            RestoreDisposition::Failed => ApplicationControlledPhase::RetryableFailure,
+        };
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_restoring(
+        &self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+    ) -> bool {
+        self.entries.get(window_key).is_some_and(|recovery| {
+            recovery.generation == generation
+                && recovery.phase == ApplicationControlledPhase::Restoring
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_healthy(
+        &self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+    ) -> bool {
+        self.entries.get(window_key).is_some_and(|recovery| {
+            recovery.generation == generation
+                && recovery.phase == ApplicationControlledPhase::Healthy
+        })
     }
 }
 
@@ -160,62 +249,9 @@ pub(super) fn emit_topology_notifications(
 
 pub(super) fn on_restore_window(
     restore: On<RestoreWindow>,
-    mut registrations: ResMut<RecoveryRegistrations>,
-    mut recoveries: ResMut<ApplicationControlledRecoveries>,
+    mut requests: ResMut<ExplicitRestoreRequests>,
 ) {
-    let Some(registration) = registrations.by_entity_mut(restore.entity) else {
-        return;
-    };
-    if registration.policy != WindowRecovery::ApplicationControlled {
-        return;
-    }
-    let Some(recovery) = recoveries.entries.get_mut(&registration.window_key) else {
-        return;
-    };
-    if recovery.generation == registration.generation
-        && matches!(
-            recovery.phase,
-            ApplicationControlledPhase::TargetAvailable
-                | ApplicationControlledPhase::RetryableFailure
-        )
-    {
-        recovery.phase = ApplicationControlledPhase::Restoring;
-    }
-}
-
-pub(super) fn on_window_restored(
-    restored: On<WindowRestored>,
-    registrations: Res<RecoveryRegistrations>,
-    mut recoveries: ResMut<ApplicationControlledRecoveries>,
-) {
-    let Some(registration) = registrations
-        .registered()
-        .find(|registration| registration.entity == Some(restored.entity))
-    else {
-        return;
-    };
-    if let Some(recovery) = recoveries.entries.get_mut(&registration.window_key)
-        && recovery.generation == registration.generation
-        && recovery.phase == ApplicationControlledPhase::Restoring
-    {
-        recovery.phase = ApplicationControlledPhase::Healthy;
-    }
-}
-
-pub(super) fn on_window_restore_mismatch(
-    mismatch: On<WindowRestoreMismatch>,
-    mut registrations: ResMut<RecoveryRegistrations>,
-    mut recoveries: ResMut<ApplicationControlledRecoveries>,
-) {
-    let Some(registration) = registrations.by_entity_mut(mismatch.entity) else {
-        return;
-    };
-    if let Some(recovery) = recoveries.entries.get_mut(&registration.window_key)
-        && recovery.generation == registration.generation
-        && recovery.phase == ApplicationControlledPhase::Restoring
-    {
-        recovery.phase = ApplicationControlledPhase::RetryableFailure;
-    }
+    requests.entities.push(restore.entity);
 }
 
 #[cfg(test)]
