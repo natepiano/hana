@@ -15,9 +15,11 @@ pub(crate) use restore_attempt::cancel_restore;
 use restore_attempt::clear_native_window_ready;
 pub(crate) use restore_attempt::mark_native_window_ready;
 pub(crate) use restore_attempt::prepare_restore_targets;
+pub(crate) use restore_attempt::reconcile_runtime_restore_attempts;
 pub(crate) use settle_state::check_restore_settling;
 pub(crate) use target_position::FullscreenRestoreState;
 pub(crate) use target_position::MonitorScaleStrategy;
+use target_position::ObservedScaleInputs;
 #[cfg(any(test, all(target_os = "linux", feature = "workaround-winit-4445")))]
 pub(crate) use target_position::TargetPosition;
 pub(crate) use target_position::WindowRestoreState;
@@ -40,6 +42,7 @@ pub(crate) struct RestorePlugin;
 impl Plugin for RestorePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RestoreAttemptIds>()
+            .init_resource::<ObservedScaleInputs>()
             .init_resource::<Time<Virtual>>()
             .add_observer(mark_native_window_ready)
             .add_observer(clear_native_window_ready)
@@ -65,6 +68,9 @@ impl Plugin for RestorePlugin {
         app.add_systems(
             Update,
             (
+                // Stamp `WindowScaleFactorChanged` with the current `RestoreAttemptId`
+                // before `RecoveryTopology` can replace `RestorePreparation`.
+                target_position::capture_scale_inputs.in_set(ClerestoryUpdateSet::MonitorTopology),
                 (
                     restore_attempt::accept_explicit_restore_requests,
                     restore_attempt::accept_automatic_restore_intents,
@@ -75,6 +81,8 @@ impl Plugin for RestorePlugin {
                     .after(recovery::advance_fallback_windows)
                     .in_set(ClerestoryUpdateSet::RecoveryWindow),
                 (
+                    restore_attempt::timeout_runtime_restore_attempts,
+                    ApplyDeferred,
                     restore_attempt::reject_stale_restore_attempts,
                     ApplyDeferred,
                     prepare_restore_targets,

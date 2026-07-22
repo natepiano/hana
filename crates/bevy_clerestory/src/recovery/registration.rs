@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "monitor-probe")]
+use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::window::ClosingWindow;
 use bevy::window::OnMonitor;
@@ -13,6 +15,7 @@ use super::fallback_and_return::FallbackAndReturnRecoveries;
 #[cfg(feature = "monitor-probe")]
 use super::monitor_probe::RecoveryAcceptanceProbeRecord;
 use crate::CancelWindowRecovery;
+use crate::ManagedWindow;
 use crate::ManagedWindowPersistence;
 use crate::WindowKey;
 use crate::managed::ManagedWindowRegistry;
@@ -58,7 +61,7 @@ struct PendingRegistration {
     policy:     WindowRecovery,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CanonicalWindowRole {
     Primary,
     Managed,
@@ -68,6 +71,12 @@ pub(crate) enum CanonicalWindowRole {
 pub(crate) enum PrimaryPresence {
     Present,
     Absent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReplacementBinding {
+    Bound,
+    Rejected,
 }
 
 #[derive(Clone, Debug)]
@@ -115,7 +124,6 @@ impl RecoveryRegistrations {
         self.registered.values_mut()
     }
 
-    #[cfg(test)]
     pub(super) fn registered(&self) -> impl Iterator<Item = &RegisteredWindow> {
         self.registered.values()
     }
@@ -132,6 +140,25 @@ impl RecoveryRegistrations {
 
     pub(crate) fn by_key_mut(&mut self, window_key: &WindowKey) -> Option<&mut RegisteredWindow> {
         self.registered.get_mut(window_key)
+    }
+
+    pub(crate) fn bind_replacement(
+        &mut self,
+        window_key: &WindowKey,
+        generation: RecoveryGeneration,
+        entity: Entity,
+    ) -> ReplacementBinding {
+        let Some(registration) = self.registered.get_mut(window_key) else {
+            return ReplacementBinding::Rejected;
+        };
+        if registration.generation != generation
+            || registration.policy != WindowRecovery::FallbackAndReturn
+            || registration.entity.is_some()
+        {
+            return ReplacementBinding::Rejected;
+        }
+        registration.entity = Some(entity);
+        ReplacementBinding::Bound
     }
 
     fn remove_key(&mut self, window_key: &WindowKey) -> Option<RegisteredWindow> {
@@ -236,7 +263,7 @@ pub(crate) fn accept_eligible_registrations(
     revision: Res<MonitorTopologyRevision>,
     mut captured_window_states: ResMut<CapturedWindowStates>,
     platform: Res<crate::Platform>,
-    #[cfg(feature = "monitor-probe")] frame_count: Option<Res<bevy::diagnostic::FrameCount>>,
+    #[cfg(feature = "monitor-probe")] frame_count: Option<Res<FrameCount>>,
 ) {
     let pending: Vec<_> = registrations.pending.values().cloned().collect();
     for pending_registration in pending {
@@ -336,6 +363,8 @@ pub(crate) fn accept_eligible_registrations(
 
 pub(super) fn on_window_removed(
     removed: On<Remove, Window>,
+    mut commands: Commands,
+    mut managed_window_registry: ResMut<ManagedWindowRegistry>,
     mut registrations: ResMut<RecoveryRegistrations>,
     mut application_controlled: ResMut<ApplicationControlledRecoveries>,
     mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,
@@ -346,6 +375,7 @@ pub(super) fn on_window_removed(
     let Some(registration) = registrations.by_entity_mut(removed.entity) else {
         return;
     };
+    let role = registration.role;
     registration.entity = None;
     captured_window_states.freeze(&registration.window_key);
     application_controlled.window_removed(&registration.window_key, registration.generation);
@@ -354,6 +384,20 @@ pub(super) fn on_window_removed(
         registration.generation,
         &mut restore_intents,
     );
+    match role {
+        CanonicalWindowRole::Primary => {
+            commands
+                .entity(removed.entity)
+                .try_remove::<PrimaryWindow>();
+        },
+        CanonicalWindowRole::Managed => {
+            managed_window_registry.release(removed.entity);
+            commands
+                .entity(removed.entity)
+                .try_remove::<ManagedWindow>();
+        },
+    }
+    restore::cancel_restore(&mut commands, removed.entity);
 }
 
 pub(super) fn on_cancel_window_recovery(
@@ -429,24 +473,34 @@ pub(super) fn record_os_close_intent(
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "monitor-probe")]
+    use bevy::diagnostic::FrameCount;
+    #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::Registry;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::prelude::*;
     use bevy::reflect::TypePath;
+    #[cfg(feature = "monitor-probe")]
+    use bevy::window::WindowMode;
 
+    #[cfg(feature = "monitor-probe")]
+    use self::example_probe::trace as example_trace;
+    #[cfg(feature = "monitor-probe")]
+    use self::example_probe::trace::TraceRecord;
     use super::*;
     use crate::ManagedWindow;
     use crate::Platform;
     use crate::RestoreWindow;
     use crate::WindowRecoveryAvailable;
     use crate::WindowRecoveryPending;
-    use crate::managed::on_managed_window_added;
-    use crate::managed::on_managed_window_removed;
+    use crate::managed;
     use crate::persistence;
+    #[cfg(feature = "monitor-probe")]
+    use crate::persistence::CapturedWindowPlacement;
     #[cfg(feature = "monitor-probe")]
     use crate::persistence::CapturedWindowPosition;
     #[cfg(feature = "monitor-probe")]
     use crate::persistence::SavedWindowMode;
+    use crate::recovery::RecoveryPlugin;
 
     #[cfg(feature = "monitor-probe")]
     mod example_probe {
@@ -488,19 +542,16 @@ mod tests {
         .insert_resource(ManagedWindowPersistence::RememberAll)
         .init_resource::<ManagedWindowRegistry>()
         .init_resource::<CapturedWindowStates>()
-        .add_plugins(crate::recovery::RecoveryPlugin)
+        .add_plugins(RecoveryPlugin)
         .add_observer(persistence::on_primary_window_removed)
         .add_observer(persistence::on_window_removed)
-        .add_observer(on_managed_window_added)
-        .add_observer(on_managed_window_removed);
+        .add_observer(managed::on_managed_window_added)
+        .add_observer(managed::on_managed_window_removed);
         app
     }
 
     #[cfg(feature = "monitor-probe")]
-    fn trace_field<'a>(
-        record: &'a example_probe::trace::TraceRecord,
-        name: &str,
-    ) -> Option<&'a str> {
+    fn trace_field<'a>(record: &'a TraceRecord, name: &str) -> Option<&'a str> {
         record
             .fields
             .iter()
@@ -510,7 +561,7 @@ mod tests {
 
     #[cfg(feature = "monitor-probe")]
     fn assert_acceptance_record(
-        record: &example_probe::trace::TraceRecord,
+        record: &TraceRecord,
         entity: Entity,
         monitor_entity: Entity,
         monitor: MonitorInfo,
@@ -775,15 +826,6 @@ mod tests {
     #[cfg(feature = "monitor-probe")]
     #[test]
     fn acceptance_probe_waits_for_core_acceptance_and_emits_the_copied_baseline_once() {
-        use bevy::diagnostic::FrameCount;
-        use bevy::window::WindowMode;
-
-        use self::example_probe::trace as example_trace;
-        use crate::monitors::CurrentMonitor;
-        use crate::monitors::MonitorId;
-        use crate::persistence::CapturedWindowPlacement;
-        use crate::restore::NativeWindowReady;
-
         let monitor = MonitorInfo {
             identity:          MonitorIdentity::Verified(MonitorId::from_test_raw(17)),
             index:             1,
@@ -802,7 +844,7 @@ mod tests {
             .init_resource::<FrameCount>()
             .init_resource::<ManagedWindowRegistry>()
             .init_resource::<CapturedWindowStates>()
-            .add_plugins(crate::recovery::RecoveryPlugin)
+            .add_plugins(RecoveryPlugin)
             .add_observer(example_trace::on_monitor_connected)
             .add_observer(example_trace::on_monitor_disconnected);
         let entity = app

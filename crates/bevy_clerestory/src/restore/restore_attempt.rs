@@ -19,9 +19,9 @@ use crate::Platform;
 use crate::WindowKey;
 use crate::WindowRestoreMismatch;
 use crate::WindowRestored;
+use crate::constants::RUNTIME_RESTORE_TIMEOUT_SECS;
 #[cfg(test)]
 use crate::constants::SCALE_FACTOR_EPSILON;
-use crate::constants::SETTLE_TIMEOUT_SECS;
 use crate::managed::ManagedWindowRegistry;
 use crate::monitors;
 use crate::monitors::CurrentMonitor;
@@ -34,6 +34,7 @@ use crate::persistence::CapturedWindowPlacement;
 use crate::persistence::CapturedWindowStates;
 use crate::persistence::PersistedWindowState;
 use crate::persistence::RebasedCapturedPosition;
+use crate::recovery;
 use crate::recovery::ApplicationControlledRecoveries;
 use crate::recovery::AutomaticRestoreIntent;
 use crate::recovery::AutomaticRestoreIntents;
@@ -44,7 +45,8 @@ use crate::recovery::PrimaryPresence;
 use crate::recovery::RecoveryGeneration;
 use crate::recovery::RecoveryRegistrations;
 use crate::recovery::WindowRecovery;
-use crate::recovery::canonical_window;
+#[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
+use crate::x11_position_fix::X11FrameTop;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
 pub(crate) struct RestoreAttemptId(u64);
@@ -69,6 +71,12 @@ pub(crate) struct RestoreAttempt {
 pub(crate) enum RestoreDisposition {
     Succeeded,
     Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RestoreAttemptStatus {
+    Current,
+    Stale,
 }
 
 #[derive(Clone, Copy)]
@@ -192,14 +200,17 @@ type RestoreAttemptComponents = (
     RestorePreparation,
     TargetPosition,
     X11FrameCompensated,
-    crate::x11_position_fix::X11FrameTop,
+    X11FrameTop,
 );
 
 #[cfg(not(all(target_os = "linux", feature = "workaround-winit-4445")))]
 type RestoreAttemptComponents = (RestorePreparation, TargetPosition, X11FrameCompensated);
 
 pub(crate) fn cancel_restore(commands: &mut Commands, entity: Entity) {
-    commands.entity(entity).queue(|mut entity: EntityWorldMut| {
+    commands.queue(move |world: &mut World| {
+        let Ok(mut entity) = world.get_entity_mut(entity) else {
+            return;
+        };
         entity.remove::<RestoreAttemptComponents>();
         if let Some(mut window) = entity.get_mut::<Window>() {
             window.visible = true;
@@ -208,7 +219,7 @@ pub(crate) fn cancel_restore(commands: &mut Commands, entity: Entity) {
 }
 
 fn restore_deadline(time: &Time<Virtual>) -> Duration {
-    time.elapsed() + Duration::from_secs_f32(SETTLE_TIMEOUT_SECS)
+    time.elapsed() + Duration::from_secs_f32(RUNTIME_RESTORE_TIMEOUT_SECS)
 }
 
 fn canonical_request(
@@ -216,7 +227,7 @@ fn canonical_request(
     primary_windows: &Query<(), With<PrimaryWindow>>,
     managed_window_registry: &ManagedWindowRegistry,
 ) -> Option<(WindowKey, CanonicalWindowRole)> {
-    canonical_window(
+    recovery::canonical_window(
         entity,
         if primary_windows.contains(entity) {
             PrimaryPresence::Present
@@ -352,7 +363,7 @@ pub(crate) fn accept_automatic_restore_intents(
             topology_revision: intent.revision,
             deadline: restore_deadline(&time),
         };
-        if !recoveries.begin_restore(&window_key, intent.generation) {
+        if !recoveries.begin_restore(&window_key, intent.generation, entity) {
             continue;
         }
         restore_intents.consume(&window_key, intent.generation);
@@ -362,14 +373,14 @@ pub(crate) fn accept_automatic_restore_intents(
     }
 }
 
-fn restore_attempt_is_current(
+pub(crate) fn restore_attempt_is_current(
     restore_attempt: &RestoreAttempt,
     entity: Entity,
     registrations: &RecoveryRegistrations,
     monitors: &Monitors,
     revision: MonitorTopologyRevision,
-) -> bool {
-    restore_attempt.entity == entity
+) -> RestoreAttemptStatus {
+    if restore_attempt.entity == entity
         && restore_attempt.topology_revision == revision
         && monitors.by_id(restore_attempt.expected_monitor).is_some()
         && registrations
@@ -379,11 +390,176 @@ fn restore_attempt_is_current(
                     && registration.generation == restore_attempt.generation
                     && registration.monitor_id == restore_attempt.expected_monitor
             })
+    {
+        RestoreAttemptStatus::Current
+    } else {
+        RestoreAttemptStatus::Stale
+    }
+}
+
+fn finalize_runtime_restore(
+    commands: &mut Commands,
+    restore_attempt: &RestoreAttempt,
+    disposition: RestoreDisposition,
+    failure_revision: MonitorTopologyRevision,
+    registrations: &RecoveryRegistrations,
+    application_controlled: &mut ApplicationControlledRecoveries,
+    fallback_and_return: &mut FallbackAndReturnRecoveries,
+) {
+    finish_recovery_lifecycle(
+        restore_attempt,
+        disposition,
+        failure_revision,
+        registrations,
+        application_controlled,
+        fallback_and_return,
+    );
+    cancel_restore(commands, restore_attempt.entity);
+}
+
+fn finalize_target_loss(
+    commands: &mut Commands,
+    restore_attempt: &RestoreAttempt,
+    registrations: &RecoveryRegistrations,
+    application_controlled: &mut ApplicationControlledRecoveries,
+    fallback_and_return: &mut FallbackAndReturnRecoveries,
+) {
+    if let Some(registration) = registrations.by_key(&restore_attempt.window_key) {
+        match registration.policy {
+            WindowRecovery::ApplicationControlled => {
+                application_controlled.finish_restore(
+                    &restore_attempt.window_key,
+                    restore_attempt.generation,
+                    RestoreDisposition::Failed,
+                );
+            },
+            WindowRecovery::FallbackAndReturn => {
+                fallback_and_return.target_lost(
+                    &restore_attempt.window_key,
+                    restore_attempt.generation,
+                    restore_attempt.entity,
+                );
+            },
+            WindowRecovery::Disabled => {},
+        }
+    }
+    cancel_restore(commands, restore_attempt.entity);
+}
+
+pub(crate) fn reconcile_runtime_restore_attempts(
+    mut commands: Commands,
+    preparations: Query<(Entity, &RestorePreparation, Has<Window>)>,
+    registrations: Res<RecoveryRegistrations>,
+    monitors: Res<Monitors>,
+    revision: Res<MonitorTopologyRevision>,
+    time: Option<Res<Time<Virtual>>>,
+    ids: Option<ResMut<RestoreAttemptIds>>,
+    mut application_controlled: ResMut<ApplicationControlledRecoveries>,
+    mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,
+) {
+    let (Some(time), Some(mut ids)) = (time, ids) else {
+        return;
+    };
+    for (entity, restore_preparation, has_window) in &preparations {
+        let RestoreOrigin::Recovery(restore_attempt) = restore_preparation.origin() else {
+            continue;
+        };
+        if restore_attempt.topology_revision == *revision {
+            continue;
+        }
+        let registration_matches = registrations
+            .by_key(&restore_attempt.window_key)
+            .is_some_and(|registration| {
+                registration.entity == Some(entity)
+                    && registration.generation == restore_attempt.generation
+                    && registration.monitor_id == restore_attempt.expected_monitor
+            });
+        if !has_window || !registration_matches {
+            cancel_restore(&mut commands, entity);
+            continue;
+        }
+        if time.elapsed() >= restore_attempt.deadline {
+            finalize_runtime_restore(
+                &mut commands,
+                restore_attempt,
+                RestoreDisposition::Failed,
+                *revision,
+                &registrations,
+                &mut application_controlled,
+                &mut fallback_and_return,
+            );
+            continue;
+        }
+        if monitors.by_id(restore_attempt.expected_monitor).is_none() {
+            finalize_target_loss(
+                &mut commands,
+                restore_attempt,
+                &registrations,
+                &mut application_controlled,
+                &mut fallback_and_return,
+            );
+            continue;
+        }
+        let Some(id) = ids.allocate() else {
+            finalize_runtime_restore(
+                &mut commands,
+                restore_attempt,
+                RestoreDisposition::Failed,
+                *revision,
+                &registrations,
+                &mut application_controlled,
+                &mut fallback_and_return,
+            );
+            continue;
+        };
+        let replanned_attempt = RestoreAttempt {
+            id,
+            window_key: restore_attempt.window_key.clone(),
+            entity,
+            generation: restore_attempt.generation,
+            expected_monitor: restore_attempt.expected_monitor,
+            topology_revision: *revision,
+            deadline: restore_attempt.deadline,
+        };
+        cancel_restore(&mut commands, entity);
+        commands
+            .entity(entity)
+            .insert(RestorePreparation::recovery(replanned_attempt));
+    }
+}
+
+pub(crate) fn timeout_runtime_restore_attempts(
+    mut commands: Commands,
+    preparations: Query<&RestorePreparation>,
+    time: Res<Time<Virtual>>,
+    revision: Res<MonitorTopologyRevision>,
+    registrations: Res<RecoveryRegistrations>,
+    mut application_controlled: ResMut<ApplicationControlledRecoveries>,
+    mut fallback_and_return: ResMut<FallbackAndReturnRecoveries>,
+) {
+    for restore_preparation in &preparations {
+        let RestoreOrigin::Recovery(restore_attempt) = restore_preparation.origin() else {
+            continue;
+        };
+        if time.elapsed() < restore_attempt.deadline {
+            continue;
+        }
+        finalize_runtime_restore(
+            &mut commands,
+            restore_attempt,
+            RestoreDisposition::Failed,
+            *revision,
+            &registrations,
+            &mut application_controlled,
+            &mut fallback_and_return,
+        );
+    }
 }
 
 fn finish_recovery_lifecycle(
     restore_attempt: &RestoreAttempt,
     disposition: RestoreDisposition,
+    failure_revision: MonitorTopologyRevision,
     registrations: &RecoveryRegistrations,
     application_controlled: &mut ApplicationControlledRecoveries,
     fallback_and_return: &mut FallbackAndReturnRecoveries,
@@ -400,8 +576,8 @@ fn finish_recovery_lifecycle(
         WindowRecovery::FallbackAndReturn => fallback_and_return.finish_restore(
             &restore_attempt.window_key,
             restore_attempt.generation,
-            restore_attempt.entity,
             disposition,
+            failure_revision,
         ),
         WindowRecovery::Disabled => false,
     }
@@ -426,17 +602,19 @@ pub(crate) fn reject_stale_restore_attempts(
             &registrations,
             &monitors,
             *revision,
-        ) {
+        ) == RestoreAttemptStatus::Current
+        {
             continue;
         }
-        finish_recovery_lifecycle(
+        finalize_runtime_restore(
+            &mut commands,
             restore_attempt,
             RestoreDisposition::Failed,
+            *revision,
             &registrations,
             &mut application_controlled,
             &mut fallback_and_return,
         );
-        cancel_restore(&mut commands, entity);
     }
 }
 
@@ -480,13 +658,13 @@ pub(crate) fn validate_runtime_restore_completion(
         return;
     };
     if restore_preparation.origin() != &RestoreOrigin::Recovery(completion.restore_attempt.clone())
-        || !restore_attempt_is_current(
+        || restore_attempt_is_current(
             &completion.restore_attempt,
             completion.entity,
             &registrations,
             &monitors,
             *revision,
-        )
+        ) == RestoreAttemptStatus::Stale
     {
         return;
     }
@@ -497,6 +675,7 @@ pub(crate) fn validate_runtime_restore_completion(
     if !finish_recovery_lifecycle(
         &completion.restore_attempt,
         disposition,
+        *revision,
         &registrations,
         &mut application_controlled,
         &mut fallback_and_return,
@@ -739,29 +918,38 @@ pub(crate) fn prepare_restore_targets(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use std::collections::HashMap;
 
     use bevy::time::TimePlugin;
     use bevy::time::TimeUpdateStrategy;
+    use bevy::window::ClosingWindow;
+    use bevy::window::ExitCondition;
     use bevy::window::OnMonitor;
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
+    use bevy::window::WindowPlugin;
     use bevy::window::WindowPosition;
     use bevy::window::WindowScaleFactorChanged;
     use bevy_kana::ToF32;
+    use bevy_kana::ToI32;
+    use tempfile::NamedTempFile;
 
     use super::*;
     use crate::CancelWindowRecovery;
+    use crate::ClerestoryUpdateSet;
     use crate::ManagedWindow;
     use crate::ManagedWindowPersistence;
     use crate::WindowRecovery;
     use crate::WindowRestoreMismatch;
     use crate::WindowRestored;
+    use crate::constants::SETTLE_STABILITY_SECS;
+    use crate::managed;
     use crate::managed::ManagedWindowRegistry;
-    use crate::managed::on_managed_window_added;
-    use crate::managed::on_managed_window_load;
-    use crate::managed::on_managed_window_removed;
     use crate::monitors::InjectedCurrentMonitorSource;
     use crate::monitors::MonitorId;
     use crate::monitors::MonitorTopologyRevision;
@@ -769,13 +957,17 @@ mod tests {
     use crate::persistence::CapturedWindowPosition;
     use crate::persistence::PersistencePlugin;
     use crate::persistence::SavedWindowMode;
+    use crate::recovery;
+    use crate::recovery::FallbackAndReturnPhaseSnapshot;
     use crate::recovery::RecoveryGeneration;
     use crate::recovery::RecoveryPlugin;
+    use crate::restore;
     use crate::restore::RestorePlugin;
-    use crate::restore::restore_windows;
     use crate::restore::settle_state::SettleState;
+    use crate::restore::target_position::FullscreenRestoreState;
     use crate::restore::target_position::InjectedWinitWindows;
     use crate::restore::target_position::MonitorScaleStrategy;
+    use crate::restore::target_position::ObservedScaleInputs;
     use crate::restore::target_position::WindowRestoreState;
     use crate::restore_window_config::RestoreWindowConfig;
 
@@ -977,7 +1169,7 @@ mod tests {
         target:          MonitorInfo,
         fallback:        MonitorInfo,
         placement:       CapturedWindowPlacement,
-        _state_file:     tempfile::NamedTempFile,
+        state_file:      NamedTempFile,
     }
 
     fn runtime_test_app(window_recovery: WindowRecovery) -> RuntimeTestApp {
@@ -988,15 +1180,15 @@ mod tests {
         app.configure_sets(
             Update,
             (
-                crate::ClerestoryUpdateSet::MonitorTopology,
-                crate::ClerestoryUpdateSet::RecoveryTopology,
-                crate::ClerestoryUpdateSet::CurrentMonitor,
-                crate::ClerestoryUpdateSet::RecoveryWindow,
-                crate::ClerestoryUpdateSet::RestorePreparation,
-                crate::ClerestoryUpdateSet::X11Compensation,
-                crate::ClerestoryUpdateSet::RestoreApplication,
-                crate::ClerestoryUpdateSet::RestoreSettling,
-                crate::ClerestoryUpdateSet::Persistence,
+                ClerestoryUpdateSet::MonitorTopology,
+                ClerestoryUpdateSet::RecoveryTopology,
+                ClerestoryUpdateSet::CurrentMonitor,
+                ClerestoryUpdateSet::RecoveryWindow,
+                ClerestoryUpdateSet::RestorePreparation,
+                ClerestoryUpdateSet::X11Compensation,
+                ClerestoryUpdateSet::RestoreApplication,
+                ClerestoryUpdateSet::RestoreSettling,
+                ClerestoryUpdateSet::Persistence,
             )
                 .chain(),
         )
@@ -1004,21 +1196,17 @@ mod tests {
             Update,
             (monitors::update_current_monitor, ApplyDeferred)
                 .chain()
-                .in_set(crate::ClerestoryUpdateSet::CurrentMonitor),
+                .in_set(ClerestoryUpdateSet::CurrentMonitor),
         );
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "runtime persistence tests require a writable temporary state file"
-    )]
     fn runtime_test_app_for(
         window_recovery: WindowRecovery,
         window_key: WindowKey,
     ) -> RuntimeTestApp {
         let mut app = App::new();
-        let state_file = tempfile::NamedTempFile::new()
-            .expect("runtime persistence state file should be available");
+        let state_file =
+            NamedTempFile::new().expect("runtime persistence state file should be available");
         let target_entity = app.world_mut().spawn_empty().id();
         let fallback_entity = app.world_mut().spawn_empty().id();
         let target = monitor(
@@ -1054,13 +1242,19 @@ mod tests {
         .init_resource::<RestoreOutcomeCounts>()
         .add_message::<WindowScaleFactorChanged>()
         .add_plugins(TimePlugin)
+        .add_plugins(WindowPlugin {
+            primary_window: None,
+            exit_condition: ExitCondition::DontExit,
+            ..default()
+        })
         .add_plugins(RecoveryPlugin)
         .add_plugins(PersistencePlugin)
         .add_plugins(RestorePlugin)
+        .add_observer(crate::visibility::hide_window_on_creation)
         .add_observer(monitors::install_current_monitor_from_association)
-        .add_observer(on_managed_window_added)
-        .add_observer(on_managed_window_removed)
-        .add_observer(on_managed_window_load)
+        .add_observer(managed::on_managed_window_added)
+        .add_observer(managed::on_managed_window_removed)
+        .add_observer(managed::on_managed_window_load)
         .add_observer(record_restored)
         .add_observer(record_mismatch);
         configure_runtime_update_schedule(&mut app);
@@ -1094,7 +1288,7 @@ mod tests {
         app.world_mut().entity_mut(window).insert(window_recovery);
         app.world_mut().flush();
         app.update();
-        RuntimeTestApp {
+        let test_app = RuntimeTestApp {
             app,
             window,
             window_key,
@@ -1103,8 +1297,10 @@ mod tests {
             target,
             fallback,
             placement,
-            _state_file: state_file,
-        }
+            state_file,
+        };
+        assert!(test_app.state_file.path().exists());
+        test_app
     }
 
     fn install_runtime_topology(
@@ -1123,9 +1319,9 @@ mod tests {
     fn settle_automatic_on_fallback(test_app: &mut RuntimeTestApp) {
         {
             let mut entity = test_app.app.world_mut().entity_mut(test_app.window);
-            let Some(mut window) = entity.get_mut::<Window>() else {
-                return;
-            };
+            let mut window = entity
+                .get_mut::<Window>()
+                .expect("the automatic fallback should retain its live window");
             window.position =
                 WindowPosition::At(test_app.fallback.physical_position + CAPTURED_OFFSET);
         }
@@ -1241,7 +1437,7 @@ mod tests {
     }
 
     #[test]
-    fn entityless_automatic_intent_remains_pending_without_a_target_position() {
+    fn entityless_automatic_intent_binds_a_shell_before_target_preparation() {
         let mut test_app = runtime_test_app(WindowRecovery::FallbackAndReturn);
         settle_automatic_on_fallback(&mut test_app);
         test_app
@@ -1253,14 +1449,17 @@ mod tests {
 
         return_target(&mut test_app, 2);
 
-        let intent = test_app
-            .app
-            .world()
-            .resource::<AutomaticRestoreIntents>()
-            .pending()
-            .next()
-            .map(|(_, intent)| intent.clone());
-        assert!(intent.is_some_and(|intent| intent.entity.is_none()));
+        let replacement = required_replacement(&test_app);
+        assert_ne!(replacement, test_app.window);
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<AutomaticRestoreIntents>()
+                .pending()
+                .next()
+                .is_none()
+        );
         assert!(
             test_app
                 .app
@@ -1272,7 +1471,14 @@ mod tests {
             test_app
                 .app
                 .world()
-                .get::<TargetPosition>(test_app.window)
+                .get::<RestorePreparation>(replacement)
+                .is_some_and(|preparation| preparation.recovery_attempt().is_some())
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<TargetPosition>(replacement)
                 .is_none()
         );
     }
@@ -1287,9 +1493,8 @@ mod tests {
             .resource::<RecoveryRegistrations>()
             .by_key(&test_app.window_key)
             .map(|registration| registration.generation);
-        let Some(generation) = generation else {
-            return;
-        };
+        assert!(generation.is_some());
+        let generation = generation.unwrap_or(RecoveryGeneration::from_test_raw(u64::MAX));
         test_app
             .app
             .world_mut()
@@ -1510,6 +1715,30 @@ mod tests {
             .cloned()
     }
 
+    fn required_restore_attempt(test_app: &RuntimeTestApp, entity: Entity) -> RestoreAttempt {
+        accepted_restore_attempt(test_app, entity)
+            .expect("the runtime restore attempt should have been accepted")
+    }
+
+    fn required_replacement(test_app: &RuntimeTestApp) -> Entity {
+        test_app
+            .app
+            .world()
+            .resource::<RecoveryRegistrations>()
+            .by_key(&test_app.window_key)
+            .and_then(|registration| registration.entity)
+            .expect("the recovery generation should have one bound replacement")
+    }
+
+    fn required_target_snapshot(test_app: &RuntimeTestApp, entity: Entity) -> TargetSnapshot {
+        test_app
+            .app
+            .world()
+            .get::<TargetPosition>(entity)
+            .map(TargetSnapshot::from)
+            .expect("the runtime restore should have a prepared target")
+    }
+
     fn restored_from_target(
         test_app: &RuntimeTestApp,
         entity: Entity,
@@ -1639,7 +1868,7 @@ mod tests {
             .app
             .world_mut()
             .resource_mut::<InjectedWinitWindows>()
-            .insert(test_app.window);
+            .extend([test_app.window]);
         let mut window = test_app
             .app
             .world_mut()
@@ -1761,7 +1990,834 @@ mod tests {
     }
 
     #[test]
-    fn stale_topology_revision_cannot_reach_restore_application() {
+    fn absolute_timeout_finalizes_and_rejects_the_old_completion_after_retry() {
+        let mut test_app = runtime_test_app(WindowRecovery::ApplicationControlled);
+        let replacement = prepare_application_replacement(&mut test_app);
+        let expired_attempt = required_restore_attempt(&test_app, replacement);
+        let target = required_target_snapshot(&test_app, replacement);
+
+        test_app
+            .app
+            .world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .advance_by(Duration::from_secs_f32(
+                RUNTIME_RESTORE_TIMEOUT_SECS + SETTLE_STABILITY_SECS,
+            ));
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        test_app.app.update();
+
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<RestorePreparation>(replacement)
+                .is_none()
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<TargetPosition>(replacement)
+                .is_none()
+        );
+        assert_eq!(restore_outcome_counts(&test_app), (0, 0));
+
+        request_application_restore(&mut test_app, replacement);
+        let retry_attempt = required_restore_attempt(&test_app, replacement);
+        assert_ne!(retry_attempt.id, expired_attempt.id);
+        assert!(retry_attempt.deadline > expired_attempt.deadline);
+
+        let stale_completion = restored_from_target(&test_app, replacement, &target);
+        test_app
+            .app
+            .world_mut()
+            .trigger(RuntimeRestoreCompletion::new(
+                expired_attempt,
+                RuntimeRestoreOutcome::Restored(stale_completion),
+            ));
+        test_app.app.world_mut().flush();
+
+        assert_eq!(
+            accepted_restore_attempt(&test_app, replacement),
+            Some(retry_attempt)
+        );
+        assert_eq!(restore_outcome_counts(&test_app), (0, 0));
+    }
+
+    #[test]
+    fn stable_runtime_mismatch_finalizes_once_without_a_frame_retry() {
+        let mut test_app = runtime_test_app(WindowRecovery::ApplicationControlled);
+        let replacement = prepare_application_replacement(&mut test_app);
+        let target = required_target_snapshot(&test_app, replacement);
+        assert!(stage_matching_settle(&mut test_app, replacement, &target));
+        let mut window = test_app
+            .app
+            .world_mut()
+            .get_mut::<Window>(replacement)
+            .expect("the replacement should remain a live window");
+        window.position = WindowPosition::At(STALE_SENTINEL_POSITION);
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        test_app.app.update();
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+                SETTLE_STABILITY_SECS,
+            )));
+        test_app.app.update();
+
+        assert_eq!(restore_outcome_counts(&test_app), (0, 1));
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<RestorePreparation>(replacement)
+                .is_none()
+        );
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        test_app.app.update();
+        assert_eq!(restore_outcome_counts(&test_app), (0, 1));
+    }
+
+    #[derive(Clone, Copy)]
+    enum AutomaticFailureScenario {
+        Timeout,
+        Mismatch,
+    }
+
+    fn cause_automatic_failure(
+        test_app: &mut RuntimeTestApp,
+        scenario: AutomaticFailureScenario,
+        target: &TargetSnapshot,
+    ) -> MonitorTopologyRevision {
+        match scenario {
+            AutomaticFailureScenario::Timeout => {
+                test_app
+                    .app
+                    .world_mut()
+                    .resource_mut::<Time<Virtual>>()
+                    .advance_by(Duration::from_secs_f32(
+                        RUNTIME_RESTORE_TIMEOUT_SECS + SETTLE_STABILITY_SECS,
+                    ));
+                let fallback = (test_app.fallback_entity, test_app.fallback);
+                let target_monitor = (test_app.target_entity, test_app.target);
+                install_runtime_topology(test_app, 3, [fallback, target_monitor]);
+            },
+            AutomaticFailureScenario::Mismatch => {
+                let window = test_app.window;
+                assert!(stage_matching_settle(test_app, window, target));
+                let mut window = test_app
+                    .app
+                    .world_mut()
+                    .get_mut::<Window>(test_app.window)
+                    .expect("the fallback should remain a live window");
+                window.position = WindowPosition::At(STALE_SENTINEL_POSITION);
+                test_app
+                    .app
+                    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+                test_app.app.update();
+                test_app
+                    .app
+                    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+                        SETTLE_STABILITY_SECS,
+                    )));
+            },
+        }
+        test_app
+            .app
+            .world_mut()
+            .write_message(WindowScaleFactorChanged {
+                window:       test_app.window,
+                scale_factor: target.target_scale,
+            });
+        test_app.app.update();
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        *test_app.app.world().resource::<MonitorTopologyRevision>()
+    }
+
+    fn assert_automatic_failure_is_waiting(test_app: &mut RuntimeTestApp) {
+        assert_eq!(
+            recovery::fallback_and_return_snapshot(test_app.app.world(), &test_app.window_key)
+                .map(|snapshot| snapshot.phase),
+            Some(FallbackAndReturnPhaseSnapshot::RestoreFailed),
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<AutomaticRestoreIntents>()
+                .get(&test_app.window_key)
+                .is_none()
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<RestorePreparation>(test_app.window)
+                .is_none()
+        );
+        test_app.app.update();
+        assert_eq!(
+            recovery::fallback_and_return_snapshot(test_app.app.world(), &test_app.window_key)
+                .map(|snapshot| snapshot.phase),
+            Some(FallbackAndReturnPhaseSnapshot::RestoreFailed),
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<AutomaticRestoreIntents>()
+                .get(&test_app.window_key)
+                .is_none()
+        );
+    }
+
+    fn start_later_automatic_retry(
+        test_app: &mut RuntimeTestApp,
+        target: &TargetSnapshot,
+        failed_attempt: &RestoreAttempt,
+        failure_revision: MonitorTopologyRevision,
+    ) -> RestoreAttempt {
+        let mut window = test_app
+            .app
+            .world_mut()
+            .get_mut::<Window>(test_app.window)
+            .expect("the fallback should remain a live window");
+        window.resolution.set_scale_factor(1.0);
+        test_app.app.init_resource::<InjectedWinitWindows>();
+        test_app
+            .app
+            .world_mut()
+            .resource_mut::<InjectedWinitWindows>()
+            .extend([test_app.window]);
+        let retry_revision = failure_revision.get() + 1;
+        let fallback = (test_app.fallback_entity, test_app.fallback);
+        let target_monitor = (test_app.target_entity, test_app.target);
+        install_runtime_topology(test_app, retry_revision, [fallback, target_monitor]);
+        test_app.app.update();
+        let retry_attempt = required_restore_attempt(test_app, test_app.window);
+        assert_ne!(retry_attempt.id, failed_attempt.id);
+        assert_eq!(retry_attempt.generation, failed_attempt.generation);
+        assert_eq!(retry_attempt.topology_revision.get(), retry_revision);
+
+        let mut window = test_app
+            .app
+            .world_mut()
+            .get_mut::<Window>(test_app.window)
+            .expect("the retry should retain its live window");
+        window
+            .resolution
+            .set_scale_factor(target.target_scale.to_f32());
+        test_app.app.update();
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<TargetPosition>(test_app.window)
+                .is_some_and(|target_position| matches!(
+                    target_position.monitor_scale_strategy,
+                    MonitorScaleStrategy::CompensateSizeOnly(
+                        WindowRestoreState::WaitingForScaleChange {
+                            attempt_id: Some(attempt_id),
+                        },
+                    ) if attempt_id == retry_attempt.id
+                ))
+        );
+        retry_attempt
+    }
+
+    fn assert_automatic_failure_waits_for_later_revision(scenario: AutomaticFailureScenario) {
+        let mut test_app = runtime_test_app(WindowRecovery::FallbackAndReturn);
+        settle_automatic_on_fallback(&mut test_app);
+        return_target(&mut test_app, 2);
+        let failed_attempt = required_restore_attempt(&test_app, test_app.window);
+        let target = required_target_snapshot(&test_app, test_app.window);
+
+        let failure_revision = cause_automatic_failure(&mut test_app, scenario, &target);
+        assert_automatic_failure_is_waiting(&mut test_app);
+        let retry_attempt =
+            start_later_automatic_retry(&mut test_app, &target, &failed_attempt, failure_revision);
+
+        let stale_completion = restored_from_target(&test_app, test_app.window, &target);
+        test_app
+            .app
+            .world_mut()
+            .trigger(RuntimeRestoreCompletion::new(
+                failed_attempt.clone(),
+                RuntimeRestoreOutcome::Restored(stale_completion),
+            ));
+        test_app.app.world_mut().flush();
+        assert_eq!(
+            accepted_restore_attempt(&test_app, test_app.window),
+            Some(retry_attempt),
+        );
+    }
+
+    #[test]
+    fn automatic_timeout_waits_for_a_later_matching_revision() {
+        assert_automatic_failure_waits_for_later_revision(AutomaticFailureScenario::Timeout);
+    }
+
+    #[test]
+    fn automatic_mismatch_waits_for_a_later_matching_revision() {
+        assert_automatic_failure_waits_for_later_revision(AutomaticFailureScenario::Mismatch);
+    }
+
+    #[test]
+    fn same_revision_replacement_loss_accepts_exactly_one_new_attempt() {
+        for window_key in [
+            WindowKey::Primary,
+            WindowKey::Managed("same-revision-secondary".to_string()),
+        ] {
+            let mut test_app =
+                runtime_test_app_for(WindowRecovery::FallbackAndReturn, window_key.clone());
+            settle_automatic_on_fallback(&mut test_app);
+            return_target(&mut test_app, 2);
+            let lost_attempt = required_restore_attempt(&test_app, test_app.window);
+            let generation = lost_attempt.generation;
+            let revision = lost_attempt.topology_revision;
+
+            test_app
+                .app
+                .world_mut()
+                .entity_mut(test_app.window)
+                .remove::<Window>();
+            test_app.app.world_mut().flush();
+            test_app.app.update();
+
+            match &window_key {
+                WindowKey::Primary => assert!(
+                    test_app
+                        .app
+                        .world()
+                        .get::<PrimaryWindow>(test_app.window)
+                        .is_none()
+                ),
+                WindowKey::Managed(_) => assert!(
+                    test_app
+                        .app
+                        .world()
+                        .get::<ManagedWindow>(test_app.window)
+                        .is_none()
+                ),
+            }
+            let replacement = required_replacement(&test_app);
+            let replacement_attempt = required_restore_attempt(&test_app, replacement);
+            assert_ne!(replacement, lost_attempt.entity);
+            assert_ne!(replacement_attempt.id, lost_attempt.id);
+            assert_eq!(replacement_attempt.generation, generation);
+            assert_eq!(replacement_attempt.topology_revision, revision);
+            assert!(
+                test_app
+                    .app
+                    .world()
+                    .get::<Window>(replacement)
+                    .is_some_and(|window| window.visible)
+            );
+            assert!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<AutomaticRestoreIntents>()
+                    .get(&test_app.window_key)
+                    .is_none()
+            );
+            let mut windows = test_app
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<Window>>();
+            assert_eq!(windows.iter(test_app.app.world()).count(), 1);
+            let mut preparations = test_app
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<RestorePreparation>>();
+            assert_eq!(preparations.iter(test_app.app.world()).count(), 1);
+        }
+    }
+
+    const LINKED_MANAGED_NAME: &str = "linked-secondary";
+
+    struct LinkedReplacementFixture {
+        managed_window: Entity,
+        keys:           [WindowKey; 2],
+        generations:    HashMap<WindowKey, RecoveryGeneration>,
+        captured:       HashMap<WindowKey, CapturedWindowPlacement>,
+        generated:      u64,
+    }
+
+    fn register_linked_windows(test_app: &mut RuntimeTestApp) -> LinkedReplacementFixture {
+        let managed_key = WindowKey::Managed(LINKED_MANAGED_NAME.to_string());
+        let target_entity = test_app.target_entity;
+        let target = test_app.target;
+        let managed_window = test_app
+            .app
+            .world_mut()
+            .spawn((
+                Window::default(),
+                ManagedWindow {
+                    name: LINKED_MANAGED_NAME.to_string(),
+                },
+                OnMonitor(target_entity),
+                CurrentMonitor {
+                    monitor_info:          target,
+                    effective_window_mode: WindowMode::Windowed,
+                },
+                NativeWindowReady,
+            ))
+            .id();
+        test_app.app.world_mut().flush();
+        let managed_placement = test_app.placement.clone();
+        test_app
+            .app
+            .world_mut()
+            .resource_mut::<CapturedWindowStates>()
+            .promote(managed_key.clone(), managed_window, managed_placement);
+        test_app
+            .app
+            .world_mut()
+            .entity_mut(managed_window)
+            .insert(WindowRecovery::FallbackAndReturn);
+        test_app.app.world_mut().flush();
+        test_app.app.update();
+
+        let primary_key = test_app.window_key.clone();
+        let keys = [primary_key, managed_key];
+        let generations: HashMap<_, _> = keys
+            .iter()
+            .filter_map(|window_key| {
+                test_app
+                    .app
+                    .world()
+                    .resource::<RecoveryRegistrations>()
+                    .by_key(window_key)
+                    .map(|registration| (window_key.clone(), registration.generation))
+            })
+            .collect();
+        let captured: HashMap<_, _> = keys
+            .iter()
+            .filter_map(|window_key| {
+                test_app
+                    .app
+                    .world()
+                    .resource::<CapturedWindowStates>()
+                    .captured_placement(window_key)
+                    .cloned()
+                    .map(|placement| (window_key.clone(), placement))
+            })
+            .collect();
+        LinkedReplacementFixture {
+            managed_window,
+            keys,
+            generations,
+            captured,
+            generated: recovery::registration_snapshot(test_app.app.world()).generated,
+        }
+    }
+
+    fn reconstruct_linked_windows(
+        test_app: &mut RuntimeTestApp,
+        fixture: &LinkedReplacementFixture,
+    ) -> HashMap<WindowKey, Entity> {
+        test_app.app.world_mut().despawn(test_app.window);
+        test_app.app.world_mut().despawn(fixture.managed_window);
+        test_app.app.world_mut().flush();
+        let fallback = (test_app.fallback_entity, test_app.fallback);
+        install_runtime_topology(test_app, 1, [fallback]);
+        test_app.app.update();
+
+        let replacements: HashMap<_, _> = fixture
+            .keys
+            .iter()
+            .filter_map(|window_key| {
+                test_app
+                    .app
+                    .world()
+                    .resource::<RecoveryRegistrations>()
+                    .by_key(window_key)
+                    .and_then(|registration| registration.entity)
+                    .map(|entity| (window_key.clone(), entity))
+            })
+            .collect();
+        assert_eq!(replacements.len(), fixture.keys.len());
+        assert_eq!(
+            recovery::registration_snapshot(test_app.app.world()).generated,
+            fixture.generated
+        );
+        for window_key in &fixture.keys {
+            let replacement = replacements[window_key];
+            let registration = test_app
+                .app
+                .world()
+                .resource::<RecoveryRegistrations>()
+                .by_key(window_key);
+            assert_eq!(
+                registration.map(|registration| registration.generation),
+                fixture.generations.get(window_key).copied(),
+            );
+            assert!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<CapturedWindowStates>()
+                    .is_bound_to(window_key, replacement)
+            );
+            assert_eq!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<CapturedWindowStates>()
+                    .captured_placement(window_key),
+                fixture.captured.get(window_key),
+            );
+        }
+        let [primary_key, managed_key] = &fixture.keys;
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<PrimaryWindow>(replacements[primary_key])
+                .is_some()
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<Window>(replacements[primary_key])
+                .is_some_and(|window| window.visible)
+        );
+        assert_eq!(
+            test_app
+                .app
+                .world()
+                .get::<ManagedWindow>(replacements[managed_key])
+                .map(|managed| managed.name.as_str()),
+            Some(LINKED_MANAGED_NAME),
+        );
+        replacements
+    }
+
+    fn alter_linked_replacement_placements(
+        test_app: &mut RuntimeTestApp,
+        fixture: &LinkedReplacementFixture,
+        replacements: &HashMap<WindowKey, Entity>,
+    ) {
+        for (index, window_key) in fixture.keys.iter().enumerate() {
+            let replacement = replacements[window_key];
+            let fallback = test_app.fallback;
+            let mut entity = test_app.app.world_mut().entity_mut(replacement);
+            if let Some(mut window) = entity.get_mut::<Window>() {
+                window.position = WindowPosition::At(
+                    fallback.physical_position
+                        + IVec2::new(100 + index.to_i32(), 80 + index.to_i32()),
+                );
+                window.resolution.set(640.0 + index.to_f32(), 480.0);
+            }
+            entity.insert(CurrentMonitor {
+                monitor_info:          fallback,
+                effective_window_mode: WindowMode::Windowed,
+            });
+        }
+    }
+
+    fn assert_linked_captures_unchanged(
+        test_app: &RuntimeTestApp,
+        fixture: &LinkedReplacementFixture,
+    ) {
+        for window_key in &fixture.keys {
+            assert_eq!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<CapturedWindowStates>()
+                    .captured_placement(window_key),
+                fixture.captured.get(window_key),
+            );
+        }
+    }
+
+    fn assert_linked_restore_attempts(
+        test_app: &mut RuntimeTestApp,
+        fixture: &LinkedReplacementFixture,
+        replacements: &HashMap<WindowKey, Entity>,
+    ) {
+        for window_key in &fixture.keys {
+            let replacement = replacements[window_key];
+            let attempt = accepted_restore_attempt(test_app, replacement);
+            assert!(attempt.is_some());
+            assert_eq!(
+                attempt.map(|attempt| attempt.generation),
+                fixture.generations.get(window_key).copied(),
+            );
+            assert!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<AutomaticRestoreIntents>()
+                    .get(window_key)
+                    .is_none()
+            );
+        }
+        let mut windows = test_app
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Window>>();
+        assert_eq!(
+            windows.iter(test_app.app.world()).count(),
+            fixture.keys.len()
+        );
+    }
+
+    #[test]
+    fn linked_primary_and_managed_deletion_reconstructs_once_and_preserves_frozen_intent() {
+        let mut test_app = runtime_test_app(WindowRecovery::FallbackAndReturn);
+        let fixture = register_linked_windows(&mut test_app);
+        let replacements = reconstruct_linked_windows(&mut test_app, &fixture);
+
+        alter_linked_replacement_placements(&mut test_app, &fixture, &replacements);
+        test_app.app.update();
+        assert_linked_captures_unchanged(&test_app, &fixture);
+
+        let fallback_entity = test_app.fallback_entity;
+        for window_key in &fixture.keys {
+            test_app
+                .app
+                .world_mut()
+                .entity_mut(replacements[window_key])
+                .insert(OnMonitor(fallback_entity));
+        }
+        test_app.app.world_mut().flush();
+        test_app.app.update();
+        assert_linked_captures_unchanged(&test_app, &fixture);
+
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+                SETTLE_STABILITY_SECS,
+            )));
+        test_app.app.update();
+        test_app
+            .app
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        let fallback = (test_app.fallback_entity, test_app.fallback);
+        let target = (test_app.target_entity, test_app.target);
+        install_runtime_topology(&mut test_app, 2, [fallback, target]);
+        test_app.app.update();
+        assert_linked_restore_attempts(&mut test_app, &fixture, &replacements);
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum NonReconstructionCase {
+        ApplicationControlled,
+        Cancelled,
+        Closed,
+        Disabled,
+        Unregistered,
+    }
+
+    #[test]
+    fn ineligible_missing_windows_are_never_reconstructed() {
+        for case in [
+            NonReconstructionCase::ApplicationControlled,
+            NonReconstructionCase::Cancelled,
+            NonReconstructionCase::Closed,
+            NonReconstructionCase::Disabled,
+            NonReconstructionCase::Unregistered,
+        ] {
+            let policy = match case {
+                NonReconstructionCase::ApplicationControlled => {
+                    WindowRecovery::ApplicationControlled
+                },
+                NonReconstructionCase::Cancelled | NonReconstructionCase::Closed => {
+                    WindowRecovery::FallbackAndReturn
+                },
+                NonReconstructionCase::Disabled | NonReconstructionCase::Unregistered => {
+                    WindowRecovery::Disabled
+                },
+            };
+            let mut test_app = runtime_test_app(policy);
+            match case {
+                NonReconstructionCase::Cancelled => {
+                    test_app.app.world_mut().trigger(CancelWindowRecovery {
+                        window: test_app.window_key.clone(),
+                    });
+                    test_app.app.world_mut().flush();
+                },
+                NonReconstructionCase::Closed => {
+                    test_app
+                        .app
+                        .world_mut()
+                        .entity_mut(test_app.window)
+                        .insert(ClosingWindow);
+                    test_app.app.update();
+                },
+                NonReconstructionCase::Unregistered => {
+                    test_app
+                        .app
+                        .world_mut()
+                        .entity_mut(test_app.window)
+                        .remove::<WindowRecovery>();
+                    test_app.app.world_mut().flush();
+                },
+                NonReconstructionCase::ApplicationControlled | NonReconstructionCase::Disabled => {
+                },
+            }
+
+            test_app.app.world_mut().despawn(test_app.window);
+            test_app.app.world_mut().flush();
+            let fallback = (test_app.fallback_entity, test_app.fallback);
+            install_runtime_topology(&mut test_app, 1, [fallback]);
+            test_app.app.update();
+
+            let mut windows = test_app
+                .app
+                .world_mut()
+                .query_filtered::<Entity, With<Window>>();
+            assert_eq!(
+                windows.iter(test_app.app.world()).count(),
+                0,
+                "{case:?} must not create a replacement"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_monitors_waits_and_target_first_return_restores_one_shell() {
+        let mut test_app = runtime_test_app(WindowRecovery::FallbackAndReturn);
+        let generation = test_app
+            .app
+            .world()
+            .resource::<RecoveryRegistrations>()
+            .by_key(&test_app.window_key)
+            .map(|registration| registration.generation);
+        test_app.app.world_mut().despawn(test_app.window);
+        test_app.app.world_mut().flush();
+        install_runtime_topology(
+            &mut test_app,
+            1,
+            std::iter::empty::<(Entity, MonitorInfo)>(),
+        );
+        test_app.app.update();
+
+        let mut windows = test_app
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Window>>();
+        assert_eq!(windows.iter(test_app.app.world()).count(), 0);
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<Messages<AppExit>>()
+                .is_empty()
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<RecoveryRegistrations>()
+                .by_key(&test_app.window_key)
+                .is_some_and(|registration| registration.entity.is_none())
+        );
+
+        let target = (test_app.target_entity, test_app.target);
+        install_runtime_topology(&mut test_app, 2, [target]);
+        test_app.app.update();
+
+        let replacement = required_replacement(&test_app);
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<Window>(replacement)
+                .is_some_and(|window| window.visible)
+        );
+        assert_eq!(
+            accepted_restore_attempt(&test_app, replacement).map(|attempt| attempt.generation),
+            generation,
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<AutomaticRestoreIntents>()
+                .get(&test_app.window_key)
+                .is_none()
+        );
+        let mut windows = test_app
+            .app
+            .world_mut()
+            .query_filtered::<Entity, With<Window>>();
+        assert_eq!(windows.iter(test_app.app.world()).count(), 1);
+    }
+
+    #[test]
+    fn target_first_timeout_keeps_the_live_replacement_bound_while_waiting() {
+        let mut test_app = runtime_test_app(WindowRecovery::FallbackAndReturn);
+        test_app.app.world_mut().despawn(test_app.window);
+        test_app.app.world_mut().flush();
+        install_runtime_topology(
+            &mut test_app,
+            1,
+            std::iter::empty::<(Entity, MonitorInfo)>(),
+        );
+        test_app.app.update();
+        let target = (test_app.target_entity, test_app.target);
+        install_runtime_topology(&mut test_app, 2, [target]);
+        test_app.app.update();
+        let replacement = required_replacement(&test_app);
+        let failed_attempt = required_restore_attempt(&test_app, replacement);
+
+        test_app
+            .app
+            .world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .advance_by(Duration::from_secs_f32(
+                RUNTIME_RESTORE_TIMEOUT_SECS + SETTLE_STABILITY_SECS,
+            ));
+        test_app.app.update();
+
+        assert_eq!(
+            recovery::fallback_and_return_snapshot(test_app.app.world(), &test_app.window_key)
+                .map(|snapshot| snapshot.phase),
+            Some(FallbackAndReturnPhaseSnapshot::RestoreFailed),
+        );
+        assert_eq!(
+            test_app
+                .app
+                .world()
+                .resource::<RecoveryRegistrations>()
+                .by_key(&test_app.window_key)
+                .and_then(|registration| registration.entity),
+            Some(replacement),
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<CapturedWindowStates>()
+                .is_bound_to(&test_app.window_key, replacement)
+        );
+
+        let target = (test_app.target_entity, test_app.target);
+        install_runtime_topology(&mut test_app, 3, [target]);
+        test_app.app.update();
+        let retry_attempt = accepted_restore_attempt(&test_app, replacement);
+        assert!(retry_attempt.is_some());
+        assert_ne!(
+            retry_attempt.map(|attempt| attempt.id),
+            Some(failed_attempt.id)
+        );
+    }
+
+    #[test]
+    fn topology_revision_replans_with_a_fresh_id_and_original_deadline() {
         let mut test_app = runtime_test_app(WindowRecovery::FallbackAndReturn);
         settle_automatic_on_fallback(&mut test_app);
         return_target(&mut test_app, 2);
@@ -1772,17 +2828,29 @@ mod tests {
                 .get::<TargetPosition>(test_app.window)
                 .is_some()
         );
-        let window_snapshot = stage_stale_application_sentinel(&mut test_app);
-        assert!(window_snapshot.is_some());
-        if let Some(window_snapshot) = window_snapshot {
-            let fallback = (test_app.fallback_entity, test_app.fallback);
-            let target = (test_app.target_entity, test_app.target);
-            install_runtime_topology(&mut test_app, 3, [fallback, target]);
+        let original_attempt = required_restore_attempt(&test_app, test_app.window);
+        stage_stale_application_sentinel(&mut test_app)
+            .expect("the original attempt should reach restore application");
+        let fallback = (test_app.fallback_entity, test_app.fallback);
+        let target = (test_app.target_entity, test_app.target);
+        install_runtime_topology(&mut test_app, 3, [fallback, target]);
 
-            test_app.app.update();
+        test_app.app.update();
 
-            assert_stale_attempt_rejected(&test_app, window_snapshot);
-        }
+        let replanned_attempt = required_restore_attempt(&test_app, test_app.window);
+        assert_ne!(replanned_attempt.id, original_attempt.id);
+        assert_eq!(replanned_attempt.generation, original_attempt.generation);
+        assert_eq!(replanned_attempt.deadline, original_attempt.deadline);
+        let installed_revision = *test_app.app.world().resource::<MonitorTopologyRevision>();
+        assert_eq!(replanned_attempt.topology_revision, installed_revision,);
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<TargetPosition>(test_app.window)
+                .is_some()
+        );
+        assert_eq!(restore_outcome_counts(&test_app), (0, 0));
     }
 
     #[test]
@@ -1833,6 +2901,29 @@ mod tests {
         other_attempt_id: RestoreAttemptId,
         starting_scale:   f64,
         target_scale:     f64,
+    }
+
+    #[derive(Resource)]
+    struct PendingScaleAttemptSwap {
+        entity:   Entity,
+        attempt:  RestoreAttempt,
+        strategy: MonitorScaleStrategy,
+    }
+
+    fn swap_scale_attempt_after_capture(
+        pending: Option<Res<PendingScaleAttemptSwap>>,
+        mut preparations: Query<(&mut RestorePreparation, &mut TargetPosition)>,
+        mut commands: Commands,
+    ) {
+        let Some(pending) = pending else {
+            return;
+        };
+        let Ok((mut preparation, mut target)) = preparations.get_mut(pending.entity) else {
+            return;
+        };
+        *preparation = RestorePreparation::recovery(pending.attempt.clone());
+        target.monitor_scale_strategy = pending.strategy;
+        commands.remove_resource::<PendingScaleAttemptSwap>();
     }
 
     #[derive(Clone, Copy)]
@@ -1906,8 +2997,16 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(scale_message_path.platform())
             .init_resource::<InjectedWinitWindows>()
+            .init_resource::<ObservedScaleInputs>()
             .add_message::<WindowScaleFactorChanged>()
-            .add_systems(Update, restore_windows);
+            .add_systems(
+                Update,
+                (
+                    restore::target_position::capture_scale_inputs,
+                    restore::restore_windows,
+                )
+                    .chain(),
+            );
         let recovery_entity = app.world_mut().spawn_empty().id();
         let startup_entity = app.world_mut().spawn_empty().id();
         let unrelated_entity = app.world_mut().spawn_empty().id();
@@ -1949,8 +3048,7 @@ mod tests {
         ));
         {
             let mut injected_windows = app.world_mut().resource_mut::<InjectedWinitWindows>();
-            injected_windows.insert(recovery_entity);
-            injected_windows.insert(startup_entity);
+            injected_windows.extend([recovery_entity, startup_entity]);
         }
         ConcurrentScaleRestores {
             app,
@@ -2124,6 +3222,55 @@ mod tests {
     }
 
     #[test]
+    fn delayed_old_attempt_scale_input_does_not_advance_the_new_attempt() {
+        for scale_message_path in [
+            ScaleMessagePath::HigherToLower,
+            ScaleMessagePath::WindowsCompensateSizeOnly,
+        ] {
+            let ConcurrentScaleRestores {
+                mut app,
+                recovery_entity,
+                recovery_attempt,
+                other_attempt_id,
+                starting_scale,
+                target_scale,
+                ..
+            } = concurrent_scale_restores(scale_message_path);
+            let mut replacement_attempt = recovery_attempt;
+            replacement_attempt.id = other_attempt_id;
+            app.insert_resource(PendingScaleAttemptSwap {
+                entity:   recovery_entity,
+                attempt:  replacement_attempt,
+                strategy: scale_message_path.waiting_strategy(Some(other_attempt_id)),
+            })
+            .add_systems(
+                Update,
+                swap_scale_attempt_after_capture
+                    .after(restore::target_position::capture_scale_inputs)
+                    .before(restore::restore_windows),
+            );
+            set_live_scale(&mut app, recovery_entity, target_scale);
+            app.world_mut().write_message(WindowScaleFactorChanged {
+                window:       recovery_entity,
+                scale_factor: target_scale,
+            });
+
+            app.update();
+
+            assert!(waiting_for_attempt(
+                &app,
+                recovery_entity,
+                scale_message_path,
+                Some(other_attempt_id),
+                starting_scale,
+            ));
+            assert!(!settle_started(&app, recovery_entity));
+            send_scale_change(&mut app, recovery_entity, target_scale);
+            assert!(settle_started(&app, recovery_entity));
+        }
+    }
+
+    #[test]
     fn preparation_waits_for_native_window_readiness() {
         let captured_window_placement = captured_placement(
             MonitorIdentity::Verified(TARGET_ID),
@@ -2217,6 +3364,80 @@ mod tests {
                 .by_key(&test_app.window_key)
                 .is_none()
         );
+    }
+
+    #[derive(Clone, Copy)]
+    enum TransientAttemptStage {
+        Preparation,
+        Target,
+        DpiStrategy,
+        FullscreenStrategy,
+        Settling,
+    }
+
+    #[test]
+    fn cancellation_removes_transient_components_from_every_attempt_stage() {
+        for stage in [
+            TransientAttemptStage::Preparation,
+            TransientAttemptStage::Target,
+            TransientAttemptStage::DpiStrategy,
+            TransientAttemptStage::FullscreenStrategy,
+            TransientAttemptStage::Settling,
+        ] {
+            let mut test_app = runtime_test_app(WindowRecovery::ApplicationControlled);
+            let replacement = prepare_application_replacement(&mut test_app);
+            let restore_attempt = required_restore_attempt(&test_app, replacement);
+            match stage {
+                TransientAttemptStage::Preparation => {
+                    test_app
+                        .app
+                        .world_mut()
+                        .entity_mut(replacement)
+                        .remove::<(TargetPosition, X11FrameCompensated)>();
+                },
+                TransientAttemptStage::Target => {
+                    test_app
+                        .app
+                        .world_mut()
+                        .entity_mut(replacement)
+                        .remove::<X11FrameCompensated>();
+                },
+                TransientAttemptStage::DpiStrategy => {
+                    let mut target = test_app
+                        .app
+                        .world_mut()
+                        .get_mut::<TargetPosition>(replacement)
+                        .expect("the DPI stage should have a target position");
+                    target.monitor_scale_strategy = MonitorScaleStrategy::CompensateSizeOnly(
+                        WindowRestoreState::WaitingForScaleChange {
+                            attempt_id: Some(restore_attempt.id),
+                        },
+                    );
+                },
+                TransientAttemptStage::FullscreenStrategy => {
+                    let mut target = test_app
+                        .app
+                        .world_mut()
+                        .get_mut::<TargetPosition>(replacement)
+                        .expect("the fullscreen stage should have a target position");
+                    target.fullscreen_restore_state = Some(FullscreenRestoreState::WaitForMove);
+                },
+                TransientAttemptStage::Settling => {
+                    let mut target = test_app
+                        .app
+                        .world_mut()
+                        .get_mut::<TargetPosition>(replacement)
+                        .expect("the settling stage should have a target position");
+                    target.settle_state = Some(SettleState::new());
+                },
+            }
+
+            test_app.app.world_mut().trigger(CancelWindowRecovery {
+                window: test_app.window_key.clone(),
+            });
+            test_app.app.world_mut().flush();
+            assert_cancelled_runtime_attempt(&test_app, replacement, &restore_attempt);
+        }
     }
 
     #[test]

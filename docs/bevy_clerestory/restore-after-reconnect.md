@@ -1784,7 +1784,7 @@ Cancellation tests prove no attempt survives and durable diagnostics remain.
 - Phase 16 now preserves the completed Phase 9 macOS runtime-restore row.
 - Phases 11, 13–14, and 17–21 remain dispatch-ready without further changes.
 
-### Phase 10 — Harden retry, cleanup, and linked-despawn behavior  · status: todo
+### Phase 10 — Harden retry, cleanup, and linked-despawn behavior  · status: done (`c84605a7`)
 
 #### Work Order
 
@@ -1910,6 +1910,64 @@ closed, disabled, or unregistered windows. Primary and managed replacement
 tests prove `bind_and_freeze`, initial default placement, capture, and delayed
 `OnMonitor` repair cannot overwrite the frozen captured intent.
 
+#### Retrospective
+
+**What worked:** Clerestory now reconstructs exactly one primary or managed
+`FallbackAndReturn` window shell on the selected remaining monitor after a
+linked deletion, keeps the app alive if every window disappears, and restores
+each shell to its original verified `MonitorId` when that monitor returns. The
+same recovery generation and frozen captured placement survive reconstruction;
+application-controlled, unregistered, cancelled, closed, and disabled windows
+remain application-owned. Automated coverage now exercises retry, timeout,
+stale completion, cleanup, close precedence, canonical-role rebinding, and
+real `WindowPlugin` zero-window behavior. All 191 package tests, build, Clippy,
+formatting, and diff checks passed; the final focused review approved the
+queued-intent repair without findings.
+
+**What deviated:** The implementation also needed a one-update visibility
+marker for replacement shells and cleanup for stale canonical roles. The final
+physical test exposed one defect after the planned automatic repair cycles, so
+the user authorized a targeted additional repair. Temporary example changes
+used to diagnose the physical path were fully reverted; the permanent example
+consumer remains Phase 12 work.
+
+**Surprises:** On macOS, reconnecting the target caused the OS to move the
+secondary fallback window by 77 physical pixels before Clerestory consumed its
+already queued return. That incidental move was initially mistaken for user
+intervention, while the primary happened not to move in the same update. An
+exact queued-intent check now defers intervention observation only when the
+same key, generation, entity, and currently installed target match. The
+regression covers both primary and managed roles on macOS, Windows, and X11.
+Recreated windows can return in a different front-to-back order; preserving
+that order is intentionally outside the current feature.
+
+**Implications for remaining phases:** Phase 12 must register recovery only
+after the initial target association is confirmed and must not register a
+replacement again using a changed monitor index. Its script must cover the
+same-update OS relocation case and treat front-to-back ordering as unspecified.
+Phase 15 must retain the queued-return relocation regression in its inventory.
+Physical matrix phases must verify stable `MonitorId` continuity rather than
+monitor-index continuity, record exactly-one shell reconstruction, and avoid
+claiming front-to-back ordering preservation.
+
+### Phase 10 Review
+
+- Phase 11 now documents that automatic reconstruction creates only the
+  canonical window shell, retains the existing generation, and leaves content
+  rebinding to the application without re-registration.
+- Phase 12 now keeps initial registration one-shot by canonical key, covers the
+  same-update OS relocation race, and treats front-to-back ordering as
+  unspecified.
+- Phases 13–14 now assert generation continuity when Hana rebinds content or
+  supplies an application-controlled replacement.
+- Phase 15 now retains the exact primary/managed macOS/Windows/X11 relocation
+  regression and the stable-identity replacement contract.
+- Phase 16 preserves the completed Phase 10 macOS evidence as its own row;
+  Phases 17–19 now distinguish stable identity from entity/index coincidence
+  and state where the relocation case applies.
+- No phase was merged, split, reordered, or removed. No pending user decision
+  remains, and Phases 11–21 are dispatch-ready.
+
 ### Phase 11 — Publish the reflected recovery API  · status: todo
 
 #### Work Order
@@ -1953,6 +2011,12 @@ completed private lifecycle.
   application using reconnect recovery must remain alive with zero windows,
   normally through `ExitCondition::DontExit`, and must implement explicit
   close-to-exit behavior.
+- Document the replacement boundary literally: `FallbackAndReturn` recreates
+  only the cloned `Window` configuration and its canonical `PrimaryWindow` or
+  `ManagedWindow` role. It copies no cameras, UI, or application content, adds
+  no new `WindowRecovery`, and keeps the existing `RecoveryGeneration`.
+  Consumers rebind their content to that canonical replacement instead of
+  registering it again.
 
 **Files:**
 
@@ -1980,7 +2044,10 @@ events and keyed cancellation must never require the former entity to remain
 alive. Phase 7 assigned all new public recovery types stable
 `bevy_clerestory::recovery::<TypeName>` reflected paths, exported them from the
 crate root, and installed `RecoveryPlugin`. This phase adds only missing reflect
-metadata, registry/remote tests, and public documentation.
+metadata, registry/remote tests, and public documentation. Phase 10 established
+that automatic replacement retains the original recovery registration and
+creates only a canonical window shell; this public contract must not imply a
+second registration or application-content reconstruction.
 
 **Acceptance gate:** Phase-local Clerestory Build, Test, and Lint are green.
 Public API tests cover primary and managed registration, all event payloads,
@@ -1991,7 +2058,9 @@ registration. Exact `TypePath` assertions include `MonitorConnected` and
 `MonitorInfo`, and `Monitors` under `bevy_clerestory::monitors::*`, plus
 `MonitorTopologyRevision` under the same namespace. Assertions also cover every
 new recovery type under `bevy_clerestory::recovery::*` and retain existing
-restore-result events under `bevy_clerestory::events::*`.
+restore-result events under `bevy_clerestory::events::*`. Public docs show a
+consumer rebinding content to the canonical replacement without inserting a
+second `WindowRecovery`.
 
 ### Phase 12 — Complete the recovery example  · status: todo
 
@@ -2014,6 +2083,11 @@ policies while retaining its causal diagnostics.
   does not terminate the example before reconnect.
 - Configure the primary and secondary managed windows with
   `WindowRecovery::FallbackAndReturn`.
+- Keep a small example-only set of accepted canonical `WindowKey` values.
+  `setup.rs` inserts `WindowRecovery` only for each initial window after its
+  original association is confirmed. A reconstructed entity's lack of a
+  `WindowRecovery` component is never permission to register it again, even if
+  the returned monitor now has a different list index.
 - Add a third application-controlled managed window with minimal
   application-owned content.
 - Add one unregistered control window on the selected monitor. It must remain
@@ -2028,8 +2102,12 @@ policies while retaining its causal diagnostics.
   follow their configured return behavior.
 - For automatic return, verify target reconnect without intervention returns
   an eligible window and post-settle movement/resize/mode change keeps the
-  adopted fallback. Verify unverified identity and Wayland windowed capability
-  remain unarmed.
+  adopted fallback. If the OS moves a fallback window during the same update in
+  which an exact return is already queued, that incidental move must not cancel
+  the return. Retain
+  `queued_return_survives_same_update_fallback_relocation` as the automated
+  macOS/Windows/X11 proof and trace the physical branch when observed. Verify
+  unverified identity and Wayland windowed capability remain unarmed.
 - On a backend where the linked cascade occurs, prove Clerestory creates and
   canonically binds exactly one replacement shell for each automatic primary
   and secondary registration. Prove the application-controlled window returns
@@ -2038,7 +2116,9 @@ policies while retaining its causal diagnostics.
 - Keep cameras/content/re-enable decisions in example application code; do not
   move them into Clerestory.
 - Update the README script and evidence schema so Phase 16–19 can execute the
-  same behavior on every platform.
+  same behavior on every platform. Recreated windows may have a different
+  front-to-back order; the script records that observation but never treats it
+  as pass or failure.
 
 **Files:**
 
@@ -2079,7 +2159,10 @@ routes, `bevy_clerestory::monitor_probe` and
 `bevy_clerestory::recovery_probe`. Phase 9's physical validation used temporary
 example observers to create application-controlled replacements and trace
 results, then removed them; its success is evidence for the runtime API, not
-shipped example behavior. This phase must add the permanent consumer.
+shipped example behavior. This phase must add the permanent consumer. Phase
+10's replacement retains one accepted generation per canonical key; the
+example's accepted-key set enforces that the initial primary and managed
+registrations are never repeated for their replacement entities.
 
 **Acceptance gate:** The example builds and its non-hardware logic is covered by
 Clerestory Test/Lint gates. On available hardware, the script completes
@@ -2092,7 +2175,10 @@ keeps the process alive with no windows, creates exactly one primary and one
 secondary automatic replacement, and leaves the unregistered control absent.
 The retained trace proves each pre-unplug `OnMonitor`/`CurrentMonitor` pair
 matches the installed target and has exactly one `recovery-accepted` record
-before recovery begins; pending records appear only after target loss.
+before recovery begins; pending records appear only after target loss. Tests
+prove both automatic keys retain one accepted generation across both cycles,
+including a returned monitor at a changed list index, and retain the
+same-update relocation regression without asserting front-to-back ordering.
 
 ### Phase 13 — Integrate Hana editor recovery  · status: todo
 
@@ -2119,6 +2205,10 @@ entity-scoped close/egui behavior without duplicating recovery state.
   copied `FallbackAndReturn` generation, then perform only Hana-owned egui,
   camera, and content rebinding. Hana creates a replacement itself only for an
   explicitly application-controlled consumer.
+- Register only the initial editor window. A later canonical primary or managed
+  shell is a target for Hana's content and egui rebinding, not a reason to add
+  another `WindowRecovery`; the original `RecoveryGeneration` must remain
+  unchanged.
 - Inspect the entity carried by `WindowCloseRequested`: closing primary exits;
   closing an output follows output lifecycle rather than terminating Hana.
 - Losing primary while a conduit output survives must not block editor
@@ -2159,7 +2249,8 @@ affected Clerestory gates if its API changes. Tests cover OS-relocated editor
 return on coordinate-capable backends, intervention, exactly one Clerestory
 replacement when linked deletion occurs, Hana-owned egui/content rebinding,
 process survival after cascade removal, surviving conduit output, primary close
-exit, and non-primary close behavior.
+exit, and non-primary close behavior. Tests assert one accepted editor
+generation before and after canonical shell reconstruction.
 
 ### Phase 14 — Integrate Hana monitor-backed screens and outputs  · status: todo
 
@@ -2174,6 +2265,9 @@ availability while Hana remains sole owner of output existence/content.
   consumes raw `MonitorConnected`/`MonitorDisconnected` facts. Choose the path
   that matches each existing Hana lifecycle—do not invent state solely to test
   Clerestory.
+- When Hana creates an application-controlled replacement, bind it to the
+  existing managed `WindowKey` and trigger `RestoreWindow`; do not add another
+  `WindowRecovery` or start a new recovery generation.
 - Keep the process-lifetime `MonitorId` separate from the optional live monitor
   entity. It may be retained across monitor-entity lifetimes within one running
   `App`, but is never persisted or compared across application runs. Clear the
@@ -2230,7 +2324,8 @@ or panel presentation requires.
 affected Clerestory gates for API changes. Tests cover target loss/inactive UI,
 verified reconnect/re-enable choice, unverified target, fresh-entity rebinding
 across every reference, no fallback output, registered/raw paths, cable
-cancellation, and no resurrection. A same-entity Hana backend layout update
+cancellation, no resurrection, and unchanged recovery generation across an
+application-controlled replacement. A same-entity Hana backend layout update
 changes only Hana-owned capture/panel metadata and starts no Clerestory recovery
 transition.
 
@@ -2256,11 +2351,15 @@ consumer passes, reusing the regressions already added by earlier phases.
   stale-topology rejection before geometry mutation, entity/attempt/reported/
   live-scale DPI matching, reflected events, zero displays, linked
   deletion before topology, zero-window survival, exactly-one replacement,
-  unregistered non-reconstruction, delayed `OnMonitor` repair, readiness
-  cleanup, zero native monitor polling, and Wayland capability gating. Rerun
-  those tests; add code or a new regression only for a concrete gap exposed by
-  the inventory or the Hana consumers. Do not reimplement an already-covered
-  behavior as a second convergence pass.
+  unchanged generation across replacement, stable `MonitorId` restoration
+  despite monitor entity/index churn, unregistered non-reconstruction, delayed
+  `OnMonitor` repair, readiness cleanup, zero native monitor polling, and
+  Wayland capability gating. Include
+  `queued_return_survives_same_update_fallback_relocation` for primary and
+  managed roles on macOS, Windows, and X11. Rerun those tests; add code or a new
+  regression only for a concrete gap exposed by the inventory or the Hana
+  consumers. Do not reimplement an already-covered behavior as a second
+  convergence pass.
 - Run full workspace tests/build/lint in both workspaces, not only package-local
   gates.
 - Update public README and unreleased changelog to the stabilized API and
@@ -2273,6 +2372,8 @@ consumer passes, reusing the regressions already added by earlier phases.
   owner of concrete cross-workspace feedback recorded there.
 - `crates/bevy_clerestory/README.md` — stabilized public docs.
 - `crates/bevy_clerestory/CHANGELOG.md` — unreleased entry.
+- `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — retain the
+  Phase 10 same-update relocation regression; change only for a concrete gap.
 - `../hana/Cargo.toml` and `../hana/Cargo.lock` — retain local checkout.
 - `../hana/crates/hana/src/window_recovery.rs` — final editor consumer.
 - `../hana/crates/hana/src/screens/connection.rs` — final screen consumer.
@@ -2286,7 +2387,8 @@ order coverage for same-entity identity refresh and linked deletion before
 topology installation, with `CurrentCaptureSuppressed` protecting the frozen
 placement and no native/global monitor metadata polling. Phases 9–12 own the
 remaining attempt and reconstruction regressions; this phase audits and reruns
-them instead of replacing their owners.
+them instead of replacing their owners. Public documentation must not promise
+front-to-back ordering for reconstructed windows.
 
 **Acceptance gate:** In both workspaces, final CI-parity Build, full workspace
 Test, and full `clippy` skill gates are green. The Hana dependency resolves to
@@ -2326,6 +2428,12 @@ example.
   completed runtime restoration on index 2 with no mismatch. Run the Phase 12
   script on macOS and append completed-automatic-recovery rows without
   replacing or reinterpreting any earlier observation.
+- Retain the completed Phase 10 macOS row separately: linked deletion rebuilt
+  the primary and secondary exactly once on the remaining external monitor;
+  the returned panel kept the same verified `MonitorId` despite monitor
+  entity/index churn; both windows returned; and the secondary's 77-physical-
+  pixel OS relocation before queued-return consumption did not cancel its
+  return. Its changed front-to-back order is permitted, not a failure.
 - Cover same-panel reconnect; same panel through another port/dock; a different
   same-model panel at the same position where available; simultaneous duplicate
   identities where available; identity change; lid close/open; repeated dock
@@ -2342,6 +2450,8 @@ example.
   surviving branch instead of assuming macOS ordering.
 - Record that `MonitorId` comparisons are valid only within one running `App`;
   never persist a token or compare token values across separate runs.
+- Never use monitor entity/index equality as continuity evidence, and do not
+  make front-to-back window ordering a pass condition.
 - Verify an arrangement-only change does not initiate recovery and record when
   it produces no Clerestory monitor-lifetime signal. A fallback intervention
   cancels only the current return intent.
@@ -2400,7 +2510,11 @@ fullscreen, and entity-scoped real DPI behavior.
   or adapter and remains unverified when descriptor/serial evidence is missing
   or duplicated.
 - Compare `MonitorId` only across entity lifetimes in one running `App`; record
-  evidence rather than token equality across separate runs.
+  evidence rather than token equality across separate runs. Monitor entity or
+  list-index equality is never continuity evidence.
+- Retain the automated same-update fallback-relocation regression for primary
+  and managed windows, and record the physical branch if Windows produces it.
+  Never assert front-to-back ordering after reconstruction.
 - Verify concurrent cross-DPI windows cannot advance each other's attempts.
   Automatic exclusive-fullscreen recovery remains unarmed; exercise explicit
   or startup exclusive-fullscreen surface creation/restore as a separate row.
@@ -2453,7 +2567,11 @@ placement, fullscreen, intervention, and DPI behavior.
 - Confirm a RandR CRTC/connector alone never verifies a physical panel; require
   stable descriptor/serial evidence and preserve permanent duplicate ambiguity.
 - Compare `MonitorId` only across entity lifetimes in one running `App`; record
-  evidence rather than token equality across separate runs.
+  evidence rather than token equality across separate runs. Monitor entity or
+  list-index equality is never continuity evidence.
+- Retain the automated same-update fallback-relocation regression for primary
+  and managed windows, and record the physical branch if X11 produces it.
+  Never assert front-to-back ordering after reconstruction.
 - Exercise negative origins, arrangement and connected-entity scale changes,
   1x↔2x cross-DPI reconnect, windowed placement, borderless/exclusive
   fullscreen, zero displays, non-target-first return, and rapid hotplug. Record
@@ -2514,6 +2632,7 @@ placement or unsupported exclusive fullscreen.
   continuity from output name, position, or index.
 - Compare `MonitorId` only across entity lifetimes in one running `App` if the
   compositor supplies qualified evidence; never compare tokens across runs.
+  Monitor entity or list-index equality is never continuity evidence.
 - Windowed capture must be
   `CapturedWindowPosition::CompositorControlled`, project
   `logical_position: None`, never emit `WindowPosition::At`, and leave
@@ -2529,6 +2648,10 @@ placement or unsupported exclusive fullscreen.
   zero-window process survival, replacement entity/key where a supported mode
   arms automatic return, and the unregistered control outcome. Fix only proven
   defects with automated regressions.
+- Mark the same-update windowed-relocation regression inapplicable because
+  Wayland windowed automatic return is unarmed. For any supported
+  monitor-targeted mode, never assert front-to-back ordering after
+  reconstruction.
 
 **Files:**
 

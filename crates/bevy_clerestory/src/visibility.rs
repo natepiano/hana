@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+/// Prevents `hide_window_on_creation` from hiding a recovery shell.
+#[derive(Component)]
+pub(crate) struct SkipInitialWindowHide;
+
 /// Hide the primary window when created, before winit creates the OS window.
 ///
 /// Uses an observer on `PrimaryWindow` component addition, so it works regardless
@@ -12,7 +16,7 @@ use bevy::window::PrimaryWindow;
 /// we know the `Window` component already exists on the entity.
 pub(crate) fn hide_window_on_creation(
     add: On<Add, PrimaryWindow>,
-    mut windows: Query<&mut Window>,
+    mut windows: Query<&mut Window, Without<SkipInitialWindowHide>>,
 ) {
     debug!(
         "[hide_window_on_creation] Observer fired for entity {:?}",

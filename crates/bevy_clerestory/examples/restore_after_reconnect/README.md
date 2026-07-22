@@ -211,5 +211,14 @@ application explicitly registered for automatic return, using the copied
 application-owned state already required by the recovery plan. It must never
 reconstruct an arbitrary unregistered window or infer application content.
 
+The implemented automatic path therefore reconstructs only a copied
+`FallbackAndReturn` window shell. If another monitor remains, Clerestory binds
+one replacement to the retained primary or managed key and lets it settle on
+the first installed monitor. If no monitor remains, it keeps the generation
+entityless. When the target is the first monitor to return, Clerestory binds one
+shell directly to the pending restore. `ApplicationControlled` remains the
+policy used by this causal probe, so the probe continues to create no windows
+after linked deletion.
+
 Phase 16 through Phase 19 will expand this initial result into the complete
 macOS, Win32, X11, and Wayland physical matrix.

@@ -29,7 +29,7 @@ pub(crate) use window_state::SavedWindowMode;
 
 use crate::ClerestoryPreStartupSet;
 use crate::ClerestoryUpdateSet;
-use crate::managed::on_persistence_changed;
+use crate::managed;
 use crate::monitors;
 use crate::restore;
 
@@ -49,7 +49,7 @@ impl Plugin for PersistencePlugin {
             .add_systems(
                 Update,
                 (
-                    on_persistence_changed
+                    managed::on_persistence_changed
                         .run_if(resource_changed::<crate::ManagedWindowPersistence>),
                     save::capture_changed_windows
                         .after(monitors::update_current_monitor)
