@@ -52,6 +52,8 @@ pub(crate) const SCALE_FACTOR_EPSILON: f64 = 0.01;
 pub(crate) const SETTLE_STABILITY_SECS: f32 = 0.2;
 /// Maximum total duration (in seconds) to wait for values to stabilize.
 pub(crate) const SETTLE_TIMEOUT_SECS: f32 = 2.0;
+/// Maximum duration of a runtime restore, including shell creation and preparation.
+pub(crate) const RUNTIME_RESTORE_TIMEOUT_SECS: f32 = SETTLE_TIMEOUT_SECS;
 
 // time conversion
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;

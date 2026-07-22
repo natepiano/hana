@@ -837,9 +837,8 @@ mod tests {
     use crate::WindowRestored;
     use crate::constants::SCALE_FACTOR_EPSILON;
     use crate::constants::SETTLE_STABILITY_SECS;
+    use crate::managed;
     use crate::managed::ManagedWindowRegistry;
-    use crate::managed::on_managed_window_added;
-    use crate::managed::on_managed_window_load;
     use crate::monitors::CurrentMonitor;
     use crate::monitors::current_monitor::InjectedCurrentMonitorSource;
     use crate::monitors::identity::OperatingSystemQueryError;
@@ -849,10 +848,10 @@ mod tests {
     use crate::persistence::PersistencePlugin;
     use crate::persistence::PersistenceWriteState;
     use crate::persistence::WindowKey;
+    use crate::recovery;
     use crate::recovery::FallbackAndReturnPhaseSnapshot;
     use crate::recovery::RecoveryPlugin;
-    use crate::recovery::fallback_and_return_snapshot;
-    use crate::recovery::registration_snapshot;
+    use crate::recovery::RecoveryRegistrations;
     use crate::restore;
     use crate::restore::NativeWindowReady;
     use crate::restore_window_config::RestoreWindowConfig;
@@ -1088,8 +1087,8 @@ mod tests {
             )
             .add_plugins(RecoveryPlugin)
             .add_plugins(PersistencePlugin)
-            .add_observer(on_managed_window_added)
-            .add_observer(on_managed_window_load)
+            .add_observer(managed::on_managed_window_added)
+            .add_observer(managed::on_managed_window_load)
             .add_observer(restore::mark_native_window_ready)
             .add_systems(
                 PreStartup,
@@ -1250,14 +1249,14 @@ mod tests {
     }
 
     fn assert_pending_registration(app: &App) {
-        let registration = registration_snapshot(app.world());
+        let registration = recovery::registration_snapshot(app.world());
         assert_eq!(registration.pending, 1);
         assert!(registration.accepted.is_empty());
         assert_eq!(registration.generated, 1);
     }
 
     fn assert_accepted_registration(app: &App, window_key: &WindowKey, monitor_info: MonitorInfo) {
-        let registration = registration_snapshot(app.world());
+        let registration = recovery::registration_snapshot(app.world());
         assert_eq!(registration.pending, 0);
         assert_eq!(
             registration.accepted,
@@ -1537,7 +1536,7 @@ mod tests {
         );
     }
 
-    fn enter_retryable_failure(
+    fn enter_intervention_rejected(
         app: &mut App,
         window_entity: Entity,
         target_entity: Entity,
@@ -1555,7 +1554,7 @@ mod tests {
         let fallback = installed_monitor(app, fallback_entity)
             .ok_or_else(|| "fallback monitor should remain installed".to_string())?;
 
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery.map(|snapshot| snapshot.phase),
             Some(FallbackAndReturnPhaseSnapshot::FallbackSettling),
@@ -1572,7 +1571,7 @@ mod tests {
         )));
         app.update();
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery.map(|snapshot| snapshot.phase),
             Some(FallbackAndReturnPhaseSnapshot::OnFallback),
@@ -1580,11 +1579,11 @@ mod tests {
 
         set_window_monitor(app, window_entity, fallback, WindowMode::Windowed);
         app.update();
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery.map(|snapshot| (snapshot.phase, snapshot.fallback_monitor)),
             Some((
-                FallbackAndReturnPhaseSnapshot::RetryableFailure,
+                FallbackAndReturnPhaseSnapshot::InterventionRejected,
                 Some(fallback)
             )),
         );
@@ -2473,7 +2472,7 @@ mod tests {
     }
 
     #[test]
-    fn retryable_identity_revalidation_uses_production_schedule_order() -> Result<(), String> {
+    fn rejected_identity_revalidation_uses_production_schedule_order() -> Result<(), String> {
         let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
         let fallback_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
         let mut app = phase_seven_topology_app(state_file.path());
@@ -2505,7 +2504,7 @@ mod tests {
             WindowMode::BorderlessFullscreen(MonitorSelection::Index(target.index)),
             None,
         );
-        let fallback = enter_retryable_failure(
+        let fallback = enter_intervention_rejected(
             &mut app,
             window_entity,
             target_entity,
@@ -2518,7 +2517,7 @@ mod tests {
             .resource::<CapturedWindowStates>()
             .captured_placement(&WindowKey::Primary)
             .cloned()
-            .ok_or_else(|| "retryable recovery should retain captured placement".to_string())?;
+            .ok_or_else(|| "rejected recovery should retain captured placement".to_string())?;
         assert_primary_capture_state(&app, &adopted_placement, PersistenceWriteState::Writable);
         let revision_before_revalidation = *app.world().resource::<MonitorTopologyRevision>();
         app.world_mut()
@@ -2547,7 +2546,7 @@ mod tests {
                 .map(|current_monitor| current_monitor.monitor_info),
             Some(revalidated),
         );
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery.map(|snapshot| {
                 (
@@ -2557,7 +2556,7 @@ mod tests {
                 )
             }),
             Some((
-                FallbackAndReturnPhaseSnapshot::RetryableFailure,
+                FallbackAndReturnPhaseSnapshot::InterventionRejected,
                 Some(revalidated),
                 0,
             )),
@@ -2606,7 +2605,7 @@ mod tests {
 
         app.world_mut().entity_mut(window_entity).remove::<Window>();
         app.world_mut().flush();
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery.map(|snapshot| (snapshot.phase, snapshot.fallback_monitor)),
             Some((FallbackAndReturnPhaseSnapshot::RemovalPending, None)),
@@ -2615,16 +2614,22 @@ mod tests {
 
         remove_monitor(&mut app, target_entity);
         app.update();
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery
                 .map(|snapshot| { (snapshot.phase, snapshot.fallback_monitor, snapshot.intent) }),
-            Some((
-                FallbackAndReturnPhaseSnapshot::MissingLiveWindow,
-                None,
-                None,
-            )),
+            Some((FallbackAndReturnPhaseSnapshot::FallbackSettling, None, None,)),
         );
+        let replacement = app
+            .world()
+            .resource::<RecoveryRegistrations>()
+            .by_key(&WindowKey::Primary)
+            .and_then(|registration| registration.entity)
+            .ok_or_else(|| "fallback replacement should be bound".to_string())?;
+        assert_ne!(replacement, window_entity);
+        assert!(app.world().get::<Window>(replacement).is_some());
+        assert!(app.world().get::<PrimaryWindow>(replacement).is_some());
+        assert!(app.world().get::<PrimaryWindow>(window_entity).is_none());
 
         let returned_entity = spawn_monitor(
             &mut app,
@@ -2638,7 +2643,7 @@ mod tests {
             .ok_or_else(|| "returned target should be installed".to_string())?;
         assert_eq!(returned.identity, target.identity);
         let revision = *app.world().resource::<MonitorTopologyRevision>();
-        let recovery = fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
         assert_eq!(
             recovery.map(|snapshot| {
                 (
@@ -2651,10 +2656,10 @@ mod tests {
                 )
             }),
             Some((
-                FallbackAndReturnPhaseSnapshot::Restoring,
+                FallbackAndReturnPhaseSnapshot::FallbackSettling,
                 None,
                 1,
-                Some((None, returned, revision)),
+                Some((Some(replacement), returned, revision)),
             )),
         );
         assert_primary_capture_state(&app, &retained_placement, PersistenceWriteState::Frozen);

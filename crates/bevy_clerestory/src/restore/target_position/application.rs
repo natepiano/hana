@@ -23,14 +23,66 @@ use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
 use crate::constants::SCALE_FACTOR_EPSILON;
 use crate::constants::SETTLE_STABILITY_SECS;
 use crate::constants::SETTLE_TIMEOUT_SECS;
+use crate::monitors::MonitorTopologyRevision;
+use crate::monitors::Monitors;
 use crate::persistence::SavedWindowMode;
+use crate::recovery::RecoveryRegistrations;
 use crate::restore::RestorePreparation;
+use crate::restore::restore_attempt;
+use crate::restore::restore_attempt::RestoreAttemptId;
+use crate::restore::restore_attempt::RestoreAttemptStatus;
 use crate::restore::settle_state::SettleState;
 use crate::restore::winit_info::X11FrameCompensated;
 
 enum RestoreStatus {
     Complete,
     Waiting,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScaleInputProvenance {
+    Startup,
+    Recovery(RestoreAttemptId),
+}
+
+impl From<&RestorePreparation> for ScaleInputProvenance {
+    fn from(preparation: &RestorePreparation) -> Self {
+        preparation
+            .attempt_id()
+            .map_or(Self::Startup, Self::Recovery)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ObservedScaleInput {
+    provenance: ScaleInputProvenance,
+    scale:      f64,
+}
+
+#[derive(Default, Resource)]
+pub(crate) struct ObservedScaleInputs {
+    entries: HashMap<Entity, Vec<ObservedScaleInput>>,
+}
+
+pub(crate) fn capture_scale_inputs(
+    mut messages: MessageReader<WindowScaleFactorChanged>,
+    preparations: Query<&RestorePreparation>,
+    mut inputs: ResMut<ObservedScaleInputs>,
+) {
+    inputs.entries.clear();
+    for message in messages.read() {
+        let Ok(preparation) = preparations.get(message.window) else {
+            continue;
+        };
+        inputs
+            .entries
+            .entry(message.window)
+            .or_default()
+            .push(ObservedScaleInput {
+                provenance: preparation.into(),
+                scale:      message.scale_factor,
+            });
+    }
 }
 
 #[cfg(test)]
@@ -41,9 +93,14 @@ pub(crate) struct InjectedWinitWindows {
 
 #[cfg(test)]
 impl InjectedWinitWindows {
-    pub(crate) fn insert(&mut self, entity: Entity) { self.entities.insert(entity); }
-
     fn contains(&self, entity: Entity) -> bool { self.entities.contains(&entity) }
+}
+
+#[cfg(test)]
+impl Extend<Entity> for InjectedWinitWindows {
+    fn extend<T: IntoIterator<Item = Entity>>(&mut self, entities: T) {
+        self.entities.extend(entities);
+    }
 }
 
 #[cfg(test)]
@@ -59,16 +116,26 @@ fn native_window_exists(entity: Entity) -> bool {
 
 fn matching_scale_change(
     entity: Entity,
-    current_attempt: Option<crate::restore::restore_attempt::RestoreAttemptId>,
-    transition_attempt: Option<crate::restore::restore_attempt::RestoreAttemptId>,
+    current_attempt: Option<RestoreAttemptId>,
+    transition_attempt: Option<RestoreAttemptId>,
     target_scale: f64,
     live_scale: f64,
-    scale_changes: &HashMap<Entity, f64>,
+    scale_inputs: &ObservedScaleInputs,
 ) -> bool {
-    current_attempt == transition_attempt
-        && scale_changes.get(&entity).is_some_and(|reported_scale| {
-            (*reported_scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
-                && (live_scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
+    let current_provenance = current_attempt.map_or(
+        ScaleInputProvenance::Startup,
+        ScaleInputProvenance::Recovery,
+    );
+    let transition_provenance = transition_attempt.map_or(
+        ScaleInputProvenance::Startup,
+        ScaleInputProvenance::Recovery,
+    );
+    current_provenance == transition_provenance
+        && scale_inputs.entries.get(&entity).is_some_and(|inputs| {
+            inputs.iter().any(|input| {
+                input.provenance == current_provenance
+                    && (input.scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
+            }) && (live_scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
         })
 }
 
@@ -196,7 +263,7 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
 fn begin_cross_dpi_restore(
     target_position: &mut TargetPosition,
     window: &mut Window,
-    attempt_id: Option<crate::restore::restore_attempt::RestoreAttemptId>,
+    attempt_id: Option<RestoreAttemptId>,
 ) {
     if target_position.physical_position.is_none() {
         // Size at `starting_scale`: `set_physical_resolution` is interpreted at the
@@ -274,7 +341,6 @@ fn advance_fullscreen_restore(
 
 /// Apply pending window restore. Runs only when entities with `TargetPosition` exist.
 pub(crate) fn restore_windows(
-    mut scale_changed_messages: MessageReader<WindowScaleFactorChanged>,
     mut windows: Query<
         (
             Entity,
@@ -286,14 +352,28 @@ pub(crate) fn restore_windows(
     >,
     _: NonSendMarker,
     platform: Res<Platform>,
+    scale_inputs: Res<ObservedScaleInputs>,
+    registrations: Option<Res<RecoveryRegistrations>>,
+    monitors: Option<Res<Monitors>>,
+    revision: Option<Res<MonitorTopologyRevision>>,
     #[cfg(test)] injected_windows: Option<Res<InjectedWinitWindows>>,
 ) {
-    let scale_changes: HashMap<_, _> = scale_changed_messages
-        .read()
-        .map(|message| (message.window, message.scale_factor))
-        .collect();
-
     for (entity, restore_preparation, mut target_position, mut window) in &mut windows {
+        if let (Some(restore_attempt), Some(registrations), Some(monitors), Some(revision)) = (
+            restore_preparation.recovery_attempt(),
+            &registrations,
+            &monitors,
+            &revision,
+        ) && restore_attempt::restore_attempt_is_current(
+            restore_attempt,
+            entity,
+            registrations,
+            monitors,
+            **revision,
+        ) == RestoreAttemptStatus::Stale
+        {
+            continue;
+        }
         #[cfg(test)]
         let native_window_exists = native_window_exists(entity, injected_windows.as_deref());
         #[cfg(not(test))]
@@ -303,7 +383,7 @@ pub(crate) fn restore_windows(
             restore_preparation,
             &mut target_position,
             &mut window,
-            &scale_changes,
+            &scale_inputs,
             *platform,
             native_window_exists,
         );
@@ -315,7 +395,7 @@ fn restore_window(
     restore_preparation: &RestorePreparation,
     target_position: &mut TargetPosition,
     window: &mut Window,
-    scale_changes: &HashMap<Entity, f64>,
+    scale_inputs: &ObservedScaleInputs,
     platform: Platform,
     native_window_exists: bool,
 ) {
@@ -348,7 +428,7 @@ fn restore_window(
             attempt_id,
             target_position.target_scale,
             f64::from(window.resolution.base_scale_factor()),
-            scale_changes,
+            scale_inputs,
         ) =>
         {
             debug!(
@@ -365,7 +445,7 @@ fn restore_window(
             attempt_id,
             target_position.target_scale,
             f64::from(window.resolution.base_scale_factor()),
-            scale_changes,
+            scale_inputs,
         ) =>
         {
             debug!("[Restore] CompensateSizeOnly: transitioning to ApplySize");

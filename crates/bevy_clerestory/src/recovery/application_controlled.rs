@@ -74,9 +74,14 @@ impl ApplicationControlledRecoveries {
     ) {
         if let Some(recovery) = self.entries.get_mut(window_key)
             && recovery.generation == generation
-            && recovery.phase == ApplicationControlledPhase::Healthy
         {
-            recovery.phase = ApplicationControlledPhase::RemovalPending;
+            recovery.phase = match recovery.phase {
+                ApplicationControlledPhase::Healthy => ApplicationControlledPhase::RemovalPending,
+                ApplicationControlledPhase::Restoring => {
+                    ApplicationControlledPhase::RetryableFailure
+                },
+                phase => phase,
+            };
         }
     }
 
@@ -207,6 +212,7 @@ pub(super) fn evaluate_topology(
             ApplicationControlledPhase::Healthy
                 | ApplicationControlledPhase::RemovalPending
                 | ApplicationControlledPhase::TargetAvailable
+                | ApplicationControlledPhase::RetryableFailure
         ) {
             captured_window_states.freeze(&registration.window_key);
             recovery.phase = ApplicationControlledPhase::TargetAbsent;
@@ -267,9 +273,8 @@ mod tests {
     use crate::ManagedWindowPersistence;
     use crate::Platform;
     use crate::WindowRecovery;
+    use crate::managed;
     use crate::managed::ManagedWindowRegistry;
-    use crate::managed::on_managed_window_added;
-    use crate::managed::on_managed_window_removed;
     use crate::monitors::CurrentMonitor;
     use crate::monitors::MonitorId;
     use crate::monitors::MonitorIdentity;
@@ -379,8 +384,8 @@ mod tests {
         .add_plugins(RecoveryPlugin)
         .add_observer(persistence::on_primary_window_removed)
         .add_observer(persistence::on_window_removed)
-        .add_observer(on_managed_window_added)
-        .add_observer(on_managed_window_removed)
+        .add_observer(managed::on_managed_window_added)
+        .add_observer(managed::on_managed_window_removed)
         .add_observer(record_pending)
         .add_observer(record_available);
         let entity = app
