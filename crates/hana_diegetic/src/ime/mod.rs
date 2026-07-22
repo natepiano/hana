@@ -23,9 +23,12 @@ pub use buffer::ImeCursorState;
 pub use buffer::ImePreedit;
 pub use buffer::ImePreeditBoundary;
 pub use buffer::ImeSelectionSnapshot;
-use editor::ImeBlurIntent;
-use editor::ImeEditorState;
+pub(crate) use editor::ImeBlurIntent;
+pub(crate) use editor::ImeEditorState;
 use editor::PendingImePanelAnchor;
+pub(crate) use editor::classify_widget_click;
+#[cfg(test)]
+pub(crate) use editor::handle_blur_intent;
 pub use events::ImeAcceptCommit;
 pub use events::ImeApplied;
 pub use events::ImeAppliedResult;

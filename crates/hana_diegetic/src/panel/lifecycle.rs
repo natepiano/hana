@@ -52,6 +52,8 @@ use crate::screen_space;
 use crate::screen_space::ScreenSpaceCamera;
 use crate::screen_space::ScreenSpaceLight;
 use crate::widgets;
+use crate::widgets::ButtonCaptures;
+use crate::widgets::ButtonPress;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::PanelWidgets;
@@ -60,6 +62,7 @@ use crate::widgets::ScreenWidgetAnchoredHere;
 use crate::widgets::ScreenWidgetAnchoredTo;
 use crate::widgets::WidgetFocusAuthority;
 use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetOf;
 
 /// Identifies the panel role that created and owns one runtime entity.
 #[derive(Clone, Copy, Component)]
@@ -207,6 +210,8 @@ pub(super) fn teardown_panel_role(
     primary: Query<Entity, With<PrimaryWindow>>,
     mut resolved_surfaces: Option<ResMut<ResolvedSdfSurfaceRegistry>>,
     mut focus_authority: Option<ResMut<WidgetFocusAuthority>>,
+    button_presses: Query<(Entity, &WidgetOf), With<ButtonPress>>,
+    mut button_captures: Option<ResMut<ButtonCaptures>>,
     mut commands: Commands,
 ) {
     let entity = trigger.entity;
@@ -228,6 +233,9 @@ pub(super) fn teardown_panel_role(
 
     if let Some(focus_authority) = focus_authority.as_deref_mut() {
         widgets::finalize_panel_focus(entity, focus_authority, &mut commands);
+    }
+    if let Some(button_captures) = button_captures.as_deref_mut() {
+        widgets::finalize_panel_buttons(entity, &button_presses, button_captures, &mut commands);
     }
 
     finalize_widget_anchor_state(
@@ -282,12 +290,20 @@ pub(super) fn teardown_panel_role(
     render::remove_panel_shape_relationship(&mut panel_entity);
 }
 
-pub(super) fn finalize_panel_focus_before_despawn(
+pub(super) fn finalize_panel_widgets_before_despawn(
     trigger: On<Despawn, DiegeticPanel>,
     mut focus_authority: ResMut<WidgetFocusAuthority>,
+    button_presses: Query<(Entity, &WidgetOf), With<ButtonPress>>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     widgets::finalize_panel_focus(trigger.entity, &mut focus_authority, &mut commands);
+    widgets::finalize_panel_buttons(
+        trigger.entity,
+        &button_presses,
+        &mut button_captures,
+        &mut commands,
+    );
 }
 
 fn finalize_widget_anchor_state(
