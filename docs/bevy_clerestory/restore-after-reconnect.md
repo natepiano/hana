@@ -2315,7 +2315,7 @@ the accepted recovery generation remains unchanged.
   plan. `0.2.0` remains the expected release.
 - No pending user decision or phase-order change remains.
 
-### Phase 13 — Converge Clerestory automated gates  · status: todo
+### Phase 13 — Converge Clerestory automated gates  · status: done (`23b312b3`)
 
 #### Work Order
 
@@ -2405,6 +2405,56 @@ cases, and the example's canonical-role content timing checks. The README still
 states one-shot registration, role-add content attachment, zero-window
 lifetime, and explicit close handling; exact reflected type paths remain
 unchanged, and event-loop doctests compile without running an application loop.
+
+#### Retrospective
+
+**What worked:**
+
+- The Phase 1–12 inventory found only two missing no-native-polling assertions;
+  both use same-`World` monitor entities and leave production behavior unchanged.
+- The full workspace gate passed 1,408 tests, and the bounded example reached
+  `recovery-ready` with all four windows before its automatic exit.
+- README and changelog now separate automated behavior checks from the pending
+  physical platform matrix.
+
+**What deviated from the plan:**
+
+- A trace assertion failed only under the concurrent workspace suite. Its test
+  App now uses Bevy's `SingleThreadedExecutor` so the thread-local tracing
+  subscriber observes the production system without changing production
+  scheduling.
+- Review found that the public docs still described 0.1.1's position-sorted
+  monitor list. They now describe cached winit enumeration order and disclose
+  the breaking `Monitors::list`, `first()`, and `by_index()` changes.
+
+**Surprises:**
+
+- A package-local trace test could pass while the same test lost its event in a
+  concurrently scheduled workspace run because `tracing::subscriber::with_default`
+  installs the subscriber only on the calling thread.
+- The first attempted test fix used executor names from an older Bevy API;
+  Bevy 0.19 requires `set_executor(SingleThreadedExecutor::new())`.
+
+**Implications for remaining phases:**
+
+- Physical rows must use verified `MonitorId` continuity, not monitor index or
+  enumeration order, and must keep the macOS, Windows, X11, and Wayland
+  two-cycle rows marked pending until each is recorded.
+- Phase 18 must rerun the concurrent workspace suite so the acceptance trace
+  remains deterministic and retain the current monitor-order documentation.
+
+### Phase 13 Review
+
+- Phases 14–17 now require a fresh source-tagged physical row; historical
+  macOS runs and automated startup evidence remain supporting records only.
+- Phases 14–17 define `CLERESTORY_PROBE_MONITOR_INDEX` as a run-local cached-
+  winit index selector and require verified `MonitorId` for continuity.
+- Phases 15–17 now name the shared setup and constants files that own the
+  cross-platform startup/mode harness.
+- Phase 18 preserves the stabilized monitor-order and evidence-boundary docs
+  and retains the test-only single-threaded acceptance-trace regression in its
+  concurrent full-workspace gate.
+- No user decision or phase-order change was needed.
 
 ### Phase 14 — Record the macOS physical matrix  · status: todo
 
@@ -2516,13 +2566,23 @@ macOS row remains valid evidence, and Phase 7's application-controlled row
 and Phase 8's pre-execution automatic row remain separate from Phase 12's
 completed automatic-return rows. Phase 9's application-controlled execution
 row remains separate as well. This phase extends the matrix without recasting
-any earlier result.
+any earlier result. Those historical runs and Phase 13's bounded
+`recovery-ready` startup are supporting evidence, not the current release
+matrix: this phase must record a fresh post-selector macOS row against its
+tested source revision. `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local
+startup selector: `Monitors::by_index` matches the stored cached-winit
+enumeration index, which is neither a dense slot nor a position-sorted order,
+and `Monitors::first()` is not guaranteed to be the primary monitor.
+Continuity and pass decisions use verified `MonitorId`, never the selector,
+entity, index, or enumeration order.
 
 **Acceptance gate:** Every applicable macOS scenario has an evidence row and
 expected/actual result; unavailable hardware cases are explicitly marked rather
-than inferred. The shared startup/mode controls have automated coverage. Every
-row names its tested source revision; any source correction has a regression,
-green Clerestory Build/Test/Lint gates, and revalidated affected earlier rows.
+than inferred. A fresh post-selector macOS row is recorded; historical rows and
+the bounded startup smoke do not substitute for it. The shared startup/mode
+controls have automated coverage. Every row names its tested source revision;
+any source correction has a regression, green Clerestory Build/Test/Lint gates,
+and revalidated affected earlier rows.
 
 ### Phase 15 — Record the Windows physical matrix  · status: todo
 
@@ -2565,6 +2625,12 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 
 - `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs` — Windows
   probe corrections only if needed.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — shared
+  startup/runtime mode harness reference; edit only for an observed
+  cross-platform harness defect and revalidate affected macOS rows.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
+  shared selector/control configuration reference under the same correction
+  rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Windows
   rows/evidence.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — Win32 display-path
@@ -2583,7 +2649,12 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 **Constraints from prior phases:** Phase 13 supplies the stable baseline and
 Phase 14 established the report schema; platform evidence remains independent.
 `MonitorId` is process-local and never comparable across application runs.
-macOS cascade ordering is not assumed on Windows.
+macOS cascade ordering is not assumed on Windows. Phase 14 and automated startup
+evidence do not substitute for a fresh Windows row on the tested source.
+`CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
+`Monitors::by_index` matches the stored cached-winit enumeration index, and
+`Monitors::first()` is not guaranteed to be primary. Continuity uses verified
+`MonitorId`, never the selector, entity, index, or enumeration order.
 
 **Acceptance gate:** Every applicable Windows scenario has an evidence row and
 expected/actual result and tested source revision; unavailable hardware is
@@ -2633,6 +2704,12 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 
 - `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs` — X11 probe
   corrections only if needed.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — shared
+  startup/runtime mode harness reference; edit only for an observed
+  cross-platform harness defect and revalidate affected macOS and Windows rows.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
+  shared selector/control configuration reference under the same correction
+  rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — X11
   rows/evidence.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — X11 RandR/EDID
@@ -2651,7 +2728,12 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 **Constraints from prior phases:** Phase 13 supplies the stable baseline and
 the shared report distinguishes physical proof from automated assertions.
 `MonitorId` is process-local and never comparable across application runs.
-macOS cascade ordering is not assumed on X11.
+macOS cascade ordering is not assumed on X11. Earlier platform rows and
+automated startup evidence do not substitute for a fresh X11 row on the tested
+source. `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
+`Monitors::by_index` matches the stored cached-winit enumeration index, and
+`Monitors::first()` is not guaranteed to be primary. Continuity uses verified
+`MonitorId`, never the selector, entity, index, or enumeration order.
 
 **Acceptance gate:** Every applicable X11 scenario has an evidence row and
 expected/actual result and tested source revision; unavailable hardware is
@@ -2704,6 +2786,12 @@ placement or unsupported exclusive fullscreen.
 
 - `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs` — Wayland
   probe corrections only if needed.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — shared
+  startup/runtime mode harness reference; edit only for an observed
+  cross-platform harness defect and revalidate affected earlier-platform rows.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
+  shared selector/control configuration reference under the same correction
+  rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Wayland
   rows/evidence.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — compositor evidence
@@ -2723,7 +2811,12 @@ placement or unsupported exclusive fullscreen.
 Wayland's lack of client-controlled windowed positioning is a fixed contract,
 not a test failure to work around. `MonitorId` remains process-local and never
 comparable across application runs. macOS cascade ordering is not assumed on
-Wayland.
+Wayland. Earlier platform rows and automated startup evidence do not substitute
+for a fresh Wayland row on the tested source. `CLERESTORY_PROBE_MONITOR_INDEX`
+is only a run-local selector: `Monitors::by_index` matches the stored
+cached-winit enumeration index, and `Monitors::first()` is not guaranteed to
+be primary. Continuity uses verified `MonitorId`, never the selector, entity,
+index, or enumeration order.
 
 **Acceptance gate:** Every applicable Wayland scenario has an evidence row and
 expected/actual result and tested source revision; compositor and
@@ -2750,8 +2843,12 @@ development line for independent downstream adoption.
   final full-workspace Build, Test, and Lint gates in Clerestory against the
   exact source selected for release. Earlier Phase 13 results do not substitute
   for this post-matrix run.
-- Finalize `README.md` and `CHANGELOG.md` with the shipped API, capability
-  limits, physical evidence boundary, and migration from 0.1.1.
+- Preserve Phase 13's stabilized `README.md` and `CHANGELOG.md` statements:
+  cached-winit enumeration and `Monitors::first()` / `by_index()` semantics,
+  migration from 0.1.1, the automated-versus-physical evidence boundary, and
+  the stacking-order disclaimer. Finalization adds the completed physical
+  results plus release version/date and metadata; it does not broadly rewrite
+  the public contract unless a recorded physical defect required a correction.
 - Preserve the public usage contract proven in Phase 11: one-shot recovery
   registration, application content binding when a canonical window role is
   added, zero-window process lifetime, explicit close-to-exit handling, and the
@@ -2772,13 +2869,17 @@ development line for independent downstream adoption.
 - `crates/bevy_clerestory/CHANGELOG.md` — finalized release entry.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — final
   evidence reference.
+- `crates/bevy_clerestory/src/recovery/registration.rs` — read-only owner of
+  the deterministic acceptance-trace regression.
 
 **Constraints from prior phases:** Phase 13 freezes automated behavior; Phases
 14–17 supply required native evidence. Any correction during Phases 14–17
 reopens the affected Phase 13 gates and physical rows. Phase 11's README
 behavior and doctest contracts remain part of the released public API
-documentation. Hana adoption begins only after this release is independently
-verified.
+documentation. The `recovery-accepted` trace test intentionally gives only its
+test `App` a `SingleThreadedExecutor`: `with_default` is thread-local, while
+production scheduling remains unchanged. Hana adoption begins only after this
+release is independently verified.
 
 **Acceptance gate:** The full `release` workflow completes for
 the exact selected `bevy_clerestory` version (expected `0.2.0`), the published
@@ -2786,5 +2887,7 @@ package is verified, release metadata and tag/changelog are consistent, the
 README contracts above remain intact, and its event-loop doctests compile
 without running. The final report records the release source revision, maps
 every physical row to a tested or revalidated revision, and includes green
-post-matrix full-workspace Clerestory gates. The exact verified version becomes
-the prerequisite version for the separate Hana adoption plan.
+post-matrix full-workspace Clerestory gates. The concurrent
+`cargo nextest run --all-features --workspace --tests` gate retains the single
+`recovery-accepted` trace assertion. The exact verified version becomes the
+prerequisite version for the separate Hana adoption plan.

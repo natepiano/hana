@@ -890,4 +890,35 @@ mod tests {
         assert!(app.world().get::<NativeWindowReady>(entity).is_some());
         assert!(app.world().get::<CurrentMonitor>(entity).is_some());
     }
+
+    #[test]
+    fn managed_removal_performs_no_native_monitor_polling() {
+        let (mut app, entity, _) = managed_removal_app(ManagedWindowPersistence::RememberAll);
+        let monitor_entity = app.world_mut().spawn_empty().id();
+        app.insert_resource(Monitors::from_test_monitors([(
+            monitor_entity,
+            monitor(MonitorIdentity::Unverified, 0, 1.0, IVec2::ZERO),
+        )]))
+        .init_resource::<InjectedCurrentMonitorSource>()
+        .add_systems(Update, monitors::update_current_monitor);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(OnMonitor(monitor_entity));
+
+        app.world_mut().entity_mut(entity).remove::<ManagedWindow>();
+        app.world_mut().flush();
+        app.update();
+
+        assert!(app.world().get::<CurrentMonitor>(entity).is_none());
+        assert!(app.world().get::<NativeWindowReady>(entity).is_none());
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .activity(),
+            NativeQueryActivity {
+                window_map:       0,
+                monitor_metadata: 0,
+            }
+        );
+    }
 }
