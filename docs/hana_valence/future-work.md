@@ -9,6 +9,48 @@
 
 ## Feature extensions
 
+- **Animated relationship retargeting** — extend the arrangement and anchoring
+  API designed in
+  [arrangements.md](arrangements.md) so an existing
+  member can move smoothly from one `AnchoredTo` relationship to another.
+  In V1, replacing `AnchoredTo` directly changes the member's target and
+  `AnchorSite`s, so the anchor resolver snaps the member to its new attachment.
+  This future work adds two animation layers without changing that immediate
+  operation:
+
+  - **Smooth replacement** captures one member's current resolved pose, stages
+    a proposed `AnchoredTo` relationship, and eases toward the pose that
+    relationship would produce before committing the replacement.
+  - **Coordinated graph morphing** applies the same behavior to several members
+    as one transition, so an arrangement can move between complete attachment
+    graphs without each relationship visibly snapping at a different time.
+
+  Build this on the current `Arrangement` controller, the `Member`/`Members`
+  relationship, `AnchoredTo`, `AnchorSite`, `AnchorFrame`, `AnchorPose`, and
+  anchor-resolver ordering. The design must define which system owns
+  `AnchorPose` during the transition, prevent competing pose writers, preserve
+  every starting world pose, and commit a coordinated destination graph
+  together. It is intentionally outside the first implementation of the
+  arrangement API, but direct `AnchoredTo` replacement remains part of normal
+  V1 ECS behavior.
+- **Anchor-input animation helpers** — add optional animation conveniences over
+  the direct resolver inputs retained by the arrangement design in
+  [arrangements.md](arrangements.md):
+
+  - **Live resolved-offset animation** changes `ResolvedAnchorOffset` over
+    time. `resolve_anchors()` uses that runtime displacement instead of the
+    static `AnchoredTo::offset`, so the member can move relative to its authored
+    attachment without replacing the relationship.
+  - **Anchored-pose spin** writes a purpose-built rise, sustained rotation,
+    pause, fall, and terminal full-turn alignment into `AnchorPose`. Its axis
+    may come from `AnchorFrame` or `Edge` geometry.
+
+  V1 exposes `ResolvedAnchorOffset` and `AnchorPose` for application systems to
+  write directly. These future helpers must define writer ownership and system
+  ordering so they never compete with `hinge_to_pose()`, which writes the whole
+  `AnchorPose` for members carrying `Hinge`. They should remain optional
+  presentation behavior rather than becoming part of arrangement construction
+  or fold playback.
 - **Magnetize** — `magnetize(group)` finds nearest unpaired edges across loose
   tiles, creates `AnchoredTo`, and tweens transforms to seat the edge. Seated
   edges become hinges, so magnetize then fold composes. The work is pure edge
@@ -32,6 +74,26 @@
   nets.
 - **`NetClosure` validator** — optionally check that a net's topology and
   target angles close.
+- **Cyclic constraint solving** — support arrangements whose complete physical
+  connection graph cannot be represented by the acyclic `AnchoredTo` placement
+  forest designed in [arrangements.md](arrangements.md). V1 may fold a
+  polyhedral net until its free seams meet geometrically, but it does not keep
+  those closing seams mechanically constrained. A future solver must designate
+  fixed members, resolve all connection constraints together, distribute
+  closure error deterministically, and report impossible configurations. This
+  is distinct from `NetClosure`, which only checks whether authored geometry
+  and target angles close; cyclic constraint solving continuously enforces
+  closure while the arrangement moves.
+- **Pattern-oriented arrangement builders** — after the V1 provider, recipe,
+  and sequence APIs have been exercised by real arrangements, identify repeated
+  authoring work that deserves reusable helpers. The intended behavior is to
+  apply or "paste" common connection, fold-group, and timing patterns over an
+  explicit member selection. Any helper must produce the ordinary
+  `Member`/`Members`, `AnchoredTo`, `Hinge`, `FoldGroup`, `FoldStage`, and
+  `FoldSequence` values defined in [arrangements.md](arrangements.md); it must
+  not introduce a second runtime arrangement model. Do not choose concrete
+  builder types or methods until demonstrated call sites show which patterns
+  materially simplify setup.
 - **Widgets handoff** — bind Phase 1 of
   [widgets.md](../hana_diegetic/widgets.md) to valence. Widget reification
   publishes `ResolvedAnchorGeometry` on materialized widget entities only while

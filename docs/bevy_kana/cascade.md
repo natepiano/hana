@@ -175,7 +175,7 @@ Updated documentation:
 - `crates/bevy_kana/README.md` and both crate changelogs;
 - `docs/hana_diegetic/as-built/cascade.md`;
 - `docs/hana_diegetic/as-built/shadow-casting.md` where ownership is described;
-- `docs/hana_valence/panel_anchoring_features.md` decision A9.3.1.2.3.1;
+- `docs/hana_valence/arrangements.md` fold-timing cascade contract;
 - this document from implementation contract to as-built status.
 
 Do not touch unrelated work, including
