@@ -119,6 +119,7 @@ pub(super) fn on_window_added(
         |_| Vec::new(),
         |window| {
             vec![
+                field(FIELD_WINDOW_TITLE, &window.title),
                 field(FIELD_WINDOW_POSITION, window.position),
                 field(FIELD_WINDOW_SIZE, window.resolution.physical_size()),
                 field(FIELD_WINDOW_MODE, window.mode),

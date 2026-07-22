@@ -146,9 +146,10 @@ move. If Bevy removed the window entity and another monitor remains, Clerestory 
 settings copied when recovery registration was accepted and adds the matching `PrimaryWindow` or
 registered `ManagedWindow` identity. It does not recreate cameras, UI, or other application-owned
 content. Clerestory automatically returns the surviving or replacement fallback window only while
-the application or user has not adopted its fallback state. Moving or resizing the window, or
-changing its mode after it settles, adopts that state: Clerestory keeps the window there and cancels
-the automatic return.
+its recovery registration remains active. Moving or resizing the fallback window, or changing its
+mode, does not replace the registered target—even when the operating system made the change. To keep
+a live fallback window where it is, the application explicitly triggers `CancelWindowRecovery` for
+that window's `WindowKey`. Cancellation keeps the live window and stops its automatic return.
 
 ```rust
 use bevy::prelude::*;
@@ -312,6 +313,10 @@ BRP clients can observe recovery notifications, monitor-lifetime events, and res
 `world.trigger_event`. These public events carry Bevy `ReflectEvent` type data. Their reflected paths
 remain in `bevy_clerestory::recovery`, `bevy_clerestory::monitors`, and
 `bevy_clerestory::events`.
+
+See the [restore-after-reconnect consumer](examples/restore_after_reconnect/README.md) for a complete
+two-policy application, causal trace schema, automated checks, and two-cycle cross-platform operator
+script.
 
 ### State File Format
 
