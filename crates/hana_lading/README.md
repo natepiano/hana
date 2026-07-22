@@ -19,6 +19,20 @@ The resource is inserted before its typed completion event. A successful set
 resolves only after every tracked root and recursive dependency reaches Bevy's
 loaded state. Renderer-specific GPU preparation may still be pending.
 
+The Hana Lading registration uses ordinary Bevy `App` methods:
+
+```rust
+app
+    .add_plugins(DiskAssetsPlugin::<StartupAssets>::default())
+    .add_observer(on_startup_assets_loaded)
+    .add_observer(on_all_sets_loaded);
+```
+
+The visual examples obtain that `&mut App` through Fairy Dust's `app_mut()`,
+install the Hana Lading plugins and observers on it, then let Fairy Dust supply
+the camera, lighting, scene framing, controls, and panels. Customer applications
+use the same `App` calls without depending on Fairy Dust.
+
 ## Failure semantics
 
 Each set emits exactly one terminal typed event. A failure also emits
@@ -28,17 +42,20 @@ are visible to global completion observers; deferred commands are not promised
 to flush between them. `AllSetsLoaded` occurs only when every set succeeds,
 while `AllSetsResolved` occurs for every completed batch.
 
-`hana_lading` supplies evidence, not severity policy. The examples demonstrate
-two different choices from the same event model:
+`hana_lading` supplies evidence, not application policy. The examples show a
+normal startup and two different failure decisions from the same event model:
 
 ```sh
+cargo run -p hana_lading --example successful_loading
 cargo run -p hana_lading --example degraded_failure
 cargo run -p hana_lading --example catastrophic_failure
 ```
 
-The degraded example keeps required content and enters `Ready` after an
-optional set fails. The catastrophic example displays the required-set failure
-and remains in `Loading`.
+The successful example applies the loaded PNG to its cube, receives
+`AllSetsLoaded`, enters `Ready`, and leaves the complete event sequence visible
+in a persistent panel. The degraded example keeps required content and enters
+`Ready` after an optional set fails. The catastrophic example displays the
+required-set failure and remains in `Loading`.
 
 ## What the examples protect
 

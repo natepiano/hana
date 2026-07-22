@@ -51,15 +51,22 @@ asset sets, runtime-generated media, or application startup policy.
 
 ## Protective examples
 
+`successful_loading` is the normal-use example. It applies a loaded PNG to its
+cube in `Loaded<StartupAssets>`, enters `Ready` after `AllSetsLoaded`, and keeps
+the set result, aggregate progress, scene use, and application decision visible
+in a persistent panel and reflected evidence.
+
 `degraded_failure` loads one required PNG and fails one optional PNG. It retains
 required content, records the generic failure, enters `Ready`, and explains the
 degraded decision. `catastrophic_failure` fails a required PNG, records and
 renders the same evidence, and remains in `Loading`.
 
-Both examples use a crate-local asset root selected as the first Fairy Dust
-builder step. Their reflected `ExampleState`, `FailureRecord`,
-`FailurePanelContent`, and `RequiredSceneContent` provide BRP-readable evidence
-that matches the visible result.
+All three examples use Fairy Dust for presentation. After selecting the
+crate-local asset root, they obtain the underlying `&mut App` through
+`app_mut()` and register each startup set through `DiskAssetsPlugin<T>` using
+ordinary Bevy methods. Their reflected state, evidence resources, panel content,
+and scene markers provide BRP-readable evidence that matches the visible
+result.
 
 The examples show that every returned handle is tracked, failures terminate,
 generic observers can record all set types, direct records precede global

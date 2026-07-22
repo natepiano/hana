@@ -3,6 +3,9 @@
 //! `hana_lading` reports the terminal failure instead of leaving startup
 //! waiting forever. The application records the generic failure before global
 //! completion, renders the evidence, and chooses not to enter `Ready`.
+//!
+//! Hana Lading is installed on the underlying Bevy `App`; Fairy Dust supplies
+//! the surrounding failure presentation.
 
 mod loading_evidence;
 
@@ -43,16 +46,15 @@ fn main() {
         "the catastrophic example requires its missing fixture to stay absent"
     );
 
-    fairy_dust::sprinkle_example()
-        .with_asset_root(asset_root)
-        .with_brp_extras()
-        .with_save_window_position()
-        .add_plugins((
-            LoadingEvidencePlugin,
-            DiskAssetsPlugin::<RequiredAssets>::default(),
-        ))
-        .add_observer(on_all_sets_resolved)
-        .run();
+    let mut example = fairy_dust::sprinkle_example().with_asset_root(asset_root);
+
+    example
+        .app_mut()
+        .add_plugins(DiskAssetsPlugin::<RequiredAssets>::default())
+        .add_plugins(LoadingEvidencePlugin)
+        .add_observer(on_all_sets_resolved);
+
+    example.with_brp_extras().with_save_window_position().run();
 }
 
 fn on_all_sets_resolved(

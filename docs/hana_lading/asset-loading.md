@@ -23,13 +23,15 @@
   metadata, `[lints] workspace = true`, and explicit `[[example]]` entries.
 - **Canonical examples:** `docs/fairy_dust/canonical-example.md` defines the
   normal Fairy Dust example shell and screen-panel conventions. Phase 4 adds a
-  narrow takeover/error-example exception and builds two examples that visibly
-  demonstrate both the loading workflow and its failure protections. Outside
-  that exception, the canonical chain includes BRP extras, saved window
+  narrow takeover/error-example exception and builds three examples that show
+  successful loading plus its failure protections. Outside that exception, the
+  canonical chain includes BRP extras, saved window
   position, studio lighting, ground plane, stable transparency, camera-control
   panel, title bar, and camera home. Custom panels use
   `DiegeticPanel::screen()`, `screen_panel_material()`, and
-  `screen_panel_frame(...)`.
+  `screen_panel_frame(...)`. Hana Lading registration occurs on the underlying
+  Bevy `App` obtained through `app_mut()`; Fairy Dust owns only the surrounding
+  presentation.
 - **Key files:**
   - `Cargo.toml` — workspace dependencies and strict inherited lints.
   - `crates/hana_diegetic/Cargo.toml` — sibling manifest reference.
@@ -474,10 +476,10 @@ isolation; the `clippy` skill passes.
 
 #### Work Order
 
-**Goal:** Two runnable examples teach the normal loading flow and visibly prove
-how applications can make safe, explicit decisions after partial or complete
-failure. Documentation names which guarantees come from `hana_lading` and which
-policy remains application-owned.
+**Goal:** Three runnable examples teach successful startup and visibly prove how
+applications can make explicit decisions after partial or complete failure.
+Documentation names which guarantees come from `hana_lading` and which policy
+remains application-owned.
 
 **Resolved decision: configure a crate-local asset root through the first builder step**
 
@@ -487,8 +489,10 @@ Phase 4 cannot replace `AssetPlugin::file_path` with
 `CARGO_MANIFEST_DIR/assets` after receiving the builder.
 
 What exists now:
-- The examples must use the Fairy Dust chain, while their successful PNG is
-  intentionally package-owned under `crates/hana_lading/assets/`.
+- The examples use the Fairy Dust chain for presentation, while their successful
+  PNG is intentionally package-owned under `crates/hana_lading/assets/`.
+- The `DiskAssetsPlugin<T>` registrations and loading observers must remain
+  ordinary Bevy `App` calls that a customer can copy without Fairy Dust.
 
 Decision:
 - Keep `fairy_dust::sprinkle_example()` as the single constructor. It returns a
@@ -511,14 +515,22 @@ Decision:
 - Add a real successful PNG fixture under `crates/hana_lading/assets/`. Configure
   the examples with
   `.with_asset_root(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))` as the first
-  builder step so both documented root-level run commands resolve that fixture
-  independently of the invoking directory; keep the intentionally missing path
-  absent.
+  builder step, obtain the underlying Bevy `App` through `app_mut()`, and call
+  `App::add_plugins(DiskAssetsPlugin::<AssetSet>::default())` once for each
+  startup set. The first call makes the fixture root independent of the invoking
+  directory; the `App` calls visibly install `hana_lading` without making Fairy
+  Dust part of the customer-facing registration. Keep the intentionally missing
+  path absent.
 - Amend `docs/fairy_dust/canonical-example.md` with a narrow takeover/error
   exception. Such examples may omit ground plane, studio lighting,
   camera-control panel, and title bar, but must still use `sprinkle_example()`,
   the first-step-only `.with_asset_root(...)` when assets are package-owned,
   `.with_brp_extras()`, `.with_save_window_position()`, and `.run()`.
+- `examples/successful_loading.rs`, display name **Successful Loading**, uses
+  the full canonical Fairy Dust chain. `Loaded<StartupAssets>` applies the blue
+  PNG to the cube, `AllSetsLoaded` enters `Ready`, and a persistent panel plus a
+  reflected `SuccessEvidence` resource retain the set result, progress, scene
+  use, and application decision after the fast local load has completed.
 - `examples/catastrophic_failure.rs`, display name **Catastrophic Failure**,
   intentionally loads an absent PNG. An example-owned recorder writes generic
   failure evidence directly into a durable resource. The global resolution
@@ -539,8 +551,10 @@ Decision:
   the concrete generic `State<ExampleState>` for BRP reflection. Attach
   `FailurePanelContent` to the entity that carries the panel's rendered text so
   the BRP observation and visible message cannot diverge.
-- Both examples use only `hana_lading`'s public API, assert their missing fixture
-  is absent, and terminate their builder chain with `.run()`.
+- The Hana Lading-specific sections use only public crate APIs on `&mut App`.
+  Fairy Dust supplies presentation around those sections. The failure examples
+  assert their missing fixture is absent, and every example terminates the
+  presentation chain with `.run()`.
 - The examples directly exhibit protections 1 and 3–6 below. Their source
   comments and documentation cite Phase 3's
   `recursive_dependencies_gate_and_fail` contract test as the executable proof
@@ -552,7 +566,7 @@ Decision:
   4. generic failure observers can record every set without knowing its type;
   5. global completion occurs after those direct failure-record writes;
   6. the library never chooses whether the app continues, degrades, or exits.
-- Complete `README.md` with the workflow and both run commands. Add crate-level
+- Complete `README.md` with the workflow and all three run commands. Add crate-level
   docs describing definition → plugin registration → loading → per-set outcome
   → global application decision. Document failure semantics and the headless
   exit recipe tested in Phase 3. Expand the existing
@@ -562,6 +576,7 @@ Decision:
 The documented run commands are:
 
 ```sh
+cargo run -p hana_lading --example successful_loading
 cargo run -p hana_lading --example degraded_failure
 cargo run -p hana_lading --example catastrophic_failure
 ```
@@ -571,6 +586,7 @@ cargo run -p hana_lading --example catastrophic_failure
 - `crates/hana_lading/Cargo.toml`
 - `crates/hana_lading/examples/catastrophic_failure.rs`
 - `crates/hana_lading/examples/degraded_failure.rs`
+- `crates/hana_lading/examples/successful_loading.rs`
 - `crates/hana_lading/examples/loading_evidence/mod.rs`
 - `crates/hana_lading/assets/<successful-fixture>.png`
 - `crates/fairy_dust/src/lib.rs`
@@ -595,9 +611,13 @@ cargo run -p hana_lading --example catastrophic_failure
   reflection backend and image/PNG features; extend it with state support.
 
 **Acceptance gate:** Workspace build including examples passes. Launch each
-example, use BRP to read `State<ExampleState>` and `FailureRecord`, query the
-entity carrying `FailurePanelContent`, and query `RequiredSceneContent` in the
-degraded example; then terminate through `brp_extras/shutdown`. Catastrophic
+example. In the successful example, use BRP to read `State<ExampleState>` and
+`SuccessEvidence`, query `SuccessPanelContent` and `SuccessfulSceneContent`, and
+confirm the screenshot renders the blue PNG instead of Bevy's magenta fallback.
+For the failure examples, use BRP to read `State<ExampleState>` and
+`FailureRecord`, query the entity carrying `FailurePanelContent`, and query
+`RequiredSceneContent` in the degraded example; then terminate through
+`brp_extras/shutdown`. Catastrophic
 inspection must show `Loading`, one recorded failure, the remain-loading panel
 message, and no required-scene marker. Degraded inspection must show `Ready`,
 one optional failure, the continue-degraded panel message, and retained required
@@ -619,11 +639,17 @@ workspace test runs; the `clippy` skill passes.
   Existing fluent chains still install the default baseline on their first
   ordinary operation, and installed builders retain their previous one-parameter
   type spelling and `const fn` primitive/home entry points.
-- The two examples use the same loading evidence to demonstrate opposite
+- Each example performs `DiskAssetsPlugin<T>` and observer registration through
+  the underlying Bevy `App`; Fairy Dust resumes afterward for cameras, lighting,
+  scene content, controls, and panels.
+- The two failure examples use the same loading evidence to demonstrate opposite
   application policies. The catastrophic path stays in `Loading` behind an
   opaque failure panel; the degraded path enters `Ready`, applies the loaded PNG
   to its retained cube, and reports the optional failure through a translucent
   panel.
+- The successful example makes the normal event sequence readable after a fast
+  local load: per-set success applies the PNG, aggregate success reports 1 / 1,
+  and the application enters `Ready`.
 - Reflected state, failure records, applied-image evidence, panel content, and
   required-scene identity made both visual outcomes objectively inspectable
   through BRP before graceful shutdown.
@@ -634,6 +660,9 @@ workspace test runs; the `clippy` skill passes.
   first-step builder method with compile-time ordering. `app_mut()` remains on
   the installed typestate, with `with_default_asset_root()` as the explicit
   transition for callers that need direct app access before another capability.
+- The final example layout separates the owning-crate API from its presentation:
+  Hana Lading setup uses `app_mut()` and normal `App` calls, while Fairy Dust
+  supplies the example shell.
 - The API review preserved the installed builder's existing `const fn`
   capabilities, added positive and negative compile cases for both asset-root
   and direct-app transitions, and corrected documentation that still described
@@ -654,6 +683,11 @@ workspace test runs; the `clippy` skill passes.
 - The first degraded-example launch reached the expected loading events but hit
   a local WGPU queue stall. A fresh launch passed every BRP observation and shut
   down normally.
+- Render inspection found that Fairy Dust enabled `Camera3d`'s default Tony
+  McMapface tonemapping without the corresponding LUT feature, producing Bevy's
+  exact magenta fallback despite successful CPU-side image assignment. Fairy
+  Dust now enables `tonemapping_luts`, and success acceptance includes a
+  screenshot check.
 
 **Verification:**
 

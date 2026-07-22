@@ -78,6 +78,12 @@ behavior must use the owning crate's API directly. For example,
 status panels while `Cascade`, `CascadeFrom`, and `Resolved` remain the
 demonstrated API.
 
+When the owning API is installed on `App`, finish the initial Fairy Dust
+typestate transition, obtain `&mut App` through `app_mut()`, and perform the
+owning-crate registration there. Resume the Fairy Dust chain afterward for
+presentation. This keeps the demonstrated registration copyable into an
+application that does not depend on Fairy Dust.
+
 ### Always include
 
 - `.with_brp_extras()` — BRP remote control + port in window title.

@@ -7,6 +7,9 @@
 //! every returned handle, reports the optional failure, delivers generic
 //! failure evidence before global completion, and leaves the degraded-mode
 //! decision to this application.
+//!
+//! Hana Lading is installed on the underlying Bevy `App`; Fairy Dust supplies
+//! the surrounding scene and controls.
 
 mod loading_evidence;
 
@@ -84,8 +87,18 @@ fn main() {
         "the degraded example requires its missing fixture to stay absent"
     );
 
-    fairy_dust::sprinkle_example()
-        .with_asset_root(asset_root)
+    let mut example = fairy_dust::sprinkle_example().with_asset_root(asset_root);
+
+    example
+        .app_mut()
+        .add_plugins(DiskAssetsPlugin::<RequiredAssets>::default())
+        .add_plugins(DiskAssetsPlugin::<OptionalAssets>::default())
+        .add_plugins(LoadingEvidencePlugin)
+        .init_resource::<RequiredSceneEvidence>()
+        .add_observer(on_required_loaded)
+        .add_observer(on_all_sets_resolved);
+
+    example
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
@@ -101,14 +114,6 @@ fn main() {
         .with_camera_home()
         .with_title_bar(TitleBar::new().with_title(DISPLAY_NAME))
         .with_camera_control_panel()
-        .init_resource::<RequiredSceneEvidence>()
-        .add_plugins((
-            LoadingEvidencePlugin,
-            DiskAssetsPlugin::<RequiredAssets>::default(),
-            DiskAssetsPlugin::<OptionalAssets>::default(),
-        ))
-        .add_observer(on_required_loaded)
-        .add_observer(on_all_sets_resolved)
         .run();
 }
 

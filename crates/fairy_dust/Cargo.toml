@@ -30,6 +30,7 @@ bevy = { workspace = true, features = [
   "ktx2",
   "mesh_picking",
   "multi_threaded",
+  "tonemapping_luts",
   "zstd_rust",
 ] }
 bevy_brp_extras = { workspace = true }
