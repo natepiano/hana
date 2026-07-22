@@ -86,10 +86,11 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 5] = [
+const DESCRIPTION_LINES: [&str; 6] = [
     "Hover each control; interaction changes are logged in the terminal.",
     "D changes the secondary button through PanelWidgetReader and PanelWidgetWriter.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
+    "The primary button's on_click callback counts clicks in the status readout.",
     "The world status panel follows the level slider below the cube controls.",
     "The screen status panel follows the separate top-right screen widget.",
 ];
@@ -106,6 +107,9 @@ const PANEL_WORLD_HEIGHT: f32 = 0.32;
 const BUTTON_STATUS_ID: &str = "button-status";
 const BUTTON_STATUS_IDLE: &str = "Button: none";
 const BUTTON_STATUS_MEASURE: &str = "Button: Canceled secondary-button (pointer/cause)";
+const CALLBACK_STATUS_ID: &str = "callback-status";
+const CALLBACK_STATUS_IDLE: &str = "Callback: none";
+const CALLBACK_STATUS_MEASURE: &str = "Callback: 999 clicks on primary-button";
 const FOCUS_STATUS_ID: &str = "focus-status";
 const FOCUS_STATUS_MEASURE: &str = "Focus: secondary-button";
 const FOCUS_STATUS_NONE: &str = "Focus: none";
@@ -143,9 +147,9 @@ const STATUS_GAP: f32 = 0.012;
 const STATUS_LINE_GAP: Px = Px(4.0);
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = Px(7.0);
-const WORLD_READOUT_MAX_HEIGHT: Px = Px(88.0);
+const WORLD_READOUT_MAX_HEIGHT: Px = Px(116.0);
 const WORLD_READOUT_MAX_WIDTH: Px = Px(420.0);
-const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.09;
+const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.12;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum SecondaryMode {
@@ -207,6 +211,9 @@ impl From<PickingInteraction> for InteractionPriority {
         }
     }
 }
+
+#[derive(Default, Resource)]
+struct PrimaryClicks(usize);
 
 #[derive(Component)]
 struct WidgetLabPanel;
@@ -294,6 +301,7 @@ fn main() {
         )
         .with_camera_control_panel()
         .init_resource::<SecondaryMode>()
+        .init_resource::<PrimaryClicks>()
         .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
         .add_observer(report_button_pressed)
         .add_observer(report_button_released)
@@ -370,6 +378,31 @@ fn report_button_canceled(
         "widgets: {} canceled for {:?} by {:?}",
         event.id, event.cause, event.pointer_id
     );
+}
+
+/// Typed `.on_click` callback for the primary button.
+///
+/// Installed through `Button::new().on_click(...)` at authoring time; reify
+/// registers it once as a tracked system and the plugin's single
+/// global `ButtonClicked` observer dispatches it with each completed click.
+fn count_primary_click(
+    click: In<ButtonClicked>,
+    mut clicks: ResMut<PrimaryClicks>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    mut panel_text: PanelText,
+) {
+    clicks.0 += 1;
+    info!(
+        "widgets: on_click callback ran for {} ({:?}), {} total",
+        click.id, click.pointer_id, clicks.0
+    );
+    let Ok(readout) = readouts.single() else {
+        return;
+    };
+    let status = format!("Callback: {} clicks on {}", clicks.0, click.id);
+    if !panel_text.set_text(readout, &PanelElementId::named(CALLBACK_STATUS_ID), status) {
+        warn!("widgets: callback status has not been reified");
+    }
 }
 
 fn retain_button_status(
@@ -634,6 +667,7 @@ fn screen_widget_tree() -> LayoutTree {
         SCREEN_TARGET_ID,
         SCREEN_TARGET_LABEL,
         SCREEN_CONTROL_WIDTH,
+        Button::new(),
     );
     builder.build()
 }
@@ -687,12 +721,14 @@ fn widget_tree(slider: Slider) -> LayoutTree {
         PRIMARY_BUTTON_ID,
         "Primary button",
         CONTROL_WIDTH,
+        Button::new().on_click(count_primary_click),
     );
     add_button(
         &mut builder,
         SECONDARY_BUTTON_ID,
         "Secondary button",
         CONTROL_WIDTH,
+        Button::new(),
     );
     builder.with(
         El::new()
@@ -749,6 +785,14 @@ fn interaction_status_tree() -> LayoutTree {
         .id(BUTTON_STATUS_ID)
         .measure_as(BUTTON_STATUS_MEASURE),
     );
+    builder.text(
+        Text::new(
+            CALLBACK_STATUS_IDLE,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        )
+        .id(CALLBACK_STATUS_ID)
+        .measure_as(CALLBACK_STATUS_MEASURE),
+    );
     builder.build()
 }
 
@@ -765,7 +809,13 @@ fn interaction_status_transform() -> Transform {
     transform
 }
 
-fn add_button(builder: &mut LayoutBuilder, id: &'static str, label: &'static str, width: Px) {
+fn add_button(
+    builder: &mut LayoutBuilder,
+    id: &'static str,
+    label: &'static str,
+    width: Px,
+    button: Button,
+) {
     builder.with(
         El::new()
             .size(width, BUTTON_HEIGHT)
@@ -774,7 +824,7 @@ fn add_button(builder: &mut LayoutBuilder, id: &'static str, label: &'static str
             .background(BUTTON_FILL)
             .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
-            .button(id, Button::new()),
+            .button(id, button),
         |builder| {
             builder.text((
                 label,

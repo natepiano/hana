@@ -579,7 +579,10 @@ impl<L> El<L> {
     /// Marks this element as a button with panel-local semantic identity `id`.
     ///
     /// The id and button declaration are assigned together so a widget cannot
-    /// be authored without its identity.
+    /// be authored without its identity. A [`Button::on_click`] callback on
+    /// the declaration stays a cloneable template here; the builder never
+    /// touches a `World`, and reify registers the callback when the widget
+    /// entity exists.
     pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> Self {
         self.common.id = Some(id.into());
         self.common.widget = Some(WidgetSpec::Button(button));
