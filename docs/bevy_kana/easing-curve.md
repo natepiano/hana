@@ -69,11 +69,11 @@ different from accidentally leaking a convenience math wrapper. There is no
 way to let callers choose one shared, reflected, asset-backed easing without
 exposing some common authoring representation.
 
-Before implementation, amend the workspace rule that currently forbids every
-`bevy_kana` type from crossing a public boundary. The exception should be
-narrow: types deliberately designed as stable cross-crate authoring protocols,
-beginning with `Easing` and `EasingCurve`, may be public. Numeric conversion
-traits and semantic math wrappers remain internal implementation conveniences.
+Before implementation, confirm `Easing` and `EasingCurve` as deliberate
+additions under the workspace's narrow exception for stable cross-crate
+protocols and curated facades. `CascadeDefault` and `CascadeSet` already use
+this boundary pattern. Numeric conversion traits and semantic math wrappers
+remain internal implementation conveniences.
 
 ### Cargo features
 
