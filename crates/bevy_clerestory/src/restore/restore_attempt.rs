@@ -3545,6 +3545,17 @@ mod tests {
 
         assert!(app.world().get::<NativeWindowReady>(entity).is_none());
         assert!(app.world().get::<CurrentMonitor>(entity).is_none());
+        app.update();
+        assert!(app.world().get::<TargetPosition>(entity).is_none());
+        assert_eq!(
+            app.world()
+                .resource::<InjectedCurrentMonitorSource>()
+                .activity(),
+            NativeQueryActivity {
+                window_map:       0,
+                monitor_metadata: 0,
+            }
+        );
     }
 
     #[test]

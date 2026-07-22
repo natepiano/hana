@@ -6,7 +6,8 @@
 [![CI](https://github.com/natepiano/hana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/hana/actions/workflows/ci.yml)
 
 
-A Bevy plugin for window state persistence and multi-monitor utilities.
+A Bevy plugin that saves and restores window placement, handles mixed-scale
+monitors, and can recover windows after a monitor reconnects.
 
 ## Motivation
 
@@ -18,7 +19,7 @@ The first discovered issue is that winit uses the scale factor of the focused wi
 
 Windows has similar scale factor issues, plus additional quirks like invisible window borders that prevent precise placement. Linux X11 has its own quirks with window manager keyboard shortcuts not firing position events. This plugin now supports macOS, Windows, and Linux (X11 and Wayland) with workarounds for platform-specific issues (see [Platform Support](#platform-support) for details).
 
-Future directions include comprehensive multi-monitor lifecycle support.
+Clerestory can also track monitor connections while an application is running and help recover windows after their monitor is disconnected and reconnected.
 
 ## Usage
 
@@ -46,20 +47,31 @@ This crate exposes several types for working with monitors and windows beyond th
 
 ### `Monitors` Resource
 
-Query available monitors sorted by position:
+`Monitors` contains the displays currently known to Bevy. Its order comes from winit and can change
+when displays are disconnected or reconnected, so an index is useful for the current inventory but
+is not a permanent monitor identity.
 
 - `monitors.at(physical_x, physical_y)` – Find the monitor containing a position (physical pixels)
-- `monitors.by_index(index)` – Get monitor by sorted index
-- `monitors.first()` – Get the first monitor (index 0)
+- `monitors.by_index(index)` – Find the monitor currently reporting `index`
+- `monitors.first()` – Get the first monitor in winit's current order; this is not necessarily the primary monitor
 - `monitors.closest_to(physical_x, physical_y)` – Find the closest monitor to a position (physical pixels)
+- `monitors.by_id(id)` – Find the one current monitor with a verified `MonitorId`
+- `monitors.iter()` – Iterate over each current monitor entity and its `MonitorInfo`
 
 ### `MonitorInfo`
 
-Information about a single monitor: `index`, `scale`, `position`, and `size`.
+Information about one monitor: `identity`, `index`, `scale`, `physical_position`, and
+`physical_size`. It is a copy of the monitor's data and does not contain its Bevy entity.
+
+`identity` is `MonitorIdentity::Verified(MonitorId)` when the operating system provides enough
+information to distinguish that physical monitor from the others. Otherwise it is
+`MonitorIdentity::Unverified`, and Clerestory will not assume that a monitor with the same position,
+connector, or index is the same physical device.
 
 ### `CurrentMonitor` Component
 
-Automatically maintained on all managed windows. Query it to get monitor info and effective mode:
+Automatically maintained on the primary window and every `ManagedWindow`. Query it to get monitor
+information and the window's effective mode:
 
 ```rust
 use bevy::prelude::*;
@@ -75,7 +87,7 @@ fn my_system(q: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
 }
 ```
 
-- `monitor.index`, `monitor.scale`, `monitor.position`, `monitor.size` – Monitor info (via `Deref<Target = MonitorInfo>`)
+- `monitor.index`, `monitor.scale`, `monitor.physical_position`, `monitor.physical_size` – Monitor info (via `Deref<Target = MonitorInfo>`)
 - `monitor.effective_window_mode` – The actual window mode, even when `window.mode` is stale (e.g., macOS green button fullscreen reports `Windowed` but the window is actually fullscreen)
 
 ### Plugin Configuration
@@ -125,31 +137,40 @@ app.add_plugins(WindowManagerPlugin::with_persistence(ManagedWindowPersistence::
 
 See `examples/restore_window.rs` for a complete interactive example.
 
-### Monitor reconnect recovery
+### Recover windows after a monitor reconnects
 
-Reconnect recovery associates a window with its physical monitor so the window can return after that
-monitor is disconnected and reconnected. A monitor is verified when the platform supplies enough
-stable physical-display information for Clerestory to recognize the same monitor when it returns.
+When a monitor is unplugged, the operating system may move its windows to another display. In other
+cases, Bevy may delete a window entity because it was linked to the monitor entity that disappeared.
+If the application remains running, Clerestory can remember which physical monitor a window belonged
+to and help return that window when the same monitor reconnects.
 
-Add `WindowRecovery` once to the initial `PrimaryWindow` or to a `ManagedWindow`. A managed window's
-registered name identifies it across entity replacement. A recovery generation is Clerestory's
-internal identifier for one accepted registration; a replacement window keeps the same generation,
-so reconstruction does not create another registration. Applications do not create, store, or manage
-this identifier. `Disabled` does nothing.
-`ApplicationControlled` reports when the monitor is lost and when it returns, then waits for the
-application to create or select the window and trigger `RestoreWindow`.
+Add `WindowRecovery` once to the initial `PrimaryWindow` or to a `ManagedWindow`. Clerestory accepts
+the registration only after it can associate the window with one verified physical monitor. A
+verified monitor is one the operating system has provided enough information to distinguish from
+other monitors. Clerestory does not guess from its position, connector, or current index.
 
-With `FallbackAndReturn`, a surviving window may be relocated by the operating system after its
-monitor disappears. Clerestory observes that placement; it does not choose or perform the fallback
-move. If Bevy removed the window entity and another monitor remains, Clerestory can create a new
-`Window` on the first monitor in Clerestory's position-sorted monitor list. It uses the `Window`
-settings copied when recovery registration was accepted and adds the matching `PrimaryWindow` or
-registered `ManagedWindow` identity. It does not recreate cameras, UI, or other application-owned
-content. Clerestory automatically returns the surviving or replacement fallback window only while
-its recovery registration remains active. Moving or resizing the fallback window, or changing its
-mode, does not replace the registered target—even when the operating system made the change. To keep
-a live fallback window where it is, the application explicitly triggers `CancelWindowRecovery` for
-that window's `WindowKey`. Cancellation keeps the live window and stops its automatic return.
+Choose how much of the recovery the application wants Clerestory to perform:
+
+| Policy | Behavior |
+| --- | --- |
+| `Disabled` | The window does not participate in reconnect recovery. |
+| `ApplicationControlled` | Clerestory reports when the target monitor disappears and returns. The application creates or selects the window, prepares its content, and sends `RestoreWindow`. |
+| `FallbackAndReturn` | Clerestory tracks a surviving window that the operating system moved to another display, or creates one replacement `Window` when Bevy deleted it. It returns that window automatically when the target monitor comes back. |
+
+For `FallbackAndReturn`, the window behaves as follows:
+
+1. If the operating system moves the existing window to another display, Clerestory leaves it there
+   while the target monitor is absent.
+2. If Bevy deletes the window entity and another monitor is available, Clerestory creates one new
+   `Window` using the saved window settings. That replacement starts on the first monitor in winit's
+   current order, which is not necessarily the primary monitor.
+3. When the same verified monitor returns, Clerestory moves the surviving or replacement window back
+   to its saved placement.
+
+Clerestory restores the Bevy `Window` and its settings. It does not clone application-owned cameras,
+UI, or other content. The application must attach that content when the replacement gains its
+`PrimaryWindow` or `ManagedWindow` component. Reconstructed windows may also return in a different
+front-to-back order because Clerestory does not preserve window stacking order.
 
 ```rust
 use bevy::prelude::*;
@@ -178,27 +199,39 @@ fn register_windows(
 }
 ```
 
-Clerestory records the selected policy when `WindowRecovery` is first added. Later mutation or
-removal of the component does not change that active registration. To replace a policy, trigger
-`CancelWindowRecovery` for its `WindowKey`, remove the component, and add the new variant.
+#### Change or cancel recovery
 
-A `WindowKey` is `Primary` for Bevy's primary window or `Managed(name)` for a registered
-`ManagedWindow` name. Cancellation uses this key, so it still works after the original entity has
-been removed. It stops the current recovery attempt but does not despawn a live window. With
-`ManagedWindowPersistence::RememberAll`, saved state for an absent cancelled window remains available
-for a later launch. With `ActiveOnly`, that saved entry is removed.
+Once Clerestory starts tracking the window, changing or removing its `WindowRecovery` component does
+not change the active policy or target monitor. To choose another policy, first send
+`CancelWindowRecovery`, then remove the component and add the new policy.
 
-`WindowRecoveryPending` reports the `WindowKey` and the absent monitor's `MonitorId`. For
-`ApplicationControlled`, `WindowRecoveryAvailable` is the fact the application uses to decide when
-to create or select a replacement; it reports the same key and the current `MonitorInfo` after that
-monitor returns. Automatic `FallbackAndReturn` recovery does not require the application to handle
-this event. These events report observed facts and do not include the registered policy. A
-`MonitorId` identifies a verified monitor only within the current process and is never written to the
+Recovery is tracked by a stable `WindowKey`, not only by the current Bevy entity. The primary window
+uses `WindowKey::Primary`; a managed window uses `WindowKey::Managed(name)`. This lets cancellation
+and application-controlled recovery continue after the original entity has been deleted.
+
+`CancelWindowRecovery` stops recovery for that key. It does not close a surviving window that was
+moved to another display; the window stays where it is. With
+`ManagedWindowPersistence::RememberAll`, the saved state for an absent cancelled window remains
+available on the next launch. With `ActiveOnly`, that saved entry is removed.
+
+#### Application-controlled recovery
+
+Two events tell the application what happened:
+
+- `WindowRecoveryPending` means the registered monitor has disappeared. It contains the
+  `WindowKey` and the missing monitor's `MonitorId`.
+- For `ApplicationControlled` recovery, `WindowRecoveryAvailable` means that monitor has returned.
+  The application uses this event to create or choose a window before sending `RestoreWindow`.
+  `FallbackAndReturn` handles the return itself and does not send this event.
+
+A `MonitorId` is meaningful only within the current application process and is never written to the
 state file.
 
 For `ApplicationControlled`, the application creates the window and owns its cameras, UI, and other
-content. The following observer recreates the registered managed window after its target returns and
-requests restoration. It does not add another `WindowRecovery`.
+content. The following observer creates the managed window after its target returns, then asks
+Clerestory to restore it. This small example has no application-owned content; when a real window has
+content, prepare it before sending `RestoreWindow`. The replacement does not receive another
+`WindowRecovery` component.
 
 ```rust
 use bevy::prelude::*;
@@ -233,16 +266,17 @@ fn restore_inspector(
 }
 ```
 
-`RestoreWindow` targets an entity. That entity must be either the one `PrimaryWindow` or the
-`ManagedWindow` whose name was registered. Clerestory rejects an entity that does not have exactly
-one of these identities. Callers do not provide a `WindowKey` with this request.
-`CancelWindowRecovery` is a global event with a `window: WindowKey` field because the registered
-entity may no longer exist.
+`RestoreWindow` names the Bevy entity to restore. That entity must be the current primary window or a
+managed window with the registered name. Clerestory rejects unrelated or ambiguous entities. The
+request does not need a `WindowKey` because Clerestory derives it from the entity's components.
 
-When Clerestory creates a replacement, application code must rebind its content as soon as the
-replacement's `PrimaryWindow` or `ManagedWindow` identity appears. The replacement can exist on a
-fallback monitor before restoration completes. This system updates an application-owned content root
-whenever the registered inspector identity is added to an entity:
+#### Reattach content to a replacement window
+
+When Clerestory creates a replacement, its Bevy entity is new. Cameras, UI, and other
+application-owned objects that referred to the old entity must be updated as soon as the replacement
+receives `PrimaryWindow` or `ManagedWindow`. This should happen when the role component is added,
+because the replacement may exist on a fallback monitor before its final restore finishes. The
+following system updates an application-owned content root when the registered inspector appears:
 
 ```rust
 use bevy::prelude::*;
@@ -268,17 +302,21 @@ fn rebind_inspector_content(
 }
 ```
 
-Registration waits until the window is associated with one verified monitor. `FallbackAndReturn`
-also requires a placement mode that Clerestory can restore. macOS, Windows, and X11 support
-client-selected windowed placement. A Wayland compositor controls windowed placement, so a windowed
-Wayland registration cannot enable automatic return. A verified borderless-fullscreen output can
-enable automatic return on Wayland. `ApplicationControlled` can still report that a verified target
-has returned, but a requested windowed restore on Wayland cannot promise a position and may report a
-restore mismatch.
+#### Platform limits
 
-Bevy normally exits after the last window disappears. To recover through a period with no windows,
-configure `WindowPlugin` with `ExitCondition::DontExit`, then implement an explicit user action that
-sends `AppExit`. This example exits when the operating system requests any window close:
+Automatic return requires both a verified monitor and a window placement that the operating system
+lets Clerestory restore. macOS, Windows, and X11 allow applications to choose a windowed position.
+Wayland compositors choose windowed positions, so a windowed Wayland window cannot use automatic
+return. A verified borderless-fullscreen output may still support automatic return on Wayland.
+`ApplicationControlled` can report that a verified Wayland target returned, but a requested windowed
+restore cannot promise a position and may report `WindowRestoreMismatch`.
+
+#### Keep the application alive with no windows
+
+Bevy normally exits when its last window disappears. If the application must stay alive long enough
+to recover deleted windows, configure `WindowPlugin` with `ExitCondition::DontExit`. The application
+must then decide what should exit it. This example sends `AppExit` when the operating system requests
+that any window close:
 
 ```rust,no_run
 use bevy::prelude::*;
@@ -308,15 +346,31 @@ fn exit_when_close_is_requested(
 }
 ```
 
-BRP clients can observe recovery notifications, monitor-lifetime events, and restore results with
-`world.observe+watch`. They can trigger `RestoreWindow` and `CancelWindowRecovery` with
-`world.trigger_event`. These public events carry Bevy `ReflectEvent` type data. Their reflected paths
-remain in `bevy_clerestory::recovery`, `bevy_clerestory::monitors`, and
+#### Remote control through BRP
+
+Bevy Remote Protocol (BRP) clients can observe recovery notifications, monitor connection changes,
+and restore results with `world.observe+watch`. They can send `RestoreWindow` and
+`CancelWindowRecovery` with `world.trigger_event`. These events carry Bevy `ReflectEvent` data and
+keep their reflected paths in `bevy_clerestory::recovery`, `bevy_clerestory::monitors`, and
 `bevy_clerestory::events`.
 
-See the [restore-after-reconnect consumer](examples/restore_after_reconnect/README.md) for a complete
-two-policy application, causal trace schema, automated checks, and two-cycle cross-platform operator
-script.
+See the [restore-after-reconnect example](examples/restore_after_reconnect/README.md) for a complete
+application using both policies, an ordered diagnostic log, automated checks, and a two-cycle manual
+monitor-disconnect script.
+
+#### What the automated tests cover
+
+Automated Bevy tests simulate monitor disconnection and reconnection without unplugging a physical
+display. They verify registration, windows moved to another display, replacement of deleted windows,
+return to the same verified monitor after entity and index changes, cancellation, operation with no
+displays or no windows, and Wayland's capability limits.
+
+Real hardware is still required to verify what the operating system does when a cable, dock, or lid
+changes: whether it moves or deletes a window, how it reports the returning display, and how real
+scale-factor changes behave. Those results are recorded separately in the
+[restore-after-reconnect README](examples/restore_after_reconnect/README.md). It contains one earlier
+macOS disconnect/reconnect record; the complete two-cycle macOS, Windows, X11, and Wayland results
+have not yet been recorded.
 
 ### State File Format
 
@@ -338,9 +392,13 @@ Legacy state files (unversioned and v1) are still accepted on read and migrated 
 
 | bevy_clerestory | Bevy |
 |---------------------|------|
-| 0.1                 | 0.19 |
+| 0.1 – 0.2           | 0.19 |
 
 ## Platform Support
+
+This table records physical testing of window placement save/restore. Physical reconnect test
+results are tracked separately (see
+[What the automated tests cover](#what-the-automated-tests-cover)).
 
 | Platform | Status | Notes |
 |----------|--------|-------|

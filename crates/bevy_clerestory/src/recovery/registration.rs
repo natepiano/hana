@@ -474,6 +474,8 @@ pub(super) fn record_os_close_intent(
 mod tests {
     #[cfg(feature = "monitor-probe")]
     use bevy::diagnostic::FrameCount;
+    #[cfg(feature = "monitor-probe")]
+    use bevy::ecs::schedule::SingleThreadedExecutor;
     use bevy::ecs::system::In;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::Registry;
@@ -891,6 +893,12 @@ mod tests {
             .add_plugins(RecoveryPlugin)
             .add_observer(example_trace::on_monitor_connected)
             .add_observer(example_trace::on_monitor_disconnected);
+        // `with_default` installs a thread-local subscriber, so `Update` must run
+        // single-threaded for `accept_eligible_registrations` to emit on this
+        // thread instead of a `ComputeTaskPool` worker.
+        app.edit_schedule(Update, |schedule| {
+            schedule.set_executor(SingleThreadedExecutor::new());
+        });
         let entity = app
             .world_mut()
             .spawn((
