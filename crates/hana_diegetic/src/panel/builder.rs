@@ -35,6 +35,7 @@ use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 use crate::layout::Unit;
 use crate::widgets;
+use crate::widgets::PanelPicking;
 
 /// Error returned by [`DiegeticPanelBuilder::build`].
 ///
@@ -183,6 +184,7 @@ pub(super) struct BuilderData {
     shape_material:         Cascade<Handle<StandardMaterial>>,
     text_alpha_mode:        Cascade<AlphaMode>,
     hdr_text_coverage_bias: Cascade<f32>,
+    picking:                PanelPicking,
     tree:                   Option<LayoutTree>,
     coordinate_space:       CoordinateSpace,
 }
@@ -288,6 +290,18 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     #[must_use]
     pub const fn anchor(mut self, anchor: Anchor) -> Self {
         self.data.anchor = Some(anchor);
+        self
+    }
+
+    /// Sets the front- and back-face pointer behavior for the panel.
+    ///
+    /// Applied as a seed on spawn or replacement: it installs only when the
+    /// entity has no live [`PanelPicking`], and an installed seed that the
+    /// application never rewrites is removed together with the
+    /// [`DiegeticPanel`] role.
+    #[must_use]
+    pub const fn picking(mut self, panel_picking: PanelPicking) -> Self {
+        self.data.picking = panel_picking;
         self
     }
 
@@ -907,6 +921,7 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
     panel.shape_material = data.shape_material;
     panel.text_alpha_mode = data.text_alpha_mode;
     panel.hdr_text_coverage_bias = data.hdr_text_coverage_bias;
+    panel.picking = data.picking;
     panel.coordinate_space = data.coordinate_space;
     panel
 }

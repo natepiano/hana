@@ -17,6 +17,7 @@ use bevy::image::Image;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::Indices;
 use bevy::pbr::MaterialPlugin;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_resource::ShaderSize;
@@ -715,6 +716,7 @@ fn spawn_image_batch_entity(
         DiegeticImageBatch,
         Mesh3d(gpu.mesh.clone()),
         MeshMaterial3d(gpu.material.clone()),
+        Pickable::IGNORE,
         Visibility::Inherited,
         NoAutoAabb,
         Aabb::default(),
@@ -1338,6 +1340,24 @@ mod tests {
 
         assert_eq!(image_batch_entity_count(&mut app), 0);
         assert_eq!(non_empty_image_batch_count(&app), 0);
+    }
+
+    #[test]
+    fn image_batch_entities_ignore_stock_mesh_picking() {
+        let mut app = image_batch_app();
+        let mut images = Assets::<Image>::default();
+        let texture = images.add(Image::default());
+        spawn_panel(&mut app, vec![image_command(texture, Color::WHITE, 0)]);
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(Entity, &Pickable), With<DiegeticImageBatch>>();
+        let batches = query.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(batches.len(), 1);
+        assert!(!batches[0].1.is_hoverable);
+        assert!(!batches[0].1.should_block_lower);
     }
 
     #[test]

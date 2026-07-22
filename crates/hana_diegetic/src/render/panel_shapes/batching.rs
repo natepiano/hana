@@ -17,6 +17,7 @@ use bevy::math::Vec2;
 use bevy::math::Vec3;
 use bevy::math::Vec3A;
 use bevy::mesh::Indices;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
@@ -1262,6 +1263,7 @@ fn spawn_batch_entity(
         DiegeticPanelShapeBatch,
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
+        Pickable::IGNORE,
         NoAutoAabb,
         Aabb::default(),
         key.layers.0.clone(),
@@ -2529,6 +2531,21 @@ mod tests {
 
         assert_eq!(store.batches().count(), 1);
         assert_eq!(store.get(&key).map(ShapeBatch::record_count), Some(2));
+    }
+
+    #[test]
+    fn panel_shape_batch_entities_ignore_stock_mesh_picking() {
+        let mut app = line_batch_app();
+        spawn_line_panel(&mut app, DrawZIndex::default());
+        settle(&mut app);
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(Entity, &Pickable), With<DiegeticPanelShapeBatch>>();
+        let batches = query.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(batches.len(), 1);
+        assert!(!batches[0].1.is_hoverable);
+        assert!(!batches[0].1.should_block_lower);
     }
 
     #[test]

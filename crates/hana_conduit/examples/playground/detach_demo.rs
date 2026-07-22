@@ -12,6 +12,7 @@ use hana_conduit::DetachPolicy;
 use hana_conduit::Solver;
 use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticText;
+use hana_diegetic::PanelPicking;
 
 use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::DESPAWN_GREEN;
@@ -154,6 +155,7 @@ fn spawn_detach_demo_row(
     commands.spawn((
         CameraFacingLabel,
         Pickable::IGNORE,
+        PanelPicking::PASS_THROUGH,
         DetachDemoEntity,
         DiegeticText::world(row.label)
             .size(DETACH_DEMO_LABEL_SIZE)

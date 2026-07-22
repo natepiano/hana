@@ -21,6 +21,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowCaster;
 use bevy::math::Vec3A;
 use bevy::mesh::Indices;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
@@ -990,6 +991,7 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
         DiegeticTextBatch,
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
+        Pickable::IGNORE,
         // The union system owns this Aabb; CalculateBounds must not replace
         // it with a zero-extent box from the inert mesh's zeroed positions.
         NoAutoAabb,
@@ -1494,6 +1496,22 @@ mod tests {
         assert_eq!(runs, 2);
         assert_eq!(glyphs, 9, "'Alpha' + 'Beta' visible glyphs");
         assert_eq!(batch_entities(&mut app).len(), 1);
+    }
+
+    #[test]
+    fn text_batch_entities_ignore_stock_mesh_picking() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, one_text_tree());
+        settle(&mut app);
+
+        let entities = batch_entities(&mut app);
+        assert_eq!(entities.len(), 1);
+        let pickable = app
+            .world()
+            .get::<Pickable>(entities[0])
+            .expect("text batch entity should carry Pickable::IGNORE");
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
     }
 
     #[test]

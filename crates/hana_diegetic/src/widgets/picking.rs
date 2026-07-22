@@ -15,13 +15,114 @@ use super::WidgetOf;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelOwned;
+use crate::panel::PanelPlane;
 use crate::render;
 use crate::render::PanelInteractionMesh;
+
+/// Pointer behavior for one side of a diegetic panel.
+///
+/// Panel and widget hit regions are rectangles. Transparent pixels inside a
+/// reported rectangle still receive pointer hits, and content that renders
+/// beyond the panel rectangle does not. Use [`Self::WidgetsOnly`] when a
+/// transparent panel background should pass pointer input through while its
+/// widget rectangles remain interactive. Non-rectangular hit regions are not
+/// supported.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+pub enum FacePicking {
+    /// The panel background and widget rectangles receive pointer input.
+    #[default]
+    Interactive,
+    /// The panel background receives pointer input, but widgets do not.
+    PanelOnly,
+    /// Widget rectangles receive pointer input, but the panel background does
+    /// not block lower hits.
+    WidgetsOnly,
+    /// Neither the panel background nor widgets receive or block pointer input.
+    PassThrough,
+}
+
+impl FacePicking {
+    const fn includes_panel(self) -> bool { matches!(self, Self::Interactive | Self::PanelOnly) }
+
+    const fn includes_widgets(self) -> bool {
+        matches!(self, Self::Interactive | Self::WidgetsOnly)
+    }
+
+    /// Faces whose blocking of lower diegetic panels needs no widget matching:
+    /// the panel background is itself a hit surface, so any lower panel is
+    /// always blocked. [`Self::WidgetsOnly`] is excluded — it blocks only when a
+    /// widget is hit, which is unknown until widgets are matched.
+    const fn always_blocks_lower(self) -> bool {
+        matches!(self, Self::Interactive | Self::PanelOnly)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PanelFace {
+    Front,
+    Back,
+}
+
+/// Configures pointer behavior independently for a panel's front and back.
+///
+/// An entity without this component behaves as [`Self::INTERACTIVE`]. The
+/// picking backend tests the panel and each widget as rectangles: transparent
+/// pixels inside those rectangles still receive pointer hits, while rendered
+/// content beyond the panel edge does not. Use [`FacePicking::WidgetsOnly`] for
+/// a transparent panel whose widget rectangles should remain interactive.
+/// Non-rectangular hit regions are not supported.
+#[derive(Clone, Copy, Component, Debug, Eq, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct PanelPicking {
+    /// Pointer behavior for rays that meet the panel's front face.
+    pub front: FacePicking,
+    /// Pointer behavior for rays that meet the panel's back face.
+    pub back:  FacePicking,
+}
+
+impl PanelPicking {
+    /// Both faces report the panel and its widgets.
+    pub const INTERACTIVE: Self = Self {
+        front: FacePicking::Interactive,
+        back:  FacePicking::Interactive,
+    };
+
+    /// Both faces pass pointer input through without reporting hits.
+    pub const PASS_THROUGH: Self = Self {
+        front: FacePicking::PassThrough,
+        back:  FacePicking::PassThrough,
+    };
+
+    const fn behavior(self, panel_face: PanelFace) -> FacePicking {
+        match panel_face {
+            PanelFace::Front => self.front,
+            PanelFace::Back => self.back,
+        }
+    }
+}
+
+impl Default for PanelPicking {
+    fn default() -> Self { Self::INTERACTIVE }
+}
 
 #[derive(Clone, Copy)]
 enum PickableMarkers {
     Optional,
     Required,
+}
+
+struct FaceHit {
+    camera:   Entity,
+    panel:    Entity,
+    point:    Vec3,
+    normal:   Vec3,
+    distance: f32,
+    behavior: FacePicking,
+}
+
+enum LowerHits {
+    Block,
+    Continue,
 }
 
 pub(super) fn update_hits(
@@ -34,6 +135,7 @@ pub(super) fn update_hits(
         &ComputedDiegeticPanel,
         &GlobalTransform,
         Option<&PanelWidgets>,
+        Option<&PanelPicking>,
     )>,
     widgets: Query<(&PanelWidget, &WidgetOf, Option<&Pickable>)>,
     pickables: Query<&Pickable>,
@@ -60,18 +162,25 @@ pub(super) fn update_hits(
                 !backend_settings.require_markers || pickables.get(panel_entity).is_ok();
             let mesh_layers = layers.get(mesh_entity).cloned().unwrap_or_default();
             let render_layers_match = camera_layers.intersects(&mesh_layers);
-            let panel_is_pickable = pickables
+            let face_receives_hits = panels
                 .get(panel_entity)
                 .ok()
-                .is_none_or(|pickable| pickable.is_hoverable);
-            marker_requirement && render_layers_match && panel_is_pickable
+                .and_then(|(panel, _, panel_transform, _, panel_picking)| {
+                    face_behavior(panel, panel_transform, panel_picking, ray)
+                })
+                .is_some_and(|behavior| behavior != FacePicking::PassThrough);
+            marker_requirement && render_layers_match && face_receives_hits
         };
         let early_exit = |mesh_entity| {
             interaction_meshes
                 .get(mesh_entity)
                 .ok()
-                .and_then(|ownership| pickables.get(ownership.owner()).ok())
-                .is_some_and(|pickable| pickable.should_block_lower)
+                .and_then(|ownership| {
+                    let (panel, _, panel_transform, _, panel_picking) =
+                        panels.get(ownership.owner()).ok()?;
+                    face_behavior(panel, panel_transform, panel_picking, ray)
+                })
+                .is_some_and(FacePicking::always_blocks_lower)
         };
         let settings = MeshRayCastSettings {
             visibility:      backend_settings.ray_cast_visibility,
@@ -86,7 +195,12 @@ pub(super) fn update_hits(
                 continue;
             };
             let panel_entity = ownership.owner();
-            let Ok((panel, computed, panel_transform, panel_widgets)) = panels.get(panel_entity)
+            let Ok((panel, computed, panel_transform, panel_widgets, panel_picking)) =
+                panels.get(panel_entity)
+            else {
+                continue;
+            };
+            let Some(face_behavior) = face_behavior(panel, panel_transform, panel_picking, ray)
             else {
                 continue;
             };
@@ -96,41 +210,34 @@ pub(super) fn update_hits(
                 continue;
             };
 
-            let matching_widgets = matching_widgets(
-                panel_entity,
-                panel_local,
-                computed,
-                panel_widgets,
-                &widgets,
-                if backend_settings.require_markers {
-                    PickableMarkers::Required
-                } else {
-                    PickableMarkers::Optional
-                },
-            );
-
-            let mut widget_depth = hit.distance;
-            for (_, widget_entity) in matching_widgets {
-                widget_depth = widget_depth.next_down();
-                picks.push((
-                    widget_entity,
-                    HitData::new(
-                        ray_id.camera,
-                        widget_depth,
-                        Some(hit.point),
-                        Some(hit.normal),
-                    ),
-                ));
+            let matching_widgets = face_behavior.includes_widgets().then(|| {
+                matching_widgets(
+                    panel_entity,
+                    panel_local,
+                    computed,
+                    panel_widgets,
+                    &widgets,
+                    if backend_settings.require_markers {
+                        PickableMarkers::Required
+                    } else {
+                        PickableMarkers::Optional
+                    },
+                )
+            });
+            let face_hit = FaceHit {
+                camera:   ray_id.camera,
+                panel:    panel_entity,
+                point:    hit.point,
+                normal:   hit.normal,
+                distance: hit.distance,
+                behavior: face_behavior,
+            };
+            if matches!(
+                append_face_picks(&mut picks, face_hit, matching_widgets, &pickables),
+                LowerHits::Block
+            ) {
+                break;
             }
-            picks.push((
-                panel_entity,
-                HitData::new(
-                    ray_id.camera,
-                    hit.distance,
-                    Some(hit.point),
-                    Some(hit.normal),
-                ),
-            ));
         }
 
         if !picks.is_empty() {
@@ -141,6 +248,82 @@ pub(super) fn update_hits(
             ));
         }
     }
+}
+
+fn append_face_picks(
+    picks: &mut Vec<(Entity, HitData)>,
+    face_hit: FaceHit,
+    matching_widgets: Option<Vec<(usize, Entity)>>,
+    pickables: &Query<&Pickable>,
+) -> LowerHits {
+    let widgets_block_lower = matching_widgets.as_ref().is_some_and(|matching_widgets| {
+        matching_widgets.iter().any(|(_, widget_entity)| {
+            pickables
+                .get(*widget_entity)
+                .ok()
+                .is_none_or(|pickable| pickable.should_block_lower)
+        })
+    });
+
+    let pick_count = picks.len();
+    let mut widget_depth = face_hit.distance;
+    if let Some(matching_widgets) = matching_widgets {
+        for (_, widget_entity) in matching_widgets {
+            widget_depth = widget_depth.next_down();
+            picks.push((
+                widget_entity,
+                HitData::new(
+                    face_hit.camera,
+                    widget_depth,
+                    Some(face_hit.point),
+                    Some(face_hit.normal),
+                ),
+            ));
+        }
+    }
+    if face_hit.behavior.includes_panel() {
+        picks.push((
+            face_hit.panel,
+            HitData::new(
+                face_hit.camera,
+                face_hit.distance,
+                Some(face_hit.point),
+                Some(face_hit.normal),
+            ),
+        ));
+    }
+
+    let blocks_lower = match face_hit.behavior {
+        FacePicking::WidgetsOnly => widgets_block_lower,
+        behavior => behavior.always_blocks_lower(),
+    };
+    if picks.len() != pick_count && blocks_lower {
+        LowerHits::Block
+    } else {
+        LowerHits::Continue
+    }
+}
+
+fn face_behavior(
+    panel: &DiegeticPanel,
+    panel_transform: &GlobalTransform,
+    panel_picking: Option<&PanelPicking>,
+    ray: Ray3d,
+) -> Option<FacePicking> {
+    let normal = PanelPlane::from_panel(panel, panel_transform)
+        .ok()?
+        .normal();
+    let panel_face = if ray.direction.as_vec3().dot(normal) < 0.0 {
+        PanelFace::Front
+    } else {
+        PanelFace::Back
+    };
+    Some(
+        panel_picking
+            .copied()
+            .unwrap_or_default()
+            .behavior(panel_face),
+    )
 }
 
 fn matching_widgets(
@@ -211,7 +394,10 @@ mod tests {
     use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
     use bevy::picking::mesh_picking::ray_cast::RayCastVisibility;
     use bevy::picking::pointer::Location;
+    use bevy::picking::pointer::PointerAction;
+    use bevy::picking::pointer::PointerButton;
     use bevy::picking::pointer::PointerId;
+    use bevy::picking::pointer::PointerInput;
     use bevy::picking::pointer::PointerLocation;
     use bevy::picking::pointer::update_pointer_map;
     use bevy::prelude::*;
@@ -219,9 +405,14 @@ mod tests {
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowRef;
 
+    use super::FacePicking;
+    use super::PanelPicking;
     use super::camera_order;
     use crate::Anchor;
     use crate::Button;
+    use crate::ButtonClicked;
+    use crate::ButtonPressed;
+    use crate::ButtonReleased;
     use crate::DiegeticPanel;
     use crate::El;
     use crate::FitMax;
@@ -248,6 +439,7 @@ mod tests {
     const LARGE_CAMERA_ORDER: isize = 1_isize << 40;
     #[cfg(target_pointer_width = "64")]
     const LARGE_CAMERA_ORDER_F32: f32 = 1_099_511_627_776.0;
+    const LOWER_PANEL_DEPTH_OFFSET: Vec3 = Vec3::new(0.0, 0.0, -0.5);
     const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
     const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
     const SCREEN_PANEL_SETTLE_UPDATES: usize = 4;
@@ -257,6 +449,25 @@ mod tests {
     const SCREEN_TARGET_WIDTH: f32 = 40.0;
     const SCREEN_TEST_WINDOW_HEIGHT: u32 = 700;
     const SCREEN_TEST_WINDOW_WIDTH: u32 = 1000;
+
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Resource)]
+    struct ButtonLifecycle {
+        pressed:  usize,
+        released: usize,
+        clicked:  usize,
+    }
+
+    fn record_button_pressed(_: On<ButtonPressed>, mut lifecycle: ResMut<ButtonLifecycle>) {
+        lifecycle.pressed += 1;
+    }
+
+    fn record_button_released(_: On<ButtonReleased>, mut lifecycle: ResMut<ButtonLifecycle>) {
+        lifecycle.released += 1;
+    }
+
+    fn record_button_clicked(_: On<ButtonClicked>, mut lifecycle: ResMut<ButtonLifecycle>) {
+        lifecycle.clicked += 1;
+    }
 
     #[test]
     fn camera_order_preserves_common_signed_values() {
@@ -314,7 +525,11 @@ mod tests {
         render::seed_default_material_cascades(&mut app);
         app.add_plugins(cascade::cascade_plugin::<SdfMaterial>())
             .insert_resource(DiegeticTextMeasurer::default())
-            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, PanelGeometryPlugin));
+            .init_resource::<ButtonLifecycle>()
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, PanelGeometryPlugin))
+            .add_observer(record_button_pressed)
+            .add_observer(record_button_released)
+            .add_observer(record_button_clicked);
         app
     }
 
@@ -632,6 +847,224 @@ mod tests {
             .collect()
     }
 
+    /// Spawns a second diegetic panel directly behind the scene's panel along
+    /// the shared pointer ray, so both panels compete inside Hana's own backend.
+    fn stack_lower_panel(scene: &mut PickingScene) -> Entity {
+        let lower = spawn_picking_panel(&mut scene.app);
+        scene
+            .app
+            .world_mut()
+            .entity_mut(lower)
+            .insert(Transform::from_translation(LOWER_PANEL_DEPTH_OFFSET));
+        scene.app.update();
+        scene.app.update();
+        lower
+    }
+
+    /// Casts one pointer ray and lets Bevy resolve hover, so assertions read the
+    /// resolved [`PickingInteraction`] state rather than raw backend hits.
+    fn resolve_hover(scene: &mut PickingScene, origin: Vec3) {
+        let mut ray_map = scene.app.world_mut().resource_mut::<RayMap>();
+        ray_map.map.clear();
+        ray_map.map.insert(
+            RayId::new(scene.camera, scene.pointer),
+            Ray3d::new(origin, Dir3::NEG_Z),
+        );
+        scene.app.update();
+    }
+
+    fn hover_state(scene: &PickingScene, entity: Entity) -> Option<PickingInteraction> {
+        scene.app.world().get::<PickingInteraction>(entity).copied()
+    }
+
+    fn pointer_location(app: &mut App, pointer: PointerId) -> Location {
+        let world = app.world_mut();
+        let mut query = world.query::<(&PointerId, &PointerLocation)>();
+        query
+            .iter(world)
+            .find(|(pointer_id, _)| **pointer_id == pointer)
+            .and_then(|(_, pointer_location)| pointer_location.location().cloned())
+            .expect("test pointer should have a location")
+    }
+
+    fn dispatch_button_click(scene: &mut PickingScene) {
+        let ray = Ray3d::new(scene.local_hit + Vec3::Z, Dir3::NEG_Z);
+        scene
+            .app
+            .world_mut()
+            .resource_mut::<RayMap>()
+            .map
+            .insert(RayId::new(scene.camera, scene.pointer), ray);
+        scene.app.update();
+
+        let location = pointer_location(&mut scene.app, scene.pointer);
+        scene.app.world_mut().write_message(PointerInput::new(
+            scene.pointer,
+            location.clone(),
+            PointerAction::Press(PointerButton::Primary),
+        ));
+        scene.app.update();
+        scene.app.world_mut().write_message(PointerInput::new(
+            scene.pointer,
+            location,
+            PointerAction::Release(PointerButton::Primary),
+        ));
+        scene.app.update();
+    }
+
+    #[test]
+    fn panel_picking_defaults_and_symmetric_constants_are_stable() {
+        assert_eq!(PanelPicking::default(), PanelPicking::INTERACTIVE);
+        assert_eq!(PanelPicking::INTERACTIVE.front, FacePicking::Interactive);
+        assert_eq!(PanelPicking::INTERACTIVE.back, FacePicking::Interactive);
+        assert_eq!(PanelPicking::PASS_THROUGH.front, FacePicking::PassThrough);
+        assert_eq!(PanelPicking::PASS_THROUGH.back, FacePicking::PassThrough);
+    }
+
+    #[test]
+    fn world_and_screen_builders_install_authored_panel_picking() {
+        let authored = PanelPicking {
+            front: FacePicking::WidgetsOnly,
+            back:  FacePicking::PanelOnly,
+        };
+        let mut app = screen_picking_app();
+        let world_panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .picking(authored)
+            .build()
+            .expect("world panel builds");
+        let screen_panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .picking(authored)
+            .build()
+            .expect("screen panel builds");
+        let world_entity = app.world_mut().spawn(world_panel).id();
+        let screen_entity = app.world_mut().spawn(screen_panel).id();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PanelPicking>(world_entity),
+            Some(&authored),
+        );
+        assert_eq!(
+            app.world().get::<PanelPicking>(screen_entity),
+            Some(&authored),
+        );
+    }
+
+    #[test]
+    fn explicit_same_bundle_panel_picking_overrides_builder_seed() {
+        let mut app = picking_app();
+        let seed = PanelPicking {
+            front: FacePicking::WidgetsOnly,
+            back:  FacePicking::WidgetsOnly,
+        };
+        let build_seeded_panel = || {
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .picking(seed)
+                .build()
+                .expect("panel builds")
+        };
+        let pass_through_entity = app
+            .world_mut()
+            .spawn((build_seeded_panel(), PanelPicking::PASS_THROUGH))
+            .id();
+        let interactive_entity = app
+            .world_mut()
+            .spawn((build_seeded_panel(), PanelPicking::INTERACTIVE))
+            .id();
+        app.update();
+
+        // An explicit component in the same spawn bundle is authoritative over
+        // the builder seed — including `INTERACTIVE`, which equals the default.
+        assert_eq!(
+            app.world().get::<PanelPicking>(pass_through_entity),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+        assert_eq!(
+            app.world().get::<PanelPicking>(interactive_entity),
+            Some(&PanelPicking::INTERACTIVE),
+        );
+    }
+
+    #[test]
+    fn replacing_panel_preserves_live_picking_of_any_value() {
+        let mut app = picking_app();
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .build()
+            .expect("panel builds");
+        let entity = app.world_mut().spawn(panel).id();
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::default()),
+        );
+
+        // A live component is never rewritten, even while it holds the
+        // default: a replacement's non-default seed does not apply.
+        let seeded = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .picking(PanelPicking::PASS_THROUGH)
+            .build()
+            .expect("panel builds");
+        app.world_mut().entity_mut(entity).insert(seeded);
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::INTERACTIVE),
+        );
+
+        // A runtime-authored value survives a later replacement seed too.
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(PanelPicking::PASS_THROUGH);
+        let rebuilt = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .picking(PanelPicking {
+                front: FacePicking::WidgetsOnly,
+                back:  FacePicking::WidgetsOnly,
+            })
+            .build()
+            .expect("panel builds");
+        app.world_mut().entity_mut(entity).insert(rebuilt);
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+    }
+
+    #[test]
+    fn panel_replacement_seed_fills_absent_picking() {
+        let mut app = picking_app();
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .build()
+            .expect("panel builds");
+        let entity = app.world_mut().spawn(panel).id();
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::default()),
+        );
+
+        // With no live component at replacement time, the seed fills it.
+        app.world_mut().entity_mut(entity).remove::<PanelPicking>();
+        let rebuilt = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .picking(PanelPicking::PASS_THROUGH)
+            .build()
+            .expect("panel builds");
+        app.world_mut().entity_mut(entity).insert(rebuilt);
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+    }
+
     #[test]
     fn dynamic_fitmax_screen_panel_uses_resolved_interaction_geometry_for_widget_rays() {
         let mut app = screen_picking_app();
@@ -744,6 +1177,223 @@ mod tests {
             let hits = cast_scene_ray(&mut scene, &mut cursor, origin, direction);
             assert_eq!(hits.len(), 1);
             assert_hit_group(&hits[0], &scene);
+        }
+    }
+
+    #[test]
+    fn absent_panel_picking_behaves_as_interactive_on_both_faces() {
+        let mut scene = build_picking_scene();
+        scene
+            .app
+            .world_mut()
+            .entity_mut(scene.panel)
+            .remove::<PanelPicking>();
+        let mut cursor = MessageCursor::<PointerHits>::default();
+
+        for (origin, direction) in [
+            (scene.local_hit + Vec3::Z, Dir3::NEG_Z),
+            (scene.local_hit - Vec3::Z, Dir3::Z),
+        ] {
+            let hits = cast_scene_ray(&mut scene, &mut cursor, origin, direction);
+            assert_eq!(hits.len(), 1);
+            assert_hit_group(&hits[0], &scene);
+        }
+    }
+
+    #[test]
+    fn panel_only_back_face_reports_panel_without_widgets() {
+        let mut scene = build_picking_scene();
+        scene
+            .app
+            .world_mut()
+            .entity_mut(scene.panel)
+            .insert(PanelPicking {
+                front: FacePicking::Interactive,
+                back:  FacePicking::PanelOnly,
+            });
+        let mut cursor = MessageCursor::<PointerHits>::default();
+        let origin = scene.local_hit - Vec3::Z;
+        let hits = cast_scene_ray(&mut scene, &mut cursor, origin, Dir3::Z);
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].picks.len(), 1);
+        assert_eq!(hits[0].picks[0].0, scene.panel);
+    }
+
+    #[test]
+    fn widgets_only_empty_front_face_resolves_hover_to_lower_panel() {
+        let mut scene = build_picking_scene();
+        let lower = stack_lower_panel(&mut scene);
+        scene
+            .app
+            .world_mut()
+            .entity_mut(scene.panel)
+            .insert(PanelPicking {
+                front: FacePicking::WidgetsOnly,
+                back:  FacePicking::PassThrough,
+            });
+
+        let origin = scene.background_hit + Vec3::Z;
+        resolve_hover(&mut scene, origin);
+
+        // The front's empty background reports nothing and does not block, so
+        // hover resolves onto the lower panel's background behind it.
+        assert_eq!(
+            hover_state(&scene, lower),
+            Some(PickingInteraction::Hovered)
+        );
+        assert_ne!(
+            hover_state(&scene, scene.panel),
+            Some(PickingInteraction::Hovered),
+        );
+    }
+
+    #[test]
+    fn pass_through_front_face_resolves_hover_to_lower_panel() {
+        let mut scene = build_picking_scene();
+        let lower = stack_lower_panel(&mut scene);
+        let lower_widget = resolve_widget(&mut scene.app, lower, "target");
+        scene
+            .app
+            .world_mut()
+            .entity_mut(scene.panel)
+            .insert(PanelPicking::PASS_THROUGH);
+
+        let origin = scene.local_hit + Vec3::Z;
+        resolve_hover(&mut scene, origin);
+
+        // The pass-through front emits no hits at all; hover resolves onto the
+        // lower panel's widget.
+        assert_eq!(
+            hover_state(&scene, lower_widget),
+            Some(PickingInteraction::Hovered),
+        );
+        assert_ne!(
+            hover_state(&scene, scene.widget),
+            Some(PickingInteraction::Hovered),
+        );
+        assert_ne!(
+            hover_state(&scene, scene.panel),
+            Some(PickingInteraction::Hovered),
+        );
+    }
+
+    #[test]
+    fn widgets_only_front_widget_blocks_lower_panel() {
+        let mut scene = build_picking_scene();
+        let lower = stack_lower_panel(&mut scene);
+        let lower_widget = resolve_widget(&mut scene.app, lower, "target");
+        scene
+            .app
+            .world_mut()
+            .entity_mut(scene.panel)
+            .insert(PanelPicking {
+                front: FacePicking::WidgetsOnly,
+                back:  FacePicking::PassThrough,
+            });
+
+        let origin = scene.local_hit + Vec3::Z;
+        resolve_hover(&mut scene, origin);
+
+        // A matching nearer WidgetsOnly widget still blocks: the lower panel
+        // receives no hover.
+        assert_eq!(
+            hover_state(&scene, scene.widget),
+            Some(PickingInteraction::Hovered),
+        );
+        assert_ne!(
+            hover_state(&scene, lower),
+            Some(PickingInteraction::Hovered)
+        );
+        assert_ne!(
+            hover_state(&scene, lower_widget),
+            Some(PickingInteraction::Hovered),
+        );
+    }
+
+    #[test]
+    fn blocking_front_faces_withhold_hover_from_lower_panel() {
+        enum FrontSurface {
+            Widget,
+            Panel,
+        }
+
+        for (front, front_surface) in [
+            (FacePicking::Interactive, FrontSurface::Widget),
+            (FacePicking::PanelOnly, FrontSurface::Panel),
+        ] {
+            let mut scene = build_picking_scene();
+            let lower = stack_lower_panel(&mut scene);
+            let lower_widget = resolve_widget(&mut scene.app, lower, "target");
+            scene
+                .app
+                .world_mut()
+                .entity_mut(scene.panel)
+                .insert(PanelPicking {
+                    front,
+                    back: FacePicking::PassThrough,
+                });
+
+            let origin = scene.local_hit + Vec3::Z;
+            resolve_hover(&mut scene, origin);
+
+            let hovered_front = match front_surface {
+                FrontSurface::Widget => scene.widget,
+                FrontSurface::Panel => scene.panel,
+            };
+            assert_eq!(
+                hover_state(&scene, hovered_front),
+                Some(PickingInteraction::Hovered),
+                "{front:?} should hover its own surface",
+            );
+            assert_ne!(
+                hover_state(&scene, lower),
+                Some(PickingInteraction::Hovered),
+                "{front:?} must block the lower panel root",
+            );
+            assert_ne!(
+                hover_state(&scene, lower_widget),
+                Some(PickingInteraction::Hovered),
+                "{front:?} must block the lower panel widget",
+            );
+        }
+    }
+
+    #[test]
+    fn face_picking_controls_real_button_pointer_dispatch() {
+        for (face_picking, expected) in [
+            (
+                FacePicking::Interactive,
+                ButtonLifecycle {
+                    pressed:  1,
+                    released: 1,
+                    clicked:  1,
+                },
+            ),
+            (
+                FacePicking::WidgetsOnly,
+                ButtonLifecycle {
+                    pressed:  1,
+                    released: 1,
+                    clicked:  1,
+                },
+            ),
+            (FacePicking::PanelOnly, ButtonLifecycle::default()),
+            (FacePicking::PassThrough, ButtonLifecycle::default()),
+        ] {
+            let mut scene = build_picking_scene();
+            scene
+                .app
+                .world_mut()
+                .entity_mut(scene.panel)
+                .insert(PanelPicking {
+                    front: face_picking,
+                    back:  FacePicking::PassThrough,
+                });
+
+            dispatch_button_click(&mut scene);
+
+            assert_eq!(*scene.app.world().resource::<ButtonLifecycle>(), expected);
         }
     }
 
@@ -980,7 +1630,7 @@ mod tests {
     }
 
     #[test]
-    fn visibility_layers_and_panel_pickable_filter_panel_hits() {
+    fn visibility_layers_and_panel_picking_filter_panel_hits() {
         let mut scene = build_picking_scene();
         let mut cursor = MessageCursor::<PointerHits>::default();
         let origin = scene.local_hit + Vec3::Z;
@@ -1027,7 +1677,7 @@ mod tests {
             .app
             .world_mut()
             .entity_mut(scene.panel)
-            .insert(Pickable::IGNORE);
+            .insert(PanelPicking::PASS_THROUGH);
         assert!(cast_scene_ray(&mut scene, &mut cursor, origin, Dir3::NEG_Z).is_empty());
     }
 

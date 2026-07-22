@@ -16,6 +16,7 @@ use hana_diegetic::DiegeticUiPlugin;
 use hana_diegetic::El;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::Padding;
+use hana_diegetic::PanelPicking;
 use hana_diegetic::Sizing;
 use hana_diegetic::default_panel_material;
 pub use performance::StatsPanelRow;
@@ -162,7 +163,7 @@ fn ignore_screen_panel_picking(
     if panel.coordinate_space().is_screen() {
         commands
             .entity(entity)
-            .insert((FairyDustOverlayPanel, Pickable::IGNORE));
+            .insert((FairyDustOverlayPanel, PanelPicking::PASS_THROUGH));
     }
 }
 
@@ -220,19 +221,25 @@ mod tests {
     use bevy::picking::Pickable;
     use bevy::prelude::*;
     use hana_diegetic::DiegeticPanel;
+    use hana_diegetic::PanelPicking;
     use hana_diegetic::Sizing;
 
     use super::FairyDustOverlayPanel;
     use super::install_overlay_picking;
 
     #[test]
-    fn screen_panel_root_ignores_picking() -> Result<(), String> {
+    fn screen_panel_root_passes_pointer_through() -> Result<(), String> {
         let mut app = App::new();
         install_overlay_picking(&mut app);
 
         let panel = spawn_screen_panel(&mut app)?;
 
-        assert_eq!(app.world().get::<Pickable>(panel), Some(&Pickable::IGNORE));
+        // The overlay root installs pass-through picking so it cannot block the
+        // diegetic backend for the widgets example or any panel behind it.
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
         assert!(app.world().get::<FairyDustOverlayPanel>(panel).is_some());
         Ok(())
     }

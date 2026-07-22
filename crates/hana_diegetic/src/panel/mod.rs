@@ -194,7 +194,8 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_plugins(cascade::cascade_plugin::<HairlineFade>())
             .add_plugins(cascade::cascade_plugin::<HdrTextCoverageBias>())
             .add_plugins(cascade::cascade_plugin::<ShadowCasting>())
-            .add_observer(diegetic_panel::seed_panel_overrides);
+            .add_observer(diegetic_panel::seed_panel_overrides)
+            .add_observer(diegetic_panel::sync_panel_picking_on_insert);
 
         add_cascade_ownership_observers!(
             app,

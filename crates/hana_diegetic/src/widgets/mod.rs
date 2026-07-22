@@ -60,6 +60,8 @@ pub use input::WidgetInputPlugin;
 pub use interactivity::PanelWidgetWriter;
 pub use interactivity::WidgetDisabled;
 pub use interactivity::WidgetInteractivity;
+pub use picking::FacePicking;
+pub use picking::PanelPicking;
 pub(crate) use reify::WidgetAnchorRect;
 pub(crate) use reify::on_screen_widget_demand_added;
 pub(crate) use reify::on_screen_widget_demand_removed;

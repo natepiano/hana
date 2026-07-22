@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use fairy_dust::FairyDustOrbitCam;
 use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticText;
+use hana_diegetic::PanelPicking;
 use hana_diegetic::TextAlign;
 
 use super::animation::LightAnimation;
@@ -126,6 +127,7 @@ pub(crate) fn spawn_connector_labels(mut commands: Commands) {
         commands.spawn((
             CameraFacingLabel,
             Pickable::IGNORE,
+            PanelPicking::PASS_THROUGH,
             DiegeticText::world(*name)
                 .size(CONNECTOR_LANE_NAME_SIZE)
                 .anchor(Anchor::BottomCenter)
@@ -137,6 +139,7 @@ pub(crate) fn spawn_connector_labels(mut commands: Commands) {
         commands.spawn((
             CameraFacingLabel,
             Pickable::IGNORE,
+            PanelPicking::PASS_THROUGH,
             DiegeticText::world(description)
                 .size(CONNECTOR_LANE_DESC_SIZE)
                 .width(CONNECTOR_LANE_DESC_WRAP_WIDTH)

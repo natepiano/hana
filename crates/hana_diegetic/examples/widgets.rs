@@ -45,6 +45,7 @@ use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::El;
+use hana_diegetic::FacePicking;
 use hana_diegetic::FitMax;
 use hana_diegetic::FocusPreviousWidget;
 use hana_diegetic::LayoutBuilder;
@@ -54,6 +55,7 @@ use hana_diegetic::PanelAnchorOffset;
 use hana_diegetic::PanelAttachment;
 use hana_diegetic::PanelElementId;
 use hana_diegetic::PanelEntityReader;
+use hana_diegetic::PanelPicking;
 use hana_diegetic::PanelText;
 use hana_diegetic::PanelWidget;
 use hana_diegetic::PanelWidgetReader;
@@ -529,6 +531,10 @@ fn spawn_widget_lab(
         )
         .world_height(PANEL_WORLD_HEIGHT)
         .anchor(Anchor::Center)
+        .picking(PanelPicking {
+            front: FacePicking::Interactive,
+            back:  FacePicking::PanelOnly,
+        })
         .material(material.clone())
         .text_material(material.clone())
         .with_tree(widget_tree(slider))

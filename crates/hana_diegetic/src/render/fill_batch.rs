@@ -23,6 +23,7 @@ use bevy::pbr::MaterialExtensionKey;
 use bevy::pbr::MaterialExtensionPipeline;
 use bevy::pbr::MaterialPlugin;
 use bevy::pbr::StandardMaterial;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
@@ -1498,6 +1499,7 @@ pub(crate) fn spawn_sdf_batch_entity(
         DiegeticSdfFillBatch,
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
+        Pickable::IGNORE,
         Visibility::Inherited,
         NoAutoAabb,
         Aabb::default(),
@@ -2811,6 +2813,26 @@ mod tests {
                 .all(|visibility| *visibility != Visibility::Hidden),
             "production SDF batch entities must not spawn hidden"
         );
+    }
+
+    #[test]
+    fn sdf_batch_entities_ignore_stock_mesh_picking() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::WHITE),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let entities = live_sdf_batch_entities(&mut app);
+        assert_eq!(entities.len(), 1);
+        let pickable = app
+            .world()
+            .get::<Pickable>(entities[0])
+            .expect("SDF batch entity should carry Pickable::IGNORE");
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
     }
 
     #[test]
