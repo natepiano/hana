@@ -37,6 +37,10 @@ use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
+use hana_diegetic::ButtonCanceled;
+use hana_diegetic::ButtonClicked;
+use hana_diegetic::ButtonPressed;
+use hana_diegetic::ButtonReleased;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
@@ -97,6 +101,9 @@ const PANEL_PADDING: Px = Px(12.0);
 const PANEL_RADIUS: Px = Px(10.0);
 const PANEL_TITLE: &str = "Widget Lab";
 const PANEL_WORLD_HEIGHT: f32 = 0.32;
+const BUTTON_STATUS_ID: &str = "button-status";
+const BUTTON_STATUS_IDLE: &str = "Button: none";
+const BUTTON_STATUS_MEASURE: &str = "Button: Canceled secondary-button (pointer/cause)";
 const FOCUS_STATUS_ID: &str = "focus-status";
 const FOCUS_STATUS_MEASURE: &str = "Focus: secondary-button";
 const FOCUS_STATUS_NONE: &str = "Focus: none";
@@ -104,12 +111,14 @@ const FOCUS_STATUS_UNAVAILABLE: &str = "Focus: unavailable";
 const PRIMARY_BUTTON_ID: &str = "primary-button";
 const POINTER_STATUS_ID: &str = "pointer-status";
 const POINTER_STATUS_IDLE: &str = "Pointer: none";
-const POINTER_STATUS_MEASURE: &str = "Pressed: secondary-button";
+const POINTER_STATUS_MEASURE: &str = "Pointer: Pressed secondary-button";
 const SECONDARY_BUTTON_ID: &str = "secondary-button";
 const SECONDARY_CONTROL: &str = "D Toggle Secondary";
 const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
 const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
 const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
+const SCREEN_READOUT_MAX_HEIGHT: Px = Px(64.0);
+const SCREEN_READOUT_MAX_WIDTH: Px = Px(260.0);
 const SCREEN_READOUT_COLOR: Color = Color::srgb(1.0, 0.78, 0.32);
 const SCREEN_READOUT_ID: &str = "screen-anchor-status";
 const SCREEN_READOUT_TEXT: &str = "^ Attached panel";
@@ -130,11 +139,11 @@ const STATUS_BORDER_WIDTH: Px = Px(1.0);
 const STATUS_COLOR: Color = Color::srgb(0.38, 0.94, 0.78);
 const STATUS_GAP: f32 = 0.012;
 const STATUS_LINE_GAP: Px = Px(4.0);
-const STATUS_MAX_HEIGHT: Px = Px(64.0);
-const STATUS_MAX_WIDTH: Px = Px(260.0);
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = Px(7.0);
-const STATUS_WORLD_HEIGHT: f32 = 0.066;
+const WORLD_READOUT_MAX_HEIGHT: Px = Px(88.0);
+const WORLD_READOUT_MAX_WIDTH: Px = Px(420.0);
+const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.09;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum SecondaryMode {
@@ -284,6 +293,10 @@ fn main() {
         .with_camera_control_panel()
         .init_resource::<SecondaryMode>()
         .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
+        .add_observer(report_button_pressed)
+        .add_observer(report_button_released)
+        .add_observer(report_button_clicked)
+        .add_observer(report_button_canceled)
         .add_observer(report_widget_focus_changed)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
@@ -297,6 +310,77 @@ fn main() {
         )
         .with_shortcut(KeyCode::KeyD, toggle_secondary_button)
         .run();
+}
+
+fn report_button_pressed(
+    event: On<ButtonPressed>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    mut panel_text: PanelText,
+) {
+    retain_button_status(
+        &readouts,
+        &mut panel_text,
+        format!("Button: Pressed {} ({:?})", event.id, event.pointer_id),
+    );
+    info!("widgets: {} pressed by {:?}", event.id, event.pointer_id);
+}
+
+fn report_button_released(
+    event: On<ButtonReleased>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    mut panel_text: PanelText,
+) {
+    retain_button_status(
+        &readouts,
+        &mut panel_text,
+        format!("Button: Released {} ({:?})", event.id, event.pointer_id),
+    );
+    info!("widgets: {} released by {:?}", event.id, event.pointer_id);
+}
+
+fn report_button_clicked(
+    event: On<ButtonClicked>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    mut panel_text: PanelText,
+) {
+    let status = event.pointer_id.as_ref().map_or_else(
+        || format!("Button: Clicked {} (semantic)", event.id),
+        |pointer_id| format!("Button: Clicked {} ({pointer_id:?})", event.id),
+    );
+    retain_button_status(&readouts, &mut panel_text, status);
+    info!("widgets: {} clicked by {:?}", event.id, event.pointer_id);
+}
+
+fn report_button_canceled(
+    event: On<ButtonCanceled>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    mut panel_text: PanelText,
+) {
+    retain_button_status(
+        &readouts,
+        &mut panel_text,
+        format!(
+            "Button: Canceled {} ({:?}, {:?})",
+            event.id, event.pointer_id, event.cause
+        ),
+    );
+    info!(
+        "widgets: {} canceled for {:?} by {:?}",
+        event.id, event.cause, event.pointer_id
+    );
+}
+
+fn retain_button_status(
+    readouts: &Query<Entity, With<WidgetInteractionReadout>>,
+    panel_text: &mut PanelText,
+    status: String,
+) {
+    let Ok(readout) = readouts.single() else {
+        return;
+    };
+    if !panel_text.set_text(readout, &PanelElementId::named(BUTTON_STATUS_ID), status) {
+        warn!("widgets: button status has not been reified");
+    }
 }
 
 fn spawn_app_widget_input(mut commands: Commands) {
@@ -451,10 +535,10 @@ fn spawn_widget_lab(
         .build();
     let readout = DiegeticPanel::world()
         .size(
-            FitMax(STATUS_MAX_WIDTH.into()),
-            FitMax(STATUS_MAX_HEIGHT.into()),
+            FitMax(WORLD_READOUT_MAX_WIDTH.into()),
+            FitMax(WORLD_READOUT_MAX_HEIGHT.into()),
         )
-        .world_height(STATUS_WORLD_HEIGHT)
+        .world_height(WORLD_READOUT_WORLD_HEIGHT)
         .anchor(Anchor::Center)
         .material(material.clone())
         .text_material(material.clone())
@@ -472,8 +556,8 @@ fn spawn_widget_lab(
         .build();
     let screen_readout = DiegeticPanel::screen()
         .size(
-            FitMax(STATUS_MAX_WIDTH.into()),
-            FitMax(STATUS_MAX_HEIGHT.into()),
+            FitMax(SCREEN_READOUT_MAX_WIDTH.into()),
+            FitMax(SCREEN_READOUT_MAX_HEIGHT.into()),
         )
         .anchor(Anchor::TopRight)
         .material(material.clone())
@@ -630,7 +714,7 @@ fn interaction_status_tree() -> LayoutTree {
             .height(Sizing::FIT)
             .padding(Padding::all(STATUS_PADDING))
             .gap(STATUS_LINE_GAP)
-            .alignment(AlignX::Center, AlignY::Center)
+            .alignment(AlignX::Left, AlignY::Center)
             .background(STATUS_BACKGROUND)
             .border(Border::all(STATUS_BORDER_WIDTH, STATUS_BORDER))
             .corner_radius(CornerRadius::all(STATUS_RADIUS)),
@@ -651,6 +735,14 @@ fn interaction_status_tree() -> LayoutTree {
         .id(FOCUS_STATUS_ID)
         .measure_as(FOCUS_STATUS_MEASURE),
     );
+    builder.text(
+        Text::new(
+            BUTTON_STATUS_IDLE,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        )
+        .id(BUTTON_STATUS_ID)
+        .measure_as(BUTTON_STATUS_MEASURE),
+    );
     builder.build()
 }
 
@@ -662,7 +754,8 @@ fn widget_panel_transform() -> Transform {
 
 fn interaction_status_transform() -> Transform {
     let mut transform = widget_panel_transform();
-    transform.translation.y -= (PANEL_WORLD_HEIGHT + STATUS_WORLD_HEIGHT).mul_add(0.5, STATUS_GAP);
+    transform.translation.y -=
+        (PANEL_WORLD_HEIGHT + WORLD_READOUT_WORLD_HEIGHT).mul_add(0.5, STATUS_GAP);
     transform
 }
 
@@ -719,7 +812,7 @@ fn report_interaction_changes(
         let priority = InteractionPriority::from(*interaction);
         if priority > active_priority {
             active_priority = priority;
-            active_status = Some(format!("{:?}: {}", *interaction, widget.id()));
+            active_status = Some(format!("Pointer: {:?} {}", *interaction, widget.id()));
         }
     }
 

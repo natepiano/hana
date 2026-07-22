@@ -19,6 +19,9 @@ use super::WidgetFocusable;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
+use super::button;
+use super::button::ButtonCancelCause;
+use super::button::ButtonCaptures;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::cascade::CascadeFrom;
@@ -132,6 +135,7 @@ pub(super) fn reify_widgets(
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
     )>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, panel_global, computed, panel_widgets, mut widget_index) in
@@ -175,6 +179,7 @@ pub(super) fn reify_widgets(
                         anchor_rect,
                         panel_entity,
                         &existing_widgets,
+                        &mut button_captures,
                     );
                     entity
                 },
@@ -185,6 +190,12 @@ pub(super) fn reify_widgets(
 
         for &entity in existing_entities {
             if !visited.contains(&entity) {
+                button::cancel_button_press(
+                    entity,
+                    ButtonCancelCause::WidgetRemoved,
+                    &mut button_captures,
+                    &mut commands,
+                );
                 commands.entity(entity).despawn();
             }
         }
@@ -247,6 +258,7 @@ fn update_widget(
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
     )>,
+    button_captures: &mut ButtonCaptures,
 ) {
     let Ok((
         _,
@@ -261,10 +273,18 @@ fn update_widget(
     else {
         return;
     };
-    let mut widget = commands.entity(entity);
     if *existing_kind != kind {
-        widget.insert(kind);
+        if *existing_kind == WidgetKind::Button {
+            button::cancel_button_press(
+                entity,
+                ButtonCancelCause::WidgetKindChanged,
+                button_captures,
+                commands,
+            );
+        }
+        commands.entity(entity).insert(kind);
     }
+    let mut widget = commands.entity(entity);
     if existing_authored != authored {
         widget.insert(authored.clone());
     }

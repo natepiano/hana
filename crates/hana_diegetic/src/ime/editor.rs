@@ -126,7 +126,7 @@ impl ImePanelAnchorSource {
 
 /// Active screen-space editor state.
 #[derive(Resource, Debug, Default)]
-pub(super) struct ImeEditorState {
+pub(crate) struct ImeEditorState {
     active: Option<ImeEditor>,
 }
 
@@ -175,7 +175,7 @@ struct ImeEditorAnchor {
 
 /// Last panel click that was classified as outside the active editor.
 #[derive(Resource, Debug, Default)]
-pub(super) struct ImeBlurIntent {
+pub(crate) struct ImeBlurIntent {
     latest: Option<ImeBlurClassification>,
 }
 
@@ -398,7 +398,7 @@ pub(super) fn update_window_ime_position(
     window.ime_position = anchor.caret_pos;
 }
 
-pub(super) fn handle_blur_intent(
+pub(crate) fn handle_blur_intent(
     mut blur_intent: ResMut<ImeBlurIntent>,
     active_session: Res<ActiveImeSession>,
     mut commands: Commands,
@@ -434,20 +434,30 @@ fn classify_panel_click(
     if click.button != PointerButton::Primary {
         return;
     }
-    let Some(session_id) = editor_state.session_id() else {
+    if editor_state.session_id().is_none() {
         return;
-    };
+    }
     let clicked_panel = click.event_target();
     if editor_state.is_editor_panel(clicked_panel) {
         click.propagate(false);
         return;
     }
+    classify_widget_click(clicked_panel, &editor_state, &mut blur_intent);
+    click.propagate(false);
+}
 
+pub(crate) fn classify_widget_click(
+    clicked_panel: Entity,
+    editor_state: &ImeEditorState,
+    blur_intent: &mut ImeBlurIntent,
+) {
+    let Some(session_id) = editor_state.session_id() else {
+        return;
+    };
     let Some(editor) = editor_state.active() else {
         return;
     };
     blur_intent.set(session_id, clicked_panel, &editor.target);
-    click.propagate(false);
 }
 
 fn spawn_editor_panel(
@@ -809,13 +819,30 @@ fn add_caret(builder: &mut LayoutBuilder) {
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use bevy::camera::NormalizedRenderTarget;
     use bevy::math::Rect;
     use bevy::math::Vec2;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::Location;
+    use bevy::picking::pointer::PointerId;
+    use bevy::prelude::App;
+    use bevy::prelude::Click;
+    use bevy::prelude::Entity;
+    use bevy::prelude::On;
+    use bevy::prelude::Pointer;
+    use bevy::prelude::PointerButton;
+    use bevy::prelude::ResMut;
+    use bevy::prelude::Resource;
     use bevy::prelude::Window;
 
+    use super::ImeBlurIntent;
+    use super::ImeEditor;
+    use super::ImeEditorState;
     use super::caret_position;
     use super::caret_prefix_text;
     use super::clamp_editor_position;
+    use super::classify_panel_click;
+    use super::classify_widget_click;
     use super::editor_size;
     use super::screen_field_record_rect;
     use crate::BoundingBox;
@@ -830,10 +857,22 @@ mod tests {
     use crate::ImePreedit;
     use crate::ImePreeditBoundary;
     use crate::ImeSelectionSnapshot;
+    use crate::ImeSessionId;
+    use crate::ImeTarget;
     use crate::PanelElementId;
     use crate::PanelFieldRecord;
     use crate::PanelScreenBounds;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
+
+    #[derive(Default, Resource)]
+    struct PropagatedPanelClicks(Vec<bool>);
+
+    fn record_propagated_panel_click(
+        click: On<Pointer<Click>>,
+        mut clicks: ResMut<PropagatedPanelClicks>,
+    ) {
+        clicks.0.push(click.get_propagate());
+    }
 
     fn assert_float_eq(actual: f32, expected: f32) {
         assert!(
@@ -847,6 +886,22 @@ mod tests {
             committed_text: text.to_owned(),
             cursor:         ImeCursorState::Insertion(ImeBufferBoundary::new(cursor)),
             preedit:        None,
+        }
+    }
+
+    fn editor_state(target: ImeTarget) -> ImeEditorState {
+        ImeEditorState {
+            active: Some(ImeEditor {
+                session_id: ImeSessionId::new(1),
+                target,
+                window: Entity::PLACEHOLDER,
+                snapshot: insertion_snapshot("", 0),
+                validation: None,
+                panel: Entity::PLACEHOLDER,
+                source: None,
+                app_anchor: None,
+                anchor: None,
+            }),
         }
     }
 
@@ -938,5 +993,68 @@ mod tests {
 
         assert_eq!(rect.min, Vec2::new(140.0, 70.0));
         assert_eq!(rect.max, Vec2::new(260.0, 100.0));
+    }
+
+    #[test]
+    fn widget_click_classification_uses_the_owning_panel_focus_scope() {
+        let source_panel = Entity::from_raw_u32(1).expect("test entity index is valid");
+        let other_panel = Entity::from_raw_u32(2).expect("test entity index is valid");
+        let target = ImeTarget::WorldPanelField {
+            panel:    source_panel,
+            field_id: PanelElementId::named("field"),
+        };
+        let editor_state = editor_state(target.clone());
+        let mut blur_intent = ImeBlurIntent::default();
+
+        classify_widget_click(source_panel, &editor_state, &mut blur_intent);
+        assert!(
+            blur_intent
+                .latest
+                .as_ref()
+                .is_some_and(|classification| classification.is_inside_focus_scope(&target))
+        );
+
+        classify_widget_click(other_panel, &editor_state, &mut blur_intent);
+        assert!(
+            blur_intent
+                .latest
+                .as_ref()
+                .is_some_and(|classification| !classification.is_inside_focus_scope(&target))
+        );
+    }
+
+    #[test]
+    fn panel_click_propagates_without_an_active_editor() {
+        let mut app = App::new();
+        app.init_resource::<ImeEditorState>()
+            .init_resource::<ImeBlurIntent>()
+            .init_resource::<PropagatedPanelClicks>();
+        let panel = app
+            .world_mut()
+            .spawn_empty()
+            .observe(classify_panel_click)
+            .observe(record_propagated_panel_click)
+            .id();
+        app.world_mut().flush();
+
+        app.world_mut().trigger(Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target:   NormalizedRenderTarget::None {
+                    width:  1,
+                    height: 1,
+                },
+                position: Vec2::ZERO,
+            },
+            Click {
+                button:   PointerButton::Primary,
+                hit:      HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                duration: std::time::Duration::ZERO,
+                count:    1,
+            },
+            panel,
+        ));
+
+        assert_eq!(app.world().resource::<PropagatedPanelClicks>().0, [true]);
     }
 }

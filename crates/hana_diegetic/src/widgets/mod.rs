@@ -10,11 +10,23 @@ mod slider;
 
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;
+use bevy::picking::PickingSettings;
 use bevy::picking::PickingSystems;
+use bevy::picking::events::PointerState;
+use bevy::picking::hover::HoverMap;
 use bevy::picking::mesh_picking::MeshPickingSettings;
+use bevy::picking::pointer::PointerInput;
 use bevy::prelude::*;
 use bevy::window::WindowFocused;
 pub use button::Button;
+pub use button::ButtonCancelCause;
+pub use button::ButtonCanceled;
+pub(crate) use button::ButtonCaptures;
+pub use button::ButtonClicked;
+pub(crate) use button::ButtonPress;
+pub use button::ButtonPressed;
+pub use button::ButtonReleased;
+pub(crate) use button::finalize_panel_buttons;
 pub use focus::ClearWidgetFocus;
 pub use focus::RequestWidgetFocus;
 pub(crate) use focus::WidgetFocusAuthority;
@@ -37,6 +49,7 @@ pub use input::FocusFirstWidget;
 pub use input::FocusLastWidget;
 pub use input::FocusNextWidget;
 pub use input::FocusPreviousWidget;
+pub(crate) use input::SemanticWidgetIntent;
 pub use input::WidgetControlSummary;
 pub use input::WidgetInputBindings;
 pub use input::WidgetInputBindingsBuilder;
@@ -91,6 +104,7 @@ impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MeshPickingSettings>()
             .init_resource::<WidgetFocusAuthority>()
+            .init_resource::<ButtonCaptures>()
             .add_message::<WindowFocused>()
             .add_message::<FocusNextWidget>()
             .add_message::<FocusPreviousWidget>()
@@ -133,6 +147,27 @@ impl Plugin for WidgetsPlugin {
             .add_observer(focus::request_widget_focus)
             .add_observer(focus::clear_widget_focus)
             .add_observer(focus::focus_from_pointer_press)
+            .add_observer(button::press_from_pointer)
+            .add_observer(button::click_from_pointer)
+            .add_observer(button::release_from_pointer)
+            .add_observer(button::cancel_from_pointer)
+            .add_observer(button::cancel_from_drag_end)
+            .add_observer(button::cancel_from_pointer_removal)
+            .add_observer(button::cancel_from_disabled)
+            .add_observer(button::cancel_from_widget_removal)
+            .add_observer(button::cancel_before_widget_despawn)
+            .add_observer(button::handle_semantic_intent)
+            .add_systems(
+                PreUpdate,
+                button::reconcile_pointer_input
+                    .run_if(
+                        resource_exists::<Messages<PointerInput>>
+                            .and_then(resource_exists::<PointerState>)
+                            .and_then(resource_exists::<HoverMap>)
+                            .and_then(resource_exists::<PickingSettings>),
+                    )
+                    .in_set(PickingSystems::Last),
+            )
             .add_systems(
                 Update,
                 (

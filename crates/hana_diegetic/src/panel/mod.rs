@@ -214,7 +214,7 @@ impl Plugin for HeadlessLayoutPlugin {
         );
 
         app.add_observer(
-            lifecycle::finalize_panel_focus_before_despawn
+            lifecycle::finalize_panel_widgets_before_despawn
                 .run_if(resource_exists::<WidgetFocusAuthority>),
         );
         app.add_observer(lifecycle::finalize_orphaned_panel_owned)
