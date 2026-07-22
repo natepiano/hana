@@ -3301,6 +3301,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hana_lading"
+version = "0.0.1"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_ecs",
+ "tracing",
+]
+
+[[package]]
 name = "hana_prosody"
 version = "0.0.1"
 dependencies = [

@@ -82,7 +82,7 @@ API documentation, and an overview under `docs/hana_lading/`.
 
 ## Phases
 
-### Phase 1 — Crate scaffold and public API · status: todo
+### Phase 1 — Crate scaffold and public API · status: done (`9a8ae890`)
 
 #### Work Order
 
@@ -167,6 +167,45 @@ pub struct LoadProgress;
 the `clippy` skill passes; the crate has exactly the production dependency set
 above; all public API is documented.
 
+#### Retrospective
+
+**What worked:**
+
+- `crates/hana_lading/` now exposes the planned loading, plugin, progress, and
+  completion API with exactly four production dependencies.
+- Release build, 1,221 nextest tests, lint, rustdoc, formatting, and a standalone
+  plugin-registration smoke executable passed.
+
+**What deviated from the plan:**
+
+- `docs/hana_lading/overview.md` was scaffolded now so the new public API has an
+  overview; Phase 4 will complete it alongside the examples.
+- Review corrected the pathless-handle panic contract and made `LoadProgress` a
+  resource rather than an event before checkpointing.
+
+**Surprises:**
+
+- A standalone granular-Bevy smoke executable must select a reflection
+  auto-registration backend; the workspace's umbrella Bevy users already do.
+
+**Implications for remaining phases:**
+
+- Phase 2 starts from `disk_asset_loader.rs`, `events.rs`, and
+  `lading_plugin.rs`; `LoadProgress` is already a defaultable resource and the
+  plugin stubs already establish their registration relationship.
+- Phase 4 should expand the existing `docs/hana_lading/overview.md` instead of
+  creating a second overview file.
+
+#### Phase 1 Review
+
+- Phase 2 now carries the shipped module/API constraints, creates the required
+  crate-private construction seams, and activates Bevy's reflection backend for
+  its isolated zero-set test.
+- Phase 3 now names its isolated asset-test configuration and replaces duplicate
+  clean-order coverage with recursive-dependency coverage.
+- Phase 4 now expands the existing overview and names its state, PNG, fixture,
+  and isolated-example requirements.
+
 ### Phase 2 — Runtime machinery · status: todo
 
 #### Work Order
@@ -176,6 +215,15 @@ sets end-to-end with deterministic terminal-event ordering. A zero-set app also
 completes.
 
 **Spec:**
+
+- Add `bevy` as a workspace-inherited test-only dev-dependency now so isolated
+  `hana_lading` tests select the workspace's reflection auto-registration
+  backend. Phase 3 extends this same dev-dependency with the image features its
+  fixtures require.
+- Add crate-private seams in the Phase 1 modules: `disk_asset_loader.rs` owns
+  loader construction and extraction of its recorded `Vec<UntypedHandle>`;
+  `events.rs` owns construction of private-field events plus mutation of
+  `LoadProgress`. Keep those seams inaccessible to downstream crates.
 
 - `LadingPlugin`, auto-added by every `DiskAssetsPlugin<T>` after checking
   `is_plugin_added`, initializes `LoadProgress`; configures `Update` ordering
@@ -221,11 +269,31 @@ completes.
 - Add an in-crate zero-set smoke test proving `AllSetsLoaded` precedes
   `AllSetsResolved { failures: 0 }` and tracking state is removed.
 
-**Files:** `crates/hana_lading/src/` and an in-crate or integration smoke test.
+**Files:**
+
+- `crates/hana_lading/Cargo.toml`
+- `crates/hana_lading/src/disk_asset_loader.rs`
+- `crates/hana_lading/src/events.rs`
+- `crates/hana_lading/src/lading_plugin.rs`
+- an in-crate or integration zero-set smoke test
+
+**Constraints from prior phases:**
+
+- Phase 1 created the public API in `disk_asset_loader.rs`, `events.rs`, and
+  `lading_plugin.rs`; keep those module paths instead of rediscovering a layout.
+- `LoadProgress` is already a defaultable `Resource` with private `total`,
+  `resolved`, and `failures` fields. Public completion-event fields are private
+  and must remain constructible only inside the crate.
+- `DiskAssetsPlugin<T>` already conditionally adds `LadingPlugin` after
+  `is_plugin_added`; preserve that registration relationship while adding the
+  runtime systems.
+- `DiskAssetLoader` already retains strong untyped handle clones and rejects a
+  pathless returned handle with the documented, reason-allowed targeted panic.
 
 **Acceptance gate:** Workspace build passes; `cargo nextest run --all-features
 --workspace --tests` passes including zero-set completion; the `clippy` skill
-passes.
+passes. `cargo nextest run -p hana_lading --all-features` also passes so
+workspace feature unification cannot mask the test-only reflection backend.
 
 ### Phase 3 — Contract test suite · status: todo
 
@@ -236,13 +304,16 @@ exit-on-failure protections.
 
 **Spec:**
 
-Add `bevy` with only required test features as a workspace-inherited
-dev-dependency. Keep fixtures under `crates/hana_lading/tests/assets/`; missing
-file cases must assert that their chosen file is genuinely absent. Exercise the
-same Bevy 0.19 asynchronous asset failure path used in production: with the
-image loader registered, the load initially returns a `Loading` handle; the
-asynchronous read produces `AssetReaderError::NotFound`; Bevy records failed
-root, dependency, and recursive states before `hana_lading` polls in `Update`.
+Extend the workspace-inherited `bevy` dev-dependency from Phase 2 with only the
+`bevy_asset`, `bevy_image`, and `png` features required by the fixtures. Keep
+fixtures under `crates/hana_lading/tests/assets/`; configure each test app's
+`AssetPlugin::file_path` from `CARGO_MANIFEST_DIR/tests/assets` so tests do not
+depend on the invoking directory. Missing-file cases must assert that their
+chosen file is genuinely absent. Exercise the same Bevy 0.19 asynchronous asset
+failure path used in production: with the image loader registered, the load
+initially returns a `Loading` handle; the asynchronous read produces
+`AssetReaderError::NotFound`; Bevy records failed root, dependency, and recursive
+states before `hana_lading` polls in `Update`.
 
 Required tests:
 
@@ -254,19 +325,39 @@ Required tests:
    before the global resolution observer.
 4. `mixed_outcome`: the successful set remains usable while the other fails;
    only `AllSetsResolved` fires globally.
-5. `ordering`: `AllSetsLoaded` precedes `AllSetsResolved` on the clean path.
+5. `recursive_dependencies_gate_and_fail`: a custom test asset loader requests a
+   child through its `LoadContext`; the root cannot complete while that child is
+   pending, and a failed child produces the set's terminal failure instead of a
+   success event.
 6. `empty_set_panics`: an empty `DiskAssets` declaration names its concrete type.
-7. `pathless_rejection_panics`: an invalid/pathless load fails at load
-   declaration rather than hanging tracking.
+7. `pathless_rejection_panics`: an in-module unit test in
+   `src/disk_asset_loader.rs` drives the private recording seam and proves a
+   pathless handle fails at load declaration rather than hanging tracking.
 8. `exit_on_failure_pattern`: an app using `ScheduleRunnerPlugin` converts a
    generic failure into `AppExit::error()` through `MessageWriter<AppExit>` and
    `app.run()` returns the error variant.
 
-**Files:** `crates/hana_lading/Cargo.toml`, `crates/hana_lading/tests/`, and test
-fixtures.
+**Files:**
+
+- `crates/hana_lading/Cargo.toml`
+- `crates/hana_lading/src/disk_asset_loader.rs`
+- `crates/hana_lading/tests/`
+- `crates/hana_lading/tests/assets/`
+
+**Constraints from prior phases:**
+
+- Phase 2 owns runtime construction and terminal-event ordering; tests use only
+  public APIs except the pathless-handle unit test, which remains beside the
+  private loader-recording seam.
+- Phase 2 already adds the workspace `bevy` dev-dependency to select a reflection
+  backend for isolated package tests; extend its features rather than creating a
+  second test dependency.
+- Public completion-event fields remain read-only, and `LoadProgress` is a
+  resource that observers may read until global finalization removes it.
 
 **Acceptance gate:** All eight tests pass under `cargo nextest run --all-features
---workspace --tests`; the `clippy` skill passes.
+--workspace --tests`; `cargo nextest run -p hana_lading --all-features` passes in
+isolation; the `clippy` skill passes.
 
 ### Phase 4 — Protective examples and documentation · status: todo
 
@@ -280,7 +371,12 @@ policy remains application-owned.
 **Spec:**
 
 - Add `fairy_dust` and `hana_diegetic` as example-only dev-dependencies and
-  explicit `[[example]]` entries.
+  explicit `[[example]]` entries. Extend the existing workspace `bevy`
+  dev-dependency with `bevy_state` and preserve the Phase 3 image/PNG features.
+- Add a real successful PNG fixture under `crates/hana_lading/assets/`. Configure
+  the examples' `AssetPlugin` root from `CARGO_MANIFEST_DIR/assets` so both
+  documented root-level run commands resolve that fixture independently of the
+  invoking directory; keep the intentionally missing path absent.
 - Amend `docs/fairy_dust/canonical-example.md` with a narrow takeover/error
   exception. Such examples may omit ground plane, studio lighting,
   camera-control panel, and title bar, but must still use `sprinkle_example()`,
@@ -310,8 +406,9 @@ policy remains application-owned.
 - Complete `README.md` with the workflow and both run commands. Add crate-level
   docs describing definition → plugin registration → loading → per-set outcome
   → global application decision. Document failure semantics and the headless
-  exit recipe tested in Phase 3. Add a concise as-planned overview under
-  `docs/hana_lading/` without duplicating this work order.
+  exit recipe tested in Phase 3. Expand the existing
+  `docs/hana_lading/overview.md` into the concise as-planned overview without
+  duplicating this work order.
 
 The documented run commands are:
 
@@ -325,15 +422,28 @@ cargo run -p hana_lading --example catastrophic_failure
 - `crates/hana_lading/Cargo.toml`
 - `crates/hana_lading/examples/catastrophic_failure.rs`
 - `crates/hana_lading/examples/degraded_failure.rs`
+- `crates/hana_lading/assets/<successful-fixture>.png`
 - `docs/fairy_dust/canonical-example.md`
 - `crates/hana_lading/README.md`
 - `crates/hana_lading/src/lib.rs`
-- `docs/hana_lading/<overview>.md`
+- `docs/hana_lading/overview.md`
+
+**Constraints from prior phases:**
+
+- Phase 1 sealed event construction behind private fields and created
+  `docs/hana_lading/overview.md`; examples must use only public accessors and
+  expand that file instead of adding a second overview.
+- Phase 2 supplies the complete loading and terminal-event runtime. Phase 3
+  proves failure evidence, recursive-dependency completion, observer ordering,
+  and the exit-on-failure recipe that these examples document.
+- The package already has a workspace-inherited `bevy` dev-dependency with the
+  reflection backend and image/PNG features; extend it with state support.
 
 **Acceptance gate:** Workspace build including examples passes; both examples
 launch and visibly reach their documented outcome; the example source and
 documentation identify all six protections above; the canonical-example
-exception is present; the `clippy` skill passes.
+exception is present; `cargo build -p hana_lading --all-features --examples`
+passes in isolation; the `clippy` skill passes.
 
 ## Handoff to Hana
 
