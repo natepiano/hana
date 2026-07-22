@@ -1,13 +1,9 @@
 # `hana_lading`
 
-`hana_lading` defines a tracked startup-loading API for assets loaded from disk.
-An application groups related handles in a resource that implements
-`DiskAssets`, then registers that resource type with `DiskAssetsPlugin<T>`.
-
-Phase 1 defines the public asset-set, loader, plugin, progress-resource, and
-completion-event types. The current plugins establish their registration
-relationship but do not start loads or insert a `DiskAssets` resource. Loading,
-polling, resource insertion, and event delivery arrive in Phase 2.
+`hana_lading` tracks fixed startup asset sets loaded from disk. An application
+groups related handles in a `DiskAssets` resource, registers
+`DiskAssetsPlugin<T>`, and observes typed or type-erased terminal events before
+making its own startup decision.
 
 ## Loading API
 
@@ -52,3 +48,22 @@ and any degraded behavior. It can observe `Loaded<T>`, `AllSetsLoaded`, or
 
 The crate does not cover hot reload or unload watching, runtime registration of
 asset sets, runtime-generated media, or application startup policy.
+
+## Protective examples
+
+`degraded_failure` loads one required PNG and fails one optional PNG. It retains
+required content, records the generic failure, enters `Ready`, and explains the
+degraded decision. `catastrophic_failure` fails a required PNG, records and
+renders the same evidence, and remains in `Loading`.
+
+Both examples use a crate-local asset root selected as the first Fairy Dust
+builder step. Their reflected `ExampleState`, `FailureRecord`,
+`FailurePanelContent`, and `RequiredSceneContent` provide BRP-readable evidence
+that matches the visible result.
+
+The examples show that every returned handle is tracked, failures terminate,
+generic observers can record all set types, direct records precede global
+completion, and policy stays application-owned. The Phase 3
+`recursive_dependencies_gate_and_fail` contract test separately proves that a
+set waits for recursive dependencies, because PNG fixtures have no recursive
+children.

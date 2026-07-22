@@ -39,3 +39,6 @@ bevy_kana = { workspace = true, features = ["input"] }
 bevy_lagrange = { workspace = true }
 hana_diegetic = { path = "../hana_diegetic" }
 hana_valence = { workspace = true }
+
+[dev-dependencies]
+trybuild.workspace = true

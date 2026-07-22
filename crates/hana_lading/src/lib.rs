@@ -26,6 +26,29 @@
 //! Application policy remains outside this crate. In particular, an
 //! application decides whether a failed set blocks startup, enters a degraded
 //! mode, or records additional failure details.
+//!
+//! # Startup sequence
+//!
+//! 1. Define a resource that implements [`DiskAssets`].
+//! 2. Register [`DiskAssetsPlugin`] for each startup set.
+//! 3. Load every handle through [`DiskAssetLoader`] in [`DiskAssets::load`].
+//! 4. Observe [`Loaded`] or [`LoadFailed`] for per-set work.
+//! 5. Observe [`AllSetsLoaded`] or [`AllSetsResolved`] for the application decision.
+//!
+//! [`AssetSetLoadFailed`] is suitable for one durable failure recorder because
+//! it identifies every failed set without its concrete resource type. Its
+//! observer runs before the typed [`LoadFailed`] observer and before global
+//! completion. Direct resource writes are therefore visible to the global
+//! decision observer.
+//!
+//! # Failure policy and headless exit
+//!
+//! A windowed application can remain in its loading state after a required
+//! failure or enter a ready state after only optional content fails. A headless
+//! application can instead observe [`AssetSetLoadFailed`] and write
+//! `AppExit::error()` through `MessageWriter<AppExit>`. The
+//! `exit_on_failure_pattern` integration test executes that recipe with Bevy's
+//! `ScheduleRunnerPlugin`.
 
 mod disk_asset_loader;
 mod events;

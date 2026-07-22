@@ -455,8 +455,9 @@ isolation; the `clippy` skill passes.
 - Phase 4 examples can rely on generic failure observers running before global
   resolution, successful sets remaining usable after another set fails, and
   `LoadProgress` remaining readable through global observers.
-- The deferred Fairy Dust asset-root constructor remains the only unresolved
-  decision before Phase 4 can be dispatched.
+- Phase 4 uses a first-step-only Fairy Dust builder method for its crate-local
+  asset root. Typestate keeps that method unavailable after any ordinary
+  builder operation has installed Bevy's baseline plugins.
 
 #### Phase 3 Review
 
@@ -466,10 +467,10 @@ isolation; the `clippy` skill passes.
   its PNG examples directly exhibit failure reporting, generic recording,
   global ordering, and application-owned policy instead of simulating a child
   dependency they do not load.
-- The existing Fairy Dust asset-root constructor decision remains deferred to
-  the Phase 4 pre-dispatch gate.
+- The Fairy Dust asset-root decision is resolved in favor of a typestate-gated
+  `with_asset_root(...)` builder method rather than a second constructor.
 
-### Phase 4 — Protective examples and documentation · status: todo
+### Phase 4 — Protective examples and documentation · status: done (`5bbf8999`)
 
 #### Work Order
 
@@ -478,7 +479,7 @@ how applications can make safe, explicit decisions after partial or complete
 failure. Documentation names which guarantees come from `hana_lading` and which
 policy remains application-owned.
 
-**Pending decision: configure a crate-local asset root before Fairy Dust installs Bevy plugins**
+**Resolved decision: configure a crate-local asset root through the first builder step**
 
 Actual problem:
 `fairy_dust::sprinkle_example()` installs `DefaultPlugins` immediately, so
@@ -489,15 +490,18 @@ What exists now:
 - The examples must use the Fairy Dust chain, while their successful PNG is
   intentionally package-owned under `crates/hana_lading/assets/`.
 
-What should change:
-- Add a narrow Fairy Dust constructor that accepts an asset root before
-  `DefaultPlugins` are installed, and allow that constructor in the documented
-  takeover/error exception.
-
-Recommendation:
-Add `fairy_dust::sprinkle_example_with_asset_root(...)`, implement it beside
-`sprinkle_example()` in `crates/fairy_dust/src/lib.rs`, and update the Phase 4
-Spec, Files, canonical-example exception, and examples to use it.
+Decision:
+- Keep `fairy_dust::sprinkle_example()` as the single constructor. It returns a
+  pre-installation typestate whose `with_asset_root(...)` method consumes that
+  builder, configures `AssetPlugin::file_path`, installs the Fairy Dust baseline
+  plugins, and returns the normal builder typestate.
+- The first ordinary builder operation performs the same transition with
+  Bevy's default asset root, preserving existing fluent call sites. Once that
+  transition occurs, `with_asset_root(...)` is absent from the returned type,
+  so Rust rejects attempts to configure the root later in the chain.
+- Keep the direct `app_mut()` escape hatch on the installed typestate only. Add
+  an explicit default-root finalization method if a caller needs direct app
+  access before selecting any ordinary capability.
 
 **Spec:**
 
@@ -505,12 +509,15 @@ Spec, Files, canonical-example exception, and examples to use it.
   explicit `[[example]]` entries. Extend the existing workspace `bevy`
   dev-dependency with `bevy_state` and preserve the Phase 3 image/PNG features.
 - Add a real successful PNG fixture under `crates/hana_lading/assets/`. Configure
-  the examples' `AssetPlugin` root from `CARGO_MANIFEST_DIR/assets` so both
-  documented root-level run commands resolve that fixture independently of the
-  invoking directory; keep the intentionally missing path absent.
+  the examples with
+  `.with_asset_root(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))` as the first
+  builder step so both documented root-level run commands resolve that fixture
+  independently of the invoking directory; keep the intentionally missing path
+  absent.
 - Amend `docs/fairy_dust/canonical-example.md` with a narrow takeover/error
   exception. Such examples may omit ground plane, studio lighting,
   camera-control panel, and title bar, but must still use `sprinkle_example()`,
+  the first-step-only `.with_asset_root(...)` when assets are package-owned,
   `.with_brp_extras()`, `.with_save_window_position()`, and `.run()`.
 - `examples/catastrophic_failure.rs`, display name **Catastrophic Failure**,
   intentionally loads an absent PNG. An example-owned recorder writes generic
@@ -566,6 +573,11 @@ cargo run -p hana_lading --example catastrophic_failure
 - `crates/hana_lading/examples/degraded_failure.rs`
 - `crates/hana_lading/examples/loading_evidence/mod.rs`
 - `crates/hana_lading/assets/<successful-fixture>.png`
+- `crates/fairy_dust/src/lib.rs`
+- `crates/fairy_dust/src/builder/sprinkle.rs`
+- `crates/fairy_dust/README.md`
+- `crates/fairy_dust/tests/trybuild.rs`
+- `crates/fairy_dust/tests/trybuild/`
 - `docs/fairy_dust/canonical-example.md`
 - `crates/hana_lading/README.md`
 - `crates/hana_lading/src/lib.rs`
@@ -591,8 +603,79 @@ message, and no required-scene marker. Degraded inspection must show `Ready`,
 one optional failure, the continue-degraded panel message, and retained required
 scene content. The example source and documentation identify all six
 protections above; the canonical-example exception is present; `cargo build -p
-hana_lading --all-features --examples` passes in isolation; the `clippy` skill
-passes.
+hana_lading --all-features --examples` passes in isolation; Fairy Dust has
+opt-in nextest-executed trybuild pass and compile-fail cases proving that
+`with_asset_root(...)` is available first and unavailable after another builder
+operation; `cargo nextest run -p fairy_dust --test trybuild --run-ignored
+ignored-only` passes without imposing that separate Bevy compile on routine
+workspace test runs; the `clippy` skill passes.
+
+#### Retrospective
+
+**What worked:**
+
+- Fairy Dust keeps one `sprinkle_example()` entry point while a second typestate
+  dimension exposes `with_asset_root(...)` only before baseline installation.
+  Existing fluent chains still install the default baseline on their first
+  ordinary operation, and installed builders retain their previous one-parameter
+  type spelling and `const fn` primitive/home entry points.
+- The two examples use the same loading evidence to demonstrate opposite
+  application policies. The catastrophic path stays in `Loading` behind an
+  opaque failure panel; the degraded path enters `Ready`, applies the loaded PNG
+  to its retained cube, and reports the optional failure through a translucent
+  panel.
+- Reflected state, failure records, panel content, and required-scene identity
+  made both visual outcomes objectively inspectable through BRP before graceful
+  shutdown.
+
+**What changed during implementation:**
+
+- The deferred constructor decision was resolved in favor of the user's
+  first-step builder method with compile-time ordering. `app_mut()` remains on
+  the installed typestate, with `with_default_asset_root()` as the explicit
+  transition for callers that need direct app access before another capability.
+- The API review preserved the installed builder's existing `const fn`
+  capabilities, added positive and negative compile cases for both asset-root
+  and direct-app transitions, and corrected documentation that still described
+  baseline installation as constructor work.
+- The slow trybuild case is ignored during routine suites and run explicitly for
+  typestate API changes. Its first cold build populated a separate Bevy target;
+  subsequent verification completed from that cache.
+- The first degraded-example launch reached the expected loading events but hit
+  a local WGPU queue stall. A fresh launch passed every BRP observation and shut
+  down normally.
+
+**Verification:**
+
+- `cargo build --release --workspace --all-features --examples` passes; the only
+  diagnostic is the pre-existing unused `DetectChanges` import in
+  `hana_valence`.
+- `cargo nextest run --all-features --workspace --tests` passes with 1,235 tests
+  and five intentional skips. The explicit ignored-only Fairy Dust trybuild
+  case also passes.
+- The `clippy` workflow, rustdoc, Mend, style review, banned-word scan, nightly
+  formatting check, and `git diff --check` pass.
+- Live BRP inspection proves the catastrophic example remains `Loading`, records
+  its required failure and exact panel text, and has no required-scene marker.
+  The degraded example reaches `Ready`, records its optional failure and exact
+  panel text, and retains the required textured cube. Both terminate through
+  `brp_extras/shutdown`.
+
+**Implications for remaining phases:**
+
+- No implementation phases remain. The documented handoff can pin the final
+  checkpoint SHA when Hana begins consuming `hana_lading`.
+
+#### Phase 4 Review
+
+- The independent behavior review approved the examples, reflected evidence,
+  asset-root independence, visible policies, and documentation without fixes.
+- The independent API review's compatibility and compile-coverage findings were
+  repaired and rechecked. Its final custom-root pass assertion was restored
+  alongside the default-root `app_mut()` assertion, and the ignored-only
+  trybuild test passes with both late-call rejection cases.
+- With no later phase to revise, the plan review records only the final Hana
+  handoff boundary below.
 
 ## Handoff to Hana
 

@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use bevy::app::App;
 use bevy::app::Plugins;
+use bevy::asset::AssetPlugin;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
@@ -60,17 +61,46 @@ pub struct NoOrbitCam;
 /// become callable in this state.
 pub struct WithOrbitCam;
 
+/// Typestate marker: the Fairy Dust baseline has not been installed yet.
+///
+/// Only this state exposes [`SprinkleBuilder::with_asset_root`]. Every other
+/// builder operation installs the baseline with Bevy's default asset root and
+/// returns [`BaselineInstalled`].
+pub struct AssetRootPending;
+
+/// Typestate marker: `DefaultPlugins` and the Fairy Dust baseline are installed.
+pub struct BaselineInstalled;
+
+enum BaselineStatus {
+    Pending,
+    Installed,
+}
+
 /// Builder returned by [`sprinkle_example`](crate::sprinkle_example). State-agnostic capability
 /// methods are defined for any `S`; camera-attached methods are gated by
 /// the typestate.
-pub struct SprinkleBuilder<S> {
-    pub(super) app:          App,
-    pub(super) state_marker: PhantomData<S>,
+pub struct SprinkleBuilder<S, B = BaselineInstalled> {
+    pub(super) app:  App,
+    baseline_status: BaselineStatus,
+    orbit:           PhantomData<S>,
+    baseline:        PhantomData<B>,
 }
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
-impl<S> SprinkleBuilder<S> {
+impl<S, Baseline> SprinkleBuilder<S, Baseline> {
+    fn into_installed(mut self) -> SprinkleBuilder<S> {
+        if matches!(self.baseline_status, BaselineStatus::Pending) {
+            crate::install_baseline(&mut self.app, AssetPlugin::default());
+        }
+        SprinkleBuilder {
+            app:             self.app,
+            baseline_status: BaselineStatus::Installed,
+            orbit:           PhantomData,
+            baseline:        PhantomData,
+        }
+    }
+
     /// Installs Hana fold playback with the standard `Space` fold,
     /// `Shift+Space` unfold, and `P` play controls.
     ///
@@ -79,34 +109,38 @@ impl<S> SprinkleBuilder<S> {
     /// continues that direction to the terminal; during play, it reverses
     /// immediately.
     #[must_use]
-    pub fn with_fold_controls(mut self) -> Self {
-        fold_controls::install(&mut self.app);
-        self
+    pub fn with_fold_controls(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        fold_controls::install(&mut builder.app);
+        builder
     }
 
     /// Add a `bevy_clerestory` `WindowManagerPlugin` so window position
     /// and size are persisted across runs.
     #[must_use]
-    pub fn with_save_window_position(mut self) -> Self {
-        save_window_position::install(&mut self.app);
-        self
+    pub fn with_save_window_position(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        save_window_position::install(&mut builder.app);
+        builder
     }
 
     /// Add a `bevy_brp_extras` `BrpExtrasPlugin` configured to display the
     /// BRP port in the window title when the port is non-default.
     #[must_use]
-    pub fn with_brp_extras(mut self) -> Self {
-        brp_extras::install(&mut self.app);
-        self
+    pub fn with_brp_extras(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        brp_extras::install(&mut builder.app);
+        builder
     }
 
     /// Enable HDR output on every camera (current and later-spawned). Required
     /// for over-bright (>1.0) colors to survive a multi-camera diegetic render
     /// chain — any camera left in LDR clamps them at that step.
     #[must_use]
-    pub fn with_hdr(mut self) -> Self {
-        hdr::install(&mut self.app);
-        self
+    pub fn with_hdr(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        hdr::install(&mut builder.app);
+        builder
     }
 
     /// Uncap the frame rate so a stress example reports its true per-frame
@@ -119,16 +153,17 @@ impl<S> SprinkleBuilder<S> {
     /// 60 Hz reactive-low-power. With both removed, the on-screen overlay and a
     /// background BRP reader both see un-throttled frame time.
     #[must_use]
-    pub fn with_perf_mode(mut self) -> Self {
-        self.app.insert_resource(WinitSettings::continuous());
-        let mut windows = self
+    pub fn with_perf_mode(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder.app.insert_resource(WinitSettings::continuous());
+        let mut windows = builder
             .app
             .world_mut()
             .query_filtered::<&mut Window, With<PrimaryWindow>>();
-        if let Ok(mut window) = windows.single_mut(self.app.world_mut()) {
+        if let Ok(mut window) = windows.single_mut(builder.app.world_mut()) {
             window.present_mode = PresentMode::AutoNoVsync;
         }
-        self
+        builder
     }
 
     /// Enable smart screen-space camera control panels for `OrbitCam` cameras.
@@ -137,18 +172,20 @@ impl<S> SprinkleBuilder<S> {
     /// [`CameraGuidance::auto()`](crate::CameraGuidance::auto), so the panel reflects the effective
     /// preset or binding configuration and highlights active interactions.
     #[must_use]
-    pub fn with_camera_control_panel(mut self) -> Self {
-        camera_control_panel::install(&mut self.app);
-        self
+    pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        camera_control_panel::install(&mut builder.app);
+        builder
     }
 
     /// Pins the camera to its spawned preset: suppresses the Shift+C cycle and
     /// its entry in the keyboard-shortcut overlay. Pair with
     /// [`with_camera_control_panel`](Self::with_camera_control_panel).
     #[must_use]
-    pub fn lock_camera_preset(mut self) -> Self {
-        self.app.insert_resource(CameraPresetSwitching::Disabled);
-        self
+    pub fn lock_camera_preset(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder.app.insert_resource(CameraPresetSwitching::Disabled);
+        builder
     }
 
     /// Overrides the inner background color of the camera control panel.
@@ -157,10 +194,12 @@ impl<S> SprinkleBuilder<S> {
     /// [`Color::with_alpha`] to tweak only the opacity:
     /// `.with_camera_control_panel_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(0.85))`.
     #[must_use]
-    pub fn with_camera_control_panel_background_color(mut self, color: Color) -> Self {
-        self.app
+    pub fn with_camera_control_panel_background_color(self, color: Color) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder
+            .app
             .insert_resource(CameraControlPanelBackground(color));
-        self
+        builder
     }
 
     /// Wire a one-shot keyboard shortcut: pressing `key` runs `system` once.
@@ -185,14 +224,15 @@ impl<S> SprinkleBuilder<S> {
     /// [`with_fold_controls`](Self::with_fold_controls)) fails at startup —
     /// use the matching capability instead of a manual shortcut.
     #[must_use]
-    pub fn with_shortcut<Sys, M>(mut self, key: KeyCode, system: Sys) -> Self
+    pub fn with_shortcut<Sys, M>(self, key: KeyCode, system: Sys) -> SprinkleBuilder<S>
     where
         Sys: IntoSystem<(), (), M> + 'static,
     {
-        shortcuts::install(&mut self.app);
-        let system_id = self.app.world_mut().register_system(system);
-        shortcuts::register_press(&mut self.app, key, system_id);
-        self
+        let mut builder = self.into_installed();
+        shortcuts::install(&mut builder.app);
+        let system_id = builder.app.world_mut().register_system(system);
+        shortcuts::register_press(&mut builder.app, key, system_id);
+        builder
     }
 
     /// Wire a continuous keyboard shortcut: while `key` is held, `system` runs
@@ -204,27 +244,29 @@ impl<S> SprinkleBuilder<S> {
     /// [`with_shortcut`](Self::with_shortcut); only the firing cadence differs
     /// (every held frame instead of once per press).
     #[must_use]
-    pub fn with_held_shortcut<Sys, M>(mut self, key: KeyCode, system: Sys) -> Self
+    pub fn with_held_shortcut<Sys, M>(self, key: KeyCode, system: Sys) -> SprinkleBuilder<S>
     where
         Sys: IntoSystem<(), (), M> + 'static,
     {
-        shortcuts::install(&mut self.app);
-        let system_id = self.app.world_mut().register_system(system);
-        shortcuts::register_held(&mut self.app, key, system_id);
-        self
+        let mut builder = self.into_installed();
+        shortcuts::install(&mut builder.app);
+        let system_id = builder.app.world_mut().register_system(system);
+        shortcuts::register_held(&mut builder.app, key, system_id);
+        builder
     }
 
     /// Adds a marker-scoped cube spin helper.
     #[must_use]
-    pub fn with_cube_spin<M: Component>(self) -> Self {
+    pub fn with_cube_spin<M: Component>(self) -> SprinkleBuilder<S> {
         self.with_cube_spin_config::<M>(CubeSpinConfig::default())
     }
 
     /// Adds a marker-scoped cube spin helper with a customized configuration.
     #[must_use]
-    pub fn with_cube_spin_config<M: Component>(mut self, config: CubeSpinConfig) -> Self {
-        cube_spin::install::<M>(&mut self.app, config);
-        self
+    pub fn with_cube_spin_config<M: Component>(self, config: CubeSpinConfig) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        cube_spin::install::<M>(&mut builder.app, config);
+        builder
     }
 
     /// Add a reusable key/fill/rim lighting setup for simple example scenes.
@@ -236,11 +278,157 @@ impl<S> SprinkleBuilder<S> {
     #[must_use]
     pub fn with_studio_lighting(self) -> StudioLightingBuilder<S> {
         StudioLightingBuilder {
-            parent: self,
+            parent: self.into_installed(),
             config: StudioLightingConfig::default(),
         }
     }
 
+    /// Spawn a static side panel that describes the example.
+    #[must_use]
+    pub fn with_description_panel(self, panel: DescriptionPanel) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        screen_panels::install_description(&mut builder.app, panel);
+        builder
+    }
+
+    /// Spawn a compact top-left title bar for example controls and switch to
+    /// a [`TitleBarBuilder`] so chip highlights can be wired to event
+    /// lifecycles.
+    #[must_use]
+    pub fn with_title_bar(self, title_bar: TitleBar) -> TitleBarBuilder<S> {
+        let mut builder = self.into_installed();
+        screen_panels::install_title_bar(&mut builder.app, title_bar);
+        TitleBarBuilder { parent: builder }
+    }
+
+    /// Mirror of [`App::add_plugins`].
+    #[must_use]
+    pub fn add_plugins<M>(self, plugins: impl Plugins<M>) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder.app.add_plugins(plugins);
+        builder
+    }
+
+    /// Mirror of [`App::add_systems`].
+    #[must_use]
+    pub fn add_systems<M>(
+        self,
+        schedule: impl ScheduleLabel,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder.app.add_systems(schedule, systems);
+        builder
+    }
+
+    /// Mirror of [`App::add_observer`].
+    #[must_use]
+    pub fn add_observer<E, BundleType, M, I>(self, observer: I) -> SprinkleBuilder<S>
+    where
+        E: bevy::ecs::event::Event,
+        BundleType: Bundle,
+        I: bevy::ecs::system::IntoObserverSystem<E, BundleType, M>,
+    {
+        let mut builder = self.into_installed();
+        builder.app.add_observer(observer);
+        builder
+    }
+
+    /// Mirror of [`App::init_resource`].
+    #[must_use]
+    pub fn init_resource<R: Resource + FromWorld>(self) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder.app.init_resource::<R>();
+        builder
+    }
+
+    /// Mirror of [`App::insert_resource`].
+    #[must_use]
+    pub fn insert_resource<R: Resource>(self, resource: R) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        builder.app.insert_resource(resource);
+        builder
+    }
+
+    /// Run the configured app. Mirror of [`App::run`], with the exception
+    /// that a `Ctrl+Shift+R` press handled via `with_restart_key`
+    /// will re-exec the current binary before this method returns.
+    pub fn run(self) -> AppExit {
+        let mut builder = self.into_installed();
+        let exit = builder.app.run();
+        restart::perform_restart_if_requested();
+        exit
+    }
+}
+
+impl<S> SprinkleBuilder<S, AssetRootPending> {
+    pub(crate) const fn new(app: App) -> Self {
+        Self {
+            app,
+            baseline_status: BaselineStatus::Pending,
+            orbit: PhantomData,
+            baseline: PhantomData,
+        }
+    }
+
+    /// Install the Fairy Dust baseline with a package-owned asset directory.
+    ///
+    /// This method is only available immediately after [`crate::sprinkle_example`]
+    /// and consumes the pre-installation builder state:
+    ///
+    /// ```
+    /// let builder = fairy_dust::sprinkle_example()
+    ///     .with_asset_root(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"));
+    /// # drop(builder);
+    /// ```
+    ///
+    /// Any ordinary builder operation installs Bevy with its default asset
+    /// root, so configuring an asset root later is rejected:
+    ///
+    /// ```compile_fail
+    /// let builder = fairy_dust::sprinkle_example()
+    ///     .with_brp_extras()
+    ///     .with_asset_root("assets");
+    /// # drop(builder);
+    /// ```
+    #[must_use]
+    pub fn with_asset_root(mut self, asset_root: impl Into<String>) -> SprinkleBuilder<S> {
+        crate::install_baseline(
+            &mut self.app,
+            AssetPlugin {
+                file_path: asset_root.into(),
+                ..AssetPlugin::default()
+            },
+        );
+        self.baseline_status = BaselineStatus::Installed;
+        self.into_installed()
+    }
+
+    /// Install the Fairy Dust baseline with Bevy's default asset root.
+    ///
+    /// This explicit transition makes [`SprinkleBuilder::app_mut`] available
+    /// before selecting another capability.
+    #[must_use]
+    pub fn with_default_asset_root(self) -> SprinkleBuilder<S> { self.into_installed() }
+
+    /// Installs the baseline, then starts configuring a reusable ground plane.
+    #[must_use]
+    pub fn with_ground_plane(self) -> PrimitiveBuilder<S> {
+        self.into_installed().with_ground_plane()
+    }
+
+    /// Installs the baseline, then starts configuring a reusable cube.
+    #[must_use]
+    pub fn with_cube(self) -> PrimitiveBuilder<S> { self.into_installed().with_cube() }
+
+    /// Installs the baseline, then begins configuring a camera home pose.
+    #[must_use]
+    pub fn with_camera_home(self) -> CameraHomeBuilder<S> {
+        self.into_installed().with_camera_home()
+    }
+}
+
+impl<S> SprinkleBuilder<S> {
     /// Starts configuring a reusable ground plane for the example scene.
     #[must_use]
     pub const fn with_ground_plane(self) -> PrimitiveBuilder<S> {
@@ -259,22 +447,6 @@ impl<S> SprinkleBuilder<S> {
             config:  PrimitiveConfig::cube(),
             inserts: Vec::new(),
         }
-    }
-
-    /// Spawn a static side panel that describes the example.
-    #[must_use]
-    pub fn with_description_panel(mut self, panel: DescriptionPanel) -> Self {
-        screen_panels::install_description(&mut self.app, panel);
-        self
-    }
-
-    /// Spawn a compact top-left title bar for example controls and switch to
-    /// a [`TitleBarBuilder`] so chip highlights can be wired to event
-    /// lifecycles.
-    #[must_use]
-    pub fn with_title_bar(mut self, title_bar: TitleBar) -> TitleBarBuilder<S> {
-        screen_panels::install_title_bar(&mut self.app, title_bar);
-        TitleBarBuilder { parent: self }
     }
 
     /// Begin configuring a generalized camera "home" pose.
@@ -300,100 +472,50 @@ impl<S> SprinkleBuilder<S> {
         }
     }
 
-    /// Mirror of [`App::add_plugins`].
-    #[must_use]
-    pub fn add_plugins<M>(mut self, plugins: impl Plugins<M>) -> Self {
-        self.app.add_plugins(plugins);
-        self
-    }
-
-    /// Mirror of [`App::add_systems`].
-    #[must_use]
-    pub fn add_systems<M>(
-        mut self,
-        schedule: impl ScheduleLabel,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) -> Self {
-        self.app.add_systems(schedule, systems);
-        self
-    }
-
-    /// Mirror of [`App::add_observer`].
-    #[must_use]
-    pub fn add_observer<E, B, M, I>(mut self, observer: I) -> Self
-    where
-        E: bevy::ecs::event::Event,
-        B: Bundle,
-        I: bevy::ecs::system::IntoObserverSystem<E, B, M>,
-    {
-        self.app.add_observer(observer);
-        self
-    }
-
-    /// Mirror of [`App::init_resource`].
-    #[must_use]
-    pub fn init_resource<R: Resource + FromWorld>(mut self) -> Self {
-        self.app.init_resource::<R>();
-        self
-    }
-
-    /// Mirror of [`App::insert_resource`].
-    #[must_use]
-    pub fn insert_resource<R: Resource>(mut self, resource: R) -> Self {
-        self.app.insert_resource(resource);
-        self
-    }
-
-    /// Run the configured app. Mirror of [`App::run`], with the exception
-    /// that a `Ctrl+Shift+R` press handled via `with_restart_key`
-    /// will re-exec the current binary before this method returns.
-    pub fn run(mut self) -> AppExit {
-        let exit = self.app.run();
-        restart::perform_restart_if_requested();
-        exit
-    }
-
     /// Escape hatch: borrow the underlying [`App`] for capabilities not yet
     /// surfaced as `with_*` methods.
     pub const fn app_mut(&mut self) -> &mut App { &mut self.app }
 }
 
 // State transition: `NoOrbitCam` → `WithOrbitCam`.
-impl SprinkleBuilder<NoOrbitCam> {
-    pub(crate) const fn new(app: App) -> Self {
-        Self {
-            app,
-            state_marker: PhantomData,
-        }
-    }
-
+impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
     /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
     /// The caller's `configure` closure can set `focus`, `radius`, `yaw`,
     /// `pitch`, sensitivity, limits, or other camera behavior fields. Input
     /// uses `OrbitCamPreset::simple_mouse()` unless another input mode is inserted.
-    pub fn with_orbit_cam_configured<F>(mut self, configure: F) -> SprinkleBuilder<WithOrbitCam>
+    pub fn with_orbit_cam_configured<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
     {
-        orbit_cam::install_with(&mut self.app, configure);
+        let mut builder = self.into_installed();
+        orbit_cam::install_with(&mut builder.app, configure);
         SprinkleBuilder {
-            app:          self.app,
-            state_marker: PhantomData,
+            app:             builder.app,
+            baseline_status: BaselineStatus::Installed,
+            orbit:           PhantomData,
+            baseline:        PhantomData,
         }
     }
 
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
     /// insert extra camera-side components such as `OrbitCamInputMode` or
     /// [`CameraGuidance`](crate::CameraGuidance).
-    pub fn with_orbit_cam<F, B>(mut self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
+    pub fn with_orbit_cam<F, BundleType>(
+        self,
+        configure: F,
+        bundle: BundleType,
+    ) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
-        B: Bundle + Send + Sync + 'static,
+        BundleType: Bundle + Send + Sync + 'static,
     {
-        orbit_cam::install_with_bundle(&mut self.app, configure, bundle);
+        let mut builder = self.into_installed();
+        orbit_cam::install_with_bundle(&mut builder.app, configure, bundle);
         SprinkleBuilder {
-            app:          self.app,
-            state_marker: PhantomData,
+            app:             builder.app,
+            baseline_status: BaselineStatus::Installed,
+            orbit:           PhantomData,
+            baseline:        PhantomData,
         }
     }
 
@@ -413,18 +535,21 @@ impl SprinkleBuilder<NoOrbitCam> {
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
     /// explicit startup pose, and install one built-in input preset.
     pub fn with_orbit_cam_preset_pose(
-        mut self,
+        self,
         pose: OrbitCamPose,
         preset: impl Into<OrbitCamPreset>,
     ) -> SprinkleBuilder<WithOrbitCam> {
+        let mut builder = self.into_installed();
         orbit_cam::install_pose_with_bundle(
-            &mut self.app,
+            &mut builder.app,
             pose,
             OrbitCamInputMode::with_preset(preset),
         );
         SprinkleBuilder {
-            app:          self.app,
-            state_marker: PhantomData,
+            app:             builder.app,
+            baseline_status: BaselineStatus::Installed,
+            orbit:           PhantomData,
+            baseline:        PhantomData,
         }
     }
 
@@ -448,7 +573,7 @@ impl SprinkleBuilder<NoOrbitCam> {
     /// explicit startup pose, install one built-in input preset, and insert extra
     /// camera-side components.
     pub fn with_orbit_cam_preset_pose_bundle<B>(
-        mut self,
+        self,
         pose: OrbitCamPose,
         preset: impl Into<OrbitCamPreset>,
         bundle: B,
@@ -456,14 +581,17 @@ impl SprinkleBuilder<NoOrbitCam> {
     where
         B: Bundle + Send + Sync + 'static,
     {
+        let mut builder = self.into_installed();
         orbit_cam::install_pose_with_bundle(
-            &mut self.app,
+            &mut builder.app,
             pose,
             (OrbitCamInputMode::with_preset(preset), bundle),
         );
         SprinkleBuilder {
-            app:          self.app,
-            state_marker: PhantomData,
+            app:             builder.app,
+            baseline_status: BaselineStatus::Installed,
+            orbit:           PhantomData,
+            baseline:        PhantomData,
         }
     }
 
@@ -586,6 +714,8 @@ impl SprinkleBuilder<WithOrbitCam> {
 
 #[cfg(test)]
 mod tests {
+    use bevy::asset::AssetPlugin;
+    use bevy::asset::AssetServer;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
 
     use super::NoOrbitCam;
@@ -595,6 +725,47 @@ mod tests {
     use crate::builder::PrimitiveBuilder;
     use crate::builder::StudioLightingBuilder;
     use crate::builder::TitleBarBuilder;
+
+    const CUSTOM_ASSET_ROOT: &str = "custom-assets";
+
+    #[derive(bevy::prelude::Resource)]
+    struct BaselineTransitionProbe;
+
+    #[test]
+    fn ordinary_first_operation_installs_default_baseline() {
+        let builder = crate::sprinkle_example().insert_resource(BaselineTransitionProbe);
+
+        assert_baseline(&builder, &AssetPlugin::default().file_path);
+        assert!(
+            builder
+                .app
+                .world()
+                .contains_resource::<BaselineTransitionProbe>()
+        );
+    }
+
+    #[test]
+    fn explicit_default_asset_root_installs_default_baseline() {
+        let builder = crate::sprinkle_example().with_default_asset_root();
+
+        assert_baseline(&builder, &AssetPlugin::default().file_path);
+    }
+
+    #[test]
+    fn custom_asset_root_installs_custom_baseline() {
+        let builder = crate::sprinkle_example().with_asset_root(CUSTOM_ASSET_ROOT);
+
+        assert_baseline(&builder, CUSTOM_ASSET_ROOT);
+    }
+
+    #[test]
+    fn operation_after_baseline_transition_does_not_duplicate_asset_plugin() {
+        let builder = crate::sprinkle_example()
+            .with_default_asset_root()
+            .insert_resource(BaselineTransitionProbe);
+
+        assert_baseline(&builder, &AssetPlugin::default().file_path);
+    }
 
     #[test]
     fn builder_wrappers_accept_typed_preset_payloads() {
@@ -618,6 +789,13 @@ mod tests {
             TitleBarBuilder<NoOrbitCam>,
             OrbitCamBlenderLikePreset,
         ) -> SprinkleBuilder<WithOrbitCam> = title_bar_builder_with_preset;
+    }
+
+    fn assert_baseline(builder: &SprinkleBuilder<NoOrbitCam>, expected_asset_root: &str) {
+        let asset_plugins = builder.app.get_added_plugins::<AssetPlugin>();
+        assert_eq!(asset_plugins.len(), 1);
+        assert_eq!(asset_plugins[0].file_path, expected_asset_root);
+        assert!(builder.app.world().contains_resource::<AssetServer>());
     }
 
     fn sprinkle_builder_with_preset(
