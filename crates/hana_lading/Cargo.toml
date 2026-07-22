@@ -21,7 +21,18 @@ bevy_ecs   = { workspace = true }
 tracing    = { workspace = true }
 
 [dev-dependencies]
-bevy = { workspace = true, features = ["bevy_asset", "bevy_image", "png"] }
+bevy = { workspace = true, features = ["bevy_asset", "bevy_image", "bevy_state", "png"] }
+bevy_lagrange.workspace = true
+fairy_dust.workspace    = true
+hana_diegetic.workspace = true
+
+[[example]]
+name = "catastrophic_failure"
+path = "examples/catastrophic_failure.rs"
+
+[[example]]
+name = "degraded_failure"
+path = "examples/degraded_failure.rs"
 
 [[test]]
 name = "startup_loading"

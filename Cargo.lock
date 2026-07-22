@@ -2855,6 +2855,7 @@ dependencies = [
  "bevy_lagrange",
  "hana_diegetic",
  "hana_valence",
+ "trybuild",
 ]
 
 [[package]]
@@ -3308,6 +3309,9 @@ dependencies = [
  "bevy_app",
  "bevy_asset",
  "bevy_ecs",
+ "bevy_lagrange",
+ "fairy_dust",
+ "hana_diegetic",
  "tracing",
 ]
 

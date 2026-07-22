@@ -2,9 +2,9 @@
 
 Workspace example helper — quiet logs and opt-in dev capabilities for bevy_hana examples.
 
-Use `sprinkle_example()` to construct a `SprinkleBuilder` preloaded with `DefaultPlugins`
-configured for a quiet log filter, then chain capability methods to opt into specific
-dev conveniences:
+Use `sprinkle_example()` to construct a `SprinkleBuilder` before Fairy Dust installs
+its baseline plugins. The first builder operation installs `DefaultPlugins` with a
+quiet log filter, then the chain opts into specific dev conveniences:
 
 ```rust,ignore
 fairy_dust::sprinkle_example()
@@ -27,7 +27,24 @@ offset.
 
 ## Typestate
 
-The builder is parameterized by a state marker (`NoOrbitCam` / `WithOrbitCam`).
+The builder has independent baseline and orbit-camera typestates. The baseline
+starts as `AssetRootPending`, where `SprinkleBuilder::with_asset_root` can configure
+`AssetPlugin` before `DefaultPlugins` is installed. That method and every ordinary
+builder operation return `BaselineInstalled`, where `with_asset_root` is no longer
+available.
+
+Code that needs direct access to the Bevy app before adding a Fairy Dust capability
+must complete the first-step transition explicitly:
+
+```rust,ignore
+let mut builder = fairy_dust::sprinkle_example().with_default_asset_root();
+let app = builder.app_mut();
+```
+
+The pending builder intentionally has no `app_mut` method, which keeps asset-root
+selection ahead of any operation that can initialize Bevy's asset plugin.
+
+The orbit-camera marker starts as `NoOrbitCam` and transitions to `WithOrbitCam`.
 Methods that act on the spawned `OrbitCam` entity (such as
 `SprinkleBuilder::with_stable_transparency`) are only defined on
 `SprinkleBuilder<WithOrbitCam>`, so calling them before

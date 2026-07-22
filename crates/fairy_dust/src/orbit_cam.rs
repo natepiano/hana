@@ -1,7 +1,7 @@
 //! Capability: spawn an `OrbitCam` entity tagged with [`FairyDustOrbitCam`]
 //! so camera-attached capabilities (e.g. stable-transparency) can find it.
-//! `LagrangePlugin` itself is installed unconditionally by
-//! [`crate::sprinkle_example`].
+//! `LagrangePlugin` itself is installed by the deferred Fairy Dust baseline
+//! when the first builder operation is applied.
 
 use std::sync::Mutex;
 

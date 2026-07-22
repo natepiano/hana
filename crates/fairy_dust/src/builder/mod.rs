@@ -12,6 +12,8 @@ mod title_bar;
 
 pub use camera_home::CameraHomeBuilder;
 pub use primitive::PrimitiveBuilder;
+pub use sprinkle::AssetRootPending;
+pub use sprinkle::BaselineInstalled;
 pub use sprinkle::NoOrbitCam;
 pub use sprinkle::SprinkleBuilder;
 pub use sprinkle::WithOrbitCam;

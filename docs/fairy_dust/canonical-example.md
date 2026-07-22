@@ -101,8 +101,23 @@ demonstrated API.
   display name, e.g. `"Zoom to Fit"` or `"Render to Texture"`. Title and chip
   strings render literally (no auto-uppercasing) — pass the case you want
   displayed. `H Home` is auto-prepended when `.with_camera_home()` is used.
-- `Ctrl+Shift+R` hot-restart — wired up unconditionally inside
-  `sprinkle_example()`; no builder call needed.
+- `Ctrl+Shift+R` hot-restart — installed unconditionally with the deferred
+  Fairy Dust baseline by the first builder operation; no dedicated builder
+  call needed.
+
+### Takeover and error examples
+
+An example whose subject is startup takeover or unrecoverable error policy may
+omit the ground plane, studio lighting, camera-control panel, and title bar when
+those elements would obscure the application state it demonstrates. It still
+uses `fairy_dust::sprinkle_example()`, `.with_brp_extras()`,
+`.with_save_window_position()`, and `.run()`.
+
+When the example owns package-local assets, it calls
+`.with_asset_root(concat!(env!("CARGO_MANIFEST_DIR"), "/assets"))` immediately
+after `sprinkle_example()`. The builder's typestate makes this ordering
+mandatory: the method is unavailable after any ordinary capability installs
+the Fairy Dust baseline.
 
 ### Cubes — use the builder
 
@@ -311,7 +326,8 @@ and camera control panel.
 
 ### `DiegeticUiPlugin`
 
-`DiegeticUiPlugin` is registered automatically inside `sprinkle_example`.
+`DiegeticUiPlugin` is registered automatically with the deferred Fairy Dust
+baseline.
 Examples may spawn `WorldText` or `DiegeticPanel` directly without an explicit
 `add_plugins` call. The `crates/hana_diegetic/examples/*` examples follow the
 same Fairy Dust scene, OrbitCam, lighting, ground, and HUD conventions as
@@ -321,8 +337,8 @@ registration:
 
 ```rust
 fn main() {
-    // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
-    // `fairy_dust::sprinkle_example`.
+    // `hana_diegetic::DiegeticUiPlugin` is registered automatically with
+    // Fairy Dust's deferred baseline.
     fairy_dust::sprinkle_example()
         // ...
 }

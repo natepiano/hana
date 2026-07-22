@@ -1,9 +1,10 @@
 //! Workspace example helper for `bevy_hana`.
 //!
 //!
-//! Use [`sprinkle_example`] to construct a [`SprinkleBuilder`] preloaded with
-//! `DefaultPlugins` configured for a quiet log filter, then chain capability
-//! methods to opt into specific dev conveniences:
+//! Use [`sprinkle_example`] to construct a [`SprinkleBuilder`] before Fairy
+//! Dust installs its baseline plugins. The first builder operation installs
+//! `DefaultPlugins` with a quiet log filter, then the chain opts into specific
+//! dev conveniences:
 //!
 //! ```ignore
 //! fairy_dust::sprinkle_example()
@@ -26,8 +27,15 @@
 //!
 //! ## Typestate
 //!
-//! The builder is parameterized by a state marker (`NoOrbitCam` / `WithOrbitCam`).
-//! Methods that act on the spawned `OrbitCam` entity (such as
+//! The builder has independent baseline and orbit-camera typestates. The
+//! baseline starts as [`AssetRootPending`], where
+//! [`SprinkleBuilder::with_asset_root`] can configure `AssetPlugin` before
+//! `DefaultPlugins` is installed. That method and every ordinary builder
+//! operation return [`BaselineInstalled`], where `with_asset_root` is no longer
+//! available.
+//!
+//! The orbit-camera marker starts as [`NoOrbitCam`] and transitions to
+//! [`WithOrbitCam`]. Methods that act on the spawned `OrbitCam` entity (such as
 //! [`SprinkleBuilder::with_stable_transparency`]) are only defined on
 //! `SprinkleBuilder<WithOrbitCam>`, so calling them before
 //! [`SprinkleBuilder::with_orbit_cam_preset`] is a compile error.
@@ -62,10 +70,15 @@ mod shortcuts;
 mod transparency;
 mod unclamp;
 
+use bevy::asset::AssetPlugin;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+#[cfg(test)]
+use bevy::winit::WinitPlugin;
 use bevy_lagrange::LagrangePlugin;
 pub use bevy_lagrange::OrbitCam;
+pub use builder::AssetRootPending;
+pub use builder::BaselineInstalled;
 pub use builder::CameraHomeBuilder;
 pub use builder::NoOrbitCam;
 pub use builder::PrimitiveBuilder;
@@ -144,8 +157,8 @@ pub use screen_panels::screen_panel_frame;
 pub use screen_panels::screen_panel_material;
 pub use screen_panels::screen_panel_material_handle;
 
-/// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
-/// for a quiet log filter. Chain capability methods, then call `.run()`.
+/// Construct a fresh [`SprinkleBuilder`] whose Fairy Dust baseline is installed
+/// by the first builder operation. Chain capability methods, then call `.run()`.
 ///
 /// [`hana_diegetic::DiegeticUiPlugin`] is registered unconditionally so any
 /// example can spawn `WorldText` or `DiegeticPanel` without an explicit
@@ -156,13 +169,12 @@ pub use screen_panels::screen_panel_material_handle;
 /// from the workspace root. Cargo handles the incremental rebuild, so any
 /// source changes since the last build are picked up automatically.
 #[must_use]
-pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
-    let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(quiet_log_plugin()));
-    sprinkle_builder(app)
+pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam, AssetRootPending> {
+    SprinkleBuilder::new(App::new())
 }
 
 /// The workspace's quiet-filter [`LogPlugin`], used by [`sprinkle_example`].
+#[cfg(not(test))]
 fn quiet_log_plugin() -> LogPlugin {
     LogPlugin {
         filter: LOG_FILTER.to_string(),
@@ -170,15 +182,23 @@ fn quiet_log_plugin() -> LogPlugin {
     }
 }
 
-/// Register the Fairy Dust baseline plugins on an `app` that already has
-/// `DefaultPlugins`, then wrap it in a [`SprinkleBuilder`].
-fn sprinkle_builder(mut app: App) -> SprinkleBuilder<NoOrbitCam> {
-    ensure_plugin(&mut app, DiegeticUiPlugin);
-    ensure_plugin(&mut app, LagrangePlugin);
-    screen_panels::install_overlay_picking(&mut app);
-    restart::install(&mut app);
-    screen_space_lights::install(&mut app);
-    SprinkleBuilder::new(app)
+/// Install `DefaultPlugins` and the Fairy Dust baseline with `asset_plugin`.
+pub(crate) fn install_baseline(app: &mut App, asset_plugin: AssetPlugin) {
+    #[cfg(not(test))]
+    app.add_plugins(DefaultPlugins.set(asset_plugin).set(quiet_log_plugin()));
+    #[cfg(test)]
+    app.add_plugins(
+        DefaultPlugins
+            .build()
+            .set(asset_plugin)
+            .disable::<LogPlugin>()
+            .disable::<WinitPlugin>(),
+    );
+    ensure_plugin(app, DiegeticUiPlugin);
+    ensure_plugin(app, LagrangePlugin);
+    screen_panels::install_overlay_picking(app);
+    restart::install(app);
+    screen_space_lights::install(app);
 }
 
 /// Add `plugin` to `app` if no plugin of the same type is already registered.
