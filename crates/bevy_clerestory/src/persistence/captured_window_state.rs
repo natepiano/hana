@@ -10,6 +10,7 @@ use bevy_kana::ToU32;
 use super::PersistedWindowState;
 use super::SavedWindowMode;
 use super::WindowKey;
+use super::save;
 use crate::ManagedWindowPersistence;
 use crate::Platform;
 use crate::monitors::CurrentMonitor;
@@ -395,9 +396,8 @@ impl CapturedWindowStates {
                 let CapturedPlacement::Captured(captured) = &entry.placement else {
                     return StateMutation::Unchanged;
                 };
-                entry.placement = CapturedPlacement::PersistedOnly(
-                    captured.project(&super::save::application_name()),
-                );
+                entry.placement =
+                    CapturedPlacement::PersistedOnly(captured.project(&save::application_name()));
             },
             ManagedWindowPersistence::ActiveOnly => {
                 self.entries.remove(window_key);
@@ -624,9 +624,8 @@ mod tests {
     use super::*;
     use crate::monitors::MonitorIdentity;
     use crate::persistence::format;
+    use crate::persistence::save;
     use crate::persistence::save::StateFileWrite;
-    use crate::persistence::save::application_name;
-    use crate::persistence::save::save_all_states;
 
     const CANCELLED_ORIGINAL_OFFSET: IVec2 = IVec2::new(10, 20);
     const CANCELLED_REPLACEMENT_OFFSET: IVec2 = IVec2::new(30, 40);
@@ -814,7 +813,7 @@ mod tests {
             states.deactivate(&key, entity, &ManagedWindowPersistence::RememberAll),
             StateMutation::Changed
         );
-        let app_name = application_name();
+        let app_name = save::application_name();
         assert!(!app_name.is_empty());
         let projected = states.project("replacement-name");
         assert_eq!(
@@ -828,7 +827,7 @@ mod tests {
             return;
         };
         assert_eq!(
-            save_all_states(file.path(), &projected),
+            save::save_all_states(file.path(), &projected),
             StateFileWrite::Written
         );
         let contents = fs::read_to_string(file.path());

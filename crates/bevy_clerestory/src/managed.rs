@@ -17,6 +17,7 @@ use super::persistence::CapturedWindowStates;
 use super::platform::Platform;
 use super::recovery::CanonicalWindowRole;
 use super::recovery::RecoveryRegistrations;
+use super::recovery::ReplacementBinding;
 use super::recovery::WindowRecovery;
 use super::restore::NativeWindowReady;
 use super::restore::RestorePreparation;
@@ -74,6 +75,31 @@ impl ManagedWindowRegistry {
     pub(crate) fn name(&self, entity: Entity) -> Option<&str> {
         self.entities.get(&entity).map(String::as_str)
     }
+
+    pub(crate) fn bind_replacement(
+        &mut self,
+        entity: Entity,
+        window_key: &WindowKey,
+        role: CanonicalWindowRole,
+    ) -> ReplacementBinding {
+        match (role, window_key) {
+            (CanonicalWindowRole::Primary, WindowKey::Primary) => ReplacementBinding::Bound,
+            (CanonicalWindowRole::Managed, WindowKey::Managed(name))
+                if !self.names.contains(name) && !self.entities.contains_key(&entity) =>
+            {
+                self.names.insert(name.clone());
+                self.entities.insert(entity, name.clone());
+                ReplacementBinding::Bound
+            },
+            _ => ReplacementBinding::Rejected,
+        }
+    }
+
+    pub(crate) fn release(&mut self, entity: Entity) -> Option<String> {
+        let name = self.entities.remove(&entity)?;
+        self.names.remove(&name);
+        Some(name)
+    }
 }
 
 /// Register and deduplicate a `ManagedWindow` name.
@@ -88,6 +114,10 @@ pub(crate) fn on_managed_window_added(
         return;
     };
     let name = managed_window.name.clone();
+
+    if managed_window_registry.name(entity) == Some(name.as_str()) {
+        return;
+    }
 
     // Primary window is managed automatically — reject explicit `ManagedWindow` on it
     if primary_query.get(entity).is_ok() {
@@ -144,12 +174,10 @@ pub(crate) fn on_managed_window_removed(
             .entity(entity)
             .try_remove::<(monitors::CurrentMonitor, NativeWindowReady)>();
     }
-    if let Some(name) = managed_window_registry.entities.remove(&entity) {
+    if let Some(name) = managed_window_registry.release(entity) {
         let window_key = WindowKey::Managed(name.clone());
         captured_window_states.deactivate(&window_key, entity, &managed_window_persistence);
         captured_window_states.apply_policy(&managed_window_persistence);
-
-        managed_window_registry.names.remove(&name);
         debug!(
             "[on_managed_window_removed] Unregistered managed window \"{name}\" from entity {entity:?}"
         );

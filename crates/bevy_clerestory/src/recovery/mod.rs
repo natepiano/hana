@@ -23,6 +23,7 @@ pub(crate) use registration::CanonicalWindowRole;
 pub(crate) use registration::PrimaryPresence;
 pub(crate) use registration::RecoveryGeneration;
 pub(crate) use registration::RecoveryRegistrations;
+pub(crate) use registration::ReplacementBinding;
 pub use registration::WindowRecovery;
 pub(crate) use registration::accept_eligible_registrations;
 pub(crate) use registration::canonical_window;
@@ -34,6 +35,7 @@ pub use crate::events::CancelWindowRecovery;
 pub use crate::events::RestoreWindow;
 pub use crate::events::WindowRecoveryAvailable;
 pub use crate::events::WindowRecoveryPending;
+use crate::restore;
 
 pub(crate) struct RecoveryPlugin;
 
@@ -65,6 +67,7 @@ impl Plugin for RecoveryPlugin {
             .add_systems(
                 Update,
                 (
+                    restore::reconcile_runtime_restore_attempts,
                     application_controlled::evaluate_topology,
                     fallback_and_return::evaluate_topology,
                     ApplyDeferred,
@@ -76,6 +79,7 @@ impl Plugin for RecoveryPlugin {
                 Update,
                 (
                     registration::accept_eligible_registrations,
+                    fallback_and_return::reconstruct_missing_windows,
                     fallback_and_return::advance_fallback_windows,
                     ApplyDeferred,
                 )
@@ -85,7 +89,7 @@ impl Plugin for RecoveryPlugin {
             .add_systems(
                 Last,
                 (
-                    registration::record_os_close_intent.after(close_when_requested),
+                    registration::record_os_close_intent.before(close_when_requested),
                     application_controlled::emit_topology_notifications,
                     fallback_and_return::emit_pending_notifications,
                 )

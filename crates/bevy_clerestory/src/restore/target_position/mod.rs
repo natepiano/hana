@@ -8,6 +8,8 @@ mod target;
 
 #[cfg(test)]
 pub(crate) use application::InjectedWinitWindows;
+pub(crate) use application::ObservedScaleInputs;
+pub(crate) use application::capture_scale_inputs;
 pub(crate) use application::restore_windows;
 pub(crate) use monitor::MonitorResolutionSource;
 pub(crate) use monitor::resolve_target_monitor_and_position;

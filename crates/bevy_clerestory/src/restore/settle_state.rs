@@ -9,6 +9,8 @@ use bevy_kana::ToI32;
 use bevy_kana::ToU32;
 
 use super::RestorePreparation;
+use super::restore_attempt;
+use super::restore_attempt::RestoreAttemptStatus;
 use super::restore_attempt::RuntimeRestoreCompletion;
 use super::restore_attempt::RuntimeRestoreOutcome;
 use super::target_position::TargetPosition;
@@ -22,6 +24,9 @@ use crate::constants::SETTLE_TIMEOUT_SECS;
 use crate::events::WindowRestoreMismatch;
 use crate::events::WindowRestored;
 use crate::monitors::CurrentMonitor;
+use crate::monitors::MonitorTopologyRevision;
+use crate::monitors::Monitors;
+use crate::recovery::RecoveryRegistrations;
 
 /// Snapshot of compared values for change detection between frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
@@ -113,6 +118,51 @@ struct SettleTarget {
     window_mode:       WindowMode,
     monitor:           usize,
     scale:             f64,
+}
+
+impl SettleTarget {
+    fn from_target_position(target_position: &TargetPosition, platform: Platform) -> Self {
+        let position_available = platform.position_available();
+        Self {
+            physical_position: position_available
+                .then_some(target_position.physical_position)
+                .flatten(),
+            logical_position:  position_available
+                .then_some(target_position.logical_position)
+                .flatten(),
+            logical_size:      target_position.logical_size,
+            physical_size:     target_position.physical_size,
+            window_mode:       target_position
+                .saved_window_mode
+                .to_window_mode(target_position.monitor_index),
+            monitor:           target_position.monitor_index,
+            scale:             target_position.target_scale,
+        }
+    }
+}
+
+fn runtime_attempt_is_current(
+    entity: Entity,
+    restore_preparation: &RestorePreparation,
+    registrations: Option<&RecoveryRegistrations>,
+    monitors: Option<&Monitors>,
+    revision: Option<MonitorTopologyRevision>,
+) -> RestoreAttemptStatus {
+    let Some(restore_attempt) = restore_preparation.recovery_attempt() else {
+        return RestoreAttemptStatus::Current;
+    };
+    match (registrations, monitors, revision) {
+        (Some(registrations), Some(monitors), Some(revision)) => {
+            restore_attempt::restore_attempt_is_current(
+                restore_attempt,
+                entity,
+                registrations,
+                monitors,
+                revision,
+            )
+        },
+        _ => RestoreAttemptStatus::Current,
+    }
 }
 
 /// Build a [`SettleSnapshot`] from the current window state, returning the snapshot
@@ -218,7 +268,9 @@ fn detect_settle_change(
 /// - **Stability timer** (200ms): resets whenever any compared value changes. If values stay stable
 ///   for 200ms, fires `WindowRestored`.
 /// - **Total timeout** (2s): hard deadline. Fires `WindowRestoreMismatch` if stability is never
-///   reached.
+///   reached during startup restoration.
+/// - Runtime attempts report a stable mismatch immediately. Their absolute
+///   `RestoreAttempt::deadline` is enforced before this system runs.
 ///
 /// Runs while `TargetPosition` entities exist (same gate as `restore_windows`).
 /// Only processes entities that have a `settle_state` set.
@@ -236,25 +288,23 @@ pub(crate) fn check_restore_settling(
         With<X11FrameCompensated>,
     >,
     platform: Res<Platform>,
+    registrations: Option<Res<RecoveryRegistrations>>,
+    monitors: Option<Res<Monitors>>,
+    revision: Option<Res<MonitorTopologyRevision>>,
 ) {
     for (entity, mut target_position, window, current_monitor, restore_preparation) in &mut windows
     {
-        let target_window_mode = target_position
-            .saved_window_mode
-            .to_window_mode(target_position.monitor_index);
-        let target_physical_size = target_position.physical_size;
-        let target_logical_size = target_position.logical_size;
-        let target_monitor = target_position.monitor_index;
-        let expected_scale = target_position.target_scale;
-
-        let target_physical_position = platform
-            .position_available()
-            .then_some(target_position.physical_position)
-            .flatten();
-        let target_logical_position = platform
-            .position_available()
-            .then_some(target_position.logical_position)
-            .flatten();
+        if runtime_attempt_is_current(
+            entity,
+            restore_preparation,
+            registrations.as_deref(),
+            monitors.as_deref(),
+            revision.as_deref().copied(),
+        ) == RestoreAttemptStatus::Stale
+        {
+            continue;
+        }
+        let settle_target = SettleTarget::from_target_position(&target_position, *platform);
         let window_key = restore_preparation.window_key().clone();
         let (current_snapshot, actual_scale) =
             build_actual_snapshot(window, current_monitor, *platform);
@@ -288,38 +338,33 @@ pub(crate) fn check_restore_settling(
         let stable = settle.stability_timer.is_finished();
         let comparison = check_settle_matches(
             &target_position,
-            target_physical_position,
-            target_physical_size,
-            target_window_mode,
-            target_monitor,
+            settle_target.physical_position,
+            settle_target.physical_size,
+            settle_target.window_mode,
+            settle_target.monitor,
             &current_snapshot,
             *platform,
         );
         debug!(
             "[check_restore_settling] [{window_key}] {total_elapsed_ms:.0}ms (stable: {stability_elapsed_ms:.0}ms): \
              position={} size={} mode={} monitor={} | \
-             size: {target_physical_size} vs {}, \
-             mode: {target_window_mode:?} vs {:?}, \
-             monitor: {target_monitor} vs {}, \
-             scale: {expected_scale} vs {actual_scale}",
+             size: {} vs {}, \
+             mode: {:?} vs {:?}, \
+             monitor: {} vs {}, \
+             scale: {} vs {actual_scale}",
             comparison.position.is_match(),
             comparison.size.is_match(),
             comparison.mode.is_match(),
             comparison.monitor.is_match(),
+            settle_target.physical_size,
             current_snapshot.physical_size,
+            settle_target.window_mode,
             current_snapshot.window_mode,
+            settle_target.monitor,
             current_snapshot.monitor,
+            settle_target.scale,
         );
 
-        let settle_target = SettleTarget {
-            physical_position: target_physical_position,
-            logical_position:  target_logical_position,
-            physical_size:     target_physical_size,
-            logical_size:      target_logical_size,
-            window_mode:       target_window_mode,
-            monitor:           target_monitor,
-            scale:             expected_scale,
-        };
         if stable && comparison.all_match() {
             emit_settle_success(
                 &mut commands,
@@ -329,7 +374,10 @@ pub(crate) fn check_restore_settling(
                 total_elapsed_ms,
                 stability_elapsed_ms,
             );
-        } else if timeout_state == TimeoutState::TimedOut {
+        } else if (stable && restore_preparation.recovery_attempt().is_some())
+            || (timeout_state == TimeoutState::TimedOut
+                && restore_preparation.recovery_attempt().is_none())
+        {
             emit_settle_mismatch(
                 &mut commands,
                 entity,
