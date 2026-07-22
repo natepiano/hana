@@ -121,6 +121,7 @@ pub struct Monitors {
 /// The event is emitted for verified and unverified monitors. The `entity`
 /// field is valid only while the monitor remains present in [`Monitors`].
 #[derive(Event, Debug, Clone, Reflect)]
+#[reflect(Event)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorConnected {
     /// Newly-created Bevy monitor entity.
@@ -134,6 +135,7 @@ pub struct MonitorConnected {
 /// `former_entity` identifies the ended lifetime and must not be retained as a
 /// current monitor target.
 #[derive(Event, Debug, Clone, Reflect)]
+#[reflect(Event)]
 #[type_path = "bevy_clerestory::monitors"]
 pub struct MonitorDisconnected {
     /// Bevy monitor entity from the ended lifetime.
@@ -801,15 +803,19 @@ pub(super) fn update_monitors(
 
 #[cfg(test)]
 mod tests {
+    use std::any::TypeId;
     use std::fs;
     use std::path::Path;
     use std::time::Duration;
 
+    use bevy::ecs::reflect::AppTypeRegistry;
+    use bevy::ecs::reflect::ReflectEvent;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::Registry;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::prelude::*;
     use bevy::reflect::TypePath;
+    use bevy::reflect::TypeRegistry;
     use bevy::time::TimePlugin;
     use bevy::time::TimeUpdateStrategy;
     use bevy::window::MonitorSelection;
@@ -1703,6 +1709,22 @@ mod tests {
                 "bevy_clerestory::monitors::MonitorDisconnected",
             ]
         );
+    }
+
+    fn has_reflect_event<T: 'static>(registry: &TypeRegistry) -> bool {
+        registry
+            .get(TypeId::of::<T>())
+            .and_then(|registration| registration.data::<ReflectEvent>())
+            .is_some()
+    }
+
+    #[test]
+    fn monitor_lifetime_events_auto_register_reflected_event_type_data() {
+        let app = App::new();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+
+        assert!(has_reflect_event::<MonitorConnected>(&registry));
+        assert!(has_reflect_event::<MonitorDisconnected>(&registry));
     }
 
     #[test]
