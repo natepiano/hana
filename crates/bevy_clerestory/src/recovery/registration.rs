@@ -474,6 +474,7 @@ pub(super) fn record_os_close_intent(
 mod tests {
     #[cfg(feature = "monitor-probe")]
     use bevy::diagnostic::FrameCount;
+    use bevy::ecs::system::In;
     #[cfg(feature = "monitor-probe")]
     use bevy::log::tracing_subscriber::Registry;
     #[cfg(feature = "monitor-probe")]
@@ -481,6 +482,9 @@ mod tests {
     use bevy::reflect::TypePath;
     #[cfg(feature = "monitor-probe")]
     use bevy::window::WindowMode;
+    use bevy_remote::builtin_methods::process_remote_trigger_event_request;
+    use serde_json::Value;
+    use serde_json::json;
 
     #[cfg(feature = "monitor-probe")]
     use self::example_probe::trace as example_trace;
@@ -735,6 +739,46 @@ mod tests {
                 .get(&entity)
                 .map(|pending| pending.policy),
             Some(WindowRecovery::FallbackAndReturn)
+        );
+    }
+
+    #[test]
+    fn remote_cancellation_reaches_the_registration_observer() {
+        let mut app = App::new();
+        app.insert_resource(ManagedWindowPersistence::RememberAll)
+            .init_resource::<ManagedWindowRegistry>()
+            .init_resource::<CapturedWindowStates>()
+            .init_resource::<RecoveryRegistrations>()
+            .init_resource::<ApplicationControlledRecoveries>()
+            .init_resource::<FallbackAndReturnRecoveries>()
+            .init_resource::<AutomaticRestoreIntents>()
+            .add_observer(on_window_recovery_added)
+            .add_observer(on_cancel_window_recovery);
+        app.world_mut()
+            .spawn((PrimaryWindow, WindowRecovery::ApplicationControlled));
+        app.world_mut().flush();
+        assert_eq!(
+            app.world()
+                .resource::<RecoveryRegistrations>()
+                .pending
+                .len(),
+            1
+        );
+
+        let params = json!({
+            "event": <CancelWindowRecovery as TypePath>::type_path(),
+            "value": { "window": "Primary" },
+        });
+        assert_eq!(
+            process_remote_trigger_event_request(In(Some(params)), app.world_mut()),
+            Ok(Value::Null)
+        );
+
+        assert!(
+            app.world()
+                .resource::<RecoveryRegistrations>()
+                .pending
+                .is_empty()
         );
     }
 
