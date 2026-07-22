@@ -91,3 +91,31 @@ pub trait DiskAssets: Resource + Sized {
     /// that owns the resulting handles.
     fn load(loader: &mut DiskAssetLoader<'_>) -> Self;
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::app::App;
+    use bevy::asset::AssetApp;
+    use bevy::asset::AssetPath;
+    use bevy::asset::AssetPlugin;
+    use bevy::asset::AssetServer;
+    use bevy::prelude::MinimalPlugins;
+    use bevy::reflect::TypePath;
+
+    use super::DiskAssetLoader;
+
+    #[derive(bevy::asset::Asset, TypePath)]
+    struct PathlessAsset;
+
+    #[test]
+    #[should_panic(expected = "because Bevy returned a pathless handle")]
+    fn pathless_rejection_panics() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<PathlessAsset>();
+        let asset_server = app.world().resource::<AssetServer>();
+        let pathless_handle = asset_server.add(PathlessAsset);
+        let mut disk_asset_loader = DiskAssetLoader::new(asset_server);
+        disk_asset_loader.record(pathless_handle, &AssetPath::from("tests/pathless.png"));
+    }
+}

@@ -21,4 +21,8 @@ bevy_ecs   = { workspace = true }
 tracing    = { workspace = true }
 
 [dev-dependencies]
-bevy = { workspace = true }
+bevy = { workspace = true, features = ["bevy_asset", "bevy_image", "png"] }
+
+[[test]]
+name = "startup_loading"
+path = "tests/startup_loading/main.rs"

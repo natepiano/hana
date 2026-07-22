@@ -340,7 +340,7 @@ workspace feature unification cannot mask the test-only reflection backend.
   constructor because `sprinkle_example()` installs `AssetPlugin` before its
   builder is available.
 
-### Phase 3 — Contract test suite · status: todo
+### Phase 3 — Contract test suite · status: done (`b9a9d7a7`)
 
 #### Work Order
 
@@ -420,6 +420,55 @@ Required tests:
 --workspace --tests`; `cargo nextest run -p hana_lading --all-features` passes in
 isolation; the `clippy` skill passes.
 
+#### Retrospective
+
+**What worked:**
+
+- Nine focused contract cases now prove successful multi-set completion,
+  settings-aware loading, typed and generic failure evidence, same-frame writes,
+  mixed outcomes, recursive-dependency gating, developer-error diagnostics,
+  declaration-order selection, and an error exit pattern against real Bevy 0.19
+  asset loading.
+- All 1,231 workspace tests, the ten-test isolated package suite, release example
+  build, lint, rustdoc, formatting, and the standalone file-backed runtime smoke
+  pass.
+
+**What deviated from the plan:**
+
+- The initial recursive-child gate repeatedly woke itself and trapped one
+  `App::update`; the final gate uses a mutex-protected `GateState` and stored
+  `Waker`, so the test controls release without a busy future.
+- The integration suite was split into one explicit test binary with success,
+  recursive, support, and focused failure modules to satisfy the repository's
+  module-ownership rules.
+- At the user's direction, the main agent completed the final post-fix review
+  after stopping an unusually slow second blind-review process.
+
+**Surprises:**
+
+- Static inspection predicted Bevy's bounded task-pool tick would prevent the
+  self-waking gate from hanging; the isolated nextest run disproved that claim
+  by remaining inside the recursive test until interrupted after 63 seconds.
+
+**Implications for remaining phases:**
+
+- Phase 4 examples can rely on generic failure observers running before global
+  resolution, successful sets remaining usable after another set fails, and
+  `LoadProgress` remaining readable through global observers.
+- The deferred Fairy Dust asset-root constructor remains the only unresolved
+  decision before Phase 4 can be dispatched.
+
+#### Phase 3 Review
+
+- Phase 4 now names the reflected state, failure record, rendered-text evidence,
+  and successful-scene marker that BRP must inspect before shutdown.
+- Phase 4 now cites the recursive-dependency contract test for that guarantee;
+  its PNG examples directly exhibit failure reporting, generic recording,
+  global ordering, and application-owned policy instead of simulating a child
+  dependency they do not load.
+- The existing Fairy Dust asset-root constructor decision remains deferred to
+  the Phase 4 pre-dispatch gate.
+
 ### Phase 4 — Protective examples and documentation · status: todo
 
 #### Work Order
@@ -474,10 +523,21 @@ Spec, Files, canonical-example exception, and examples to use it.
   intentionally failing optional set. On global resolution it enters `Ready`,
   keeps the successful scene content, and displays a panel identifying the
   failed optional capability and the decision to continue in degraded mode.
+- Add `examples/loading_evidence/mod.rs`, shared by both example binaries. It
+  defines `ExampleState` (`Loading` and `Ready`), a reflected `FailureRecord`
+  resource containing set name, tracked-path string, and error string, a
+  reflected `FailurePanelContent` component containing the exact rendered panel
+  text, and a reflected `RequiredSceneContent` marker for usable successful
+  content. Its plugin initializes the state and failure resource and registers
+  the concrete generic `State<ExampleState>` for BRP reflection. Attach
+  `FailurePanelContent` to the entity that carries the panel's rendered text so
+  the BRP observation and visible message cannot diverge.
 - Both examples use only `hana_lading`'s public API, assert their missing fixture
   is absent, and terminate their builder chain with `.run()`.
-- The examples and their source comments explicitly demonstrate these
-  protections:
+- The examples directly exhibit protections 1 and 3–6 below. Their source
+  comments and documentation cite Phase 3's
+  `recursive_dependencies_gate_and_fail` contract test as the executable proof
+  for protection 2, because the example PNG has no recursive child:
   1. every handle returned by `DiskAssetLoader` is tracked;
   2. an asset set emits one terminal outcome only after recursive dependencies
      resolve;
@@ -504,6 +564,7 @@ cargo run -p hana_lading --example catastrophic_failure
 - `crates/hana_lading/Cargo.toml`
 - `crates/hana_lading/examples/catastrophic_failure.rs`
 - `crates/hana_lading/examples/degraded_failure.rs`
+- `crates/hana_lading/examples/loading_evidence/mod.rs`
 - `crates/hana_lading/assets/<successful-fixture>.png`
 - `docs/fairy_dust/canonical-example.md`
 - `crates/hana_lading/README.md`
@@ -522,12 +583,16 @@ cargo run -p hana_lading --example catastrophic_failure
   reflection backend and image/PNG features; extend it with state support.
 
 **Acceptance gate:** Workspace build including examples passes. Launch each
-example, use BRP to inspect its application state, durable failure record, and
-rendered panel content, then terminate it through `brp_extras/shutdown`; each
-inspection must match the documented catastrophic or degraded outcome. The
-example source and documentation identify all six protections above; the
-canonical-example exception is present; `cargo build -p hana_lading
---all-features --examples` passes in isolation; the `clippy` skill passes.
+example, use BRP to read `State<ExampleState>` and `FailureRecord`, query the
+entity carrying `FailurePanelContent`, and query `RequiredSceneContent` in the
+degraded example; then terminate through `brp_extras/shutdown`. Catastrophic
+inspection must show `Loading`, one recorded failure, the remain-loading panel
+message, and no required-scene marker. Degraded inspection must show `Ready`,
+one optional failure, the continue-degraded panel message, and retained required
+scene content. The example source and documentation identify all six
+protections above; the canonical-example exception is present; `cargo build -p
+hana_lading --all-features --examples` passes in isolation; the `clippy` skill
+passes.
 
 ## Handoff to Hana
 
