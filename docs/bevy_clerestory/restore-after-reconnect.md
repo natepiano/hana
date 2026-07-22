@@ -1,21 +1,25 @@
 # Restore windows after monitor reconnect
 
 > **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Add verified
-> monitor identity and per-window reconnect recovery to `bevy_clerestory`, then
-> integrate the public boundary into Hana.
+> monitor identity and per-window reconnect recovery to `bevy_clerestory`,
+> validate it through the shipped example, and publish the new release.
+
+## Downstream Hana integration
+
+Hana adoption now lives in
+`/Users/natemccoy/rust/hana/docs/hana/reconnect-window.md`. That plan begins
+only after this plan publishes and verifies the new `bevy_clerestory` release.
+This worktree no longer changes or verifies Hana.
 
 ## Delegation Context
 
 - **Project:** `bevy_clerestory` (`crates/bevy_clerestory`) — Bevy plugin for
-  persisted window restoration and multi-monitor management; this work also
-  integrates its recovery API into the sibling `hana` visualization
-  application.
+  persisted window restoration and multi-monitor management.
 - **Stack:** Rust 2024; `bevy` 0.19.0 with `reflect_auto_register`,
   `bevy_window`, and `bevy_winit`; `winit` 0.30.13; locked `ron` 0.12.1 and
   `serde` 1.0.228; native macOS, Win32, X11, and Wayland monitor/window APIs.
-  Clerestory is `0.2.0-dev`; sibling Hana currently consumes published
-  `bevy_clerestory` 0.1.1 and must temporarily use this checkout before moving
-  to the resulting release.
+  Clerestory is `0.2.0-dev` and this plan publishes its reconnect API before
+  any downstream Hana adoption begins.
 - **Layout:**
   - `docs/bevy_clerestory/` — recovery plan and topology contract.
   - `crates/bevy_clerestory/src/monitors/` — monitor identity, topology, and
@@ -29,8 +33,6 @@
   - `crates/bevy_clerestory/examples/restore_after_reconnect/` — shipped raw
     hotplug probe and manual script; planned complete recovery example and
     physical evidence matrix.
-  - `../hana/crates/hana/src/{window_recovery.rs,screens/,conduit/}` — real
-    editor, display, cable, and output consumers.
 - **Key files:**
   - `Cargo.toml` — Clerestory workspace versions/features, including Bevy
     0.19.0 and exact winit 0.30.13.
@@ -123,43 +125,18 @@
     events.
   - `crates/bevy_clerestory/README.md` — public recovery behavior and API.
   - `crates/bevy_clerestory/CHANGELOG.md` — release-facing recovery changes.
-  - `../hana/Cargo.toml` — Hana workspace dependency and temporary override.
-  - `../hana/Cargo.lock` — Hana local-override and final-release resolution.
-  - `../hana/crates/hana/Cargo.toml` — Hana consumer dependency declaration.
-  - `../hana/crates/hana/src/main.rs` — editor construction and plugin setup.
-  - `../hana/crates/hana/src/window_recovery.rs` — current missing-window
-    respawn heuristic, primary reconstruction/egui rebinding, and close
-    behavior.
-  - `../hana/crates/hana/src/screens/mod.rs` — screen observer/system
-    registration.
-  - `../hana/crates/hana/src/screens/connection.rs` — raw monitor
-    reconciliation and feed availability.
-  - `../hana/crates/hana/src/screens/panel.rs` — monitor metadata and
-    panel/output association.
-  - `../hana/crates/hana/src/conduit/mod.rs` — cable/output observer and system
-    registration.
-  - `../hana/crates/hana/src/conduit/jack.rs` — `InputJack` monitor-entity
-    ownership and reconnect rebinding.
-  - `../hana/crates/hana/src/conduit/window.rs` — unmanaged
-    borderless-fullscreen output lifecycle and `MonitorSelection::Entity`.
-  - `../hana/crates/hana/src/conduit/cable.rs` — cable retirement and recovery
-    cancellation.
 - **Build:** Phase-local from this root:
-  `cargo check -p bevy_clerestory --all-targets --all-features`. From
-  `../hana`: `cargo check -p hana --all-targets --all-features`. Final
-  CI-parity builds: `cargo build --release --workspace --all-features --examples`
-  in each workspace.
+  `cargo check -p bevy_clerestory --all-targets --all-features`. Final
+  CI-parity build:
+  `cargo build --release --workspace --all-features --examples`.
 - **Test:** Clerestory phases:
-  `cargo nextest run -p bevy_clerestory --all-features`. Hana phases from
-  `../hana`: `cargo nextest run -p hana --all-features`. Final workspace gate
-  in each workspace: `cargo nextest run --all-features --workspace --tests`;
-  Hana's `.config/nextest.toml` supplies its WASM exclusions.
-- **Lint:** Run the full `clippy` skill in the affected workspace;
-  cross-workspace phases run it here and from `../hana`.
-  `/plan:delegate` supplies `auto-proceed`.
+  `cargo nextest run -p bevy_clerestory --all-features`. Final workspace gate:
+  `cargo nextest run --all-features --workspace --tests`.
+- **Lint:** Run the full `clippy` skill in this workspace. `/plan:delegate`
+  supplies `auto-proceed`.
 - **Style:**
   `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_clerestory_reconnect`
-- **Invariants:** Both origins are owned by `natepiano`/`hanallc`, so use
+- **Invariants:** The origin is owned by `natepiano`/`hanallc`, so use
   `cargo +nightly fmt` and never plain `cargo fmt`; use `cargo nextest run` for
   tests. `MonitorId` is a process-local, append-only, nonpersisted token for
   complete verified evidence; ambiguity remains unverified and matching never
@@ -202,12 +179,12 @@
   application content is never cloned. `ApplicationControlled` and
   unregistered windows remain application-owned and are never reconstructed
   automatically.
-  Keep
-  transition/`App` tests and native physical evidence as separate gates. Keep
-  Hana cable routes, capture sessions, rendered content, readiness, and
-  re-enable/UI policy in Hana; Clerestory owns only monitor/window metadata,
-  retained placement, persistence, recovery transitions, and restore
-  application. New types live with their constructor/mutator/behavior owner;
+  Keep transition/`App` tests and native physical evidence as separate gates.
+  Downstream applications own cable routes, capture sessions, rendered
+  content, readiness, and re-enable/UI policy; Clerestory owns only
+  monitor/window metadata, retained placement, persistence, recovery
+  transitions, and restore application. New types live with their
+  constructor/mutator/behavior owner;
   do not add generic `types.rs` or `state.rs` buckets. Launch-while-absent
   recovery and persisted physical identity remain out of scope.
 
@@ -453,9 +430,9 @@ ambiguity downgrade cannot leave a stale verified identity.
   shared restore preparation and verifies that startup boundary.
 - Phase 11 now retains the exact reflected paths for the complete public
   monitor surface introduced through Phases 1–3.
-- Phase 14 and the physical evidence phases now state that `MonitorId` survives
-  entity lifetimes only within one running `App` and is never persisted or
-  compared across runs.
+- The downstream Hana plan and the physical evidence phases state that
+  `MonitorId` survives entity lifetimes only within one running `App` and is
+  never persisted or compared across runs.
 
 ### Phase 3 — Order monitor lifetime topology and identity revalidation  · status: done (`533c97af`)
 
@@ -689,8 +666,8 @@ claims a physical disconnect/reconnect run.
   arrangement, resolution, and scale maintenance is outside this feature.
 - Phase 11 now preserves the reflected topology types and paths already shipped
   in Phase 3 while adding only the missing event type data and registry proof.
-- Phase 14 now keeps same-entity display-layout refresh in Hana's capture/panel
-  state and prevents it from initiating Clerestory recovery.
+- The downstream Hana plan keeps same-entity display-layout refresh in Hana's
+  capture/panel state and prevents it from initiating Clerestory recovery.
 - No remaining phase became redundant or required merging or reordering.
 
 ### Phase 4 — Build the causal hotplug probe  · status: done (`495433fd`)
@@ -725,7 +702,7 @@ relocation from Bevy linked despawn before recovery depends on either path.
 - Establish the evidence schema and manual script in the example README. Every
   run records the operator-confirmed physical inventory and exact unplug/replug
   action separately from OS enumeration. Compare `MonitorId` continuity only
-  within one running `App`; Phase 16–19 fill the full platform matrix.
+  within one running `App`; Phases 14–17 fill the full platform matrix.
 - Declare the example with `required-features = ["monitor-probe"]` and capture
   Phase 3's structured topology tracing records into the same ordered trace as
   the example's window and lifecycle records. The capture layer owns the shared
@@ -842,11 +819,11 @@ mitigation.
   canonically bound replacement shell for an eligible `FallbackAndReturn`
   generation, with no automatic reconstruction for application-controlled or
   unregistered windows.
-- Phases 10–13 now require the process to survive zero windows, preserve
-  explicit close-to-exit behavior, and prevent Hana from creating a second
-  automatic primary replacement.
-- Phases 12 and 15 add an unregistered control and exactly-one replacement
-  coverage; Phases 16–19 record each backend's observed relocation-or-cascade
+- Phases 10–12 now require the process to survive zero windows and preserve
+  explicit close-to-exit behavior. The downstream Hana plan prevents Hana from
+  creating a second automatic primary replacement.
+- Phases 12 and 13 add an unregistered control and exactly-one replacement
+  coverage; Phases 14–17 record each backend's observed relocation-or-cascade
   order instead of assuming the macOS branch.
 
 ### Phase 5 — Make captured window state authoritative  · status: done (`a3d73475`)
@@ -1182,8 +1159,8 @@ polling.
   registration.
 - Phase 9 now retains the prepared canonical `WindowKey` through runtime settle
   and removes preparation only through validated completion or finalization.
-- Phase 15 now carries the rejected-association and managed-role-removal
-  regressions into the final cross-workspace gate with zero native polling.
+- Phase 13 carries the rejected-association and managed-role-removal
+  regressions into the final Clerestory gate with zero native polling.
 - No remaining phase became redundant or required merging, splitting, or
   reordering.
 
@@ -1415,9 +1392,8 @@ are removed, and performs no automatic reconstruction or restore.
 - Phase 12 now uses the diagnostic acceptance record before unplug, retains the
   one-time placement boundary, and names the actual split example files and
   trace targets.
-- Phase 13 now records the Hana editor behavior that its recovery integration
-  must selectively replace.
-- Phase 16 now preserves the Phase 7 application-controlled macOS result as a
+- Hana editor integration moved to the downstream reconnect-window plan.
+- Phase 14 preserves the Phase 7 application-controlled macOS result as a
   separate physical evidence row.
 - No remaining phase required merging, splitting, or reordering.
 
@@ -1571,12 +1547,13 @@ topology transition.
 - Phase 12 now uses two reconnect cycles so application-controlled cancellation
   does not conflict with automatic return, and its Work Order names every trace
   source file it changes.
-- Phase 15 is now an audit of regressions shipped by earlier phases and permits
-  new code only for a concrete Hana-discovered or coverage gap.
-- Phase 16 preserves the Phase 8 macOS automatic-policy row; Phases 16–18 now
+- Phase 13 is an audit of regressions shipped by earlier phases and permits new
+  code only for a concrete coverage gap.
+- Phase 14 preserves the Phase 8 macOS automatic-policy row; Phases 14–16 now
   separate unsupported automatic exclusive fullscreen from explicit/startup
   fullscreen restore tests.
-- Phases 11, 13–14, and 19–21 remain dispatch-ready without further changes.
+- Phase 11 and the remaining Clerestory physical/release phases need no further
+  structural change from this review.
 
 ### Phase 9 — Execute runtime restore attempts  · status: done (`6da3313a`)
 
@@ -1781,10 +1758,11 @@ Cancellation tests prove no attempt survives and durable diagnostics remain.
   Phase 9 established for attempt-aware DPI progression.
 - Phase 12 now treats the successful temporary replacement smoke as evidence,
   not permanent example functionality.
-- Phase 15 now audits the specific replacement, validation, stale-topology, and
+- Phase 13 audits the specific replacement, validation, stale-topology, and
   DPI regressions added in Phase 9.
-- Phase 16 now preserves the completed Phase 9 macOS runtime-restore row.
-- Phases 11, 13–14, and 17–21 remain dispatch-ready without further changes.
+- Phase 14 preserves the completed Phase 9 macOS runtime-restore row.
+- Phase 11 and the remaining Clerestory physical/release phases need no further
+  structural change from this review.
 
 ### Phase 10 — Harden retry, cleanup, and linked-despawn behavior  · status: done (`c84605a7`)
 
@@ -1949,7 +1927,7 @@ after the initial target association is confirmed and must not register a
 replacement again using a changed monitor index. Its script must cover both
 same-update and delayed OS fallback relocation, use explicit cancellation for
 the keep-on-fallback case, and treat front-to-back ordering as unspecified.
-Phase 15 must retain the queued-return relocation regression in its inventory.
+Phase 13 must retain the queued-return relocation regression in its inventory.
 Physical matrix phases must verify stable `MonitorId` continuity rather than
 monitor-index continuity, record exactly-one shell reconstruction, and avoid
 claiming front-to-back ordering preservation.
@@ -1962,15 +1940,15 @@ claiming front-to-back ordering preservation.
 - Phase 12 now keeps initial registration one-shot by canonical key, covers the
   same-update and delayed OS relocation cases, uses explicit cancellation, and
   treats front-to-back ordering as unspecified.
-- Phases 13–14 now assert generation continuity when Hana rebinds content or
-  supplies an application-controlled replacement.
-- Phase 15 now retains the exact primary/managed macOS/Windows/X11 relocation
+- The downstream Hana plan asserts generation continuity when Hana reconnects
+  content or supplies an application-controlled replacement.
+- Phase 13 retains the exact primary/managed macOS/Windows/X11 relocation
   regression and the stable-identity replacement contract.
-- Phase 16 preserves the completed Phase 10 macOS evidence as its own row;
-  Phases 17–19 now distinguish stable identity from entity/index coincidence
+- Phase 14 preserves the completed Phase 10 macOS evidence as its own row;
+  Phases 15–17 distinguish stable identity from entity/index coincidence
   and state where the relocation case applies.
 - No phase was merged, split, reordered, or removed. No pending user decision
-  remains, and Phases 11–21 are dispatch-ready.
+  remains, and the remaining Clerestory phases are dispatch-ready.
 
 ### Phase 11 — Publish the reflected recovery API  · status: done (`64b6e8f0`)
 
@@ -2101,9 +2079,9 @@ accepted, not the OS default monitor or later window mutations.
 **Implications for remaining phases:** Phase 12's permanent example must rebind
 content on canonical-role addition, keep its event-loop examples safe for
 rustdoc, and use the reflected public events without private recovery state.
-Phase 13 must likewise attach Hana content and egui state when the canonical
-replacement role appears rather than waiting only for a successful restore
-result. Phase 15 must retain the handler-level BRP tests and exact serialized
+The downstream Hana plan attaches Hana content and egui state when the
+canonical replacement role appears rather than waiting only for a successful
+restore result. Phase 13 retains the handler-level BRP tests and exact serialized
 payload coverage in its regression inventory.
 
 ### Phase 11 Review
@@ -2113,21 +2091,21 @@ payload coverage in its regression inventory.
   `Added<ManagedWindow>`. This works for initial and reconstructed windows
   before any `WindowRestored` result and never creates a second recovery
   registration.
-- Phase 13 now binds Hana's editor content, cameras, and egui state when the
-  canonical primary or managed role is added. Phase 14 attaches Hana's output
-  content and retained routes before requesting placement of an
-  application-controlled replacement. In both phases, `WindowRestored` reports
-  a placement result; it does not announce that content may be attached.
-- Phase 15 now retains the exact reflected type paths, remote observation of all
+- The downstream Hana plan reconnects editor state when a canonical role is
+  added and attaches output content plus retained routes before requesting
+  placement of an application-controlled replacement. `WindowRestored`
+  reports a placement result; it does not announce that content may be
+  attached.
+- Phase 13 retains the exact reflected type paths, remote observation of all
   six public notification/result events, remote triggering of both public
   request events, and the test-only remote dependencies. It also inventories
   canonical-role content timing.
-- Phase 20 now preserves the README contracts established here, including
+- Phase 18 preserves the README contracts established here, including
   one-shot registration, canonical-role content rebinding, zero-window process
   lifetime, explicit close handling, exact reflected paths, and non-executing
   event-loop doctests.
-- No user decision remains from this review. Phases 12–21 are ready for
-  dispatch.
+- No user decision remains from this review. The remaining Clerestory phases
+  are ready for dispatch.
 
 ### Phase 12 — Complete the recovery example  · status: done (`58a04c67`)
 
@@ -2191,7 +2169,7 @@ policies while retaining its causal diagnostics.
   the unregistered control never returns.
 - Keep cameras/content/re-enable decisions in example application code; do not
   move them into Clerestory.
-- Update the README script and evidence schema so Phase 16–19 can execute the
+- Update the README script and evidence schema so Phases 14–17 can execute the
   same behavior on every platform. Recreated windows may have a different
   front-to-back order; the script records that observation but never treats it
   as pass or failure.
@@ -2311,9 +2289,9 @@ the accepted recovery generation remains unchanged.
 
 **Implications for remaining phases:**
 
-- Hana and every platform matrix must treat the registered monitor as the
-  automatic target until the application explicitly cancels recovery. Window
-  geometry and mode changes alone never retarget it.
+- Downstream consumers and every platform matrix must treat the registered
+  monitor as the automatic target until the application explicitly cancels
+  recovery. Window geometry and mode changes alone never retarget it.
 - Windows and X11 retain automated coverage for delayed and same-update
   fallback moves; physical runs must verify the same explicit-cancellation
   behavior. Windowed Wayland remains unarmed and cannot claim that automatic
@@ -2324,245 +2302,67 @@ the accepted recovery generation remains unchanged.
 
 ### Phase 12 Review
 
-- Phase 13 now removes Hana's competing primary-window template and respawn
-  path, repairs only the egui map that stores the new primary entity, and lets
-  process-owned camera and scene content continue without recreation.
-- Phase 14 now converts an existing output to `ApplicationControlled` only if
-  that matches a real Hana lifecycle; otherwise it retains and tests the raw
-  monitor-event path without inventing a registered output.
-- Phase 15 now inventories delayed geometry changes and explicit cancellation,
-  retains frozen placement until restore or cancellation, and requires exact
-  Phase 13–14 feedback and changed paths before dispatch.
-- Phases 16–19 now share one tested startup mode selector, record the source
+- Hana editor and output integration moved to the downstream
+  `reconnect-window.md` plan, which begins after the Clerestory release.
+- Phase 13 inventories delayed geometry changes and explicit cancellation and
+  retains frozen placement until restore or cancellation.
+- Phases 14–17 share one tested startup mode selector, record the source
   revision for every physical row, and repeat or revalidate affected earlier
   rows after a shared correction. The completed Phase 12 macOS run remains its
   own evidence row.
-- Phase 20 now repeats the final Clerestory and Hana automated gates after all
-  physical testing, and Phase 21 consumes the exact package version that Phase
-  20 publishes and verifies. `0.2.0` remains the expected release.
+- Phase 18 repeats the final Clerestory automated gates after all physical
+  testing and publishes the exact package version consumed later by the Hana
+  plan. `0.2.0` remains the expected release.
 - No pending user decision or phase-order change remains.
 
-### Phase 13 — Integrate Hana editor recovery  · status: todo
+### Phase 13 — Converge Clerestory automated gates  · status: todo
 
 #### Work Order
 
-**Goal:** Make Hana's editor consume Clerestory automatic recovery and preserve
-entity-scoped close/egui behavior without duplicating recovery state.
+**Goal:** Audit and stabilize the completed Clerestory recovery API and example
+before the physical platform matrix.
 
 **Spec:**
 
-- Temporarily point Hana at this checkout through one path dependency or
-  `[patch.crates-io]` and update its lockfile; do not test published 0.1.1.
-- Insert `WindowRecovery::FallbackAndReturn` during primary editor setup. It
-  arms only on verified, targetable placement; Wayland windowed remains
-  unarmed.
-- Configure Hana's `WindowPlugin` with `ExitCondition::DontExit`. Keep its
-  entity-scoped close handler responsible for exiting after an actual primary
-  close, while monitor-cascade removal leaves the process alive for recovery.
-- Replace Hana's “no windows exist” recovery heuristic with Clerestory
-  lifecycle/canonical state. Test for a missing `PrimaryWindow`, not an empty
-  set of all `Window` entities.
-- Do not let Hana create a competing automatic primary replacement. Observe the
-  one replacement shell created and canonically bound by Clerestory for the
-  copied `FallbackAndReturn` generation. Remove Hana's
-  `PrimaryWindowTemplate`, `WindowRecoveryPlugin::primary_window`, and
-  `respawn_primary_window`; `main.rs` retains the initial `WindowPlugin`
-  configuration. On `Added<PrimaryWindow>`, repair only Hana state that stores
-  the window entity, currently `WindowToEguiContextMap`. Process-owned camera
-  and scene content continue targeting the canonical primary without
-  recreation. This repair must work before or without `WindowRestored`; that
-  event reports only the placement result. Hana creates a replacement itself
-  only for an explicitly application-controlled consumer.
-- Register only the initial editor window. A later canonical primary or managed
-  shell is a target for Hana's content and egui rebinding, not a reason to add
-  another `WindowRecovery`; the original `RecoveryGeneration` must remain
-  unchanged.
-- Inspect the entity carried by `WindowCloseRequested`: closing primary exits;
-  closing an output follows output lifecycle rather than terminating Hana.
-- Losing primary while a conduit output survives must not block editor
-  recovery.
-- Exercise an existing ordinary managed secondary window with
-  `FallbackAndReturn` if one exists; do not invent a Hana use case solely for
-  coverage.
-- Feed any API mismatch back into Clerestory immediately rather than retaining
-  parallel Hana state.
-
-**Files:**
-
-- `../hana/Cargo.toml` — temporary local dependency override.
-- `../hana/Cargo.lock` — local dependency resolution.
-- `../hana/crates/hana/Cargo.toml` — consumer declaration if package-local
-  changes are needed.
-- `../hana/crates/hana/src/main.rs` — editor registration and setup.
-- `../hana/crates/hana/src/window_recovery.rs` — lifecycle consumption,
-  replacement/egui repair, and entity-scoped close.
-- `crates/bevy_clerestory/src/recovery/mod.rs` — adjust only for proven public
-  API feedback.
-- `crates/bevy_clerestory/src/recovery/registration.rs` — adjust only if Hana
-  otherwise must duplicate canonical state.
-
-**Constraints from prior phases:** Phase 12 proves the public API, zero-window
-process lifetime, single automatic replacement, and unregistered control
-behavior independently. Hana must consume only that public surface, must not
-duplicate Clerestory's replacement shell, and keeps the local override until
-Phase 21. Record the current Hana behavior before replacing it: it already uses
-`ExitCondition::DontExit`, creates a primary template, respawns on an empty
-window query, rebinds egui state, and exits when any window closes. Replace only
-the empty-query respawn and any-close boundaries required for canonical primary
-recovery and entity-scoped close handling. Delete the template and respawn
-state once Clerestory owns replacement; preserve Hana's egui repair.
-
-**Acceptance gate:** Hana phase-local Build, Test, and Lint are green, plus
-affected Clerestory gates if its API changes. Tests cover OS-relocated editor
-return on coordinate-capable backends, fallback changes that preserve the
-registered target, explicit cancellation, exactly one Clerestory replacement
-when linked deletion occurs, egui rebinding, process survival after cascade
-removal, surviving conduit output, primary close exit, and non-primary close
-behavior. Tests assert one accepted editor generation before and after
-canonical shell reconstruction and prove Hana never spawns a competing
-primary. They also prove the egui map is repaired when the canonical role is
-added, independently of whether `WindowRestored` has occurred, while the
-existing process-owned camera and scene content continue without recreation.
-
-### Phase 14 — Integrate Hana monitor-backed screens and outputs  · status: todo
-
-#### Work Order
-
-**Goal:** Make Hana's display-specific consumers use Clerestory identity and
-availability while Hana remains sole owner of output existence/content.
-
-**Spec:**
-
-- A Clerestory-managed output uses `ApplicationControlled`; an unmanaged output
-  consumes raw `MonitorConnected`/`MonitorDisconnected` facts. Choose the path
-  that matches each existing Hana lifecycle—do not invent state solely to test
-  Clerestory.
-- If an existing Hana output is converted to `ApplicationControlled`, bind its
-  replacement to the existing managed `WindowKey`, attach its output content
-  and retained routes, and then trigger `RestoreWindow`; do not add another
-  `WindowRecovery` or start a new recovery generation. `WindowRestored`
-  reports the placement result and is not the signal to begin attaching
-  content. Otherwise keep the existing unmanaged outputs on raw monitor events
-  and create no registered-output path solely for coverage.
-- Keep the process-lifetime `MonitorId` separate from the optional live monitor
-  entity. It may be retained across monitor-entity lifetimes within one running
-  `App`, but is never persisted or compared across application runs. Clear the
-  entity on disconnect; on reconnect match only exact verified identity, then
-  replace every retained `InputJack`/output target with the new entity before
-  re-enable. Never retain/use the disconnected entity.
-- An unverified target remains inactive until application selection.
-- Losing a cable target marks its in-world screen unavailable and creates no
-  fallback output. Reconnect may offer application-controlled re-enable; it
-  never causes Clerestory to create content/output automatically.
-- Recreated borderless output uses
-  `MonitorSelection::Entity(new_entity)`. Wayland windowed placement is never
-  promised; borderless targeting follows platform capability.
-- Removing a cable while absent sends `CancelWindowRecovery` for a registered
-  key, or confirms no entry exists for an unmanaged/raw-event path. Later
-  reconnect must not revive it.
-- Hana keeps cable routes, capture sessions, rendered content, first-frame
-  readiness, and UI/re-enable policy. Do not add any of those concepts to
-  Clerestory.
-- Treat Clerestory as the source of physical identity and monitor-entity
-  lifetime availability, not as a continuous display-layout feed. If Hana's
-  screen/capture backend needs same-entity arrangement, resolution, or scale
-  refresh, keep that metadata in Hana's backend-owned state; it must not mutate
-  Clerestory topology or initiate reconnect recovery.
-- Revise the Clerestory boundary if Hana would otherwise infer identity from
-  position, retain dead entities, or reproduce private recovery state.
-
-**Files:**
-
-- `../hana/crates/hana/src/screens/mod.rs` — observer/system registration.
-- `../hana/crates/hana/src/screens/connection.rs` — identity/availability
-  transitions.
-- `../hana/crates/hana/src/screens/panel.rs` — current monitor metadata and
-  panel association.
-- `../hana/crates/hana/src/conduit/mod.rs` — observer/system registration.
-- `../hana/crates/hana/src/conduit/jack.rs` — live entity rebinding.
-- `../hana/crates/hana/src/conduit/window.rs` — output lifecycle and monitor
-  selection.
-- `../hana/crates/hana/src/conduit/cable.rs` — retirement/cancellation.
-- `crates/bevy_clerestory/src/monitors/mod.rs` — adjust only for proven metadata
-  feedback.
-- `crates/bevy_clerestory/src/recovery/mod.rs` — adjust only for proven
-  application-controlled feedback.
-
-**Constraints from prior phases:** Phase 13 established Hana's local dependency
-and editor consumption. Phase 11's factual event/API boundary remains
-authoritative; `MonitorId` is process-local rather than persisted identity, and
-rejected capture/readiness scope must stay out of Clerestory. Phase 3 refreshes
-Clerestory metadata only for monitor entity lifetimes and identity
-revalidation; Hana owns any same-entity live display-layout metadata its capture
-or panel presentation requires.
-
-**Acceptance gate:** Hana phase-local Build, Test, and Lint are green, plus
-affected Clerestory gates for API changes. Tests cover target loss/inactive UI,
-verified reconnect/re-enable choice, unverified target, fresh-entity rebinding
-across every reference, no fallback output, cable removal, no resurrection,
-and a same-entity Hana backend layout update that changes only Hana-owned
-capture/panel metadata and starts no Clerestory recovery transition. If a real
-output uses `ApplicationControlled`, tests additionally prove unchanged
-recovery generation and content/routes attached before `RestoreWindow` without
-waiting for `WindowRestored`. Otherwise tests prove the raw-event path has no
-recovery registration, rebinds every reference to the fresh monitor entity,
-and cannot resurrect an output after cable removal.
-
-### Phase 15 — Converge the cross-workspace API and automated gates  · status: todo
-
-#### Work Order
-
-**Goal:** Audit and stabilize the Clerestory/Hana boundary after both real
-consumer passes, reusing the regressions already added by earlier phases.
-
-**Spec:**
-
-- Fold concrete feedback from Phases 13–14 into Clerestory only where the
-  consumer otherwise duplicates identity, persistence, restore, or recovery
-  state. Do not absorb Hana content/capture/UI lifecycle.
-- Ensure the local Hana override still targets this checkout while corrections
-  are tested.
-- Inventory the tests shipped by Phases 1–14 against immediate topology
+- Inventory the tests shipped by Phases 1–12 against immediate topology
   observers, identity ambiguity, first eligible registration, persistence
   promotion/freezing/projection, primary/secondary and both policies, attempt
   cleanup/retry, managed application-controlled replacement bypass of startup
   restore, full-tuple completion validation including `RecoveryGeneration`,
   stale-topology rejection before geometry mutation, entity/attempt/reported/
-  live-scale DPI matching, reflected events, zero displays, linked
-  deletion before topology, zero-window survival, exactly-one replacement,
-  unchanged generation across replacement, stable `MonitorId` restoration
-  despite monitor entity/index churn, unregistered non-reconstruction, delayed
-  `OnMonitor` repair, readiness cleanup, delayed fallback geometry changes that
-  preserve the registered target, explicit cancellation that keeps a live
-  fallback, zero native monitor polling, and Wayland capability gating. Include
+  live-scale DPI matching, reflected events, zero displays, linked deletion
+  before topology, zero-window survival, exactly-one replacement, unchanged
+  generation across replacement, stable `MonitorId` restoration despite
+  monitor entity/index churn, unregistered non-reconstruction, delayed
+  `OnMonitor` repair, readiness cleanup, delayed fallback geometry changes
+  that preserve the registered target, explicit cancellation that keeps a live
+  fallback, zero native monitor polling, and Wayland capability gating.
+- Retain
   `queued_return_survives_same_update_fallback_relocation` for primary and
-  managed roles on macOS, Windows, and X11. Rerun those tests; add code or a new
-  regression only for a concrete gap exposed by the inventory or the Hana
-  consumers. Do not reimplement an already-covered behavior as a second
-  convergence pass.
-- Include canonical-role content timing from Phases 12–14: automatic primary
-  and managed content binds on role addition before or without
-  `WindowRestored`. If Phase 14 converts a real output to
-  `ApplicationControlled`, its replacement receives content and retained routes
-  before `RestoreWindow` is triggered; otherwise retain the proven raw-event
-  output path without inventing a registered one.
+  managed roles on macOS, Windows, and X11. Rerun existing coverage; add code or
+  a regression only for a concrete gap found by the inventory.
+- Retain the Phase 12 example's canonical-role content timing: automatic
+  primary and managed content binds when the role is added, before or without
+  `WindowRestored`. The application-controlled replacement receives content
+  before `RestoreWindow`; the unregistered control remains outside recovery.
 - Retain the Phase 11 remote-handler regressions exactly: all six public
-  notification/result events pass through Bevy's `world.observe+watch` handler
-  with every serialized public field, while `RestoreWindow` and
-  `CancelWindowRecovery` pass through `world.trigger_event`.
-- Run full workspace tests/build/lint in both workspaces, not only package-local
-  gates.
-- Update public README and unreleased changelog to the stabilized API and
+  notification/result events pass through Bevy's
+  `world.observe+watch` handler with every serialized public field, while
+  `RestoreWindow` and `CancelWindowRecovery` pass through
+  `world.trigger_event`.
+- Run the full Clerestory workspace tests, build, and lint rather than only the
+  package-local gates.
+- Update the public README and unreleased changelog to the stabilized API and
   explicitly separate automated proof from physical-only behavior.
-- Do not publish or remove Hana's local override in this phase.
+- Do not publish in this phase.
 
 **Files:**
 
 - `Cargo.toml` and `Cargo.lock` — retain the workspace test-only remote
   dependency resolution.
-- `crates/bevy_clerestory/Cargo.toml` — retain `bevy_remote` and `serde_json`
-  only as dev-dependencies.
-- `crates/bevy_clerestory/README.md` — stabilized public docs.
+- `crates/bevy_clerestory/Cargo.toml` — retain `bevy_remote` and
+  `serde_json` only as dev-dependencies.
+- `crates/bevy_clerestory/README.md` — stabilized public documentation.
 - `crates/bevy_clerestory/CHANGELOG.md` — unreleased entry.
 - `crates/bevy_clerestory/src/events.rs` — reflected restore-result event
   owner.
@@ -2575,44 +2375,38 @@ consumer passes, reusing the regressions already added by earlier phases.
 - `crates/bevy_clerestory/src/recovery/application_controlled.rs` — remote
   restore request test owner.
 - `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — retain the
-  Phase 10 same-update relocation regression and the delayed geometry-change
-  target-preservation regression; change only for a concrete gap.
+  same-update relocation and delayed geometry-change regressions; change only
+  for a concrete gap.
 - `crates/bevy_clerestory/src/recovery/registration.rs` — remote cancellation
   and public event observation test owner.
-- `../hana/Cargo.toml` and `../hana/Cargo.lock` — retain local checkout.
-- `../hana/crates/hana/src/window_recovery.rs` — final editor consumer.
-- `../hana/crates/hana/src/screens/connection.rs` — final screen consumer.
-- `../hana/crates/hana/src/conduit/jack.rs` — final entity rebinding.
-- `../hana/crates/hana/src/conduit/window.rs` — final output consumer.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/` — final example
+  integration and hardware-independent consumer tests.
 
-**Constraints from prior phases:** Phase review must propagate the exact API
-feedback, changed signatures, and concrete changed paths from Phases 13–14 into
-this Work Order before dispatch. The design boundary and all public behavior
-are otherwise fixed. Phase 8 already supplies production-order coverage for
-same-entity identity refresh and linked deletion before topology installation.
-Captured placement remains `Frozen` throughout automatic fallback until restore
-or explicit cancellation; no transient capture-suppression state remains and
-no native/global monitor metadata polling is permitted. Phases 9–12 own the
-remaining attempt and reconstruction regressions; this phase audits and reruns
-them instead of replacing their owners. Public documentation must not promise
-front-to-back ordering for reconstructed windows. Preserve the exact reflected
-namespaces from Phase 11 and keep `bevy_remote` and `serde_json` test-only.
+**Constraints from prior phases:** The design boundary and public behavior from
+Phases 1–12 are fixed. Captured placement remains `Frozen` throughout
+automatic fallback until restore or explicit cancellation; no transient
+capture-suppression state remains and no native/global monitor metadata polling
+is permitted. This phase audits and reruns the existing attempt,
+reconstruction, remote-handler, and example regressions instead of replacing
+their owners. Public documentation must not promise front-to-back ordering for
+reconstructed windows. Preserve the exact reflected namespaces from Phase 11
+and keep `bevy_remote` and `serde_json` test-only. Hana integration is a
+separate downstream plan and is not a gate for this branch.
 
-**Acceptance gate:** In both workspaces, final CI-parity Build, full workspace
-Test, and full `clippy` skill gates are green. The Hana dependency resolves to
-this checkout, all named hardware-independent cases pass, and docs contain no
-claim that requires unrecorded physical evidence. Readiness regression tests
-construct monitor relationships from entities in the same test `World` and
-prove rejected associations and managed-role removal perform no native monitor
-polling. The final report maps each required behavior to its existing or newly
-added test and names any Hana-discovered correction. It explicitly reports the
-six `world.observe+watch` event cases, the two `world.trigger_event` request
-cases, and the canonical-role content timing checks. The README still states
-one-shot registration, role-add content rebinding, zero-window lifetime, and
-explicit close handling; its reflected type paths remain exact, and event-loop
-doctests compile without running an application loop.
+**Acceptance gate:** The final Clerestory CI-parity Build, full workspace Test,
+and full `clippy` skill gates are green. All named hardware-independent cases
+pass, and documentation contains no claim that requires unrecorded physical
+evidence. Readiness tests construct monitor relationships from entities in the
+same test `World` and prove rejected associations and managed-role removal
+perform no native monitor polling. The final report maps each required behavior
+to its existing or newly added test, explicitly reports the six
+`world.observe+watch` event cases, the two `world.trigger_event` request
+cases, and the example's canonical-role content timing checks. The README still
+states one-shot registration, role-add content attachment, zero-window
+lifetime, and explicit close handling; exact reflected type paths remain
+unchanged, and event-loop doctests compile without running an application loop.
 
-### Phase 16 — Record the macOS physical matrix  · status: todo
+### Phase 14 — Record the macOS physical matrix  · status: todo
 
 #### Work Order
 
@@ -2714,7 +2508,7 @@ completed example.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — attempt fixes only
   if observed.
 
-**Constraints from prior phases:** Phase 15 freezes the automated/public
+**Constraints from prior phases:** Phase 13 freezes the automated/public
 baseline. Physical evidence may correct an implementation defect but must not
 weaken identity or capability gates. `MonitorId` is process-local and may be
 compared across entity lifetimes only inside one running `App`. Phase 4's raw
@@ -2730,7 +2524,7 @@ than inferred. The shared startup/mode controls have automated coverage. Every
 row names its tested source revision; any source correction has a regression,
 green Clerestory Build/Test/Lint gates, and revalidated affected earlier rows.
 
-### Phase 17 — Record the Windows physical matrix  · status: todo
+### Phase 15 — Record the Windows physical matrix  · status: todo
 
 #### Work Order
 
@@ -2741,8 +2535,8 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 
 - Execute the shared script on Windows and record the same core identity,
   dock/port, duplicate, reorder, zero-display, reconnect-order, rapid-hotplug,
-  mode, and cross-DPI scenarios as Phase 16. Use the finalized startup/mode
-  controls from Phase 16 rather than creating a Windows-only harness.
+  mode, and cross-DPI scenarios as Phase 14. Use the finalized startup/mode
+  controls from Phase 14 rather than creating a Windows-only harness.
 - Confirm verified evidence identifies a physical panel rather than device name
   or adapter and remains unverified when descriptor/serial evidence is missing
   or duplicated.
@@ -2786,8 +2580,8 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — attempt fixes only
   if observed.
 
-**Constraints from prior phases:** Phase 15 supplies the stable baseline and
-Phase 16 established the report schema; platform evidence remains independent.
+**Constraints from prior phases:** Phase 13 supplies the stable baseline and
+Phase 14 established the report schema; platform evidence remains independent.
 `MonitorId` is process-local and never comparable across application runs.
 macOS cascade ordering is not assumed on Windows.
 
@@ -2796,7 +2590,7 @@ expected/actual result and tested source revision; unavailable hardware is
 explicit. Any correction has a regression test, green Windows Clerestory
 Build/Test/Lint gates, and revalidated affected earlier-platform rows.
 
-### Phase 18 — Record the X11 physical matrix  · status: todo
+### Phase 16 — Record the X11 physical matrix  · status: todo
 
 #### Work Order
 
@@ -2806,7 +2600,7 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 **Spec:**
 
 - Execute the shared script in an X11 session and record the core matrix. Use
-  the finalized startup/mode controls from Phase 16 rather than creating an
+  the finalized startup/mode controls from Phase 14 rather than creating an
   X11-only harness.
 - Confirm a RandR CRTC/connector alone never verifies a physical panel; require
   stable descriptor/serial evidence and preserve permanent duplicate ambiguity.
@@ -2854,7 +2648,7 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — runtime ordering
   fixes only if observed.
 
-**Constraints from prior phases:** Phase 15 supplies the stable baseline and
+**Constraints from prior phases:** Phase 13 supplies the stable baseline and
 the shared report distinguishes physical proof from automated assertions.
 `MonitorId` is process-local and never comparable across application runs.
 macOS cascade ordering is not assumed on X11.
@@ -2865,7 +2659,7 @@ explicit. Placement/fullscreen rows demonstrate compensation order. Any
 correction has a regression, green X11 Clerestory Build/Test/Lint gates, and
 revalidated affected earlier-platform rows.
 
-### Phase 19 — Record the Wayland physical matrix  · status: todo
+### Phase 17 — Record the Wayland physical matrix  · status: todo
 
 #### Work Order
 
@@ -2876,7 +2670,7 @@ placement or unsupported exclusive fullscreen.
 
 - Execute the shared script in the available Wayland compositor(s) and record
   the core identity/lifetime/reconnect matrix using the finalized startup/mode
-  controls from Phase 16.
+  controls from Phase 14.
 - A `wl_output` object ID alone remains `Unverified`. Record whether the
   compositor exposes equivalent stable physical-panel evidence; do not infer
   continuity from output name, position, or index.
@@ -2925,7 +2719,7 @@ placement or unsupported exclusive fullscreen.
 - `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — capability
   gate fixes only if observed.
 
-**Constraints from prior phases:** Phase 15 supplies the stable baseline.
+**Constraints from prior phases:** Phase 13 supplies the stable baseline.
 Wayland's lack of client-controlled windowed positioning is a fixed contract,
 not a test failure to work around. `MonitorId` remains process-local and never
 comparable across application runs. macOS cascade ordering is not assumed on
@@ -2938,24 +2732,24 @@ modes have separate results. Any correction has a regression, green Wayland
 Clerestory Build/Test/Lint gates, and revalidated affected earlier-platform
 rows.
 
-### Phase 20 — Release bevy_clerestory  · status: todo
+### Phase 18 — Release bevy_clerestory  · status: todo
 
 #### Work Order
 
 **Goal:** Publish the validated reconnect recovery API from the existing 0.2
-development line without changing Hana's dependency prematurely.
+development line for independent downstream adoption.
 
 **Spec:**
 
-- Require green Phase 15 automated gates and completed Phase 16–19 evidence
+- Require green Phase 13 automated gates and completed Phase 14–17 evidence
   rows. Every physical row must name its tested source revision, and any row
   affected by a later correction must have been repeated or explicitly
   revalidated on the corrected revision. Unresolved platform failures block
   release.
-- After all physical testing and corrections are complete, rerun Phase 15's
-  final full-workspace Build, Test, and Lint gates in both Clerestory and Hana
-  against the exact source selected for release. Earlier Phase 15 results do
-  not substitute for this post-matrix run.
+- After all physical testing and corrections are complete, rerun Phase 13's
+  final full-workspace Build, Test, and Lint gates in Clerestory against the
+  exact source selected for release. Earlier Phase 13 results do not substitute
+  for this post-matrix run.
 - Finalize `README.md` and `CHANGELOG.md` with the shipped API, capability
   limits, physical evidence boundary, and migration from 0.1.1.
 - Preserve the public usage contract proven in Phase 11: one-shot recovery
@@ -2968,7 +2762,6 @@ development line without changing Hana's dependency prematurely.
   a conflicting version rule.
 - Run the final Clerestory workspace Build, Test, and Lint gates required by the
   release workflow; publish and verify the crate/package through that workflow.
-- Do not remove Hana's local override until the published package is verified.
 
 **Files:**
 
@@ -2980,61 +2773,18 @@ development line without changing Hana's dependency prematurely.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — final
   evidence reference.
 
-**Constraints from prior phases:** Phase 15 freezes automated behavior; Phases
-16–19 supply required native evidence. Hana remains on the local checkout until
-publication is independently verified. Any correction during Phases 16–19
-reopens the affected Phase 15 gates and physical rows. Phase 11's README
+**Constraints from prior phases:** Phase 13 freezes automated behavior; Phases
+14–17 supply required native evidence. Any correction during Phases 14–17
+reopens the affected Phase 13 gates and physical rows. Phase 11's README
 behavior and doctest contracts remain part of the released public API
-documentation.
+documentation. Hana adoption begins only after this release is independently
+verified.
 
 **Acceptance gate:** The full `release` workflow completes for
 the exact selected `bevy_clerestory` version (expected `0.2.0`), the published
 package is verified, release metadata and tag/changelog are consistent, the
-README contracts above remain intact, its event-loop doctests compile without
-running, and no Hana dependency file changes in this phase. The final report
-records the release source revision, maps every physical row to a tested or
-revalidated revision, and includes green post-matrix full-workspace Clerestory
-and Hana gates.
-
-### Phase 21 — Move Hana to the published release  · status: todo
-
-#### Work Order
-
-**Goal:** Remove Hana's temporary checkout override and verify the real
-application against the published Clerestory recovery release.
-
-**Spec:**
-
-- Replace the temporary path/patch override with the verified published
-  `bevy_clerestory` version produced by Phase 20 and refresh `Cargo.lock`.
-  `0.2.0` is expected, but the exact successfully published and verified
-  version is authoritative if the release workflow required another version.
-- Confirm no path or `[patch.crates-io]` entry still points at this checkout.
-- Build and test the same editor, screen, conduit, close, identity, restore, and
-  cancellation behavior against the registry package.
-- Run Hana's final workspace Build, Test, and full `clippy` skill gates.
-- Do not change the stabilized public API or reintroduce local duplicated
-  recovery state during dependency handoff.
-
-**Files:**
-
-- `../hana/Cargo.toml` — remove temporary override/use published version.
-- `../hana/Cargo.lock` — resolve the published package.
-- `../hana/crates/hana/Cargo.toml` — update package declaration if required by
-  workspace layout.
-- `../hana/crates/hana/src/main.rs` — read-only verification target unless a
-  package-only compatibility defect appears.
-- `../hana/crates/hana/src/window_recovery.rs` — read-only verification target.
-- `../hana/crates/hana/src/screens/connection.rs` — read-only verification
-  target.
-- `../hana/crates/hana/src/conduit/jack.rs` — read-only verification target.
-- `../hana/crates/hana/src/conduit/window.rs` — read-only verification target.
-
-**Constraints from prior phases:** Phase 20 supplies the verified published
-version. Phases 13–15 already converged Hana against identical local source;
-this phase is dependency handoff, not API redesign.
-
-**Acceptance gate:** Hana resolves the exact Phase 20 version of
-`bevy_clerestory` from the registry with no local override; final Hana workspace
-Build, Test, and Lint gates are green; the editor and output integration tests
-remain green against the published artifact.
+README contracts above remain intact, and its event-loop doctests compile
+without running. The final report records the release source revision, maps
+every physical row to a tested or revalidated revision, and includes green
+post-matrix full-workspace Clerestory gates. The exact verified version becomes
+the prerequisite version for the separate Hana adoption plan.
