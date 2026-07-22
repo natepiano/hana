@@ -1542,7 +1542,7 @@ mod tests {
         );
     }
 
-    fn enter_intervention_rejected(
+    fn enter_on_fallback(
         app: &mut App,
         window_entity: Entity,
         target_entity: Entity,
@@ -1581,17 +1581,6 @@ mod tests {
         assert_eq!(
             recovery.map(|snapshot| snapshot.phase),
             Some(FallbackAndReturnPhaseSnapshot::OnFallback),
-        );
-
-        set_window_monitor(app, window_entity, fallback, WindowMode::Windowed);
-        app.update();
-        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
-        assert_eq!(
-            recovery.map(|snapshot| (snapshot.phase, snapshot.fallback_monitor)),
-            Some((
-                FallbackAndReturnPhaseSnapshot::InterventionRejected,
-                Some(fallback)
-            )),
         );
         Ok(fallback)
     }
@@ -2494,7 +2483,7 @@ mod tests {
     }
 
     #[test]
-    fn rejected_identity_revalidation_uses_production_schedule_order() -> Result<(), String> {
+    fn fallback_identity_revalidation_preserves_registered_target() -> Result<(), String> {
         let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
         let fallback_position = IVec2::new(MONITOR_WIDTH.to_i32(), 0);
         let mut app = phase_seven_topology_app(state_file.path());
@@ -2526,7 +2515,7 @@ mod tests {
             WindowMode::BorderlessFullscreen(MonitorSelection::Index(target.index)),
             None,
         );
-        let fallback = enter_intervention_rejected(
+        let fallback = enter_on_fallback(
             &mut app,
             window_entity,
             target_entity,
@@ -2534,13 +2523,21 @@ mod tests {
             fallback,
         )?;
 
-        let adopted_placement = app
+        let original_placement = app
             .world()
             .resource::<CapturedWindowStates>()
             .captured_placement(&WindowKey::Primary)
             .cloned()
-            .ok_or_else(|| "rejected recovery should retain captured placement".to_string())?;
-        assert_primary_capture_state(&app, &adopted_placement, PersistenceWriteState::Writable);
+            .ok_or_else(|| "fallback recovery should retain captured placement".to_string())?;
+        assert_primary_capture_state(&app, &original_placement, PersistenceWriteState::Frozen);
+        set_window_monitor(&mut app, window_entity, fallback, WindowMode::Windowed);
+        app.update();
+        let recovery = recovery::fallback_and_return_snapshot(app.world(), &WindowKey::Primary);
+        assert_eq!(
+            recovery.map(|snapshot| (snapshot.phase, snapshot.fallback_monitor)),
+            Some((FallbackAndReturnPhaseSnapshot::OnFallback, Some(fallback))),
+        );
+        assert_primary_capture_state(&app, &original_placement, PersistenceWriteState::Frozen);
         let revision_before_revalidation = *app.world().resource::<MonitorTopologyRevision>();
         app.world_mut()
             .resource_mut::<InjectedMonitorEvidence>()
@@ -2578,12 +2575,12 @@ mod tests {
                 )
             }),
             Some((
-                FallbackAndReturnPhaseSnapshot::InterventionRejected,
+                FallbackAndReturnPhaseSnapshot::OnFallback,
                 Some(revalidated),
                 0,
             )),
         );
-        assert_primary_capture_state(&app, &adopted_placement, PersistenceWriteState::Writable);
+        assert_primary_capture_state(&app, &original_placement, PersistenceWriteState::Frozen);
         Ok(())
     }
 

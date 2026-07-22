@@ -721,7 +721,7 @@ mod tests {
             ManagedWindowPersistence::RememberAll,
             ManagedWindowPersistence::ActiveOnly,
         ] {
-            let (mut app, entity, _) =
+            let (mut app, entity, monitor_entity) =
                 recovery_app(MonitorIdentity::Verified(TARGET_ID), persistence.clone());
             app.world_mut().entity_mut(entity).remove::<Window>();
             app.world_mut().flush();
@@ -741,6 +741,33 @@ mod tests {
                     assert!(states.entry(&WindowKey::Primary).is_none());
                 },
             }
+            assert_eq!(
+                app.world()
+                    .resource::<RecoveryRegistrations>()
+                    .registered()
+                    .count(),
+                0
+            );
+
+            install_topology(
+                &mut app,
+                2,
+                [(
+                    monitor_entity,
+                    monitor_info(MonitorIdentity::Verified(TARGET_ID), 1),
+                )],
+            );
+            app.update();
+            app.update();
+
+            assert!(app.world().resource::<RecoveryFacts>().available.is_empty());
+            assert!(
+                app.world()
+                    .resource::<ExplicitRestoreRequests>()
+                    .entities
+                    .is_empty()
+            );
+            assert!(app.world().get::<Window>(entity).is_none());
             assert_eq!(
                 app.world()
                     .resource::<RecoveryRegistrations>()

@@ -19,6 +19,7 @@ path = "src/lib.rs"
 name              = "restore_after_reconnect"
 path              = "examples/restore_after_reconnect/main.rs"
 required-features = ["monitor-probe"]
+test              = true
 
 [dependencies]
 bevy = { workspace = true, features = [

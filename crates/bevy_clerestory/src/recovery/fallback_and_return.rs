@@ -1,4 +1,4 @@
-//! Automatic fallback settling, intervention, and return intent.
+//! Automatic fallback observation, cancellation, and return intent.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -28,11 +28,11 @@ use crate::monitors::MonitorIdentity;
 use crate::monitors::MonitorInfo;
 use crate::monitors::MonitorTopologyRevision;
 use crate::monitors::Monitors;
+#[cfg(test)]
 use crate::persistence::CapturedWindowPlacement;
 use crate::persistence::CapturedWindowPosition;
 use crate::persistence::CapturedWindowStates;
 use crate::persistence::SavedWindowMode;
-use crate::platform::ReturnCapability;
 use crate::restore::RestoreDisposition;
 use crate::visibility::SkipInitialWindowHide;
 
@@ -64,14 +64,6 @@ enum RestoreQueueReadiness {
 }
 
 impl FallbackObservation {
-    const fn intervention_projection(&self) -> InterventionProjection<'_> {
-        InterventionProjection {
-            position:          &self.position,
-            logical_size:      self.logical_size,
-            saved_window_mode: &self.saved_window_mode,
-        }
-    }
-
     fn monitor_presence(&self, monitors: &Monitors) -> MonitorPresence {
         if let Some(monitor_entity) = self.monitor_entity {
             return if monitors
@@ -96,24 +88,10 @@ impl FallbackObservation {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct InterventionProjection<'a> {
-    position:          &'a ObservedPosition,
-    logical_size:      UVec2,
-    saved_window_mode: &'a SavedWindowMode,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 struct FallbackSettling {
-    readiness:   ReturnReadiness,
     observation: Option<FallbackObservation>,
     stable_for:  Duration,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum ReturnReadiness {
-    Armed,
-    Rejected(FallbackObservation),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -131,7 +109,6 @@ struct FailedAutomaticRestore {
 #[derive(Clone, Debug, PartialEq)]
 enum MissingWindowState {
     ReturnArmed,
-    InterventionRejected(FallbackObservation),
     RestoreFailed(FailedAutomaticRestore),
 }
 
@@ -144,7 +121,6 @@ enum FallbackAndReturnPhase {
     Restoring(AutomaticRetryContext),
     MissingLiveWindow(MissingWindowState),
     RestoreFailed(FailedAutomaticRestore),
-    InterventionRejected(FallbackObservation),
 }
 
 #[derive(Clone, Debug)]
@@ -204,24 +180,11 @@ impl FallbackAndReturnRecoveries {
                     failure.clone(),
                 ))
             },
-            FallbackAndReturnPhase::InterventionRejected(observation) => {
-                FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::InterventionRejected(
-                    observation.clone(),
-                ))
-            },
-            FallbackAndReturnPhase::FallbackSettling(settling) => {
-                let missing = match &settling.readiness {
-                    ReturnReadiness::Armed => MissingWindowState::ReturnArmed,
-                    ReturnReadiness::Rejected(observation) => {
-                        MissingWindowState::InterventionRejected(observation.clone())
-                    },
-                };
-                FallbackAndReturnPhase::MissingLiveWindow(missing)
-            },
             FallbackAndReturnPhase::MissingLiveWindow(missing) => {
                 FallbackAndReturnPhase::MissingLiveWindow(missing.clone())
             },
-            FallbackAndReturnPhase::RemovalPending
+            FallbackAndReturnPhase::FallbackSettling(_)
+            | FallbackAndReturnPhase::RemovalPending
             | FallbackAndReturnPhase::OnFallback(_)
             | FallbackAndReturnPhase::Restoring(_) => {
                 FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::ReturnArmed)
@@ -256,10 +219,7 @@ impl FallbackAndReturnRecoveries {
                 && matches!(
                     recovery.phase,
                     FallbackAndReturnPhase::RemovalPending
-                        | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                            readiness: ReturnReadiness::Armed,
-                            ..
-                        })
+                        | FallbackAndReturnPhase::FallbackSettling(_)
                         | FallbackAndReturnPhase::OnFallback(_)
                         | FallbackAndReturnPhase::MissingLiveWindow(
                             MissingWindowState::ReturnArmed
@@ -282,15 +242,13 @@ impl FallbackAndReturnRecoveries {
             return false;
         }
         let context = match &recovery.phase {
-            FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness: ReturnReadiness::Armed,
-                observation,
-                ..
-            }) => observation
-                .as_ref()
-                .map_or(AutomaticRetryContext::LiveWindow(entity), |observation| {
-                    AutomaticRetryContext::ObservedFallback(observation.clone())
-                }),
+            FallbackAndReturnPhase::FallbackSettling(FallbackSettling { observation, .. }) => {
+                observation
+                    .as_ref()
+                    .map_or(AutomaticRetryContext::LiveWindow(entity), |observation| {
+                        AutomaticRetryContext::ObservedFallback(observation.clone())
+                    })
+            },
             FallbackAndReturnPhase::OnFallback(observation) => {
                 AutomaticRetryContext::ObservedFallback(observation.clone())
             },
@@ -300,15 +258,10 @@ impl FallbackAndReturnRecoveries {
                 AutomaticRetryContext::LiveWindow(entity)
             },
             FallbackAndReturnPhase::Healthy
-            | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness: ReturnReadiness::Rejected(_),
-                ..
-            })
             | FallbackAndReturnPhase::Restoring(_)
-            | FallbackAndReturnPhase::MissingLiveWindow(
-                MissingWindowState::InterventionRejected(_) | MissingWindowState::RestoreFailed(_),
-            )
-            | FallbackAndReturnPhase::InterventionRejected(_) => return false,
+            | FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::RestoreFailed(_)) => {
+                return false;
+            },
         };
         recovery.phase = FallbackAndReturnPhase::Restoring(context);
         true
@@ -362,9 +315,7 @@ impl FallbackAndReturnRecoveries {
             AutomaticRetryContext::ObservedFallback(observation) => {
                 FallbackAndReturnPhase::OnFallback(observation)
             },
-            AutomaticRetryContext::LiveWindow(_) => {
-                fallback_phase(Some(entity), ReturnReadiness::Armed)
-            },
+            AutomaticRetryContext::LiveWindow(_) => fallback_phase(Some(entity)),
         };
     }
 
@@ -390,7 +341,6 @@ impl FallbackAndReturnRecoveries {
         }
         if target_presence == MonitorPresence::Missing {
             recovery.phase = FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness:   ReturnReadiness::Armed,
                 observation: None,
                 stable_for:  Duration::ZERO,
             });
@@ -446,25 +396,15 @@ impl FallbackAndReturnRecoveries {
                 RestoreQueueReadiness::Ready
             },
             FallbackAndReturnPhase::RemovalPending
-            | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness: ReturnReadiness::Armed,
-                ..
-            })
+            | FallbackAndReturnPhase::FallbackSettling(_)
             | FallbackAndReturnPhase::OnFallback(_)
             | FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::ReturnArmed) => {
                 RestoreQueueReadiness::Ready
             },
             FallbackAndReturnPhase::Healthy
-            | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness: ReturnReadiness::Rejected(_),
-                ..
-            })
             | FallbackAndReturnPhase::Restoring(_)
-            | FallbackAndReturnPhase::MissingLiveWindow(
-                MissingWindowState::InterventionRejected(_) | MissingWindowState::RestoreFailed(_),
-            )
-            | FallbackAndReturnPhase::RestoreFailed(_)
-            | FallbackAndReturnPhase::InterventionRejected(_) => RestoreQueueReadiness::Blocked,
+            | FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::RestoreFailed(_))
+            | FallbackAndReturnPhase::RestoreFailed(_) => RestoreQueueReadiness::Blocked,
         }
     }
 }
@@ -560,7 +500,6 @@ pub(crate) enum FallbackAndReturnPhaseSnapshot {
     Restoring,
     MissingLiveWindow,
     RestoreFailed,
-    InterventionRejected,
 }
 
 #[cfg(test)]
@@ -598,10 +537,6 @@ pub(crate) fn fallback_and_return_snapshot(
             let fallback_monitor = settling
                 .observation
                 .as_ref()
-                .or(match &settling.readiness {
-                    ReturnReadiness::Armed => None,
-                    ReturnReadiness::Rejected(observation) => Some(observation),
-                })
                 .map(|observation| observation.monitor_snapshot);
             (
                 FallbackAndReturnPhaseSnapshot::FallbackSettling,
@@ -620,9 +555,6 @@ pub(crate) fn fallback_and_return_snapshot(
             FallbackAndReturnPhaseSnapshot::MissingLiveWindow,
             match missing {
                 MissingWindowState::ReturnArmed => None,
-                MissingWindowState::InterventionRejected(observation) => {
-                    Some(observation.monitor_snapshot)
-                },
                 MissingWindowState::RestoreFailed(failure) => {
                     retry_context_monitor(&failure.context)
                 },
@@ -631,10 +563,6 @@ pub(crate) fn fallback_and_return_snapshot(
         FallbackAndReturnPhase::RestoreFailed(failure) => (
             FallbackAndReturnPhaseSnapshot::RestoreFailed,
             retry_context_monitor(&failure.context),
-        ),
-        FallbackAndReturnPhase::InterventionRejected(observation) => (
-            FallbackAndReturnPhaseSnapshot::InterventionRejected,
-            Some(observation.monitor_snapshot),
         ),
     };
     let restore_intents = world.resource::<AutomaticRestoreIntents>();
@@ -666,22 +594,13 @@ const fn retry_context_monitor(context: &AutomaticRetryContext) -> Option<Monito
     }
 }
 
-const fn fallback_phase(
-    live_entity: Option<Entity>,
-    readiness: ReturnReadiness,
-) -> FallbackAndReturnPhase {
+const fn fallback_phase(live_entity: Option<Entity>) -> FallbackAndReturnPhase {
     match live_entity {
         Some(_) => FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-            readiness,
             observation: None,
-            stable_for: Duration::ZERO,
+            stable_for:  Duration::ZERO,
         }),
-        None => FallbackAndReturnPhase::MissingLiveWindow(match readiness {
-            ReturnReadiness::Armed => MissingWindowState::ReturnArmed,
-            ReturnReadiness::Rejected(observation) => {
-                MissingWindowState::InterventionRejected(observation)
-            },
-        }),
+        None => FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::ReturnArmed),
     }
 }
 
@@ -695,26 +614,14 @@ fn evaluate_installed_target(
 ) {
     let should_queue = match &recovery.phase {
         FallbackAndReturnPhase::RemovalPending
-        | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-            readiness: ReturnReadiness::Armed,
-            ..
-        })
+        | FallbackAndReturnPhase::FallbackSettling(_)
         | FallbackAndReturnPhase::OnFallback(_)
         | FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::ReturnArmed) => true,
         FallbackAndReturnPhase::RestoreFailed(failure)
         | FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::RestoreFailed(failure)) => {
             revision.get() > failure.revision.get()
         },
-        FallbackAndReturnPhase::Healthy
-        | FallbackAndReturnPhase::Restoring(_)
-        | FallbackAndReturnPhase::InterventionRejected(_)
-        | FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-            readiness: ReturnReadiness::Rejected(_),
-            ..
-        })
-        | FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::InterventionRejected(_)) => {
-            false
-        },
+        FallbackAndReturnPhase::Healthy | FallbackAndReturnPhase::Restoring(_) => false,
     };
     if should_queue {
         restore_intents.enqueue(
@@ -739,23 +646,21 @@ fn evaluate_missing_target(
         FallbackAndReturnPhase::Healthy | FallbackAndReturnPhase::RemovalPending => {
             captured_window_states.freeze(&registration.window_key);
             recovery.notification = Some(registration.monitor_id);
-            recovery.phase = fallback_phase(live_entity, ReturnReadiness::Armed);
+            recovery.phase = fallback_phase(live_entity);
         },
         FallbackAndReturnPhase::Restoring(_) | FallbackAndReturnPhase::RestoreFailed(_) => {
             restore_intents.clear(&registration.window_key, registration.generation);
-            recovery.phase = fallback_phase(live_entity, ReturnReadiness::Armed);
+            recovery.phase = fallback_phase(live_entity);
         },
         FallbackAndReturnPhase::OnFallback(observation)
             if observation.monitor_presence(monitors) == MonitorPresence::Missing =>
         {
-            recovery.phase = fallback_phase(live_entity, ReturnReadiness::Armed);
+            recovery.phase = fallback_phase(live_entity);
         },
         FallbackAndReturnPhase::MissingLiveWindow(_) => {
             restore_intents.clear(&registration.window_key, registration.generation);
         },
-        FallbackAndReturnPhase::FallbackSettling(_)
-        | FallbackAndReturnPhase::OnFallback(_)
-        | FallbackAndReturnPhase::InterventionRejected(_) => {},
+        FallbackAndReturnPhase::FallbackSettling(_) | FallbackAndReturnPhase::OnFallback(_) => {},
     }
 }
 
@@ -790,27 +695,6 @@ pub(super) fn evaluate_topology(
             .entity
             .filter(|entity| live_windows.contains(*entity));
         let target_monitor = monitors.by_id(registration.monitor_id).copied();
-        let lost_rejected_fallback = match &recovery.phase {
-            FallbackAndReturnPhase::InterventionRejected(observation)
-                if observation.monitor_presence(&monitors) == MonitorPresence::Missing =>
-            {
-                Some(observation.clone())
-            },
-            FallbackAndReturnPhase::Healthy
-            | FallbackAndReturnPhase::RemovalPending
-            | FallbackAndReturnPhase::FallbackSettling(_)
-            | FallbackAndReturnPhase::OnFallback(_)
-            | FallbackAndReturnPhase::Restoring(_)
-            | FallbackAndReturnPhase::MissingLiveWindow(_)
-            | FallbackAndReturnPhase::RestoreFailed(_)
-            | FallbackAndReturnPhase::InterventionRejected(_) => None,
-        };
-        if let Some(observation) = lost_rejected_fallback {
-            captured_window_states.freeze(&registration.window_key);
-            recovery.phase = fallback_phase(live_entity, ReturnReadiness::Rejected(observation));
-            continue;
-        }
-
         if let Some(monitor) = target_monitor {
             evaluate_installed_target(
                 registration,
@@ -976,63 +860,14 @@ fn observe_fallback(
     })
 }
 
-fn captured_fallback(
-    window: &Window,
-    current_monitor: &CurrentMonitor,
-    observation: &FallbackObservation,
-    platform: crate::Platform,
-) -> CapturedWindowPlacement {
-    let physical_position = match observation.position {
-        ObservedPosition::Restorable(physical_position) => Some(physical_position),
-        ObservedPosition::CompositorControlled => None,
-    };
-    CapturedWindowPlacement::capture(window, current_monitor, physical_position, platform)
-}
-
-fn adopt_user_placement(
-    window_key: &WindowKey,
-    entity: Entity,
-    window: &Window,
-    current_monitor: &CurrentMonitor,
-    observation: FallbackObservation,
-    platform: crate::Platform,
-    revision: MonitorTopologyRevision,
-    generation: RecoveryGeneration,
-    registrations: &mut RecoveryRegistrations,
-    restore_intents: &mut AutomaticRestoreIntents,
-    captured_window_states: &mut CapturedWindowStates,
-) -> Option<FallbackAndReturnPhase> {
-    let placement = captured_fallback(window, current_monitor, &observation, platform);
-    captured_window_states
-        .adopt_intervention(window_key, entity, placement.clone())
-        .mutation()?;
-    restore_intents.clear(window_key, generation);
-    let capability =
-        platform.fallback_return_capability(placement.position, &placement.saved_window_mode);
-    if let (MonitorIdentity::Verified(monitor_id), ReturnCapability::Supported) =
-        (placement.monitor_snapshot.identity, capability)
-    {
-        if let Some(registration) = registrations.by_key_mut(window_key) {
-            registration.monitor_id = monitor_id;
-            registration.target = placement.monitor_snapshot;
-            registration.last_revision = Some(revision);
-        }
-        Some(FallbackAndReturnPhase::Healthy)
-    } else {
-        Some(FallbackAndReturnPhase::InterventionRejected(observation))
-    }
-}
-
 pub(crate) fn advance_fallback_windows(
     time: Option<Res<Time<Virtual>>>,
-    platform: Res<crate::Platform>,
-    revision: Res<MonitorTopologyRevision>,
     monitors: Res<Monitors>,
     windows: Query<(&Window, &CurrentMonitor)>,
-    mut registrations: ResMut<RecoveryRegistrations>,
+    registrations: Res<RecoveryRegistrations>,
     mut recoveries: ResMut<FallbackAndReturnRecoveries>,
-    mut restore_intents: ResMut<AutomaticRestoreIntents>,
-    mut captured_window_states: ResMut<CapturedWindowStates>,
+    restore_intents: Res<AutomaticRestoreIntents>,
+    captured_window_states: Res<CapturedWindowStates>,
 ) {
     let delta = time.as_deref().map_or(Duration::ZERO, Time::delta);
     let window_keys: Vec<_> = recoveries.entries.keys().cloned().collect();
@@ -1076,46 +911,12 @@ pub(crate) fn advance_fallback_windows(
                     settling.stable_for = Duration::ZERO;
                 }
                 if settling.stable_for >= Duration::from_secs_f32(SETTLE_STABILITY_SECS) {
-                    recovery.phase = match &settling.readiness {
-                        ReturnReadiness::Armed => FallbackAndReturnPhase::OnFallback(observation),
-                        ReturnReadiness::Rejected(_) => {
-                            captured_window_states.suppress_current_capture(&window_key, entity);
-                            FallbackAndReturnPhase::InterventionRejected(observation)
-                        },
-                    };
+                    recovery.phase = FallbackAndReturnPhase::OnFallback(observation);
                 }
             },
-            FallbackAndReturnPhase::OnFallback(previous)
-                if previous.intervention_projection() == observation.intervention_projection() =>
-            {
+            FallbackAndReturnPhase::OnFallback(previous) => {
                 if *previous != observation {
                     *previous = observation;
-                }
-            },
-            FallbackAndReturnPhase::InterventionRejected(previous)
-                if previous.intervention_projection() == observation.intervention_projection() =>
-            {
-                if *previous != observation {
-                    *previous = observation;
-                    captured_window_states.suppress_current_capture(&window_key, entity);
-                }
-            },
-            FallbackAndReturnPhase::OnFallback(_)
-            | FallbackAndReturnPhase::InterventionRejected(_) => {
-                if let Some(next_phase) = adopt_user_placement(
-                    &window_key,
-                    entity,
-                    window,
-                    current_monitor,
-                    observation,
-                    *platform,
-                    *revision,
-                    registration.generation,
-                    &mut registrations,
-                    &mut restore_intents,
-                    &mut captured_window_states,
-                ) {
-                    recovery.phase = next_phase;
                 }
             },
             FallbackAndReturnPhase::Healthy
@@ -1159,7 +960,6 @@ mod tests {
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
     use bevy_kana::ToF32;
-    use tempfile::NamedTempFile;
 
     use super::*;
     use crate::CancelWindowRecovery;
@@ -1181,7 +981,7 @@ mod tests {
     use crate::restore::TargetPosition;
     use crate::restore_window_config::RestoreWindowConfig;
 
-    const ADOPTED_POSITION_OFFSET: IVec2 = IVec2::new(50, 60);
+    const MOVED_POSITION_OFFSET: IVec2 = IVec2::new(50, 60);
     const FALLBACK_ID: MonitorId = MonitorId::from_test_raw(22);
     const FALLBACK_IDENTITY_REVISION: u64 = 2;
     const FALLBACK_INDEX: usize = 1;
@@ -1193,9 +993,9 @@ mod tests {
     const MANAGED_WINDOW_NAME: &str = "secondary";
     const MONITOR_SCALE_FACTOR: f64 = 1.0;
     const MOVED_LOGICAL_SIZE: UVec2 = UVec2::new(900, 700);
-    const OS_RELOCATED_LOGICAL_SIZE: UVec2 = UVec2::new(1_000, 800);
     const PHYSICAL_SIZE: UVec2 = UVec2::new(1_920, 1_080);
     const REARRANGED_TARGET_OFFSET: IVec2 = IVec2::new(20, 30);
+    const RECONNECTED_TARGET_INDEX: usize = 2;
     const RETURN_RELOCATION_OFFSET: IVec2 = IVec2::new(0, -77);
     const SETTLE_PROBE_SECS: f32 = SETTLE_STABILITY_SECS / 2.0;
     const TARGET_ID: MonitorId = MonitorId::from_test_raw(11);
@@ -1301,24 +1101,6 @@ mod tests {
             position,
             saved_window_mode,
             None,
-        )
-    }
-
-    fn recovery_app_with_persistence(
-        role: TestWindowRole,
-        platform: Platform,
-        target_identity: MonitorIdentity,
-        position: CapturedWindowPosition,
-        saved_window_mode: SavedWindowMode,
-        state_file: &Path,
-    ) -> RecoveryTestApp {
-        recovery_app_configured(
-            role,
-            platform,
-            target_identity,
-            position,
-            saved_window_mode,
-            Some(state_file),
         )
     }
 
@@ -1526,24 +1308,6 @@ mod tests {
             .map(|registration| (registration.monitor_id, registration.target))
     }
 
-    fn assert_captured_placement_state(
-        test_app: &RecoveryTestApp,
-        expected_placement: &CapturedWindowPlacement,
-        expected_write_state: PersistenceWriteState,
-    ) {
-        let states = test_app.app.world().resource::<CapturedWindowStates>();
-        assert_eq!(
-            states.captured_placement(&test_app.window_key),
-            Some(expected_placement),
-        );
-        assert_eq!(
-            states
-                .entry(&test_app.window_key)
-                .map(|state| state.persistence),
-            Some(expected_write_state),
-        );
-    }
-
     fn seed_restore_intent(test_app: &mut RecoveryTestApp) -> Option<AutomaticRestoreIntent> {
         let source = test_app
             .app
@@ -1634,67 +1398,111 @@ mod tests {
         );
     }
 
-    fn intervention_rejected_app() -> RecoveryTestApp { intervention_rejected_app_configured(None) }
-
-    fn intervention_rejected_app_with_persistence(state_file: &Path) -> RecoveryTestApp {
-        intervention_rejected_app_configured(Some(state_file))
+    fn registered_generation(test_app: &RecoveryTestApp) -> Option<RecoveryGeneration> {
+        test_app
+            .app
+            .world()
+            .resource::<RecoveryRegistrations>()
+            .by_key(&test_app.window_key)
+            .map(|registration| registration.generation)
     }
 
-    fn intervention_rejected_app_configured(state_file: Option<&Path>) -> RecoveryTestApp {
-        let mut test_app = state_file.map_or_else(
-            || {
-                recovery_app_with(
-                    TestWindowRole::Primary,
-                    Platform::Wayland,
-                    MonitorIdentity::Verified(TARGET_ID),
-                    CapturedWindowPosition::CompositorControlled,
-                    SavedWindowMode::BorderlessFullscreen,
-                )
-            },
-            |state_file| {
-                recovery_app_with_persistence(
-                    TestWindowRole::Primary,
-                    Platform::Wayland,
-                    MonitorIdentity::Verified(TARGET_ID),
-                    CapturedWindowPosition::CompositorControlled,
-                    SavedWindowMode::BorderlessFullscreen,
-                    state_file,
-                )
-            },
-        );
-        move_to_fallback(&mut test_app);
-        test_app
-            .app
-            .world_mut()
-            .entity_mut(test_app.window)
-            .insert(CurrentMonitor {
-                monitor_info:          test_app.fallback,
-                effective_window_mode: WindowMode::BorderlessFullscreen(MonitorSelection::Index(
-                    test_app.fallback.index,
-                )),
-            });
+    fn reconstruct_and_restore_cycle(
+        test_app: &mut RecoveryTestApp,
+        original_generation: Option<RecoveryGeneration>,
+        loss_revision: u64,
+        return_revision: u64,
+        returned_target: MonitorInfo,
+    ) -> Option<Entity> {
+        let previous_window = test_app.window;
+        assert!(test_app.app.world_mut().despawn(previous_window));
+        test_app.app.world_mut().flush();
+        assert_eq!(registered_generation(test_app), original_generation);
+
         let fallback = (test_app.fallback_entity, test_app.fallback);
-        install_topology(&mut test_app, LOSS_REVISION, [fallback]);
+        install_topology(test_app, loss_revision, [fallback]);
         test_app.app.update();
-        advance(
-            &mut test_app,
-            Duration::from_secs_f32(SETTLE_STABILITY_SECS),
+        assert_eq!(registered_generation(test_app), original_generation);
+        assert_eq!(
+            test_app
+                .app
+                .world()
+                .resource::<FallbackAndReturnRecoveries>()
+                .entries
+                .get(&test_app.window_key)
+                .map(|recovery| recovery.generation),
+            original_generation,
         );
 
-        test_app
+        let replacement = test_app
             .app
-            .world_mut()
-            .entity_mut(test_app.window)
-            .insert(CurrentMonitor {
-                monitor_info:          test_app.fallback,
-                effective_window_mode: WindowMode::Windowed,
-            });
+            .world()
+            .resource::<RecoveryRegistrations>()
+            .by_key(&test_app.window_key)
+            .and_then(|registration| registration.entity);
+        assert!(replacement.is_some());
+        let replacement = replacement?;
+        assert_ne!(replacement, previous_window);
+        assert!(
+            test_app
+                .app
+                .world()
+                .get::<WindowRecovery>(replacement)
+                .is_none()
+        );
+
+        test_app.window = replacement;
+        let target = (test_app.target_entity, returned_target);
+        let fallback = (test_app.fallback_entity, test_app.fallback);
+        install_topology(test_app, return_revision, [target, fallback]);
         test_app.app.update();
-        assert!(matches!(
-            phase(&test_app),
-            FallbackAndReturnPhase::InterventionRejected(_)
+        assert_eq!(registered_generation(test_app), original_generation);
+        let intent = test_app
+            .app
+            .world()
+            .resource::<AutomaticRestoreIntents>()
+            .get(&test_app.window_key);
+        assert_eq!(intent.map(|intent| intent.generation), original_generation);
+        assert_eq!(intent.map(|intent| intent.entity), Some(Some(replacement)));
+        assert_eq!(intent.map(|intent| intent.monitor), Some(returned_target));
+
+        let restore_started = original_generation.is_some_and(|generation| {
+            test_app
+                .app
+                .world_mut()
+                .resource_mut::<FallbackAndReturnRecoveries>()
+                .begin_restore(&test_app.window_key, generation, replacement)
+        });
+        assert!(restore_started);
+        let restore_finished = original_generation.is_some_and(|generation| {
+            test_app
+                .app
+                .world_mut()
+                .resource_mut::<FallbackAndReturnRecoveries>()
+                .finish_restore(
+                    &test_app.window_key,
+                    generation,
+                    RestoreDisposition::Succeeded,
+                    MonitorTopologyRevision::from_test_raw(return_revision),
+                )
+        });
+        assert!(restore_finished);
+        if let Some(generation) = original_generation {
+            test_app
+                .app
+                .world_mut()
+                .resource_mut::<AutomaticRestoreIntents>()
+                .consume(&test_app.window_key, generation);
+        }
+        test_app.app.world_mut().entity_mut(replacement).insert((
+            OnMonitor(test_app.target_entity),
+            CurrentMonitor {
+                monitor_info:          returned_target,
+                effective_window_mode: WindowMode::Windowed,
+            },
         ));
-        test_app
+        assert_eq!(registered_generation(test_app), original_generation);
+        Some(replacement)
     }
 
     fn fallback_observation() -> FallbackObservation {
@@ -1928,61 +1736,57 @@ mod tests {
     }
 
     #[test]
-    fn intervention_adopts_placement_and_rearms_for_verified_target() {
-        let mut test_app = recovery_app(TestWindowRole::Primary);
-        settle_on_fallback(&mut test_app);
-        let evaluations_after_loss = topology_evaluations(&test_app);
-        let adopted_position = test_app.fallback.physical_position + ADOPTED_POSITION_OFFSET;
-        if let Some(mut window) = test_app.app.world_mut().get_mut::<Window>(test_app.window) {
-            window.position = WindowPosition::At(adopted_position);
-            window
-                .resolution
-                .set(MOVED_LOGICAL_SIZE.x.to_f32(), MOVED_LOGICAL_SIZE.y.to_f32());
-        }
-        test_app.app.update();
-
-        assert!(matches!(phase(&test_app), FallbackAndReturnPhase::Healthy));
-        let registrations = test_app.app.world().resource::<RecoveryRegistrations>();
-        assert_eq!(
-            registrations
-                .by_key(&test_app.window_key)
-                .map(|registration| registration.monitor_id),
-            Some(FALLBACK_ID),
-        );
-        let states = test_app.app.world().resource::<CapturedWindowStates>();
-        let entry = states.entry(&test_app.window_key);
-        assert_eq!(
-            entry.map(|entry| entry.persistence),
-            Some(PersistenceWriteState::Writable),
-        );
-        assert_eq!(
-            states
+    fn fallback_geometry_changes_never_replace_the_registered_target() {
+        for role in [TestWindowRole::Primary, TestWindowRole::Managed] {
+            let mut test_app = recovery_app(role);
+            settle_on_fallback(&mut test_app);
+            let original_target = registered_target(&test_app);
+            let original_placement = test_app
+                .app
+                .world()
+                .resource::<CapturedWindowStates>()
                 .captured_placement(&test_app.window_key)
-                .map(|placement| placement.logical_size),
-            Some(MOVED_LOGICAL_SIZE),
-        );
+                .cloned();
+            let moved_position = test_app.fallback.physical_position + MOVED_POSITION_OFFSET;
+            if let Some(mut window) = test_app.app.world_mut().get_mut::<Window>(test_app.window) {
+                window.position = WindowPosition::At(moved_position);
+                window
+                    .resolution
+                    .set(MOVED_LOGICAL_SIZE.x.to_f32(), MOVED_LOGICAL_SIZE.y.to_f32());
+            }
 
-        test_app.app.update();
-        test_app.app.update();
-        assert_eq!(topology_evaluations(&test_app), evaluations_after_loss);
-        assert!(matches!(phase(&test_app), FallbackAndReturnPhase::Healthy));
-        assert_eq!(
-            test_app
-                .app
-                .world()
-                .resource::<RecoveryRegistrations>()
-                .by_key(&test_app.window_key)
-                .map(|registration| registration.last_revision),
-            Some(Some(MonitorTopologyRevision::from_test_raw(LOSS_REVISION))),
-        );
-        assert!(
-            test_app
-                .app
-                .world()
-                .resource::<AutomaticRestoreIntents>()
-                .get(&test_app.window_key)
-                .is_none()
-        );
+            advance(&mut test_app, Duration::from_millis(354));
+
+            assert!(matches!(
+                phase(&test_app),
+                FallbackAndReturnPhase::OnFallback(observation)
+                    if observation.position == ObservedPosition::Restorable(moved_position)
+                        && observation.logical_size == MOVED_LOGICAL_SIZE
+            ));
+            assert_eq!(registered_target(&test_app), original_target);
+            assert_eq!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<CapturedWindowStates>()
+                    .captured_placement(&test_app.window_key),
+                original_placement.as_ref(),
+            );
+
+            let target = (test_app.target_entity, test_app.target);
+            let fallback = (test_app.fallback_entity, test_app.fallback);
+            install_topology(&mut test_app, TARGET_RETURN_REVISION, [target, fallback]);
+            test_app.app.update();
+
+            assert!(
+                test_app
+                    .app
+                    .world()
+                    .resource::<AutomaticRestoreIntents>()
+                    .get(&test_app.window_key)
+                    .is_some_and(|intent| intent.monitor == test_app.target)
+            );
+        }
     }
 
     #[test]
@@ -2035,7 +1839,7 @@ mod tests {
     }
 
     #[test]
-    fn intervention_with_wrong_live_binding_preserves_recovery_state() {
+    fn geometry_change_with_wrong_live_binding_keeps_target_and_intent() {
         let mut test_app = recovery_app(TestWindowRole::Primary);
         settle_on_fallback(&mut test_app);
         let original_intent = seed_restore_intent(&mut test_app);
@@ -2046,7 +1850,6 @@ mod tests {
             .world_mut()
             .resource_mut::<CapturedWindowStates>()
             .bind(&test_app.window_key, wrong_entity);
-        let original_phase = phase(&test_app).clone();
         let original_registration = test_app
             .app
             .world()
@@ -2070,16 +1873,21 @@ mod tests {
             (facts.pending.clone(), facts.restored, facts.mismatched)
         };
 
-        let adopted_position = test_app.fallback.physical_position + ADOPTED_POSITION_OFFSET;
+        let moved_position = test_app.fallback.physical_position + MOVED_POSITION_OFFSET;
         if let Some(mut window) = test_app.app.world_mut().get_mut::<Window>(test_app.window) {
-            window.position = WindowPosition::At(adopted_position);
+            window.position = WindowPosition::At(moved_position);
             window
                 .resolution
                 .set(MOVED_LOGICAL_SIZE.x.to_f32(), MOVED_LOGICAL_SIZE.y.to_f32());
         }
         test_app.app.update();
 
-        assert_eq!(phase(&test_app), &original_phase);
+        assert!(matches!(
+            phase(&test_app),
+            FallbackAndReturnPhase::OnFallback(observation)
+                if observation.position == ObservedPosition::Restorable(moved_position)
+                    && observation.logical_size == MOVED_LOGICAL_SIZE
+        ));
         assert_eq!(
             test_app
                 .app
@@ -2119,7 +1927,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_only_change_refreshes_fallback_without_intervention() {
+    fn identity_only_change_refreshes_fallback_without_changing_target() {
         let mut test_app = recovery_app(TestWindowRole::Primary);
         settle_on_fallback(&mut test_app);
         let original_placement = test_app
@@ -2212,315 +2020,48 @@ mod tests {
     }
 
     #[test]
-    fn wayland_windowed_intervention_stays_unarmed_until_borderless() {
-        let mut test_app = intervention_rejected_app();
+    fn explicit_cancellation_keeps_the_live_fallback_and_stops_automatic_return() {
+        let mut test_app = recovery_app(TestWindowRole::Primary);
+        settle_on_fallback(&mut test_app);
+        let window_key = test_app.window_key.clone();
 
         test_app
             .app
             .world_mut()
-            .entity_mut(test_app.window)
-            .insert(CurrentMonitor {
-                monitor_info:          test_app.fallback,
-                effective_window_mode: WindowMode::BorderlessFullscreen(MonitorSelection::Index(
-                    test_app.fallback.index,
-                )),
-            });
+            .trigger(CancelWindowRecovery { window: window_key });
         test_app.app.update();
-        assert!(matches!(phase(&test_app), FallbackAndReturnPhase::Healthy));
-    }
 
-    #[test]
-    fn rejected_fallback_loss_precedes_simultaneous_obsolete_target_return() {
-        let mut surviving = intervention_rejected_app();
-        surviving
-            .app
-            .world_mut()
-            .entity_mut(surviving.window)
-            .insert(CurrentMonitor {
-                monitor_info:          surviving.target,
-                effective_window_mode: WindowMode::Windowed,
-            });
-        let target = (surviving.target_entity, surviving.target);
-        install_topology(&mut surviving, TARGET_RETURN_REVISION, [target]);
-        surviving.app.update();
-
-        assert!(matches!(
-            phase(&surviving),
-            FallbackAndReturnPhase::FallbackSettling(_)
-        ));
         assert!(
-            surviving
+            test_app
+                .app
+                .world()
+                .get::<Window>(test_app.window)
+                .is_some()
+        );
+        assert!(
+            test_app
+                .app
+                .world()
+                .resource::<RecoveryRegistrations>()
+                .by_key(&test_app.window_key)
+                .is_none()
+        );
+        assert!(
+            !test_app
+                .app
+                .world()
+                .resource::<FallbackAndReturnRecoveries>()
+                .entries
+                .contains_key(&test_app.window_key)
+        );
+        assert!(
+            test_app
                 .app
                 .world()
                 .resource::<AutomaticRestoreIntents>()
-                .get(&surviving.window_key)
+                .get(&test_app.window_key)
                 .is_none()
         );
-        advance(
-            &mut surviving,
-            Duration::from_secs_f32(SETTLE_STABILITY_SECS),
-        );
-        assert!(
-            matches!(
-                phase(&surviving),
-                FallbackAndReturnPhase::InterventionRejected(_)
-            ),
-            "unexpected phase: {:?}",
-            phase(&surviving)
-        );
-
-        let target = (surviving.target_entity, surviving.target);
-        install_topology(&mut surviving, TARGET_REAPPEAR_REVISION, [target]);
-        surviving.app.update();
-        assert!(matches!(
-            phase(&surviving),
-            FallbackAndReturnPhase::InterventionRejected(_)
-        ));
-        assert!(
-            surviving
-                .app
-                .world()
-                .resource::<AutomaticRestoreIntents>()
-                .get(&surviving.window_key)
-                .is_none()
-        );
-
-        let mut deleted = intervention_rejected_app();
-        deleted
-            .app
-            .world_mut()
-            .entity_mut(deleted.window)
-            .remove::<Window>();
-        deleted.app.world_mut().flush();
-        assert!(matches!(
-            phase(&deleted),
-            FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::InterventionRejected(_))
-        ));
-        let target = (deleted.target_entity, deleted.target);
-        install_topology(&mut deleted, TARGET_RETURN_REVISION, [target]);
-        deleted.app.update();
-
-        assert!(matches!(
-            phase(&deleted),
-            FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::InterventionRejected(_))
-        ));
-        assert!(
-            deleted
-                .app
-                .world()
-                .resource::<AutomaticRestoreIntents>()
-                .get(&deleted.window_key)
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn rejected_fallback_loss_preserves_adopted_placement_through_persistence_settling()
-    -> Result<(), String> {
-        let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
-        let mut test_app = intervention_rejected_app_with_persistence(state_file.path());
-        let adopted_placement = test_app
-            .app
-            .world()
-            .resource::<CapturedWindowStates>()
-            .captured_placement(&test_app.window_key)
-            .cloned()
-            .ok_or_else(|| "rejected intervention should retain adopted placement".to_string())?;
-        let replacement_entity = test_app.app.world_mut().spawn_empty().id();
-        let replacement = MonitorInfo {
-            identity: MonitorIdentity::Verified(FALLBACK_REPLACEMENT_ID),
-            ..test_app.fallback
-        };
-        if let Some(mut window) = test_app.app.world_mut().get_mut::<Window>(test_app.window) {
-            window.position =
-                WindowPosition::At(replacement.physical_position + ADOPTED_POSITION_OFFSET);
-            window.resolution.set(
-                OS_RELOCATED_LOGICAL_SIZE.x.to_f32(),
-                OS_RELOCATED_LOGICAL_SIZE.y.to_f32(),
-            );
-        }
-        test_app
-            .app
-            .world_mut()
-            .entity_mut(test_app.window)
-            .insert(CurrentMonitor {
-                monitor_info:          replacement,
-                effective_window_mode: WindowMode::Windowed,
-            });
-        install_topology(
-            &mut test_app,
-            FALLBACK_LOSS_REVISION,
-            [(replacement_entity, replacement)],
-        );
-        test_app.app.update();
-
-        assert!(matches!(
-            phase(&test_app),
-            FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness: ReturnReadiness::Rejected(_),
-                ..
-            })
-        ));
-        assert_captured_placement_state(
-            &test_app,
-            &adopted_placement,
-            PersistenceWriteState::Frozen,
-        );
-
-        advance(
-            &mut test_app,
-            Duration::from_secs_f32(SETTLE_STABILITY_SECS),
-        );
-
-        assert!(matches!(
-            phase(&test_app),
-            FallbackAndReturnPhase::InterventionRejected(observation)
-                if observation.monitor_snapshot == replacement
-        ));
-        assert_captured_placement_state(
-            &test_app,
-            &adopted_placement,
-            PersistenceWriteState::Writable,
-        );
-
-        if let Some(mut window) = test_app.app.world_mut().get_mut::<Window>(test_app.window) {
-            window
-                .resolution
-                .set(MOVED_LOGICAL_SIZE.x.to_f32(), MOVED_LOGICAL_SIZE.y.to_f32());
-        }
-        test_app.app.update();
-
-        assert!(matches!(
-            phase(&test_app),
-            FallbackAndReturnPhase::InterventionRejected(_)
-        ));
-        let states = test_app.app.world().resource::<CapturedWindowStates>();
-        assert_eq!(
-            states
-                .captured_placement(&test_app.window_key)
-                .map(|placement| (
-                    placement.monitor_snapshot,
-                    placement.logical_size,
-                    placement.saved_window_mode.clone(),
-                )),
-            Some((replacement, MOVED_LOGICAL_SIZE, SavedWindowMode::Windowed)),
-        );
-        assert_eq!(
-            states
-                .entry(&test_app.window_key)
-                .map(|state| state.persistence),
-            Some(PersistenceWriteState::Writable),
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn rejected_identity_refresh_preserves_capture_then_accepts_intervention() -> Result<(), String>
-    {
-        let state_file = NamedTempFile::new().map_err(|error| error.to_string())?;
-        let mut test_app = intervention_rejected_app_with_persistence(state_file.path());
-        let adopted_placement = test_app
-            .app
-            .world()
-            .resource::<CapturedWindowStates>()
-            .captured_placement(&test_app.window_key)
-            .cloned()
-            .ok_or_else(|| "rejected intervention should retain adopted placement".to_string())?;
-        let identity_only_fallback = MonitorInfo {
-            identity: MonitorIdentity::Verified(FALLBACK_REPLACEMENT_ID),
-            ..test_app.fallback
-        };
-        test_app
-            .app
-            .world_mut()
-            .entity_mut(test_app.window)
-            .insert(CurrentMonitor {
-                monitor_info:          identity_only_fallback,
-                effective_window_mode: WindowMode::Windowed,
-            });
-        let fallback_entity = test_app.fallback_entity;
-        install_topology(
-            &mut test_app,
-            FALLBACK_IDENTITY_REVISION,
-            [(fallback_entity, identity_only_fallback)],
-        );
-        test_app.app.update();
-
-        assert!(matches!(
-            phase(&test_app),
-            FallbackAndReturnPhase::InterventionRejected(observation)
-                if observation.monitor_entity == Some(test_app.fallback_entity)
-                    && observation.monitor_snapshot == identity_only_fallback
-        ));
-        let states = test_app.app.world().resource::<CapturedWindowStates>();
-        assert_eq!(
-            states.captured_placement(&test_app.window_key),
-            Some(&adopted_placement),
-        );
-        assert_eq!(
-            states
-                .entry(&test_app.window_key)
-                .map(|state| state.persistence),
-            Some(PersistenceWriteState::Writable),
-        );
-
-        if let Some(mut window) = test_app.app.world_mut().get_mut::<Window>(test_app.window) {
-            window
-                .resolution
-                .set(MOVED_LOGICAL_SIZE.x.to_f32(), MOVED_LOGICAL_SIZE.y.to_f32());
-        }
-        test_app
-            .app
-            .world_mut()
-            .entity_mut(test_app.window)
-            .insert(CurrentMonitor {
-                monitor_info:          identity_only_fallback,
-                effective_window_mode: WindowMode::BorderlessFullscreen(MonitorSelection::Index(
-                    identity_only_fallback.index,
-                )),
-            });
-        test_app.app.update();
-
-        assert!(matches!(phase(&test_app), FallbackAndReturnPhase::Healthy));
-        let states = test_app.app.world().resource::<CapturedWindowStates>();
-        assert_eq!(
-            states
-                .captured_placement(&test_app.window_key)
-                .map(|placement| (
-                    placement.monitor_snapshot,
-                    placement.logical_size,
-                    placement.saved_window_mode.clone(),
-                )),
-            Some((
-                identity_only_fallback,
-                MOVED_LOGICAL_SIZE,
-                SavedWindowMode::BorderlessFullscreen,
-            )),
-        );
-        assert_eq!(
-            states
-                .entry(&test_app.window_key)
-                .map(|state| state.persistence),
-            Some(PersistenceWriteState::Writable),
-        );
-
-        let adopted_placement = states
-            .captured_placement(&test_app.window_key)
-            .cloned()
-            .ok_or_else(|| "intervention should replace the captured placement".to_string())?;
-        install_topology(&mut test_app, FALLBACK_LOSS_REVISION, []);
-        test_app.app.update();
-
-        assert!(matches!(
-            phase(&test_app),
-            FallbackAndReturnPhase::FallbackSettling(_)
-        ));
-        assert_captured_placement_state(
-            &test_app,
-            &adopted_placement,
-            PersistenceWriteState::Frozen,
-        );
-        Ok(())
     }
 
     #[test]
@@ -2635,6 +2176,42 @@ mod tests {
                     .captured_placement(&test_app.window_key),
                 original_placement.as_ref(),
             );
+        }
+    }
+
+    #[test]
+    fn two_reconstruction_cycles_keep_the_original_generation_when_return_index_changes() {
+        for role in [TestWindowRole::Primary, TestWindowRole::Managed] {
+            let mut test_app = recovery_app(role);
+            let original_generation = registered_generation(&test_app);
+            assert!(original_generation.is_some());
+
+            let first_returned_target = test_app.target;
+            let first_replacement = reconstruct_and_restore_cycle(
+                &mut test_app,
+                original_generation,
+                LOSS_REVISION,
+                TARGET_RETURN_REVISION,
+                first_returned_target,
+            );
+            assert!(first_replacement.is_some());
+
+            let second_returned_target = MonitorInfo {
+                index: RECONNECTED_TARGET_INDEX,
+                physical_position: test_app.target.physical_position + REARRANGED_TARGET_OFFSET,
+                ..test_app.target
+            };
+            assert_ne!(first_returned_target.index, second_returned_target.index);
+            let second_replacement = reconstruct_and_restore_cycle(
+                &mut test_app,
+                original_generation,
+                FALLBACK_LOSS_REVISION,
+                TARGET_REAPPEAR_REVISION,
+                second_returned_target,
+            );
+            assert!(second_replacement.is_some());
+            assert_ne!(first_replacement, second_replacement);
+            assert_eq!(registered_generation(&test_app), original_generation);
         }
     }
 
@@ -2773,7 +2350,7 @@ mod tests {
     }
 
     #[test]
-    fn fallback_monitor_replacement_restarts_settling_without_adoption() {
+    fn fallback_monitor_replacement_restarts_settling_without_changing_target() {
         let mut test_app = recovery_app(TestWindowRole::Primary);
         settle_on_fallback(&mut test_app);
         let original_placement = test_app
@@ -2859,20 +2436,16 @@ mod tests {
             FallbackAndReturnPhase::Healthy,
             FallbackAndReturnPhase::RemovalPending,
             FallbackAndReturnPhase::FallbackSettling(FallbackSettling {
-                readiness:   ReturnReadiness::Armed,
                 observation: None,
                 stable_for:  Duration::ZERO,
             }),
             FallbackAndReturnPhase::OnFallback(observation.clone()),
-            FallbackAndReturnPhase::Restoring(AutomaticRetryContext::ObservedFallback(
-                observation.clone(),
-            )),
+            FallbackAndReturnPhase::Restoring(AutomaticRetryContext::ObservedFallback(observation)),
             FallbackAndReturnPhase::MissingLiveWindow(MissingWindowState::ReturnArmed),
             FallbackAndReturnPhase::RestoreFailed(FailedAutomaticRestore {
                 context:  AutomaticRetryContext::LiveWindow(Entity::PLACEHOLDER),
                 revision: MonitorTopologyRevision::from_test_raw(LOSS_REVISION),
             }),
-            FallbackAndReturnPhase::InterventionRejected(observation),
         ];
 
         for automatic_phase in phases {

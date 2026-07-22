@@ -1,4 +1,4 @@
-//! Causal monitor hotplug probe for primary and managed secondary windows.
+//! End-to-end monitor reconnect consumer with a shared causal trace.
 
 mod constants;
 mod lifecycle;
@@ -15,11 +15,14 @@ use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::id;
 
+use bevy::ecs::schedule::common_conditions::not;
+use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use bevy::window::MonitorSelection;
 use bevy::window::WindowPosition;
+use bevy::window::WindowResolution;
 use bevy_clerestory::MonitorConnected;
 use bevy_clerestory::MonitorDisconnected;
 use bevy_clerestory::MonitorTopologyRevision;
@@ -30,13 +33,18 @@ use constants::EXIT_AFTER_FRAME_ENVIRONMENT_VARIABLE;
 use constants::MONITOR_INDEX_ENVIRONMENT_VARIABLE;
 use constants::PERSISTENCE_FILE_PREFIX;
 use constants::PRIMARY_WINDOW_TITLE;
+use constants::PROBE_WINDOW_HEIGHT;
+use constants::PROBE_WINDOW_WIDTH;
 use trace::ProbeTrace;
 
 struct HotplugProbePlugin;
 
 impl Plugin for HotplugProbePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<window_trace::WindowBindings>()
+        app.init_resource::<setup::AcceptedWindowKeys>()
+            .init_resource::<recovery_trace::ApplicationRecoveryCycles>()
+            .init_resource::<recovery_trace::PreUnplugReadiness>()
+            .init_resource::<window_trace::WindowBindings>()
             .init_resource::<window_trace::WindowSnapshots>()
             .add_observer(lifecycle::on_primary_window_added)
             .add_observer(lifecycle::on_managed_window_added)
@@ -45,6 +53,7 @@ impl Plugin for HotplugProbePlugin {
             .add_observer(lifecycle::on_window_added)
             .add_observer(lifecycle::on_window_removed)
             .add_observer(lifecycle::on_window_despawned)
+            .add_observer(setup::remove_window_content)
             .add_observer(lifecycle::on_monitor_added)
             .add_observer(lifecycle::on_monitor_removed)
             .add_observer(lifecycle::on_monitor_despawned)
@@ -58,20 +67,42 @@ impl Plugin for HotplugProbePlugin {
             .add_observer(lifecycle::on_has_windows_despawned)
             .add_observer(trace::on_monitor_connected)
             .add_observer(trace::on_monitor_disconnected)
-            .add_observer(setup::place_and_register_probe_window)
             .add_observer(recovery_trace::on_window_recovery_pending)
             .add_observer(recovery_trace::on_window_recovery_available)
+            .add_observer(recovery_trace::on_window_restored)
+            .add_observer(recovery_trace::on_window_restore_mismatch)
+            .add_observer(recovery_trace::prepare_application_window_restore)
             .add_systems(
                 Startup,
-                (setup::spawn_secondary_window, setup::trace_probe_session).chain(),
+                (setup::spawn_probe_windows, setup::trace_probe_session).chain(),
+            )
+            .add_systems(
+                PreUpdate,
+                (
+                    setup::attach_primary_content,
+                    setup::attach_managed_content,
+                    recovery_trace::request_application_window_restore,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
                 (
                     setup::request_probe_window_placement,
+                    (
+                        setup::place_and_register_probe_windows,
+                        setup::place_and_confirm_unregistered_control,
+                    ),
+                    (
+                        setup::control_automatic_window_mode,
+                        setup::cancel_automatic_window_recovery,
+                    )
+                        .run_if(not(resource_exists::<SmokeExitFrame>)),
+                    recovery_trace::record_recovery_readiness,
                     window_trace::trace_os_window_events,
                     window_trace::trace_internal_window_messages,
-                ),
+                )
+                    .chain_ignore_deferred(),
             )
             .add_systems(PostUpdate, window_trace::trace_window_component_changes)
             .add_systems(Last, setup::exit_after_smoke_frame);
@@ -162,6 +193,7 @@ fn main() -> std::io::Result<()> {
                     primary_window: Some(Window {
                         title: PRIMARY_WINDOW_TITLE.into(),
                         position: WindowPosition::Automatic,
+                        resolution: WindowResolution::new(PROBE_WINDOW_WIDTH, PROBE_WINDOW_HEIGHT),
                         ..default()
                     }),
                     exit_condition: ExitCondition::DontExit,
