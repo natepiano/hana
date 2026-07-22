@@ -9,6 +9,7 @@ use hana_conduit::Faces;
 use hana_conduit::Solver;
 use hana_conduit::TubeConfig;
 use hana_diegetic::DiegeticText;
+use hana_diegetic::PanelPicking;
 
 use super::constants::INSIDE_VIEW_END_Y_OFFSET;
 use super::constants::INSIDE_VIEW_ENDPOINT_X_OFFSET;
@@ -69,6 +70,7 @@ pub(super) fn setup_section_inside_view(
     commands.spawn((
         CameraFacingLabel,
         Pickable::IGNORE,
+        PanelPicking::PASS_THROUGH,
         DiegeticText::world(INSIDE_VIEW_LABEL_TEXT)
             .size(INSIDE_VIEW_LABEL_SIZE)
             .color(BOX_LABEL_EMISSIVE_COLOR)

@@ -54,6 +54,7 @@ use crate::screen_space::ScreenSpaceLight;
 use crate::widgets;
 use crate::widgets::ButtonCaptures;
 use crate::widgets::ButtonPress;
+use crate::widgets::PanelPicking;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::PanelWidgets;
@@ -732,6 +733,7 @@ fn teardown_owned_shared_state(world: &mut World, panel: Entity) {
     remove_owned_component_now::<AnchoredTo>(world, panel, panel);
     remove_owned_component_now::<ResolvedAnchorOffset>(world, panel, panel);
     remove_owned_component_now::<ResolvedAnchorGeometry>(world, panel, panel);
+    remove_owned_component_now::<PanelPicking>(world, panel, panel);
 }
 
 fn remove_seeded_cascade<A: CascadeAttribute>(world: &mut World, panel: Entity) {
@@ -867,6 +869,7 @@ mod tests {
     use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
     use crate::text::TextPlugin;
+    use crate::widgets::PanelPicking;
     use crate::widgets::PanelWidgetIndex;
     use crate::widgets::PanelWidgets;
     use crate::widgets::ScreenWidgetAnchorProxy;
@@ -1361,6 +1364,171 @@ mod tests {
             app.world()
                 .get::<PreservedResolved<TextAlpha>>(panel)
                 .is_none(),
+        );
+    }
+
+    fn picking_teardown_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins(HeadlessLayoutPlugin);
+        app
+    }
+
+    fn picking_teardown_panel(picking: PanelPicking) -> DiegeticPanel {
+        DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .picking(picking)
+            .build()
+            .expect("panel should build")
+    }
+
+    #[test]
+    fn role_teardown_removes_unchanged_picking_seed_and_readd_installs_new_seed() {
+        let mut app = picking_teardown_app();
+        let panel = app
+            .world_mut()
+            .spawn(picking_teardown_panel(PanelPicking::INTERACTIVE))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::INTERACTIVE),
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(panel)
+                .is_some(),
+        );
+
+        app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
+        app.update();
+        assert!(app.world().get::<PanelPicking>(panel).is_none());
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(panel)
+                .is_none(),
+        );
+
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(picking_teardown_panel(PanelPicking::PASS_THROUGH));
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(panel)
+                .is_some(),
+        );
+    }
+
+    #[test]
+    fn same_bundle_picking_survives_role_teardown_including_default_value() {
+        let mut app = picking_teardown_app();
+        let default_valued = app
+            .world_mut()
+            .spawn((
+                picking_teardown_panel(PanelPicking::INTERACTIVE),
+                PanelPicking::INTERACTIVE,
+            ))
+            .id();
+        let pass_through = app
+            .world_mut()
+            .spawn((
+                picking_teardown_panel(PanelPicking::INTERACTIVE),
+                PanelPicking::PASS_THROUGH,
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(default_valued)
+                .is_none(),
+        );
+
+        app.world_mut()
+            .entity_mut(default_valued)
+            .remove::<DiegeticPanel>();
+        app.world_mut()
+            .entity_mut(pass_through)
+            .remove::<DiegeticPanel>();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PanelPicking>(default_valued),
+            Some(&PanelPicking::INTERACTIVE),
+        );
+        assert_eq!(
+            app.world().get::<PanelPicking>(pass_through),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+    }
+
+    #[test]
+    fn runtime_picking_write_after_seed_survives_role_teardown() {
+        let mut app = picking_teardown_app();
+        let panel = app
+            .world_mut()
+            .spawn(picking_teardown_panel(PanelPicking::INTERACTIVE))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(panel)
+                .is_some(),
+        );
+
+        *app.world_mut()
+            .get_mut::<PanelPicking>(panel)
+            .expect("seed should be live") = PanelPicking::PASS_THROUGH;
+        app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(panel)
+                .is_none(),
+        );
+    }
+
+    #[test]
+    fn panel_replacement_never_claims_live_picking_ownership() {
+        let mut app = picking_teardown_app();
+        let panel = app
+            .world_mut()
+            .spawn((
+                picking_teardown_panel(PanelPicking::INTERACTIVE),
+                PanelPicking::PASS_THROUGH,
+            ))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(picking_teardown_panel(PanelPicking::INTERACTIVE));
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
+        assert!(
+            app.world()
+                .get::<PanelComponentOwnership<PanelPicking>>(panel)
+                .is_none(),
+        );
+
+        app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
+        app.update();
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::PASS_THROUGH),
         );
     }
 

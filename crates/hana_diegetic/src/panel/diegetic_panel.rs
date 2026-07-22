@@ -65,6 +65,7 @@ use crate::render::DrawOrder;
 use crate::render::HairlineFade;
 use crate::widgets;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::PanelPicking;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::WidgetInteractivity;
@@ -242,6 +243,16 @@ pub struct DiegeticPanel {
     /// Construction seed for the panel's HDR text coverage-bias cascade.
     #[reflect(ignore)]
     pub(super) hdr_text_coverage_bias: Cascade<f32>,
+    /// Builder-provided initial value for the sibling [`PanelPicking`]
+    /// component. Applied by
+    /// [`sync_panel_picking_on_insert`] only when the entity has no live
+    /// `PanelPicking`, so an existing component of any value — including an
+    /// explicit [`PanelPicking::INTERACTIVE`] — stays authoritative. An
+    /// installed value is recorded in `PanelComponentOwnership<PanelPicking>`
+    /// and is removed with the panel role unless application code has
+    /// replaced or mutated it.
+    #[reflect(ignore)]
+    pub(super) picking:                PanelPicking,
     /// Whether the panel is world-space or screen-space.
     pub(super) coordinate_space:       CoordinateSpace,
     /// Maps each text run's [`PanelElementId`](crate::PanelElementId) to the entity
@@ -273,6 +284,7 @@ impl Default for DiegeticPanel {
             shape_material:         Cascade::Inherit,
             text_alpha_mode:        Cascade::Inherit,
             hdr_text_coverage_bias: Cascade::Inherit,
+            picking:                PanelPicking::default(),
             coordinate_space:       CoordinateSpace::default(),
             text_index:             HashMap::new(),
         }
@@ -286,6 +298,43 @@ impl DiegeticPanel {
             ..Self::default()
         }
     }
+}
+
+/// Installs the builder's initial [`PanelPicking`] on panel insert or replacement
+/// when the entity has no live `PanelPicking` component. The deferred write
+/// goes through `lifecycle::seed_owned_component`, which records the install
+/// in `PanelComponentOwnership<PanelPicking>` so panel role teardown can tell
+/// the seed apart from application state.
+///
+/// A live `PanelPicking` is authoritative regardless of its value: one supplied
+/// explicitly in the spawn bundle — including [`PanelPicking::INTERACTIVE`],
+/// which equals the default — installed by a screen-overlay opt-out, or written
+/// at runtime is never overwritten, mutated, or recorded as Hana-owned, so
+/// replacing the `DiegeticPanel` preserves the live policy and no equal-value
+/// rewrite bumps the component's change tick. Absence is re-checked when the
+/// deferred insert applies, so any component already installed by then wins.
+///
+/// `teardown_owned_shared_state` removes an unchanged initial value together with its
+/// ownership record when the `DiegeticPanel` role is removed, so a later
+/// re-add installs the new builder value. An application write afterward
+/// moves the component's change tick off the recorded write; teardown then
+/// keeps the component and drops only the stale ownership record.
+pub(super) fn sync_panel_picking_on_insert(
+    inserted: On<Insert, DiegeticPanel>,
+    panels: Query<(&DiegeticPanel, Has<PanelPicking>)>,
+    mut commands: Commands,
+) {
+    let entity = inserted.entity;
+    let Ok((panel, has_live_picking)) = panels.get(entity) else {
+        return;
+    };
+    if has_live_picking {
+        return;
+    }
+    let seed = panel.picking;
+    commands.queue(move |world: &mut bevy::ecs::world::World| {
+        lifecycle::seed_owned_component(world, entity, entity, seed);
+    });
 }
 
 // ── Public read-only accessors ──────────────────────────────────────────────
@@ -409,6 +458,7 @@ impl DiegeticPanel {
         panel.shape_material.clone_from(&self.shape_material);
         panel.text_alpha_mode = self.text_alpha_mode;
         panel.hdr_text_coverage_bias = self.hdr_text_coverage_bias;
+        panel.picking = self.picking;
         *self = panel;
     }
 

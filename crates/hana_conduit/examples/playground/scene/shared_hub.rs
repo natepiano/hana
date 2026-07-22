@@ -9,6 +9,7 @@ use hana_conduit::CatenarySolver;
 use hana_conduit::DEFAULT_SLACK;
 use hana_conduit::Solver;
 use hana_diegetic::DiegeticText;
+use hana_diegetic::PanelPicking;
 
 use super::constants::SHARED_HUB_POSITION_Z;
 use super::constants::SHARED_HUB_SPHERE_RINGS;
@@ -67,6 +68,7 @@ pub(super) fn setup_section_shared_hub(
         parent.spawn((
             CameraFacingLabel,
             Pickable::IGNORE,
+            PanelPicking::PASS_THROUGH,
             DiegeticText::world(HUB_LABEL_TEXT)
                 .size(HUB_LABEL_SIZE)
                 .color(HUB_LABEL_COLOR)

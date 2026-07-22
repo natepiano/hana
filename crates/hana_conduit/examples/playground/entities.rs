@@ -13,6 +13,7 @@ use hana_conduit::CableMeshConfig;
 use hana_conduit::Obstacle;
 use hana_conduit::Solver;
 use hana_diegetic::DiegeticText;
+use hana_diegetic::PanelPicking;
 use hana_diegetic::Sidedness;
 
 use super::constants::CUBE_FACES;
@@ -95,8 +96,11 @@ pub(crate) fn spawn_node_cube<'a>(
 
 /// Spawns a centered `text` label of height `text_size` on every face of a
 /// `cube_size` cube. The labels are unlit so `color` reads as emissive (use an
-/// HDR color with camera bloom to make them glow), and `Pickable::IGNORE` so
-/// pointer picks fall through to the draggable cube underneath.
+/// HDR color with camera bloom to make them glow). Each label opts out of both
+/// pickers so picks fall through to the draggable cube underneath:
+/// `Pickable::IGNORE` excludes its generated meshes from Bevy's stock mesh
+/// picker, and `PanelPicking::PASS_THROUGH` makes the diegetic panel backend
+/// pass pointer hits through.
 pub(crate) fn add_cube_face_labels(
     cube: &mut EntityCommands,
     text: &str,
@@ -108,6 +112,7 @@ pub(crate) fn add_cube_face_labels(
         for face in CUBE_FACES {
             parent.spawn((
                 Pickable::IGNORE,
+                PanelPicking::PASS_THROUGH,
                 DiegeticText::world(text)
                     .size(text_size)
                     .color(color)
