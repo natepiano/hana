@@ -72,6 +72,7 @@ fairy_dust      = { path = "crates/fairy_dust" }
 float-cmp       = "0.10.0"
 hana_diegetic   = { path = "crates/hana_diegetic" }
 hana_valence    = { path = "crates/hana_valence", default-features = false }
+serde_json      = "1.0"
 
 [workspace.lints.clippy]
 # Our strict lints

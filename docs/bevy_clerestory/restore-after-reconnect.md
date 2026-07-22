@@ -1968,7 +1968,7 @@ claiming front-to-back ordering preservation.
 - No phase was merged, split, reordered, or removed. No pending user decision
   remains, and Phases 11–21 are dispatch-ready.
 
-### Phase 11 — Publish the reflected recovery API  · status: todo
+### Phase 11 — Publish the reflected recovery API  · status: done (`64b6e8f0`)
 
 #### Work Order
 
@@ -2062,6 +2062,69 @@ restore-result events under `bevy_clerestory::events::*`. Public docs show a
 consumer rebinding content to the canonical replacement without inserting a
 second `WindowRecovery`.
 
+#### Retrospective
+
+**What worked:** All public recovery, monitor-lifetime, and restore-result
+events now carry Bevy `ReflectEvent` type data through automatic reflection
+registration while preserving their exact public type paths. In-process tests
+exercise Bevy's real `world.trigger_event` handler for `RestoreWindow` and
+`CancelWindowRecovery`, and its real `world.observe+watch` handler for all six
+public observed events and their serialized fields. The README now introduces
+reconnect recovery for a first-time reader, explains both policies, one-shot
+registration, cancellation, application-owned content, fallback adoption,
+Wayland limits, zero-window lifetime, and BRP access. The package check, full
+Clippy workflow, nightly formatting, 197 Nextest tests, and README doctests
+passed. A ten-frame live example smoke opened both windows and exited
+automatically with status 0 without monitor manipulation.
+
+**What deviated:** Handler-level BRP tests required direct test-only
+`bevy_remote` and `serde_json` dependencies, so the workspace/package manifests
+and lockfile joined the planned file list. The first implementation proved only
+reflection registration; two review passes added actual remote-handler proof
+and corrected public documentation. Because `lib.rs` includes `README.md` as
+crate documentation, both README examples that call `App::run()` had to be
+marked `no_run` before the doctest gate could terminate.
+
+**Surprises:** The first doctest attempt executed an existing `App::run()`
+example and was interrupted; the final doctest run compiled the two event-loop
+examples without executing them and completed in under two seconds. Review also
+found that a reconstructed automatic window can exist on its fallback monitor
+before any `WindowRestored` result, so applications must rebind content when
+the canonical `PrimaryWindow` or `ManagedWindow` role appears. Reconstruction
+uses `Monitors::first()` and the `Window` settings copied when registration was
+accepted, not the OS default monitor or later window mutations.
+
+**Implications for remaining phases:** Phase 12's permanent example must rebind
+content on canonical-role addition, keep its event-loop examples safe for
+rustdoc, and use the reflected public events without private recovery state.
+Phase 13 must likewise attach Hana content and egui state when the canonical
+replacement role appears rather than waiting only for a successful restore
+result. Phase 15 must retain the handler-level BRP tests and exact serialized
+payload coverage in its regression inventory.
+
+### Phase 11 Review
+
+- Phase 12 now requires minimal application-owned content for both automatic
+  windows and binds that content from `Added<PrimaryWindow>` and
+  `Added<ManagedWindow>`. This works for initial and reconstructed windows
+  before any `WindowRestored` result and never creates a second recovery
+  registration.
+- Phase 13 now binds Hana's editor content, cameras, and egui state when the
+  canonical primary or managed role is added. Phase 14 attaches Hana's output
+  content and retained routes before requesting placement of an
+  application-controlled replacement. In both phases, `WindowRestored` reports
+  a placement result; it does not announce that content may be attached.
+- Phase 15 now retains the exact reflected type paths, remote observation of all
+  six public notification/result events, remote triggering of both public
+  request events, and the test-only remote dependencies. It also inventories
+  canonical-role content timing.
+- Phase 20 now preserves the README contracts established here, including
+  one-shot registration, canonical-role content rebinding, zero-window process
+  lifetime, explicit close handling, exact reflected paths, and non-executing
+  event-loop doctests.
+- No user decision remains from this review. Phases 12–21 are ready for
+  dispatch.
+
 ### Phase 12 — Complete the recovery example  · status: todo
 
 #### Work Order
@@ -2083,6 +2146,12 @@ policies while retaining its causal diagnostics.
   does not terminate the example before reconnect.
 - Configure the primary and secondary managed windows with
   `WindowRecovery::FallbackAndReturn`.
+- Give the primary and managed automatic windows minimal application-owned
+  content. Systems in `setup.rs` bind that content from
+  `Added<PrimaryWindow>` and `Added<ManagedWindow>` so the initial and any
+  reconstructed canonical windows each receive it exactly once. These systems
+  must work before or without `WindowRestored` and must not add a new
+  `WindowRecovery`.
 - Keep a small example-only set of accepted canonical `WindowKey` values.
   `setup.rs` inserts `WindowRecovery` only for each initial window after its
   original association is confirmed. A reconstructed entity's lack of a
@@ -2162,7 +2231,9 @@ results, then removed them; its success is evidence for the runtime API, not
 shipped example behavior. This phase must add the permanent consumer. Phase
 10's replacement retains one accepted generation per canonical key; the
 example's accepted-key set enforces that the initial primary and managed
-registrations are never repeated for their replacement entities.
+registrations are never repeated for their replacement entities. Phase 11
+established that canonical role addition, rather than `WindowRestored`, is the
+public timing signal for attaching application-owned content.
 
 **Acceptance gate:** The example builds and its non-hardware logic is covered by
 Clerestory Test/Lint gates. On available hardware, the script completes
@@ -2179,6 +2250,10 @@ before recovery begins; pending records appear only after target loss. Tests
 prove both automatic keys retain one accepted generation across both cycles,
 including a returned monitor at a changed list index, and retain the
 same-update relocation regression without asserting front-to-back ordering.
+Hardware-independent tests prove `Added<PrimaryWindow>` and
+`Added<ManagedWindow>` attach the example content exactly once to both initial
+and reconstructed canonical windows, before or without `WindowRestored`, while
+the accepted recovery generation remains unchanged.
 
 ### Phase 13 — Integrate Hana editor recovery  · status: todo
 
@@ -2202,9 +2277,12 @@ entity-scoped close/egui behavior without duplicating recovery state.
   set of all `Window` entities.
 - Do not let Hana create a competing automatic primary replacement. Observe the
   one replacement shell created and canonically bound by Clerestory for the
-  copied `FallbackAndReturn` generation, then perform only Hana-owned egui,
-  camera, and content rebinding. Hana creates a replacement itself only for an
-  explicitly application-controlled consumer.
+  copied `FallbackAndReturn` generation. On `Added<PrimaryWindow>`, and on
+  `Added<ManagedWindow>` if an existing managed consumer is exercised, perform
+  only Hana-owned egui, camera, and content rebinding. This binding must work
+  before or without `WindowRestored`; that event reports only the placement
+  result. Hana creates a replacement itself only for an explicitly
+  application-controlled consumer.
 - Register only the initial editor window. A later canonical primary or managed
   shell is a target for Hana's content and egui rebinding, not a reason to add
   another `WindowRecovery`; the original `RecoveryGeneration` must remain
@@ -2250,7 +2328,9 @@ return on coordinate-capable backends, intervention, exactly one Clerestory
 replacement when linked deletion occurs, Hana-owned egui/content rebinding,
 process survival after cascade removal, surviving conduit output, primary close
 exit, and non-primary close behavior. Tests assert one accepted editor
-generation before and after canonical shell reconstruction.
+generation before and after canonical shell reconstruction. They also prove
+the editor's egui, camera, and content binding runs when the canonical role is
+added, independently of whether `WindowRestored` has occurred.
 
 ### Phase 14 — Integrate Hana monitor-backed screens and outputs  · status: todo
 
@@ -2266,8 +2346,10 @@ availability while Hana remains sole owner of output existence/content.
   that matches each existing Hana lifecycle—do not invent state solely to test
   Clerestory.
 - When Hana creates an application-controlled replacement, bind it to the
-  existing managed `WindowKey` and trigger `RestoreWindow`; do not add another
-  `WindowRecovery` or start a new recovery generation.
+  existing managed `WindowKey`, attach its output content and retained routes,
+  and then trigger `RestoreWindow`; do not add another `WindowRecovery` or
+  start a new recovery generation. `WindowRestored` reports the placement
+  result and is not the signal to begin attaching content.
 - Keep the process-lifetime `MonitorId` separate from the optional live monitor
   entity. It may be retained across monitor-entity lifetimes within one running
   `App`, but is never persisted or compared across application runs. Clear the
@@ -2325,8 +2407,10 @@ affected Clerestory gates for API changes. Tests cover target loss/inactive UI,
 verified reconnect/re-enable choice, unverified target, fresh-entity rebinding
 across every reference, no fallback output, registered/raw paths, cable
 cancellation, no resurrection, and unchanged recovery generation across an
-application-controlled replacement. A same-entity Hana backend layout update
-changes only Hana-owned capture/panel metadata and starts no Clerestory recovery
+application-controlled replacement. Timing tests prove the replacement has its
+output content and retained routes before `RestoreWindow` is triggered and does
+not wait for `WindowRestored`. A same-entity Hana backend layout update changes
+only Hana-owned capture/panel metadata and starts no Clerestory recovery
 transition.
 
 ### Phase 15 — Converge the cross-workspace API and automated gates  · status: todo
@@ -2360,6 +2444,14 @@ consumer passes, reusing the regressions already added by earlier phases.
   regression only for a concrete gap exposed by the inventory or the Hana
   consumers. Do not reimplement an already-covered behavior as a second
   convergence pass.
+- Include canonical-role content timing from Phases 12–14: automatic primary
+  and managed content binds on role addition before or without
+  `WindowRestored`, and an application-controlled replacement receives its
+  content and retained routes before `RestoreWindow` is triggered.
+- Retain the Phase 11 remote-handler regressions exactly: all six public
+  notification/result events pass through Bevy's `world.observe+watch` handler
+  with every serialized public field, while `RestoreWindow` and
+  `CancelWindowRecovery` pass through `world.trigger_event`.
 - Run full workspace tests/build/lint in both workspaces, not only package-local
   gates.
 - Update public README and unreleased changelog to the stabilized API and
@@ -2370,10 +2462,22 @@ consumer passes, reusing the regressions already added by earlier phases.
 
 - Files explicitly named by the Phase 13–14 retrospectives — change only the
   owner of concrete cross-workspace feedback recorded there.
+- `Cargo.toml` and `Cargo.lock` — retain the workspace test-only remote
+  dependency resolution.
+- `crates/bevy_clerestory/Cargo.toml` — retain `bevy_remote` and `serde_json`
+  only as dev-dependencies.
 - `crates/bevy_clerestory/README.md` — stabilized public docs.
 - `crates/bevy_clerestory/CHANGELOG.md` — unreleased entry.
+- `crates/bevy_clerestory/src/events.rs` — reflected restore-result event
+  owner.
+- `crates/bevy_clerestory/src/monitors/topology.rs` — reflected monitor event
+  owner.
+- `crates/bevy_clerestory/src/recovery/application_controlled.rs` — remote
+  restore request test owner.
 - `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — retain the
   Phase 10 same-update relocation regression; change only for a concrete gap.
+- `crates/bevy_clerestory/src/recovery/registration.rs` — remote cancellation
+  and public event observation test owner.
 - `../hana/Cargo.toml` and `../hana/Cargo.lock` — retain local checkout.
 - `../hana/crates/hana/src/window_recovery.rs` — final editor consumer.
 - `../hana/crates/hana/src/screens/connection.rs` — final screen consumer.
@@ -2388,7 +2492,8 @@ topology installation, with `CurrentCaptureSuppressed` protecting the frozen
 placement and no native/global monitor metadata polling. Phases 9–12 own the
 remaining attempt and reconstruction regressions; this phase audits and reruns
 them instead of replacing their owners. Public documentation must not promise
-front-to-back ordering for reconstructed windows.
+front-to-back ordering for reconstructed windows. Preserve the exact reflected
+namespaces from Phase 11 and keep `bevy_remote` and `serde_json` test-only.
 
 **Acceptance gate:** In both workspaces, final CI-parity Build, full workspace
 Test, and full `clippy` skill gates are green. The Hana dependency resolves to
@@ -2397,7 +2502,12 @@ claim that requires unrecorded physical evidence. Readiness regression tests
 construct monitor relationships from entities in the same test `World` and
 prove rejected associations and managed-role removal perform no native monitor
 polling. The final report maps each required behavior to its existing or newly
-added test and names any Hana-discovered correction.
+added test and names any Hana-discovered correction. It explicitly reports the
+six `world.observe+watch` event cases, the two `world.trigger_event` request
+cases, and the canonical-role content timing checks. The README still states
+one-shot registration, role-add content rebinding, zero-window lifetime, and
+explicit close handling; its reflected type paths remain exact, and event-loop
+doctests compile without running an application loop.
 
 ### Phase 16 — Record the macOS physical matrix  · status: todo
 
@@ -2696,6 +2806,11 @@ development line without changing Hana's dependency prematurely.
   rows; unresolved platform failures block release.
 - Finalize `README.md` and `CHANGELOG.md` with the shipped API, capability
   limits, physical evidence boundary, and migration from 0.1.1.
+- Preserve the public usage contract proven in Phase 11: one-shot recovery
+  registration, application content binding when a canonical window role is
+  added, zero-window process lifetime, explicit close-to-exit handling, and the
+  exact reflected type paths. Keep README examples that start an application
+  loop as non-executing doctests.
 - Use the repository's full `release` skill for `bevy_clerestory`, targeting
   `0.2.0` from the current `0.2.0-dev` line unless the release workflow exposes
   a conflicting version rule.
@@ -2715,12 +2830,14 @@ development line without changing Hana's dependency prematurely.
 
 **Constraints from prior phases:** Phase 15 freezes automated behavior; Phases
 16–19 supply required native evidence. Hana remains on the local checkout until
-publication is independently verified.
+publication is independently verified. Phase 11's README behavior and doctest
+contracts remain part of the released public API documentation.
 
 **Acceptance gate:** The full `release` workflow completes for
 `bevy_clerestory` 0.2.0, the published package is verified, release metadata and
-tag/changelog are consistent, and no Hana dependency file changes in this
-phase.
+tag/changelog are consistent, the README contracts above remain intact, its
+event-loop doctests compile without running, and no Hana dependency file changes
+in this phase.
 
 ### Phase 21 — Move Hana to the published release  · status: todo
 

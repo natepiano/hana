@@ -262,11 +262,16 @@ pub(super) fn on_restore_window(
 
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::system::In;
+    use bevy::reflect::TypePath;
     use bevy::window::ClosingWindow;
     use bevy::window::OnMonitor;
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowMode;
     use bevy_kana::ToI32;
+    use bevy_remote::builtin_methods::process_remote_trigger_event_request;
+    use serde_json::Value;
+    use serde_json::json;
 
     use super::*;
     use crate::ManagedWindow;
@@ -421,6 +426,28 @@ mod tests {
     ) {
         app.insert_resource(Monitors::from_test_monitors(monitors));
         app.insert_resource(MonitorTopologyRevision::from_test_raw(revision));
+    }
+
+    #[test]
+    fn remote_restore_request_reaches_the_application_observer() {
+        let mut app = App::new();
+        app.init_resource::<ExplicitRestoreRequests>()
+            .add_observer(on_restore_window);
+        let requested_entity = app.world_mut().spawn_empty().id();
+        let other_entity = app.world_mut().spawn_empty().id();
+
+        let params = json!({
+            "event": <RestoreWindow as TypePath>::type_path(),
+            "value": { "entity": requested_entity.to_bits() },
+        });
+        assert_eq!(
+            process_remote_trigger_event_request(In(Some(params)), app.world_mut()),
+            Ok(Value::Null)
+        );
+
+        let requests = app.world().resource::<ExplicitRestoreRequests>();
+        assert_eq!(requests.entities, [requested_entity]);
+        assert_ne!(requests.entities, [other_entity]);
     }
 
     #[test]
