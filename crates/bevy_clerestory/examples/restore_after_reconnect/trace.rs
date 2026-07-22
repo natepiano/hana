@@ -100,7 +100,6 @@ impl ProbeTrace {
         state.records.push(record);
     }
 
-    #[cfg(test)]
     pub(crate) fn records(&self) -> Vec<TraceRecord> {
         match self.0.lock() {
             Ok(state) => state.records.clone(),

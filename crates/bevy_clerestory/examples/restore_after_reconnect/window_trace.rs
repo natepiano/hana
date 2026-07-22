@@ -121,6 +121,7 @@ pub(super) fn trace_os_window_events(
     mut events: MessageReader<WindowEvent>,
     bindings: Res<WindowBindings>,
     windows: Query<(Has<PrimaryWindow>, Option<&ManagedWindow>)>,
+    window_components: Query<&Window>,
     trace: Res<ProbeTrace>,
     frame_count_resource: Res<FrameCount>,
     mut app_exit: MessageWriter<AppExit>,
@@ -134,6 +135,13 @@ pub(super) fn trace_os_window_events(
                 KIND_WINDOW_CREATED,
                 vec![
                     field(FIELD_WINDOW, event.window),
+                    field(
+                        FIELD_WINDOW_TITLE,
+                        window_components
+                            .get(event.window)
+                            .ok()
+                            .map(|window| &window.title),
+                    ),
                     field(
                         FIELD_WINDOW_KEY,
                         window_key(event.window, &bindings, &windows),
@@ -268,6 +276,7 @@ pub(super) fn trace_window_component_changes(
         let mut fields = vec![
             field(FIELD_WINDOW, entity),
             field(FIELD_WINDOW_KEY, &window_key),
+            field(FIELD_WINDOW_TITLE, &window.title),
             field(FIELD_WINDOW_POSITION, window.position),
             field(FIELD_WINDOW_SIZE, window.resolution.physical_size()),
             field(FIELD_WINDOW_MODE, window.mode),
