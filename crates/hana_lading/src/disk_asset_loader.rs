@@ -17,6 +17,15 @@ pub struct DiskAssetLoader<'a> {
 }
 
 impl DiskAssetLoader<'_> {
+    pub(crate) const fn new(asset_server: &AssetServer) -> DiskAssetLoader<'_> {
+        DiskAssetLoader {
+            asset_server,
+            handles: Vec::new(),
+        }
+    }
+
+    pub(crate) fn into_handles(self) -> Vec<UntypedHandle> { self.handles }
+
     /// Starts a tracked load for `A` at `path`.
     ///
     /// The returned typed handle belongs in the asset-set resource. The loader

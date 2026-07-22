@@ -19,3 +19,6 @@ bevy_app   = { workspace = true }
 bevy_asset = { workspace = true }
 bevy_ecs   = { workspace = true }
 tracing    = { workspace = true }
+
+[dev-dependencies]
+bevy = { workspace = true }

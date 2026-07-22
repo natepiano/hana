@@ -24,6 +24,14 @@ pub struct LoadFailed<T: DiskAssets> {
 }
 
 impl<T: DiskAssets> LoadFailed<T> {
+    pub(crate) const fn new(tracked_path: AssetPath<'static>, error: Arc<AssetLoadError>) -> Self {
+        Self {
+            tracked_path,
+            error,
+            marker: PhantomData,
+        }
+    }
+
     /// Returns the tracked asset path that failed to resolve.
     #[must_use]
     pub const fn tracked_path(&self) -> &AssetPath<'static> { &self.tracked_path }
@@ -43,6 +51,18 @@ pub struct AssetSetLoadFailed {
 }
 
 impl AssetSetLoadFailed {
+    pub(crate) fn new<T: DiskAssets>(
+        tracked_path: AssetPath<'static>,
+        error: Arc<AssetLoadError>,
+    ) -> Self {
+        Self {
+            set_type_id: TypeId::of::<T>(),
+            set_name: std::any::type_name::<T>(),
+            tracked_path,
+            error,
+        }
+    }
+
     /// Returns the [`TypeId`] of the failed [`DiskAssets`] implementation.
     #[must_use]
     pub const fn set_type_id(&self) -> TypeId { self.set_type_id }
@@ -72,6 +92,8 @@ pub struct AllSetsResolved {
 }
 
 impl AllSetsResolved {
+    pub(crate) const fn new(failures: usize) -> Self { Self { failures } }
+
     /// Returns the number of asset sets that failed.
     #[must_use]
     pub const fn failures(&self) -> usize { self.failures }
@@ -86,6 +108,19 @@ pub struct LoadProgress {
 }
 
 impl LoadProgress {
+    pub(crate) const fn register_set(&mut self) { self.total += 1; }
+
+    pub(crate) const fn resolve_loaded(&mut self) { self.resolved += 1; }
+
+    pub(crate) const fn resolve_failure(&mut self) {
+        self.resolved += 1;
+        self.failures += 1;
+    }
+
+    pub(crate) const fn is_complete(&self) -> bool { self.resolved == self.total }
+
+    pub(crate) const fn failures(&self) -> usize { self.failures }
+
     /// Returns the number of asset sets that resolved successfully.
     #[must_use]
     pub const fn loaded(&self) -> usize { self.resolved - self.failures }
@@ -93,4 +128,16 @@ impl LoadProgress {
     /// Returns the total number of registered asset sets.
     #[must_use]
     pub const fn total(&self) -> usize { self.total }
+}
+
+impl<T: DiskAssets> Loaded<T> {
+    pub(crate) const fn new() -> Self {
+        Self {
+            marker: PhantomData,
+        }
+    }
+}
+
+impl AllSetsLoaded {
+    pub(crate) const fn new() -> Self { Self }
 }

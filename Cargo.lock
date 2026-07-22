@@ -3304,6 +3304,7 @@ dependencies = [
 name = "hana_lading"
 version = "0.0.1"
 dependencies = [
+ "bevy",
  "bevy_app",
  "bevy_asset",
  "bevy_ecs",

@@ -206,7 +206,7 @@ above; all public API is documented.
 - Phase 4 now expands the existing overview and names its state, PNG, fixture,
   and isolated-example requirements.
 
-### Phase 2 — Runtime machinery · status: todo
+### Phase 2 — Runtime machinery · status: done (`22edae32`)
 
 #### Work Order
 
@@ -295,6 +295,51 @@ completes.
 passes. `cargo nextest run -p hana_lading --all-features` also passes so
 workspace feature unification cannot mask the test-only reflection backend.
 
+#### Retrospective
+
+**What worked:**
+
+- `DiskAssetsPlugin<T>` now performs the complete startup load, recursive-state
+  polling, typed and type-erased terminal notification, global finalization,
+  slow-load notice, and tracking teardown described by the Work Order.
+- The release examples build, all 1,222 workspace tests pass, the isolated
+  `hana_lading` test passes, lint and rustdoc pass, and a standalone executable
+  loaded a real file through Bevy before observing the promised completion
+  order and `LoadProgress` lifetime.
+
+**What deviated from the plan:**
+
+- The final style pass replaced a Boolean loading-state accumulator with the
+  existing `SetResolution` enum so the first failed handle remains typed and in
+  declaration order throughout the fold.
+- The missing-`AssetServer` and empty-set diagnostics use assertions where the
+  Work Order calls for assertions; the remaining explicit `panic!` sites retain
+  their scoped, reasoned allowances.
+
+**Surprises:**
+
+- The first delegated verification report exited while describing a workspace
+  test as still running. The orchestrator therefore reran every acceptance gate
+  itself instead of accepting that report as evidence.
+
+**Implications for remaining phases:**
+
+- Phase 3 can test the public runtime directly; the only private test access it
+  still needs is the existing pathless-handle recording seam beside
+  `DiskAssetLoader`.
+- Recursive-dependency and multiple-failure tests should exercise the shipped
+  `SetResolution` fold so declaration-order failure evidence remains covered.
+
+#### Phase 2 Review
+
+- Phase 3 now requires bounded asynchronous update helpers, a one-set
+  declaration-order failure test, and successful `load_with_settings` coverage.
+- Phase 4 now verifies each running example through BRP and terminates it through
+  `brp_extras/shutdown` after collecting the observable result.
+- Phase 4 carries a deferred decision about adding a Fairy Dust asset-root
+  constructor because `sprinkle_example()` installs `AssetPlugin` before its
+  builder is available.
+
 ### Phase 3 — Contract test suite · status: todo
 
 #### Work Order
@@ -315,10 +360,20 @@ initially returns a `Loading` handle; the asynchronous read produces
 `AssetReaderError::NotFound`; Bevy records failed root, dependency, and recursive
 states before `hana_lading` polls in `Update`.
 
+Share a bounded update helper across integration tests. It must stop on the
+expected terminal observation or fail at a named deadline so asynchronous asset
+work cannot hang nextest. The recursive-dependency loader must use an explicit
+test-controlled release mechanism for its child rather than relying on timing.
+The exit-pattern app uses `ScheduleRunnerPlugin::run_loop` plus an independent
+deadline system that exits with a non-error result if the expected asset failure
+does not arrive; the test then requires `app.run()` to return the error variant.
+
 Required tests:
 
 1. `success_two_sets`: each set emits `Loaded<T>` once; clean global events are
    ordered; progress is readable during global observers and removed afterward.
+   At least one handle uses `load_with_settings`, and the loaded test asset proves
+   that its custom loader setting was applied.
 2. `failure_missing_file`: generic and typed failures agree on path and error;
    `AllSetsLoaded` is absent; global resolution reports one failed set.
 3. `two_failures_one_frame`: direct `ResMut` recording sees both set failures
@@ -336,6 +391,9 @@ Required tests:
 8. `exit_on_failure_pattern`: an app using `ScheduleRunnerPlugin` converts a
    generic failure into `AppExit::error()` through `MessageWriter<AppExit>` and
    `app.run()` returns the error variant.
+9. `first_failure_follows_declaration_order`: one set declares at least two
+   missing roots that fail in the same polling pass; typed and generic evidence
+   both name the first declared root.
 
 **Files:**
 
@@ -354,8 +412,11 @@ Required tests:
   second test dependency.
 - Public completion-event fields remain read-only, and `LoadProgress` is a
   resource that observers may read until global finalization removes it.
+- `check_set` folds each handle into `SetResolution` and preserves the first
+  failed root by declaration order; the multi-root test must exercise that
+  shipped path rather than reimplementing failure selection in the harness.
 
-**Acceptance gate:** All eight tests pass under `cargo nextest run --all-features
+**Acceptance gate:** All nine tests pass under `cargo nextest run --all-features
 --workspace --tests`; `cargo nextest run -p hana_lading --all-features` passes in
 isolation; the `clippy` skill passes.
 
@@ -367,6 +428,27 @@ isolation; the `clippy` skill passes.
 how applications can make safe, explicit decisions after partial or complete
 failure. Documentation names which guarantees come from `hana_lading` and which
 policy remains application-owned.
+
+**Pending decision: configure a crate-local asset root before Fairy Dust installs Bevy plugins**
+
+Actual problem:
+`fairy_dust::sprinkle_example()` installs `DefaultPlugins` immediately, so
+Phase 4 cannot replace `AssetPlugin::file_path` with
+`CARGO_MANIFEST_DIR/assets` after receiving the builder.
+
+What exists now:
+- The examples must use the Fairy Dust chain, while their successful PNG is
+  intentionally package-owned under `crates/hana_lading/assets/`.
+
+What should change:
+- Add a narrow Fairy Dust constructor that accepts an asset root before
+  `DefaultPlugins` are installed, and allow that constructor in the documented
+  takeover/error exception.
+
+Recommendation:
+Add `fairy_dust::sprinkle_example_with_asset_root(...)`, implement it beside
+`sprinkle_example()` in `crates/fairy_dust/src/lib.rs`, and update the Phase 4
+Spec, Files, canonical-example exception, and examples to use it.
 
 **Spec:**
 
@@ -439,11 +521,13 @@ cargo run -p hana_lading --example catastrophic_failure
 - The package already has a workspace-inherited `bevy` dev-dependency with the
   reflection backend and image/PNG features; extend it with state support.
 
-**Acceptance gate:** Workspace build including examples passes; both examples
-launch and visibly reach their documented outcome; the example source and
-documentation identify all six protections above; the canonical-example
-exception is present; `cargo build -p hana_lading --all-features --examples`
-passes in isolation; the `clippy` skill passes.
+**Acceptance gate:** Workspace build including examples passes. Launch each
+example, use BRP to inspect its application state, durable failure record, and
+rendered panel content, then terminate it through `brp_extras/shutdown`; each
+inspection must match the documented catastrophic or degraded outcome. The
+example source and documentation identify all six protections above; the
+canonical-example exception is present; `cargo build -p hana_lading
+--all-features --examples` passes in isolation; the `clippy` skill passes.
 
 ## Handoff to Hana
 
