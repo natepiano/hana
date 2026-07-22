@@ -159,6 +159,7 @@ impl Plugin for WidgetsPlugin {
             .add_observer(button::cancel_from_widget_removal)
             .add_observer(button::cancel_before_widget_despawn)
             .add_observer(button::handle_semantic_intent)
+            .add_observer(button::dispatch_click_callback)
             .add_systems(
                 PreUpdate,
                 button::reconcile_pointer_input

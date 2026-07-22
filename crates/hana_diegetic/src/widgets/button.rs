@@ -1,9 +1,20 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
+use std::fmt::Formatter;
+use std::sync::Arc;
 
 use bevy::ecs::change_detection::MaybeLocation;
+use bevy::ecs::error::BevyError;
 use bevy::ecs::lifecycle::HookContext;
+use bevy::ecs::system::SystemHandle;
+use bevy::ecs::system::SystemHandleTemplate;
+use bevy::ecs::system::SystemId;
+use bevy::ecs::template::SceneEntityReferences;
+use bevy::ecs::template::Template;
+use bevy::ecs::template::TemplateContext;
 use bevy::ecs::world::DeferredWorld;
+use bevy::ecs::world::EntityWorldMut;
 use bevy::picking::PickingSettings;
 use bevy::picking::events::PointerState;
 use bevy::picking::hover::HoverMap;
@@ -22,18 +33,74 @@ use crate::ime;
 use crate::ime::ImeBlurIntent;
 use crate::ime::ImeEditorState;
 
+/// Cloneable authored click callback, compared by [`Arc`] identity so the
+/// enclosing authored `Button` (and its `WidgetSpec`) stays `PartialEq`.
+#[derive(Clone)]
+pub(crate) struct ButtonCallback(Arc<SystemHandleTemplate<In<ButtonClicked>, ()>>);
+
+impl ButtonCallback {
+    fn new<M>(system: impl IntoSystem<In<ButtonClicked>, (), M>) -> Self {
+        Self(Arc::new(SystemHandleTemplate::value(system)))
+    }
+
+    /// Returns the tracked [`SystemHandle`] for this callback.
+    ///
+    /// The first build registers the callback as a tracked system;
+    /// later builds of the same callback return the cached handle without
+    /// registering again.
+    pub(crate) fn build_handle(
+        &self,
+        widget: &mut EntityWorldMut<'_>,
+    ) -> Result<SystemHandle<In<ButtonClicked>, ()>, BevyError> {
+        let mut entity_references = SceneEntityReferences::default();
+        self.0
+            .as_ref()
+            .build_template(&mut TemplateContext::new(widget, &mut entity_references))
+    }
+}
+
+impl PartialEq for ButtonCallback {
+    fn eq(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) }
+}
+
+impl Eq for ButtonCallback {}
+
+impl fmt::Debug for ButtonCallback {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ButtonCallback")
+            .finish_non_exhaustive()
+    }
+}
+
 /// Authored configuration for a panel button.
 ///
 /// Attach it to an element with [`El::button`](crate::El::button).
 #[must_use]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Button {
-    marker: (),
+    callback: Option<ButtonCallback>,
 }
 
 impl Button {
     /// Creates a button declaration with default behavior.
-    pub const fn new() -> Self { Self { marker: () } }
+    pub const fn new() -> Self { Self { callback: None } }
+
+    /// Runs `system` with each completed [`ButtonClicked`] for this button.
+    ///
+    /// The callback is an ordinary Bevy system taking `In<ButtonClicked>`
+    /// plus any other system parameters. Reify registers it once as a tracked
+    /// system; authoring the same widget id with a different
+    /// callback releases the prior tracked handle, and dropping the final
+    /// handle unregisters the system. This sugar complements direct
+    /// [`ButtonClicked`] observation — a global or entity-scoped observer
+    /// reads the widget entity from the event target.
+    pub fn on_click<M>(mut self, system: impl IntoSystem<In<ButtonClicked>, (), M>) -> Self {
+        self.callback = Some(ButtonCallback::new(system));
+        self
+    }
+
+    pub(crate) const fn callback(&self) -> Option<&ButtonCallback> { self.callback.as_ref() }
 }
 
 /// Reports the beginning of a pointer-driven button press.
@@ -111,6 +178,23 @@ pub enum ButtonCancelCause {
     on_despawn = emit_button_terminal
 )]
 pub(crate) struct ButtonPress;
+
+/// Tracked handle to a widget's registered click-callback system.
+///
+/// Reify installs and replaces this component; dropping it releases the
+/// widget's strong handle so Bevy can clean up the registered system once the
+/// final handle is gone.
+#[derive(Component)]
+pub(crate) struct ButtonCallbackHandle(SystemHandle<In<ButtonClicked>, ()>);
+
+impl ButtonCallbackHandle {
+    pub(super) const fn new(handle: SystemHandle<In<ButtonClicked>, ()>) -> Self { Self(handle) }
+
+    fn system_id(&self) -> SystemId<In<ButtonClicked>> { SystemId::from(&self.0) }
+
+    #[cfg(test)]
+    pub(super) fn system_entity(&self) -> Entity { self.0.entity() }
+}
 
 struct CapturedButtonPress {
     entity:   Entity,
@@ -706,6 +790,24 @@ pub(super) fn handle_semantic_intent(
     }
 }
 
+/// Runs the clicked widget's authored callback with the completed event.
+///
+/// `WidgetsPlugin` installs this single global [`ButtonClicked`] observer;
+/// reify never installs a per-widget observer. The observer reads only the
+/// target's [`ButtonCallbackHandle`] and forwards the finished event — it
+/// never touches [`ButtonPress`] or [`ButtonCaptures`], whose pointer
+/// lifecycle and semantic activation are resolved before dispatch.
+pub(super) fn dispatch_click_callback(
+    click: On<ButtonClicked>,
+    handles: Query<&ButtonCallbackHandle>,
+    mut commands: Commands,
+) {
+    let Ok(handle) = handles.get(click.event_target()) else {
+        return;
+    };
+    commands.run_system_with(handle.system_id(), click.event().clone());
+}
+
 fn emit_button_terminal(mut world: DeferredWorld, context: HookContext) {
     let entity = context.entity;
     let (id, pointer_id, terminal) = {
@@ -800,6 +902,7 @@ pub(crate) fn finalize_panel_buttons(
 #[cfg(test)]
 mod tests {
     use bevy::camera::NormalizedRenderTarget;
+    use bevy::ecs::observer::ObservedBy;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::input::ButtonState;
     use bevy::input::InputPlugin;
@@ -811,6 +914,7 @@ mod tests {
     use bevy::picking::PickingSettings;
     use bevy::picking::PickingSystems;
     use bevy::picking::backend::HitData;
+    use bevy::picking::backend::PointerHits;
     use bevy::picking::events::PointerState;
     use bevy::picking::events::pointer_events;
     use bevy::picking::hover::HoverMap;
@@ -910,6 +1014,12 @@ mod tests {
     struct PanelClicks(usize);
 
     #[derive(Default, Resource)]
+    struct CallbackClicks(Vec<(Entity, Option<PointerId>)>);
+
+    #[derive(Default, Resource)]
+    struct ScopedClicks(Vec<Entity>);
+
+    #[derive(Default, Resource)]
     struct ImeObservation {
         starts:        usize,
         opens:         usize,
@@ -953,6 +1063,14 @@ mod tests {
 
     fn record_panel_click(_event: On<Pointer<Click>>, mut clicks: ResMut<PanelClicks>) {
         clicks.0 += 1;
+    }
+
+    fn record_callback_click(click: In<ButtonClicked>, mut clicks: ResMut<CallbackClicks>) {
+        clicks.0.push((click.entity, click.pointer_id));
+    }
+
+    fn record_scoped_click(click: On<ButtonClicked>, mut clicks: ResMut<ScopedClicks>) {
+        clicks.0.push(click.event_target());
     }
 
     fn record_ime_started(_event: On<ImeStarted>, mut observation: ResMut<ImeObservation>) {
@@ -1119,6 +1237,15 @@ mod tests {
     fn button_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button(BUTTON_ID, Button::new()), |_| {});
+        builder.build()
+    }
+
+    fn callback_button_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().button(BUTTON_ID, Button::new().on_click(record_callback_click)),
+            |_| {},
+        );
         builder.build()
     }
 
@@ -1770,7 +1897,7 @@ mod tests {
     fn disabled_hover_processing_cancels_raw_release_once() {
         let pointer_id = PointerId::Touch(53);
         let mut app = pointer_events_test_app(pointer_id);
-        app.add_message::<bevy::picking::backend::PointerHits>();
+        app.add_message::<PointerHits>();
         let widget = spawn_button(&mut app);
         set_hover_maps(&mut app, pointer_id, &[widget], &[widget]);
         run_pointer_actions(
@@ -2259,6 +2386,71 @@ mod tests {
 
         assert_eq!(events(&app), [RecordedButtonEvent::Clicked(None)]);
         assert!(app.world().get::<ButtonPress>(widget).is_none());
+    }
+
+    #[test]
+    fn on_click_receives_pointer_and_semantic_clicks() {
+        let mut app = integrated_test_app();
+        app.init_resource::<CallbackClicks>();
+        let panel = spawn_panel(&mut app, callback_button_tree());
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        let pointer_id = PointerId::Mouse;
+
+        press(&mut app, widget, pointer_id);
+        click(&mut app, widget, pointer_id);
+        release(&mut app, widget, pointer_id);
+        app.world_mut()
+            .trigger(SemanticWidgetIntent::Activate { entity: widget });
+        app.world_mut().flush();
+
+        assert_eq!(
+            app.world().resource::<CallbackClicks>().0,
+            [(widget, Some(pointer_id)), (widget, None)]
+        );
+    }
+
+    #[test]
+    fn one_plugin_observer_dispatches_and_the_widget_owns_no_observer() {
+        let mut app = integrated_test_app();
+        app.init_resource::<CallbackClicks>();
+        let panel = spawn_panel(&mut app, callback_button_tree());
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        assert!(
+            app.world().get::<ObservedBy>(widget).is_none(),
+            "reify must not install a per-widget observer",
+        );
+
+        let pointer_id = PointerId::Mouse;
+        press(&mut app, widget, pointer_id);
+        click(&mut app, widget, pointer_id);
+        release(&mut app, widget, pointer_id);
+
+        assert_eq!(
+            app.world().resource::<CallbackClicks>().0,
+            [(widget, Some(pointer_id))],
+            "exactly one observer dispatches the callback per click",
+        );
+    }
+
+    #[test]
+    fn entity_scoped_observer_on_reader_resolved_widget_receives_the_click() {
+        let mut app = integrated_test_app();
+        app.init_resource::<ScopedClicks>();
+        let panel = spawn_panel(&mut app, button_tree());
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        app.world_mut()
+            .entity_mut(widget)
+            .observe(record_scoped_click);
+
+        let pointer_id = PointerId::Mouse;
+        press(&mut app, widget, pointer_id);
+        click(&mut app, widget, pointer_id);
+        release(&mut app, widget, pointer_id);
+
+        assert_eq!(app.world().resource::<ScopedClicks>().0, [widget]);
     }
 
     #[test]

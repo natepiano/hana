@@ -7,6 +7,7 @@ use bevy::picking::mesh_picking::MeshPickingCamera;
 use bevy::picking::mesh_picking::MeshPickingSettings;
 use bevy::picking::mesh_picking::ray_cast::MeshRayCast;
 use bevy::picking::mesh_picking::ray_cast::MeshRayCastSettings;
+use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
 use bevy::prelude::*;
 
 use super::PanelWidget;
@@ -143,6 +144,11 @@ pub(super) fn update_hits(
     mut ray_cast: MeshRayCast,
     mut pointer_hits: MessageWriter<PointerHits>,
 ) {
+    let pickable_markers = if backend_settings.require_markers {
+        PickableMarkers::Required
+    } else {
+        PickableMarkers::Optional
+    };
     for (&ray_id, &ray) in ray_map.iter() {
         let Ok((camera, camera_can_pick, camera_layers)) = picking_cameras.get(ray_id.camera)
         else {
@@ -194,43 +200,16 @@ pub(super) fn update_hits(
             let Ok(ownership) = interaction_meshes.get(*mesh_entity) else {
                 continue;
             };
-            let panel_entity = ownership.owner();
-            let Ok((panel, computed, panel_transform, panel_widgets, panel_picking)) =
-                panels.get(panel_entity)
-            else {
+            let Some((face_hit, matching_widgets)) = resolve_face_hit(
+                ray_id.camera,
+                ray,
+                hit,
+                ownership.owner(),
+                pickable_markers,
+                &panels,
+                &widgets,
+            ) else {
                 continue;
-            };
-            let Some(face_behavior) = face_behavior(panel, panel_transform, panel_picking, ray)
-            else {
-                continue;
-            };
-            let Some(panel_local) =
-                render::project_flat_panel_hit(hit.point, panel, panel_transform)
-            else {
-                continue;
-            };
-
-            let matching_widgets = face_behavior.includes_widgets().then(|| {
-                matching_widgets(
-                    panel_entity,
-                    panel_local,
-                    computed,
-                    panel_widgets,
-                    &widgets,
-                    if backend_settings.require_markers {
-                        PickableMarkers::Required
-                    } else {
-                        PickableMarkers::Optional
-                    },
-                )
-            });
-            let face_hit = FaceHit {
-                camera:   ray_id.camera,
-                panel:    panel_entity,
-                point:    hit.point,
-                normal:   hit.normal,
-                distance: hit.distance,
-                behavior: face_behavior,
             };
             if matches!(
                 append_face_picks(&mut picks, face_hit, matching_widgets, &pickables),
@@ -248,6 +227,51 @@ pub(super) fn update_hits(
             ));
         }
     }
+}
+
+/// Resolves one interaction-mesh ray hit into its per-face pick inputs: the
+/// owning panel's [`FaceHit`] and, when the face includes widgets, the
+/// rank-sorted widgets under the hit point.
+fn resolve_face_hit(
+    camera: Entity,
+    ray: Ray3d,
+    hit: &RayMeshHit,
+    panel_entity: Entity,
+    pickable_markers: PickableMarkers,
+    panels: &Query<(
+        &DiegeticPanel,
+        &ComputedDiegeticPanel,
+        &GlobalTransform,
+        Option<&PanelWidgets>,
+        Option<&PanelPicking>,
+    )>,
+    widgets: &Query<(&PanelWidget, &WidgetOf, Option<&Pickable>)>,
+) -> Option<(FaceHit, Option<Vec<(usize, Entity)>>)> {
+    let (panel, computed, panel_transform, panel_widgets, panel_picking) =
+        panels.get(panel_entity).ok()?;
+    let face_behavior = face_behavior(panel, panel_transform, panel_picking, ray)?;
+    let panel_local = render::project_flat_panel_hit(hit.point, panel, panel_transform)?;
+    let matching_widgets = face_behavior.includes_widgets().then(|| {
+        matching_widgets(
+            panel_entity,
+            panel_local,
+            computed,
+            panel_widgets,
+            widgets,
+            pickable_markers,
+        )
+    });
+    Some((
+        FaceHit {
+            camera,
+            panel: panel_entity,
+            point: hit.point,
+            normal: hit.normal,
+            distance: hit.distance,
+            behavior: face_behavior,
+        },
+        matching_widgets,
+    ))
 }
 
 fn append_face_picks(

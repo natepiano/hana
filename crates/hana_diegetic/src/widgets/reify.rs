@@ -20,6 +20,8 @@ use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
 use super::button;
+use super::button::ButtonCallback;
+use super::button::ButtonCallbackHandle;
 use super::button::ButtonCancelCause;
 use super::button::ButtonCaptures;
 use crate::PanelElementId;
@@ -217,6 +219,7 @@ fn spawn_widget(
 ) -> Entity {
     let transform = anchor_rect.transform();
     let global_transform = panel_global.mul_transform(transform);
+    let callback = widget_callback(&authored).cloned();
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel).with_children(|children| {
         spawned = children
@@ -236,6 +239,9 @@ fn spawn_widget(
             ))
             .id();
     });
+    if let Some(callback) = callback {
+        install_callback_handle(commands, spawned, callback);
+    }
     spawned
 }
 
@@ -304,6 +310,43 @@ fn update_widget(
     if existing_cascade_from.is_none_or(|relationship| relationship.target() != panel) {
         widget.insert(CascadeFrom::new(panel));
     }
+    let existing_callback = widget_callback(existing_authored);
+    let next_callback = widget_callback(authored);
+    if existing_callback != next_callback {
+        match next_callback.cloned() {
+            Some(callback) => install_callback_handle(commands, entity, callback),
+            None => {
+                commands.entity(entity).remove::<ButtonCallbackHandle>();
+            },
+        }
+    }
+}
+
+const fn widget_callback(authored: &WidgetSpec) -> Option<&ButtonCallback> {
+    match authored {
+        WidgetSpec::Button(button) => button.callback(),
+        WidgetSpec::Slider(_) => None,
+    }
+}
+
+/// Builds the tracked handle for `callback` on the world and stores it on the
+/// widget, replacing (and thereby releasing) any prior tracked handle.
+fn install_callback_handle(
+    commands: &mut Commands<'_, '_>,
+    entity: Entity,
+    callback: ButtonCallback,
+) {
+    commands.queue(move |world: &mut World| {
+        let Ok(mut widget) = world.get_entity_mut(entity) else {
+            return;
+        };
+        match callback.build_handle(&mut widget) {
+            Ok(handle) => {
+                widget.insert(ButtonCallbackHandle::new(handle));
+            },
+            Err(error) => error!("failed to register button click callback: {error}"),
+        }
+    });
 }
 
 pub(super) fn update_world_anchor_geometry(
@@ -569,7 +612,12 @@ fn retire_anchor_geometry(commands: &mut Commands<'_, '_>, panel: Entity, widget
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use bevy::camera::NormalizedRenderTarget;
     use bevy::ecs::system::RunSystemOnce;
+    use bevy::ecs::system::SystemIdMarker;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::Location;
+    use bevy::picking::pointer::PointerId;
     use bevy::prelude::*;
     use bevy::transform::TransformPlugin;
     use bevy::window::PrimaryWindow;
@@ -583,6 +631,7 @@ mod tests {
     use super::WidgetPreorder;
     use crate::Anchor;
     use crate::Button;
+    use crate::ButtonClicked;
     use crate::ComputedDiegeticPanel;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
@@ -612,6 +661,8 @@ mod tests {
     use crate::widgets::WidgetKind;
     use crate::widgets::WidgetSpec;
     use crate::widgets::WidgetsPlugin;
+    use crate::widgets::button::ButtonCallbackHandle;
+    use crate::widgets::button::ButtonPress;
 
     #[derive(Bundle)]
     struct TestAttachment {
@@ -649,6 +700,29 @@ mod tests {
 
     #[derive(Component)]
     struct ApplicationData;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum CallbackSource {
+        Authored,
+        Replacement,
+    }
+
+    #[derive(Default, Resource)]
+    struct CallbackRuns(Vec<(CallbackSource, Option<PointerId>)>);
+
+    fn record_authored_callback(click: In<ButtonClicked>, mut runs: ResMut<CallbackRuns>) {
+        runs.0.push((CallbackSource::Authored, click.pointer_id));
+    }
+
+    fn record_replacement_callback(click: In<ButtonClicked>, mut runs: ResMut<CallbackRuns>) {
+        runs.0.push((CallbackSource::Replacement, click.pointer_id));
+    }
+
+    fn callback_tree(button: Button) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("action", button), |_| {});
+        builder.build()
+    }
 
     fn widget_tree(ids: &[&str]) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -823,6 +897,73 @@ mod tests {
             .run_system_once(move |reader: PanelWidgetReader| reader.entity(panel, &id))
             .ok()
             .flatten()
+    }
+
+    fn callback_system_entity(app: &App, widget: Entity) -> Option<Entity> {
+        app.world()
+            .get::<ButtonCallbackHandle>(widget)
+            .map(ButtonCallbackHandle::system_entity)
+    }
+
+    fn system_marker_count(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&SystemIdMarker>()
+            .iter(app.world())
+            .count()
+    }
+
+    fn pointer_location() -> Location {
+        Location {
+            target:   NormalizedRenderTarget::None {
+                width:  1,
+                height: 1,
+            },
+            position: Vec2::ZERO,
+        }
+    }
+
+    fn pointer_hit() -> HitData { HitData::new(Entity::PLACEHOLDER, 0.0, None, None) }
+
+    fn press_widget(app: &mut App, widget: Entity, pointer_id: PointerId) {
+        app.world_mut().trigger(Pointer::new(
+            pointer_id,
+            pointer_location(),
+            Press {
+                button: PointerButton::Primary,
+                hit:    pointer_hit(),
+                count:  1,
+            },
+            widget,
+        ));
+        app.world_mut().flush();
+    }
+
+    fn click_widget(app: &mut App, widget: Entity, pointer_id: PointerId) {
+        app.world_mut().trigger(Pointer::new(
+            pointer_id,
+            pointer_location(),
+            Click {
+                button:   PointerButton::Primary,
+                hit:      pointer_hit(),
+                duration: std::time::Duration::ZERO,
+                count:    1,
+            },
+            widget,
+        ));
+        app.world_mut().flush();
+    }
+
+    fn release_widget(app: &mut App, widget: Entity, pointer_id: PointerId) {
+        app.world_mut().trigger(Pointer::new(
+            pointer_id,
+            pointer_location(),
+            Release {
+                button: PointerButton::Primary,
+                hit:    pointer_hit(),
+            },
+            widget,
+        ));
+        app.world_mut().flush();
     }
 
     #[track_caller]
@@ -1682,5 +1823,125 @@ mod tests {
         assert!(replacement.is_some());
         app.world_mut().entity_mut(panel).despawn();
         assert!(replacement.is_some_and(|entity| app.world().get_entity(entity).is_err()));
+    }
+
+    #[test]
+    fn identical_tree_replacement_reuses_the_tracked_callback_without_reregistering() {
+        let mut app = test_app();
+        app.init_resource::<CallbackRuns>();
+        let tree = callback_tree(Button::new().on_click(record_authored_callback));
+        let panel = spawn_panel(&mut app, tree.clone()).expect("panel should build");
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("action"))
+            .expect("widget should be reified");
+        let system_entity = callback_system_entity(&app, widget)
+            .expect("reify should install a tracked callback handle");
+
+        // The first replacement also registers `set_tree`'s own cached command
+        // system, so the registered-system count is measured after it.
+        app.world_mut()
+            .commands()
+            .set_tree(panel, tree.clone())
+            .expect("identical tree should be accepted");
+        app.update();
+        assert_eq!(callback_system_entity(&app, widget), Some(system_entity));
+        let registered_systems = system_marker_count(&mut app);
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, tree)
+            .expect("repeated identical tree should be accepted");
+        app.update();
+
+        assert_eq!(callback_system_entity(&app, widget), Some(system_entity));
+        assert_eq!(system_marker_count(&mut app), registered_systems);
+
+        let pointer_id = PointerId::Mouse;
+        press_widget(&mut app, widget, pointer_id);
+        click_widget(&mut app, widget, pointer_id);
+        release_widget(&mut app, widget, pointer_id);
+        assert_eq!(
+            app.world().resource::<CallbackRuns>().0,
+            [(CallbackSource::Authored, Some(pointer_id))]
+        );
+    }
+
+    #[test]
+    fn callback_replacement_during_live_press_swaps_the_handle_and_keeps_the_press() {
+        let mut app = test_app();
+        app.init_resource::<CallbackRuns>();
+        let panel = spawn_panel(
+            &mut app,
+            callback_tree(Button::new().on_click(record_authored_callback)),
+        )
+        .expect("panel should build");
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("action"))
+            .expect("widget should be reified");
+        let authored_system = callback_system_entity(&app, widget)
+            .expect("reify should install a tracked callback handle");
+
+        let pointer_id = PointerId::Mouse;
+        press_widget(&mut app, widget, pointer_id);
+        assert!(app.world().get::<ButtonPress>(widget).is_some());
+
+        app.world_mut()
+            .commands()
+            .set_tree(
+                panel,
+                callback_tree(Button::new().on_click(record_replacement_callback)),
+            )
+            .expect("replacement tree should be accepted");
+        app.update();
+        app.update();
+
+        let replacement_system = callback_system_entity(&app, widget)
+            .expect("replacement should install exactly one tracked handle");
+        assert_ne!(replacement_system, authored_system);
+        assert!(
+            app.world().get_entity(authored_system).is_err(),
+            "replacement must release only the prior tracked handle",
+        );
+        assert!(app.world().get_entity(replacement_system).is_ok());
+        assert!(
+            app.world().get::<ButtonPress>(widget).is_some(),
+            "callback replacement must not disturb the live press",
+        );
+
+        click_widget(&mut app, widget, pointer_id);
+        release_widget(&mut app, widget, pointer_id);
+        assert_eq!(
+            app.world().resource::<CallbackRuns>().0,
+            [(CallbackSource::Replacement, Some(pointer_id))]
+        );
+    }
+
+    #[test]
+    fn widget_removal_releases_the_final_tracked_callback() {
+        let mut app = test_app();
+        let panel = spawn_panel(
+            &mut app,
+            callback_tree(Button::new().on_click(record_authored_callback)),
+        )
+        .expect("panel should build");
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("action"))
+            .expect("widget should be reified");
+        let system_entity = callback_system_entity(&app, widget)
+            .expect("reify should install a tracked callback handle");
+        assert!(app.world().get_entity(system_entity).is_ok());
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, LayoutBuilder::new(100.0, 50.0).build())
+            .expect("empty tree should be accepted");
+        app.update();
+        app.update();
+
+        assert!(app.world().get_entity(widget).is_err());
+        assert!(
+            app.world().get_entity(system_entity).is_err(),
+            "final tracked-handle drop must release the registered system",
+        );
     }
 }
