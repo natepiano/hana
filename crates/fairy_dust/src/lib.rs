@@ -74,6 +74,12 @@ use bevy::asset::AssetPlugin;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 #[cfg(test)]
+use bevy::render::RenderPlugin;
+#[cfg(test)]
+use bevy::render::settings::RenderCreation;
+#[cfg(test)]
+use bevy::render::settings::WgpuSettings;
+#[cfg(test)]
 use bevy::winit::WinitPlugin;
 use bevy_lagrange::LagrangePlugin;
 pub use bevy_lagrange::OrbitCam;
@@ -191,6 +197,13 @@ pub(crate) fn install_baseline(app: &mut App, asset_plugin: AssetPlugin) {
         DefaultPlugins
             .build()
             .set(asset_plugin)
+            .set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
+                    backends: None,
+                    ..default()
+                })),
+                ..default()
+            })
             .disable::<LogPlugin>()
             .disable::<WinitPlugin>(),
     );
