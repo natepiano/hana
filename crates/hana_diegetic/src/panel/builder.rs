@@ -68,6 +68,21 @@ pub enum PanelBuildError {
     /// A button authored a state material without a background or border.
     #[error("button `{0}` state material requires an authored background or border")]
     ButtonStateMaterialRequiresSurface(PanelElementId),
+    /// A slider-thumb marker sits outside every slider subtree.
+    #[error("slider thumb `{0}` must be inside a slider subtree")]
+    SliderThumbOutsideSlider(PanelElementId),
+    /// A slider subtree marks more than one thumb.
+    #[error("slider `{0}` contains more than one thumb")]
+    SliderHasMultipleThumbs(PanelElementId),
+    /// A slider authored a state background without a normal background.
+    #[error("slider `{0}` state background requires an authored background")]
+    SliderStateBackgroundRequiresBackground(PanelElementId),
+    /// A slider authored a state border color without a normal border.
+    #[error("slider `{0}` state border color requires an authored border")]
+    SliderStateBorderColorRequiresBorder(PanelElementId),
+    /// A slider authored a state material without a background or border.
+    #[error("slider `{0}` state material requires an authored background or border")]
+    SliderStateMaterialRequiresSurface(PanelElementId),
 }
 
 // ── Typestate marker types ──────────────────────────────────────────────────
@@ -1010,6 +1025,32 @@ mod tests {
                     "action",
                 )),
                 "button `action` state material requires an authored background or border",
+            ),
+            (
+                PanelBuildError::SliderThumbOutsideSlider(PanelElementId::named("thumb")),
+                "slider thumb `thumb` must be inside a slider subtree",
+            ),
+            (
+                PanelBuildError::SliderHasMultipleThumbs(PanelElementId::named("volume")),
+                "slider `volume` contains more than one thumb",
+            ),
+            (
+                PanelBuildError::SliderStateBackgroundRequiresBackground(PanelElementId::named(
+                    "volume",
+                )),
+                "slider `volume` state background requires an authored background",
+            ),
+            (
+                PanelBuildError::SliderStateBorderColorRequiresBorder(PanelElementId::named(
+                    "volume",
+                )),
+                "slider `volume` state border color requires an authored border",
+            ),
+            (
+                PanelBuildError::SliderStateMaterialRequiresSurface(PanelElementId::named(
+                    "volume",
+                )),
+                "slider `volume` state material requires an authored background or border",
             ),
         ];
 

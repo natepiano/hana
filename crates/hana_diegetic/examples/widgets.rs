@@ -4,13 +4,16 @@
 //! Fairy Dust app.
 //!
 //! Current controls:
-//!   D - Toggle the secondary button between enabled and disabled
+//!   D - Toggle the secondary button and level slider between enabled and
+//!     disabled
 //!   H - Return to the camera home pose
 //!   Tab / Shift+Tab - Focus the next/previous widget through Hana's adapter
 //!   Home / End - Focus the first/last widget through Hana's adapter
 //!   Enter or Space / Escape - Activate/cancel through Hana's adapter
 //!   P - Focus the previous widget through an app-owned Bevy Kana action
 //!   [ / ] (held) - Step the level slider through app-owned Bevy Kana actions
+//!   Pointer drag on the level slider - Grab, drag, and release move the value
+//!     through the same `SliderChangeRequested` proposals the app applies.
 
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
@@ -69,10 +72,14 @@ use hana_diegetic::RequestWidgetFocus;
 use hana_diegetic::Sizing;
 use hana_diegetic::Slider;
 use hana_diegetic::SliderAdjustment;
+use hana_diegetic::SliderCancelCause;
+use hana_diegetic::SliderCanceled;
 use hana_diegetic::SliderChangeRequested;
 use hana_diegetic::SliderConfigError;
 use hana_diegetic::SliderDirection;
+use hana_diegetic::SliderGrabbed;
 use hana_diegetic::SliderRange;
+use hana_diegetic::SliderReleased;
 use hana_diegetic::SliderState;
 use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
@@ -101,7 +108,7 @@ const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
 const DESCRIPTION_LINES: [&str; 7] = [
     "Buttons restyle on hover, press, and focus; interaction changes log in the terminal.",
-    "D disables the secondary button, which then shows its disabled surface.",
+    "D disables the secondary button and level slider, which then show their disabled surfaces.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
     "The primary button's on_click callback counts clicks in the status readout.",
     "Hold [ or ] to step the level slider; the app applies each proposed value.",
@@ -133,7 +140,7 @@ const POINTER_STATUS_ID: &str = "pointer-status";
 const POINTER_STATUS_IDLE: &str = "Pointer: none";
 const POINTER_STATUS_MEASURE: &str = "Pointer: Pressed secondary-button";
 const SECONDARY_BUTTON_ID: &str = "secondary-button";
-const SECONDARY_CONTROL: &str = "D Toggle Secondary";
+const TOGGLE_CONTROL: &str = "D Toggle Disabled";
 const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
 const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
 const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
@@ -145,11 +152,16 @@ const SCREEN_READOUT_TEXT: &str = "^ Attached panel";
 const SCREEN_TARGET_ID: &str = "screen-target-button";
 const SCREEN_TARGET_LABEL: &str = "Target widget";
 const STATE_STATUS_ID: &str = "state-status";
-const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal";
-const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off";
+const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal lvl=normal";
+const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off lvl=pressed,off";
 const SLIDER_ADJUST_STEPS: f32 = 1.0;
 const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
+const SLIDER_BORDER_DISABLED: Color = Color::srgba(0.34, 0.32, 0.40, 0.60);
+const SLIDER_BORDER_FOCUSED: Color = Color::srgba(1.0, 0.86, 0.30, 0.94);
 const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
+const SLIDER_FILL_DISABLED: Color = Color::srgba(0.10, 0.08, 0.14, 0.66);
+const SLIDER_FILL_HOVERED: Color = Color::srgba(0.20, 0.09, 0.40, 0.88);
+const SLIDER_FILL_PRESSED: Color = Color::srgba(0.34, 0.16, 0.60, 0.94);
 const SLIDER_HEIGHT: Px = Px(36.0);
 const SLIDER_ID: &str = "level-slider";
 const SLIDER_INITIAL_VALUE: f32 = 0.5;
@@ -162,6 +174,11 @@ const SLIDER_STATUS_ID: &str = "slider-status";
 const SLIDER_STATUS_IDLE: &str = "Slider: 0.50 (50%)";
 const SLIDER_STATUS_MEASURE: &str = "Slider: 0.00 (100%)";
 const SLIDER_STEP: f32 = 0.05;
+const SLIDER_THUMB_BORDER: Color = Color::srgba(0.86, 0.80, 1.0, 0.96);
+const SLIDER_THUMB_FILL: Color = Color::srgba(0.74, 0.60, 1.0, 0.96);
+const SLIDER_THUMB_HEIGHT: Px = Px(16.0);
+const SLIDER_THUMB_ID: &str = "slider-thumb";
+const SLIDER_THUMB_WIDTH: Px = Px(12.0);
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
 const STATUS_ANCHOR_OFFSET: Px = Px(12.0);
 const STATUS_BORDER: Color = Color::srgba(0.20, 0.80, 0.68, 0.86);
@@ -171,17 +188,17 @@ const STATUS_GAP: f32 = 0.012;
 const STATUS_LINE_GAP: Px = Px(4.0);
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = Px(7.0);
-const WORLD_READOUT_MAX_WIDTH: Px = Px(420.0);
+const WORLD_READOUT_MAX_WIDTH: Px = Px(500.0);
 const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.15;
 
 #[derive(Clone, Copy, Default, Resource)]
-enum SecondaryMode {
+enum ToggleMode {
     #[default]
     Enabled,
     Disabled,
 }
 
-impl SecondaryMode {
+impl ToggleMode {
     const fn toggled(self) -> Self {
         match self {
             Self::Enabled => Self::Disabled,
@@ -202,6 +219,31 @@ impl SecondaryMode {
             Self::Disabled => ControlActivation::Active,
         }
     }
+}
+
+/// App-owned record of whether the level slider is currently in a pointer
+/// drag. The crate-private drag marker that drives the slider's pressed
+/// appearance is not observable, so the app tracks the drag lifecycle through
+/// the public `SliderGrabbed`/`SliderReleased`/`SliderCanceled` observers and
+/// reports pressed from this record — a captured drag stays pressed even when
+/// the pointer aggregate changes.
+#[derive(Clone, Copy, Default, Resource)]
+enum LevelSliderDrag {
+    #[default]
+    Idle,
+    Grabbed,
+}
+
+impl LevelSliderDrag {
+    const fn is_grabbed(self) -> bool { matches!(self, Self::Grabbed) }
+}
+
+/// Where the `State:` row reads a widget's pressed flag. Buttons read the
+/// pointer aggregate; the level slider reads [`LevelSliderDrag`].
+#[derive(Clone, Copy)]
+enum PressedSource {
+    PointerAggregate,
+    DragRecord,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -326,16 +368,17 @@ fn main() {
             TitleBar::new()
                 .with_title("Widgets")
                 .with_anchor(Anchor::TopLeft)
-                .control(SECONDARY_CONTROL),
+                .control(TOGGLE_CONTROL),
         )
-        .wire_chip_to_state::<SecondaryMode, _>(SECONDARY_CONTROL, |mode| mode.control_activation())
+        .wire_chip_to_state::<ToggleMode, _>(TOGGLE_CONTROL, |mode| mode.control_activation())
         .with_description_panel(
             DescriptionPanel::new(PANEL_TITLE)
                 .with_anchor(Anchor::BottomLeft)
                 .lines(DESCRIPTION_LINES),
         )
         .with_camera_control_panel()
-        .init_resource::<SecondaryMode>()
+        .init_resource::<ToggleMode>()
+        .init_resource::<LevelSliderDrag>()
         .init_resource::<PrimaryClicks>()
         .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
         .add_observer(report_button_pressed)
@@ -344,6 +387,9 @@ fn main() {
         .add_observer(report_button_canceled)
         .add_observer(report_widget_focus_changed)
         .add_observer(apply_slider_change)
+        .add_observer(report_slider_grabbed)
+        .add_observer(report_slider_released)
+        .add_observer(report_slider_canceled)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
             Update,
@@ -355,7 +401,7 @@ fn main() {
                 request_initial_widget_focus,
             ),
         )
-        .with_shortcut(KeyCode::KeyD, toggle_secondary_button)
+        .with_shortcut(KeyCode::KeyD, toggle_disabled_widgets)
         .run();
 }
 
@@ -558,6 +604,46 @@ fn apply_slider_change(
     ) {
         warn!("widgets: slider status has not been reified");
     }
+}
+
+/// Records the grab and logs the pointer grab that begins a drag; the drag's
+/// proposals move the value through [`apply_slider_change`].
+fn report_slider_grabbed(event: On<SliderGrabbed>, mut drag: ResMut<LevelSliderDrag>) {
+    if event.id.as_str() == Some(SLIDER_ID) {
+        *drag = LevelSliderDrag::Grabbed;
+    }
+    info!("widgets: {} grabbed by {:?}", event.id, event.pointer_id);
+}
+
+/// Clears the grab record and logs the valid pointer release that completes a
+/// drag.
+fn report_slider_released(event: On<SliderReleased>, mut drag: ResMut<LevelSliderDrag>) {
+    if event.id.as_str() == Some(SLIDER_ID) {
+        *drag = LevelSliderDrag::Idle;
+    }
+    info!("widgets: {} released by {:?}", event.id, event.pointer_id);
+}
+
+/// Clears the grab record and logs a drag that ended without a valid release —
+/// projection loss, disable, an explicit cancel, or teardown.
+fn report_slider_canceled(event: On<SliderCanceled>, mut drag: ResMut<LevelSliderDrag>) {
+    if event.id.as_str() == Some(SLIDER_ID) {
+        *drag = LevelSliderDrag::Idle;
+    }
+    let cause = match event.cause {
+        SliderCancelCause::PointerCanceled => "pointer canceled",
+        SliderCancelCause::PointerRemoved => "pointer removed",
+        SliderCancelCause::CaptureLost => "capture lost",
+        SliderCancelCause::Disabled => "disabled",
+        SliderCancelCause::ProjectionUnavailable => "projection unavailable",
+        SliderCancelCause::WidgetRemoved => "widget removed",
+        SliderCancelCause::WidgetKindChanged => "kind changed",
+        SliderCancelCause::Explicit => "explicit",
+    };
+    info!(
+        "widgets: {} canceled by {:?} ({cause})",
+        event.id, event.pointer_id
+    );
 }
 
 fn request_initial_widget_focus(
@@ -825,7 +911,12 @@ fn slider_declaration() -> Result<Slider, SliderConfigError> {
     let step = SliderStep::new(SLIDER_STEP)?;
     Ok(Slider::new(range, SLIDER_INITIAL_VALUE)?
         .step(step)
-        .direction(SliderDirection::LeftToRight))
+        .direction(SliderDirection::LeftToRight)
+        .hovered_background(SLIDER_FILL_HOVERED)
+        .pressed_background(SLIDER_FILL_PRESSED)
+        .focused_border_color(SLIDER_BORDER_FOCUSED)
+        .disabled_background(SLIDER_FILL_DISABLED)
+        .disabled_border_color(SLIDER_BORDER_DISABLED))
 }
 
 fn widget_tree(slider: Slider) -> LayoutTree {
@@ -860,22 +951,55 @@ fn widget_tree(slider: Slider) -> LayoutTree {
             .disabled_border_color(BUTTON_BORDER_DISABLED),
     );
     builder.with(
-        El::new()
+        El::overlay()
             .size(CONTROL_WIDTH, SLIDER_HEIGHT)
             .padding(Padding::all(CONTROL_PADDING))
-            .alignment(AlignX::Center, AlignY::Center)
             .background(SLIDER_FILL)
             .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_BORDER))
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
             .slider(SLIDER_ID, slider),
         |builder| {
-            builder.text(
-                Text::new(
-                    SLIDER_LABEL_IDLE,
-                    TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
-                )
-                .id(SLIDER_LABEL_ID)
-                .measure_as(SLIDER_LABEL_MEASURE),
+            // Bottom layer: the value label, centered and fixed. A grow overlay
+            // layer fills the slider content so the label stays centered
+            // independently of the moving thumb.
+            builder.with(
+                El::overlay()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .alignment(AlignX::Center, AlignY::Center),
+                |builder| {
+                    builder.text(
+                        Text::new(
+                            SLIDER_LABEL_IDLE,
+                            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+                        )
+                        .id(SLIDER_LABEL_ID)
+                        .measure_as(SLIDER_LABEL_MEASURE),
+                    );
+                },
+            );
+            // Top layer: the moving thumb, an ordinary descendant marked with
+            // slider_thumb() and authored at the directed range start (left,
+            // vertically centered). Value presentation translates it along the
+            // active axis from that authored center; no relayout runs on value
+            // change. Drawing it above the label keeps it visible across travel.
+            builder.with(
+                El::overlay()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.with(
+                        El::new()
+                            .size(SLIDER_THUMB_WIDTH, SLIDER_THUMB_HEIGHT)
+                            .background(SLIDER_THUMB_FILL)
+                            .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_THUMB_BORDER))
+                            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
+                            .id(SLIDER_THUMB_ID)
+                            .slider_thumb(),
+                        |_| {},
+                    );
+                },
             );
         },
     );
@@ -1042,10 +1166,13 @@ fn report_interaction_changes(
     }
 }
 
-/// Mirrors each world button's pointer and availability presentation inputs
-/// into the `State:` diagnostic row. The separate `Focus:` row reports the
-/// retained keyboard target; its border is drawn only while keyboard focus is
-/// visible.
+/// Mirrors each world button's and the level slider's presentation inputs into
+/// the `State:` diagnostic row. Hover and availability read `PickingInteraction`
+/// and `WidgetDisabled`; the buttons' pressed flag reads the pointer aggregate
+/// while the slider's reads [`LevelSliderDrag`], so a captured drag stays
+/// pressed even when the aggregate changes. The separate `Focus:` row reports
+/// the retained keyboard target, so slider focus stays visible there while
+/// hover, press, and disabled show here.
 fn report_presentation_states(
     panel: Single<Entity, With<WidgetLabPanel>>,
     readout: Single<Entity, With<WidgetInteractionReadout>>,
@@ -1055,9 +1182,10 @@ fn report_presentation_states(
         Option<&PickingInteraction>,
         Has<WidgetDisabled>,
     )>,
+    drag: Res<LevelSliderDrag>,
     mut panel_text: PanelText,
 ) {
-    let flags = |id: &str| {
+    let flags = |id: &str, pressed_source: PressedSource| {
         widgets
             .iter()
             .find(|(widget, widget_of, ..)| {
@@ -1066,11 +1194,24 @@ fn report_presentation_states(
             .map_or_else(
                 || "?".to_owned(),
                 |(_, _, interaction, disabled)| {
+                    let pressed = match pressed_source {
+                        PressedSource::PointerAggregate => {
+                            matches!(interaction, Some(PickingInteraction::Pressed))
+                        },
+                        PressedSource::DragRecord => drag.is_grabbed(),
+                    };
                     let mut parts = Vec::new();
-                    match interaction {
-                        Some(PickingInteraction::Hovered) => parts.push("hover"),
-                        Some(PickingInteraction::Pressed) => parts.push("pressed"),
-                        None | Some(PickingInteraction::None) => {},
+                    if pressed {
+                        parts.push("pressed");
+                    } else if matches!(
+                        interaction,
+                        Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
+                    ) {
+                        // A slider whose drag record is idle takes the hover layer
+                        // from a generic pressed aggregate, matching production
+                        // `present_slider_state`. A button's own pressed aggregate
+                        // is already reported above, so it never reaches here.
+                        parts.push("hover");
                     }
                     if disabled {
                         parts.push("off");
@@ -1084,34 +1225,38 @@ fn report_presentation_states(
             )
     };
     let status = format!(
-        "State: pri={} sec={}",
-        flags(PRIMARY_BUTTON_ID),
-        flags(SECONDARY_BUTTON_ID)
+        "State: pri={} sec={} lvl={}",
+        flags(PRIMARY_BUTTON_ID, PressedSource::PointerAggregate),
+        flags(SECONDARY_BUTTON_ID, PressedSource::PointerAggregate),
+        flags(SLIDER_ID, PressedSource::DragRecord)
     );
     // `PanelText` skips the layout revision bump for an unchanged string, so
     // writing every frame stays free of relayout work.
     panel_text.set_text(*readout, &PanelElementId::named(STATE_STATUS_ID), status);
 }
 
-fn toggle_secondary_button(
+fn toggle_disabled_widgets(
     panel: Single<Entity, With<WidgetLabPanel>>,
     reader: PanelWidgetReader,
     mut writer: PanelWidgetWriter,
-    mut mode: ResMut<SecondaryMode>,
+    mut mode: ResMut<ToggleMode>,
 ) {
-    let id = PanelElementId::named(SECONDARY_BUTTON_ID);
-    let Some(widget) = reader.entity(*panel, &id) else {
-        warn!("widgets: secondary button has not been reified");
+    let secondary = reader.entity(*panel, &PanelElementId::named(SECONDARY_BUTTON_ID));
+    let slider = reader.entity(*panel, &PanelElementId::named(SLIDER_ID));
+    let (Some(secondary), Some(slider)) = (secondary, slider) else {
+        warn!("widgets: secondary button or level slider has not been reified");
         return;
     };
     let next = mode.toggled();
-    if writer.override_interactivity(widget, next.interactivity()) {
+    let secondary_toggled = writer.override_interactivity(secondary, next.interactivity());
+    let slider_toggled = writer.override_interactivity(slider, next.interactivity());
+    if secondary_toggled && slider_toggled {
         *mode = next;
         info!(
-            "widgets: secondary button is now {:?}",
+            "widgets: secondary button and level slider are now {:?}",
             next.interactivity()
         );
     } else {
-        warn!("widgets: failed to update secondary button interactivity");
+        warn!("widgets: failed to update secondary button or level slider interactivity");
     }
 }

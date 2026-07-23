@@ -597,12 +597,25 @@ impl<L> El<L> {
     /// Marks this element as a slider with panel-local semantic identity `id`.
     ///
     /// The id and slider declaration are assigned together so a widget cannot
-    /// be authored without its identity.
+    /// be authored without its identity. The element also receives the private
+    /// root visual slot whose solved content box slider pointer projection
+    /// reads.
     pub fn slider(mut self, id: impl Into<PanelElementId>, slider: Slider) -> Self {
         self.common.id = Some(id.into());
         self.common.widget = Some(WidgetSpec::Slider(slider));
-        self
+        self.visual_slot(VisualSlotId::SLIDER_ROOT)
     }
+
+    /// Marks this ordinary element as the thumb of its nearest enclosing
+    /// [`Self::slider`].
+    ///
+    /// The element stays ordinary layout — it creates no ECS child and exposes
+    /// no anatomy component. Value presentation reads its solved border box to
+    /// translate it along the slider's active axis without relayout. A thumb
+    /// outside every slider subtree, or a second thumb in one slider, is a
+    /// panel build error. Zero marked thumbs leaves the slider valid with no
+    /// automatic value visualization.
+    pub const fn slider_thumb(self) -> Self { self.visual_slot(VisualSlotId::SLIDER_THUMB) }
 
     /// Authors widget interactivity for this element and its widget descendants.
     ///

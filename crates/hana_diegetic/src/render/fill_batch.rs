@@ -1725,9 +1725,15 @@ mod tests {
     use bevy_kana::ToF32;
 
     use super::*;
+    use crate::AlignX;
+    use crate::AlignY;
     use crate::Button;
     use crate::Mm;
     use crate::PanelWidget;
+    use crate::Slider;
+    use crate::SliderDirection;
+    use crate::SliderRange;
+    use crate::SliderState;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
     use crate::layout::DrawZIndex;
@@ -1764,10 +1770,12 @@ mod tests {
     use crate::render::panel_geometry::SdfRoleAuthorship;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::ComputedWidgetRecord;
+    use crate::widgets::VisualOverrideIndex;
     use crate::widgets::VisualSlotId;
     use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetAnchorRect;
     use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
 
     const ANIMATED_BASE_BLUE_SPEED: f32 = 0.29;
@@ -4565,6 +4573,164 @@ mod tests {
             app.world().get_entity(blend_entity).is_err(),
             "the emptied Blend batch should be retired",
         );
+    }
+
+    /// A world-panel vertical slider driving a visible SDF thumb, plus an
+    /// unrelated peer fill. `SliderDirection::BottomToTop` exercises the
+    /// render-frame Y inversion, and the `Mm` world panel applies a non-unit
+    /// world scale, so a raw layout-point offset renders at the wrong place.
+    fn vertical_thumb_slider_tree() -> LayoutTree {
+        let slider = Slider::new(SliderRange::new(0.0, 1.0).expect("range validates"), 0.0)
+            .expect("slider validates")
+            .direction(SliderDirection::BottomToTop);
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::overlay()
+                .size(20.0, 30.0)
+                .background(WIDGET_FILL_COLOR)
+                .border(Border::all(1.0, IMAGE_BORDER_COLOR))
+                .alignment(AlignX::Center, AlignY::Center)
+                .slider("level", slider),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .size(16.0, 8.0)
+                        .background(SLOT_OVERRIDE_COLOR)
+                        .id("thumb")
+                        .slider_thumb(),
+                    |_| {},
+                );
+            },
+        );
+        builder.with(
+            El::new().size(20.0, 10.0).background(PEER_FILL_COLOR),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn slider_value_change_moves_only_the_thumb_sdf_record_by_the_converted_render_delta() {
+        let mut app = widget_sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            vertical_thumb_slider_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        app.update();
+
+        let widget = styled_widget(&mut app);
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .cloned()
+            .expect("slider widget should carry visual slots");
+        let content = slots
+            .content_box(VisualSlotId::SLIDER_ROOT)
+            .expect("slider root content box");
+        let thumb = slots
+            .border_box(VisualSlotId::SLIDER_THUMB)
+            .expect("thumb border box");
+        let thumb_index = slots
+            .element_index(VisualSlotId::SLIDER_THUMB)
+            .expect("thumb element index");
+        let root_index = slots
+            .element_index(VisualSlotId::SLIDER_ROOT)
+            .expect("root element index");
+        assert!(
+            thumb.height < content.height,
+            "the thumb must be shorter than the content for a vertical travel",
+        );
+
+        // Derive the expected render offsets independently from the real panel
+        // scale and the solved slot boxes — not from the production conversion
+        // helper. A `BottomToTop` slider maps value 0 to the bottom (larger
+        // layout Y) and value 1 to the top (smaller layout Y); the render frame
+        // scales both axes and inverts the layout Y axis.
+        let scale = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .expect("panel role component")
+            .points_to_world();
+        assert!(
+            scale.is_finite() && scale > 0.0 && (scale - 1.0).abs() > f32::EPSILON,
+            "the world panel must apply a finite, non-unit, positive scale",
+        );
+        let authored_center = thumb.center().1;
+        let bottom_center = thumb.height.mul_add(-0.5, content.y + content.height);
+        let top_center = thumb.height.mul_add(0.5, content.y);
+        let render_offset = |value: f32| {
+            let desired_center = value.mul_add(top_center - bottom_center, bottom_center);
+            Vec3::new(0.0, -(desired_center - authored_center) * scale, 0.0)
+        };
+        let expected_offset_at_end = render_offset(1.0);
+        let expected_record_delta = render_offset(1.0) - render_offset(0.0);
+        assert!(
+            expected_record_delta.length() > 1e-6,
+            "the value change must move the thumb a measurable amount",
+        );
+
+        let records_before = sdf_records(&app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+
+        // Apply a different applied value; only the thumb presentation reacts.
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<SliderState>(widget)
+                .expect("slider widget should carry slider state");
+            assert!(state.set_value(1.0).expect("value applies"));
+        }
+        app.update();
+
+        let records_after = sdf_records(&app);
+        assert_eq!(
+            records_after.len(),
+            records_before.len(),
+            "the value change must not add or drop a retained record",
+        );
+
+        // Exactly one retained record moves, by the converted panel-local
+        // render delta; every other record stays byte-for-byte unchanged.
+        let mut moved = Vec::new();
+        for (index, (before, after)) in records_before.iter().zip(&records_after).enumerate() {
+            let delta = after.local_transform.translation - before.local_transform.translation;
+            if delta.length() > 1e-6 {
+                moved.push(index);
+                assert!(
+                    (delta - expected_record_delta).length() < 1e-6,
+                    "the thumb record must shift by the converted render delta, \
+                     not raw layout points or an uninverted Y",
+                );
+            } else {
+                assert_eq!(
+                    after, before,
+                    "a non-thumb retained record must stay unchanged"
+                );
+            }
+        }
+        assert_eq!(moved.len(), 1, "only the thumb record may move");
+
+        // The moved record is the thumb: its slot carries the converted render
+        // offset in the override index, while the plain slider root carries no
+        // override at all.
+        let index = app.world().resource::<VisualOverrideIndex>();
+        let indexed_thumb_offset = index
+            .get(panel, thumb_index)
+            .and_then(|value| value.offset)
+            .expect("thumb slot should carry a render offset in the override index");
+        assert!(
+            (indexed_thumb_offset - expected_offset_at_end.truncate()).length() < 1e-6,
+            "the indexed thumb offset must equal the independently converted render offset",
+        );
+        assert!(
+            index.get(panel, root_index).is_none(),
+            "a plain slider root writes no override",
+        );
+
+        // The value change moved no widget hit rectangle or panel layout output.
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
     }
 
     /// Widget image pipeline app plus one panel: a slotted image inside the

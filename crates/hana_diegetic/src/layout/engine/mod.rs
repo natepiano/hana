@@ -15,6 +15,7 @@ mod wrapping;
 pub use layout_engine::LayoutEngine;
 pub use layout_engine::LayoutResult;
 pub use layout_engine::MeasureTextFn;
+pub(crate) use sizing::content_box_bounds;
 
 #[cfg(test)]
 mod clay_parity;

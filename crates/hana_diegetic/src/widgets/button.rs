@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use bevy::ecs::change_detection::MaybeLocation;
 use bevy::ecs::error::BevyError;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::system::SystemHandle;
@@ -19,9 +17,7 @@ use bevy::picking::PickingSettings;
 use bevy::picking::events::PointerState;
 use bevy::picking::hover::HoverMap;
 use bevy::picking::hover::PickingInteraction;
-use bevy::picking::pointer::PointerAction;
 use bevy::picking::pointer::PointerId;
-use bevy::picking::pointer::PointerInput;
 use bevy::prelude::*;
 
 use super::PanelWidget;
@@ -36,6 +32,7 @@ use super::WidgetSpec;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
 use super::capture::WidgetCaptures;
+use super::capture::trigger_immediate;
 use super::visual;
 use crate::PanelElementId;
 use crate::ime;
@@ -743,218 +740,57 @@ pub(super) fn cancel_from_drag_end(
     }
 }
 
-/// Reconciles captures left unresolved by Bevy's targeted pointer events.
+/// Resolves a raw primary release for a captured button the shared dispatcher
+/// left unresolved.
 ///
-/// Bevy normally targets [`Pointer<Click>`] and [`Pointer<Release>`] from its
-/// previous hover, and [`Pointer<DragEnd>`] from its dragging state. Those observers
-/// remain authoritative and remove the capture before this system runs. When a
-/// primary [`PointerAction::Release`] does not target the captured button, this
-/// system uses [`HoverMap`] to release and click a button still under the pointer,
-/// or cancels a capture that ended elsewhere. A private sequence distinguishes an
-/// accepted press from a later press that was initially rejected while its pointer
-/// or widget was still captured. The system reads primary raw actions in their
-/// original order, removes surviving terminal captures, and then establishes only
-/// final presses that occurred after the terminal action which freed their pointer
-/// and widget. Raw [`PointerAction::Cancel`] and pointer removal remain separate
-/// terminal fallbacks. Bevy documents `Cancel` as terminal, so later raw actions for
-/// that pointer are warned about and ignored. When Bevy hover processing is disabled,
-/// a raw release cancels the capture without consulting stale hover or press state.
-/// `WidgetsPlugin` runs this system only when [`PointerInput`] messages,
-/// [`PointerState`], [`HoverMap`], and [`bevy::picking::PickingSettings`] are all
-/// installed.
-pub(super) fn reconcile_pointer_input(
-    mut inputs: MessageReader<PointerInput>,
-    pointer_state: Res<PointerState>,
-    hover_map: Res<HoverMap>,
-    picking_settings: Res<PickingSettings>,
-    widgets: Query<(&WidgetKind, Has<WidgetDisabled>), (With<PanelWidget>, With<WidgetOf>)>,
-    mut captures: ResMut<WidgetCaptures>,
-    mut button_captures: ResMut<ButtonCaptures>,
-    mut commands: Commands,
-) {
-    let (primary_presses, terminals) = read_primary_actions(&mut inputs);
-    let latest_observed = captures.take_latest_observed();
-    let mut removed_at = HashMap::new();
-    for (order, pointer_id, terminal) in terminals {
-        let Some(owner) = captures.owner(pointer_id) else {
-            continue;
-        };
-        if removed_at.contains_key(&pointer_id) {
-            continue;
-        }
-        let accepted_is_latest = latest_observed
-            .get(&pointer_id)
-            .is_some_and(|(_, sequence)| *sequence == owner.sequence());
-        if matches!(terminal, ButtonTerminal::Release(_))
-            && accepted_is_latest
-            && primary_presses
-                .get(&pointer_id)
-                .is_some_and(|press_order| *press_order > order)
-        {
-            continue;
-        }
-
-        let entity = owner.entity();
-        let final_is_later =
-            latest_observed
-                .get(&pointer_id)
-                .is_some_and(|(latest_entity, sequence)| {
-                    *sequence > owner.sequence()
-                        && pointer_state
-                            .get(pointer_id, PointerButton::Primary)
-                            .is_some_and(|state| state.pressing.contains_key(latest_entity))
-                });
-        removed_at.insert(pointer_id, order);
-        match terminal {
-            ButtonTerminal::Cancel(_) => cancel_button_press(
-                entity,
-                ButtonCancelCause::PointerCanceled,
-                &mut button_captures,
-                &mut commands,
-            ),
-            ButtonTerminal::Release(_) => {
-                let hover_is_current = picking_settings.is_enabled
-                    && picking_settings.is_hover_enabled
-                    && pointer_state
-                        .get(pointer_id, PointerButton::Primary)
-                        .is_none_or(|state| {
-                            !state.pressing.contains_key(&entity) || final_is_later
-                        });
-                let released_over_capture = hover_is_current
-                    && hover_map
-                        .get(&pointer_id)
-                        .is_some_and(|hovered| hovered.contains_key(&entity));
-                if released_over_capture {
-                    if let Some(button_press) = button_captures.press_mut(entity) {
-                        button_press.release(ButtonReleaseOutcome::Clicked);
-                    }
-                    commands.entity(entity).remove::<ButtonPress>();
-                } else {
-                    cancel_button_press(
-                        entity,
-                        ButtonCancelCause::CaptureLost,
-                        &mut button_captures,
-                        &mut commands,
-                    );
-                }
-            },
-            ButtonTerminal::Pending => {},
-        }
-    }
-
-    queue_final_presses(
-        latest_observed,
-        &primary_presses,
-        &removed_at,
-        &pointer_state,
-        &widgets,
-        &captures,
-        &mut commands,
-    );
-}
-
-fn read_primary_actions(
-    inputs: &mut MessageReader<'_, '_, PointerInput>,
-) -> (
-    HashMap<PointerId, usize>,
-    Vec<(usize, PointerId, ButtonTerminal)>,
-) {
-    let mut primary_presses = HashMap::new();
-    let mut terminals = Vec::new();
-    let mut canceled_pointers = HashSet::new();
-    for (order, input) in inputs.read().enumerate() {
-        if canceled_pointers.contains(&input.pointer_id) {
-            warn!(
-                "received {:?} after terminal pointer cancel for {:?}",
-                input.action, input.pointer_id
-            );
-            continue;
-        }
-        match input.action {
-            PointerAction::Press(PointerButton::Primary) => {
-                primary_presses.insert(input.pointer_id, order);
-            },
-            PointerAction::Release(PointerButton::Primary) => {
-                terminals.push((
-                    order,
-                    input.pointer_id,
-                    ButtonTerminal::Release(ButtonReleaseOutcome::WithoutClick),
-                ));
-            },
-            PointerAction::Cancel => {
-                canceled_pointers.insert(input.pointer_id);
-                terminals.push((
-                    order,
-                    input.pointer_id,
-                    ButtonTerminal::Cancel(ButtonCancelCause::PointerCanceled),
-                ));
-            },
-            PointerAction::Press(_)
-            | PointerAction::Release(_)
-            | PointerAction::Move { .. }
-            | PointerAction::Scroll { .. } => {},
-        }
-    }
-    (primary_presses, terminals)
-}
-
-fn queue_final_presses(
-    latest_observed: HashMap<PointerId, (Entity, u64)>,
-    primary_presses: &HashMap<PointerId, usize>,
-    removed_at: &HashMap<PointerId, usize>,
+/// When hover processing is enabled and the pointer is still over the captured
+/// button, this completes the press with a click; otherwise it cancels the
+/// capture as lost. `final_is_later` reports that a later accepted press by the
+/// same pointer already targets a different widget, so a stale still-pressing
+/// entry must not keep this release over the original capture.
+///
+/// Returns whether a terminal was recorded, so the shared dispatcher marks the
+/// pointer freed only when typed terminal processing will release shared
+/// occupancy. When the release lands over the capture but the typed press
+/// payload is absent, this removes no marker and returns false rather than
+/// claiming a freed pointer whose occupancy no hook will release.
+pub(super) fn apply_raw_release(
+    entity: Entity,
+    pointer_id: PointerId,
+    final_is_later: bool,
+    hover_map: &HoverMap,
     pointer_state: &PointerState,
-    widgets: &Query<
-        '_,
-        '_,
-        (&WidgetKind, Has<WidgetDisabled>),
-        (With<PanelWidget>, With<WidgetOf>),
-    >,
-    captures: &WidgetCaptures,
+    picking_settings: &PickingSettings,
+    button_captures: &mut ButtonCaptures,
     commands: &mut Commands<'_, '_>,
-) {
-    let mut final_presses = latest_observed
-        .into_iter()
-        .filter_map(|(pointer_id, (entity, sequence))| {
-            let order = primary_presses.get(&pointer_id).copied()?;
-            pointer_state
-                .get(pointer_id, PointerButton::Primary)
-                .is_some_and(|state| state.pressing.contains_key(&entity))
-                .then_some((order, pointer_id, entity, sequence))
-        })
-        .collect::<Vec<_>>();
-    final_presses.sort_unstable_by_key(|(order, ..)| *order);
-
-    for (order, pointer_id, entity, sequence) in final_presses {
-        if captures
-            .owner(pointer_id)
-            .is_some_and(|owner| owner.sequence() == sequence)
-        {
-            continue;
-        }
-        let pointer_is_freed = captures.owner(pointer_id).is_none_or(|_| {
-            removed_at
-                .get(&pointer_id)
-                .is_some_and(|removed_order| *removed_order < order)
-        });
-        let widget_is_freed = captures.pointer(entity).is_none_or(|captured_pointer| {
-            removed_at
-                .get(&captured_pointer)
-                .is_some_and(|removed_order| *removed_order < order)
-        });
-        if pointer_is_freed
-            && widget_is_freed
-            && let Ok((kind, disabled)) = widgets.get(entity)
-            && *kind == WidgetKind::Button
-            && !disabled
-        {
-            commands.queue(move |world: &mut World| {
-                capture_reconciled_press(world, entity, pointer_id, sequence);
-            });
-        }
+) -> bool {
+    let hover_is_current = picking_settings.is_enabled
+        && picking_settings.is_hover_enabled
+        && pointer_state
+            .get(pointer_id, PointerButton::Primary)
+            .is_none_or(|state| !state.pressing.contains_key(&entity) || final_is_later);
+    let released_over_capture = hover_is_current
+        && hover_map
+            .get(&pointer_id)
+            .is_some_and(|hovered| hovered.contains_key(&entity));
+    if released_over_capture {
+        let Some(button_press) = button_captures.press_mut(entity) else {
+            return false;
+        };
+        button_press.release(ButtonReleaseOutcome::Clicked);
+        commands.entity(entity).remove::<ButtonPress>();
+        true
+    } else {
+        cancel_button_press(
+            entity,
+            ButtonCancelCause::CaptureLost,
+            button_captures,
+            commands,
+        )
     }
 }
 
-fn capture_reconciled_press(
+pub(super) fn capture_reconciled_press(
     world: &mut World,
     entity: Entity,
     pointer_id: PointerId,
@@ -1159,30 +995,20 @@ fn emit_button_terminal(mut world: DeferredWorld, context: HookContext) {
     }
 }
 
-fn trigger_immediate<'a, E>(world: &mut DeferredWorld<'_>, mut event: E)
-where
-    E: Event<Trigger<'a>: Default>,
-{
-    let Some(event_key) = world.event_key::<E>() else {
-        return;
-    };
-    let mut trigger = <E::Trigger<'a> as Default>::default();
-    // SAFETY: `event_key` was fetched for `E` from this `DeferredWorld`, and
-    // `trigger` is the `Event::Trigger` associated with `E`.
-    unsafe {
-        world.trigger_raw(event_key, &mut event, &mut trigger, MaybeLocation::caller());
-    }
-}
-
+/// Records a button cancellation and, when newly recorded, removes
+/// [`ButtonPress`] so its hook emits the terminal. Returns whether a terminal
+/// was recorded, so the shared dispatcher knows shared occupancy will free.
 pub(crate) fn cancel_button_press(
     entity: Entity,
     cause: ButtonCancelCause,
     captures: &mut ButtonCaptures,
     commands: &mut Commands<'_, '_>,
-) {
-    if captures.cancel(entity, cause) {
+) -> bool {
+    let canceled = captures.cancel(entity, cause);
+    if canceled {
         commands.entity(entity).remove::<ButtonPress>();
     }
+    canceled
 }
 
 pub(crate) fn finalize_panel_buttons(
@@ -1237,6 +1063,7 @@ mod tests {
     use hana_valence::AnchoredHere;
     use hana_valence::AnchoredTo;
 
+    use super::super::capture::reconcile_pointer_input;
     use super::ButtonCancelCause;
     use super::ButtonCanceled;
     use super::ButtonCaptures;
@@ -1255,7 +1082,6 @@ mod tests {
     use super::click_from_pointer;
     use super::handle_semantic_intent;
     use super::press_from_pointer;
-    use super::reconcile_pointer_input;
     use super::release_from_pointer;
     use crate::ActivateFocusedWidget;
     use crate::Border;
@@ -1407,6 +1233,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<WidgetCaptures>()
             .init_resource::<ButtonCaptures>()
+            .init_resource::<super::super::slider::SliderCaptures>()
             .init_resource::<RecordedButtonEvents>()
             .init_resource::<HoverMap>()
             .init_resource::<PickingSettings>()
@@ -2338,6 +2165,122 @@ mod tests {
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
         assert_no_captures(&app);
+    }
+
+    #[test]
+    fn raw_cancel_finalizes_lost_widget_with_pointer_canceled_cause() {
+        let pointer_id = PointerId::Touch(60);
+        let mut app = pointer_events_test_app(pointer_id);
+        let widget = spawn_button(&mut app);
+        set_hover_maps(&mut app, pointer_id, &[widget], &[widget]);
+        run_pointer_actions(
+            &mut app,
+            pointer_id,
+            [PointerAction::Press(PointerButton::Primary)],
+        );
+        clear_events(&mut app);
+
+        // Lose the lookup components while the shared occupancy and typed button
+        // payload survive, so the reconciler's `WidgetKind` lookup returns
+        // `None`.
+        app.world_mut().entity_mut(widget).remove::<WidgetOf>();
+        app.world_mut().flush();
+
+        // A raw cancel the reconciler owns (cleared hover suppresses the targeted
+        // `Pointer<Cancel>`). The lost-widget fallback must keep the concrete
+        // `PointerCanceled` cause rather than degrading a cancel to `CaptureLost`.
+        set_hover_maps(&mut app, pointer_id, &[], &[]);
+        run_pointer_actions(&mut app, pointer_id, [PointerAction::Cancel]);
+
+        assert_eq!(
+            events(&app),
+            [RecordedButtonEvent::Canceled(
+                pointer_id,
+                ButtonCancelCause::PointerCanceled,
+            )]
+        );
+        assert!(app.world().get::<ButtonPress>(widget).is_none());
+        assert_no_captures(&app);
+    }
+
+    #[test]
+    fn raw_release_finalizes_lost_widget_with_capture_lost_cause() {
+        let pointer_id = PointerId::Touch(61);
+        let mut app = pointer_events_test_app(pointer_id);
+        let widget = spawn_button(&mut app);
+        set_hover_maps(&mut app, pointer_id, &[widget], &[widget]);
+        run_pointer_actions(
+            &mut app,
+            pointer_id,
+            [PointerAction::Press(PointerButton::Primary)],
+        );
+        clear_events(&mut app);
+
+        app.world_mut().entity_mut(widget).remove::<WidgetOf>();
+        app.world_mut().flush();
+
+        // A raw release the reconciler owns (cleared previous hover suppresses the
+        // targeted `Pointer<Release>`). A kind-lost release keeps `CaptureLost`.
+        set_hover_maps(&mut app, pointer_id, &[], &[]);
+        run_pointer_actions(
+            &mut app,
+            pointer_id,
+            [PointerAction::Release(PointerButton::Primary)],
+        );
+
+        assert_eq!(
+            events(&app),
+            [RecordedButtonEvent::Canceled(
+                pointer_id,
+                ButtonCancelCause::CaptureLost,
+            )]
+        );
+        assert!(app.world().get::<ButtonPress>(widget).is_none());
+        assert_no_captures(&app);
+    }
+
+    #[test]
+    fn raw_release_with_present_kind_and_missing_payload_frees_nothing() {
+        let pointer_id = PointerId::Touch(62);
+        let mut app = pointer_events_test_app(pointer_id);
+        let widget = spawn_button(&mut app);
+        set_hover_maps(&mut app, pointer_id, &[widget], &[widget]);
+        run_pointer_actions(
+            &mut app,
+            pointer_id,
+            [PointerAction::Press(PointerButton::Primary)],
+        );
+        clear_events(&mut app);
+
+        // Drop the typed press payload while the `WidgetKind` lookup and shared
+        // occupancy remain: the raw release lands over the capture but finds no
+        // payload to complete.
+        assert!(
+            app.world_mut()
+                .resource_mut::<ButtonCaptures>()
+                .take(widget)
+                .is_some()
+        );
+
+        // A raw release the reconciler owns (empty previous hover) with the widget
+        // still under the current hover, then a later press. Because the release
+        // records no terminal, the reconciler must not remove the marker or mark
+        // the pointer freed, so the later press cannot claim the widget.
+        set_hover_maps(&mut app, pointer_id, &[], &[widget]);
+        run_pointer_actions(
+            &mut app,
+            pointer_id,
+            [
+                PointerAction::Release(PointerButton::Primary),
+                PointerAction::Press(PointerButton::Primary),
+            ],
+        );
+
+        assert!(events(&app).is_empty());
+        assert!(app.world().get::<ButtonPress>(widget).is_some());
+        let captures = app.world().resource::<WidgetCaptures>();
+        assert_eq!(captures.widget(pointer_id), Some(widget));
+        assert_eq!(captures.pointer(widget), Some(pointer_id));
     }
 
     #[test]

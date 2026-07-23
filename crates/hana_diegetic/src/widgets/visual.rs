@@ -23,6 +23,7 @@ use bevy::prelude::*;
 
 use super::PanelWidget;
 use super::WidgetOf;
+use crate::layout::BoundingBox;
 
 /// Stable private id for one widget-owned visual slot.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -33,6 +34,14 @@ impl VisualSlotId {
     /// element carrying the widget. Button state presentation writes only this
     /// slot.
     pub(crate) const BUTTON_ROOT: Self = Self(u32::MAX);
+    /// Root slot authored by [`El::slider`](crate::El::slider) on the element
+    /// carrying the widget. Pointer projection reads its solved content box.
+    pub(crate) const SLIDER_ROOT: Self = Self(u32::MAX - 1);
+    /// Thumb slot authored by [`El::slider_thumb`](crate::El::slider_thumb) on
+    /// one ordinary descendant of a slider. Value presentation reads its border
+    /// box for the active-axis extent and solved authored center, then writes
+    /// the slot's panel-local translation.
+    pub(crate) const SLIDER_THUMB: Self = Self(u32::MAX - 2);
 
     /// Creates a slot id from a test-chosen stable value in renderer tests.
     #[cfg(test)]
@@ -45,12 +54,20 @@ impl VisualSlotId {
 /// The element index resolves to every retained record the slot element
 /// authored: its SDF fill/border surface, image quad, text runs, and
 /// panel-line groups all carry the same `LayoutTree` element index.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// `border_box` and `content_box` carry the slot element's solved outer bounds
+/// and its padding/border-excluded interior, both in panel-layout coordinates,
+/// so slider pointer projection reads the live content box without inspecting
+/// retained render batches.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ComputedVisualSlot {
     /// Authored stable slot id.
     pub slot:          VisualSlotId,
     /// Index of the slot element in the panel's `LayoutTree`.
     pub element_index: usize,
+    /// Solved border box of the slot element in panel-layout coordinates.
+    pub border_box:    BoundingBox,
+    /// Solved padding/border-excluded content box of the slot element.
+    pub content_box:   BoundingBox,
 }
 
 /// Reified slot-to-record references owned by one widget entity.
@@ -71,6 +88,24 @@ impl WidgetVisualSlots {
             .find(|computed| computed.slot == slot)
             .map(|computed| computed.element_index)
     }
+
+    /// Returns the slot's solved padding/border-excluded content box.
+    #[must_use]
+    pub(crate) fn content_box(&self, slot: VisualSlotId) -> Option<BoundingBox> {
+        self.slots
+            .iter()
+            .find(|computed| computed.slot == slot)
+            .map(|computed| computed.content_box)
+    }
+
+    /// Returns the slot's solved border box.
+    #[must_use]
+    pub(crate) fn border_box(&self, slot: VisualSlotId) -> Option<BoundingBox> {
+        self.slots
+            .iter()
+            .find(|computed| computed.slot == slot)
+            .map(|computed| computed.border_box)
+    }
 }
 
 /// State-only presentation override for one visual slot.
@@ -80,8 +115,9 @@ impl WidgetVisualSlots {
 /// `border_color` recolor only the slot's SDF fill or border role and take
 /// precedence over `color` for that role; image, text, and panel-line records
 /// never read them. `offset` translates
-/// the slot's SDF, image, text, and panel-line records in the panel-local XY
-/// plane while preserving authored draw depth. `material`
+/// the slot's SDF, image, text, and panel-line records in the panel-local
+/// render frame — panel world units with Y increasing upward — while
+/// preserving authored draw depth. `material`
 /// replaces the SDF, text, or panel-line source material and re-keys the
 /// record when the replacement changes pipeline or resource compatibility.
 /// `texture` replaces an image record's sampled texture and re-keys it to
@@ -94,7 +130,11 @@ pub(crate) struct VisualSlotOverride {
     pub fill_color:   Option<Color>,
     /// Replacement color for the SDF border role only.
     pub border_color: Option<Color>,
-    /// Panel-local XY translation added to retained record transforms.
+    /// Panel-local render-frame XY translation added to retained record
+    /// transforms: panel world units with Y increasing upward, distinct from
+    /// the layout-point frame (Y increasing downward) the widget slot boxes
+    /// use. Produce it from a layout-frame delta with
+    /// [`layout_delta_to_render_offset`].
     pub offset:       Option<Vec2>,
     /// Replacement source material for SDF, text, and panel-line records.
     pub material:     Option<Handle<StandardMaterial>>,
@@ -235,6 +275,32 @@ pub(crate) fn write_slot_override(
     }
 }
 
+/// Converts a widget slot's layout-frame translation delta into the
+/// panel-local render frame the retained routes add to record transforms.
+///
+/// `layout_delta` is a delta in layout points: X increases rightward and Y
+/// increases downward. The returned offset is in the panel-local render frame
+/// — panel world units with X unchanged and Y increasing upward — so the
+/// layout Y axis is inverted and both axes scale by `points_to_world`, the
+/// owning panel's
+/// [`DiegeticPanel::points_to_world`](crate::DiegeticPanel::points_to_world)
+/// factor. It is the single boundary that reconciles those two frames for a
+/// [`VisualSlotOverride::offset`]; returns `None` when `layout_delta` is
+/// non-finite or `points_to_world` is non-finite or non-positive, so a slot
+/// whose owning panel scale is unavailable writes no manufactured offset.
+pub(crate) fn layout_delta_to_render_offset(
+    layout_delta: Vec2,
+    points_to_world: f32,
+) -> Option<Vec2> {
+    if !layout_delta.is_finite() || !points_to_world.is_finite() || points_to_world <= 0.0 {
+        return None;
+    }
+    Some(Vec2::new(
+        layout_delta.x * points_to_world,
+        -layout_delta.y * points_to_world,
+    ))
+}
+
 /// Resolved override lookup consumed by the retained-batch route systems.
 ///
 /// Keys are `(panel entity, LayoutTree element index)` — the identity every
@@ -346,6 +412,7 @@ mod tests {
     use super::WidgetVisualOverrides;
     use super::WidgetVisualSlots;
     use crate::PanelElementId;
+    use crate::layout::BoundingBox;
     use crate::widgets::PanelWidget;
     use crate::widgets::WidgetOf;
 
@@ -354,6 +421,15 @@ mod tests {
     const OVERRIDE_COLOR: Color = Color::srgb(0.9, 0.1, 0.2);
     const PEER_ELEMENT_INDEX: usize = 5;
     const PEER_OVERRIDE_COLOR: Color = Color::srgb(0.2, 0.8, 0.9);
+
+    fn computed_slot(slot: VisualSlotId, element_index: usize) -> ComputedVisualSlot {
+        ComputedVisualSlot {
+            slot,
+            element_index,
+            border_box: BoundingBox::default(),
+            content_box: BoundingBox::default(),
+        }
+    }
 
     fn dispatch_app() -> App {
         let mut app = App::new();
@@ -367,10 +443,7 @@ mod tests {
             .spawn((
                 PanelWidget::new(PanelElementId::named("styled")),
                 WidgetOf::new(panel),
-                WidgetVisualSlots::new(vec![ComputedVisualSlot {
-                    slot:          SLOT,
-                    element_index: SLOT_ELEMENT_INDEX,
-                }]),
+                WidgetVisualSlots::new(vec![computed_slot(SLOT, SLOT_ELEMENT_INDEX)]),
             ))
             .id()
     }
@@ -388,10 +461,7 @@ mod tests {
             .spawn((
                 PanelWidget::new(PanelElementId::named(name)),
                 WidgetOf::new(panel),
-                WidgetVisualSlots::new(vec![ComputedVisualSlot {
-                    slot: SLOT,
-                    element_index,
-                }]),
+                WidgetVisualSlots::new(vec![computed_slot(SLOT, element_index)]),
                 overrides,
             ))
             .id()
@@ -406,6 +476,32 @@ mod tests {
             .resource::<VisualOverrideIndex>()
             .get(panel, element_index)
             .and_then(|value| value.color)
+    }
+
+    #[test]
+    fn render_offset_scales_and_inverts_the_layout_y_axis() {
+        // A non-unit scale multiplies both axes and the layout Y axis (down)
+        // maps to the render Y axis (up), so the sign of Y flips.
+        let offset = super::layout_delta_to_render_offset(Vec2::new(4.0, 6.0), 0.25)
+            .expect("finite delta and positive scale convert");
+        assert!((offset.x - 1.0).abs() < 1e-6, "X scales without inverting");
+        assert!((offset.y + 1.5).abs() < 1e-6, "Y scales and inverts");
+    }
+
+    #[test]
+    fn render_offset_rejects_invalid_input_or_scale() {
+        assert_eq!(
+            super::layout_delta_to_render_offset(Vec2::new(f32::NAN, 1.0), 1.0),
+            None,
+            "a non-finite delta manufactures no offset",
+        );
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(
+                super::layout_delta_to_render_offset(Vec2::new(1.0, 1.0), scale),
+                None,
+                "a non-positive or non-finite scale manufactures no offset",
+            );
+        }
     }
 
     #[test]
@@ -541,10 +637,10 @@ mod tests {
         app.world_mut().entity_mut(removed).despawn();
         app.world_mut()
             .entity_mut(renumbered)
-            .insert(WidgetVisualSlots::new(vec![ComputedVisualSlot {
-                slot:          SLOT,
-                element_index: SLOT_ELEMENT_INDEX,
-            }]));
+            .insert(WidgetVisualSlots::new(vec![computed_slot(
+                SLOT,
+                SLOT_ELEMENT_INDEX,
+            )]));
         app.update();
 
         assert_eq!(
@@ -579,16 +675,16 @@ mod tests {
         // removal would delete a fresh entry in either iteration order.
         app.world_mut()
             .entity_mut(first)
-            .insert(WidgetVisualSlots::new(vec![ComputedVisualSlot {
-                slot:          SLOT,
-                element_index: PEER_ELEMENT_INDEX,
-            }]));
+            .insert(WidgetVisualSlots::new(vec![computed_slot(
+                SLOT,
+                PEER_ELEMENT_INDEX,
+            )]));
         app.world_mut()
             .entity_mut(second)
-            .insert(WidgetVisualSlots::new(vec![ComputedVisualSlot {
-                slot:          SLOT,
-                element_index: SLOT_ELEMENT_INDEX,
-            }]));
+            .insert(WidgetVisualSlots::new(vec![computed_slot(
+                SLOT,
+                SLOT_ELEMENT_INDEX,
+            )]));
         app.update();
 
         assert_eq!(

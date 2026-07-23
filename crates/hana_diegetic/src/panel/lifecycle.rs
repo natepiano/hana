@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::change_detection::Ref;
 use bevy::ecs::change_detection::Tick;
+use bevy::ecs::system::SystemParam;
 use bevy::ecs::world::DeferredWorld;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
@@ -61,6 +62,8 @@ use crate::widgets::PanelWidgets;
 use crate::widgets::ScreenWidgetAnchorProxy;
 use crate::widgets::ScreenWidgetAnchoredHere;
 use crate::widgets::ScreenWidgetAnchoredTo;
+use crate::widgets::SliderCaptures;
+use crate::widgets::SliderDrag;
 use crate::widgets::WidgetFocusAuthority;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetOf;
@@ -196,6 +199,27 @@ impl PanelRenderLayersOwnership {
     }
 }
 
+/// Widget capture finalizers gathered into one param so the panel-role remove
+/// observer stays inside Bevy's observer parameter limit.
+#[derive(SystemParam)]
+pub(super) struct WidgetCaptureTeardown<'w, 's> {
+    button_presses:  Query<'w, 's, (Entity, &'static WidgetOf), With<ButtonPress>>,
+    button_captures: Option<ResMut<'w, ButtonCaptures>>,
+    slider_drags:    Query<'w, 's, (Entity, &'static WidgetOf), With<SliderDrag>>,
+    slider_captures: Option<ResMut<'w, SliderCaptures>>,
+}
+
+impl WidgetCaptureTeardown<'_, '_> {
+    fn finalize(&mut self, panel: Entity, commands: &mut Commands<'_, '_>) {
+        if let Some(button_captures) = self.button_captures.as_deref_mut() {
+            widgets::finalize_panel_buttons(panel, &self.button_presses, button_captures, commands);
+        }
+        if let Some(slider_captures) = self.slider_captures.as_deref_mut() {
+            widgets::finalize_panel_sliders(panel, &self.slider_drags, slider_captures, commands);
+        }
+    }
+}
+
 pub(super) fn teardown_panel_role(
     trigger: On<Remove, DiegeticPanel>,
     panels: Query<(Entity, &DiegeticPanel)>,
@@ -211,8 +235,7 @@ pub(super) fn teardown_panel_role(
     primary: Query<Entity, With<PrimaryWindow>>,
     mut resolved_surfaces: Option<ResMut<ResolvedSdfSurfaceRegistry>>,
     mut focus_authority: Option<ResMut<WidgetFocusAuthority>>,
-    button_presses: Query<(Entity, &WidgetOf), With<ButtonPress>>,
-    mut button_captures: Option<ResMut<ButtonCaptures>>,
+    mut widget_captures: WidgetCaptureTeardown,
     mut commands: Commands,
 ) {
     let entity = trigger.entity;
@@ -235,9 +258,7 @@ pub(super) fn teardown_panel_role(
     if let Some(focus_authority) = focus_authority.as_deref_mut() {
         widgets::finalize_panel_focus(entity, focus_authority, &mut commands);
     }
-    if let Some(button_captures) = button_captures.as_deref_mut() {
-        widgets::finalize_panel_buttons(entity, &button_presses, button_captures, &mut commands);
-    }
+    widget_captures.finalize(entity, &mut commands);
 
     finalize_widget_anchor_state(
         entity,
@@ -296,6 +317,8 @@ pub(super) fn finalize_panel_widgets_before_despawn(
     mut focus_authority: ResMut<WidgetFocusAuthority>,
     button_presses: Query<(Entity, &WidgetOf), With<ButtonPress>>,
     mut button_captures: ResMut<ButtonCaptures>,
+    slider_drags: Query<(Entity, &WidgetOf), With<SliderDrag>>,
+    mut slider_captures: ResMut<SliderCaptures>,
     mut commands: Commands,
 ) {
     widgets::finalize_panel_focus(trigger.entity, &mut focus_authority, &mut commands);
@@ -303,6 +326,12 @@ pub(super) fn finalize_panel_widgets_before_despawn(
         trigger.entity,
         &button_presses,
         &mut button_captures,
+        &mut commands,
+    );
+    widgets::finalize_panel_sliders(
+        trigger.entity,
+        &slider_drags,
+        &mut slider_captures,
         &mut commands,
     );
 }

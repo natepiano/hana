@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 
 use bevy::asset::load_internal_asset;
+use bevy::camera::NormalizedRenderTarget;
+use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::picking::Pickable;
@@ -940,15 +942,112 @@ pub(crate) fn project_flat_panel_hit(
     transform: &GlobalTransform,
 ) -> Option<Vec2> {
     let points_to_world = panel.points_to_world();
-    if points_to_world <= 0.0 {
+    if !points_to_world.is_finite() || points_to_world <= 0.0 {
         return None;
     }
     let local = transform.affine().inverse().transform_point3(position);
     let (anchor_x, anchor_y) = panel.anchor_offsets();
-    Some(Vec2::new(
+    let layout = Vec2::new(
         (local.x + anchor_x) / points_to_world,
         (anchor_y - local.y) / points_to_world,
-    ))
+    );
+    layout.is_finite().then_some(layout)
+}
+
+/// Live captured-camera state that re-derives the captured pointer's world
+/// ray.
+///
+/// Slider capture records the pointer's `NormalizedRenderTarget` when a press
+/// is accepted; each later projection re-reads the live `Camera`,
+/// `GlobalTransform`, and `RenderTarget` components and rejects the ray when
+/// the camera's current normalized target no longer equals that capture.
+pub(crate) struct CapturedCameraRay<'a> {
+    /// Live `Camera` of the captured camera entity.
+    pub(crate) camera:            &'a Camera,
+    /// Live global transform of the captured camera entity.
+    pub(crate) camera_transform:  &'a GlobalTransform,
+    /// Live `RenderTarget` of the captured camera entity, when it still has
+    /// one.
+    pub(crate) render_target:     Option<&'a RenderTarget>,
+    /// Resolved primary-window entity, when one exists.
+    pub(crate) primary_window:    Option<Entity>,
+    /// Normalized render target captured when the pointer press was accepted.
+    pub(crate) captured_target:   &'a NormalizedRenderTarget,
+    /// Current pointer position in viewport coordinates.
+    pub(crate) viewport_position: Vec2,
+}
+
+/// Why [`project_flat_panel_ray_hit`] produced no panel-layout coordinates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FlatPanelRayError {
+    /// The captured camera no longer has a `RenderTarget` component.
+    TargetMissing,
+    /// The live `RenderTarget` does not normalize against the resolved
+    /// primary window.
+    TargetUnresolvable,
+    /// The live normalized render target no longer equals the captured
+    /// target.
+    TargetMismatched,
+    /// `Camera::viewport_to_world` produced no ray for the pointer position.
+    CameraUnavailable,
+    /// The panel's global transform is non-finite or not invertible.
+    TransformNonInvertible,
+    /// The pointer ray never crosses the panel plane.
+    RayParallel,
+    /// The panel-plane crossing lies behind the camera.
+    HitBehindCamera,
+    /// [`project_flat_panel_hit`] rejected the panel's layout scale or its
+    /// computed coordinates.
+    ScaleInvalid,
+}
+
+/// Projects the captured pointer's current viewport position through the live
+/// captured camera onto `panel`'s layout coordinates.
+///
+/// The live `RenderTarget` is normalized against the resolved primary window
+/// and must still equal [`CapturedCameraRay::captured_target`]. The pointer
+/// ray from [`Camera::viewport_to_world`] intersects the panel's two-sided
+/// local z = 0 plane, so front and back hits both project, and the world hit
+/// converts through [`project_flat_panel_hit`].
+pub(crate) fn project_flat_panel_ray_hit(
+    captured_camera_ray: &CapturedCameraRay<'_>,
+    panel: &DiegeticPanel,
+    panel_transform: &GlobalTransform,
+) -> Result<Vec2, FlatPanelRayError> {
+    let live_target = captured_camera_ray
+        .render_target
+        .ok_or(FlatPanelRayError::TargetMissing)?;
+    let live_normalized = live_target
+        .normalize(captured_camera_ray.primary_window)
+        .ok_or(FlatPanelRayError::TargetUnresolvable)?;
+    if live_normalized != *captured_camera_ray.captured_target {
+        return Err(FlatPanelRayError::TargetMismatched);
+    }
+    let ray = captured_camera_ray
+        .camera
+        .viewport_to_world(
+            captured_camera_ray.camera_transform,
+            captured_camera_ray.viewport_position,
+        )
+        .map_err(|_| FlatPanelRayError::CameraUnavailable)?;
+
+    let world_from_panel = panel_transform.affine();
+    let determinant = world_from_panel.matrix3.determinant();
+    if !world_from_panel.is_finite() || !determinant.is_finite() || determinant == 0.0 {
+        return Err(FlatPanelRayError::TransformNonInvertible);
+    }
+    let panel_from_world = world_from_panel.inverse();
+    let local_origin = panel_from_world.transform_point3(ray.origin);
+    let local_direction = panel_from_world.transform_vector3(*ray.direction);
+    let distance = -local_origin.z / local_direction.z;
+    if !distance.is_finite() {
+        return Err(FlatPanelRayError::RayParallel);
+    }
+    if distance < 0.0 {
+        return Err(FlatPanelRayError::HitBehindCamera);
+    }
+    project_flat_panel_hit(ray.get_point(distance), panel, panel_transform)
+        .ok_or(FlatPanelRayError::ScaleInvalid)
 }
 
 const fn vec2_bits(value: Vec2) -> [u32; 2] { [value.x.to_bits(), value.y.to_bits()] }
@@ -977,6 +1076,11 @@ mod tests {
 
     use bevy::asset::AssetId;
     use bevy::asset::AssetPlugin;
+    use bevy::camera::OrthographicProjection;
+    use bevy::camera::PerspectiveProjection;
+    use bevy::camera::Projection;
+    use bevy::camera::RenderTargetInfo;
+    use bevy::window::WindowRef;
 
     use super::*;
     use crate::Mm;
@@ -996,6 +1100,9 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render;
     use crate::text::DiegeticTextMeasurer;
+
+    /// Logical viewport size seeded into every captured test camera.
+    const RAY_VIEWPORT_SIZE: Vec2 = Vec2::new(800.0, 600.0);
 
     /// Minimal measurer for geometry tests that include text commands.
     fn zero_measurer() -> DiegeticTextMeasurer {
@@ -1433,5 +1540,284 @@ mod tests {
             app.world().get::<RenderLayers>(interaction),
             Some(&RenderLayers::layer(0)),
         );
+    }
+
+    /// Camera whose computed viewport and projection are seeded directly,
+    /// matching what `camera_system` would compute for `RAY_VIEWPORT_SIZE`.
+    fn seeded_camera(mut projection: Projection) -> Camera {
+        let mut camera = Camera::default();
+        camera.computed.target_info = Some(RenderTargetInfo {
+            physical_size: RAY_VIEWPORT_SIZE.as_uvec2(),
+            scale_factor:  1.0,
+        });
+        projection.update(RAY_VIEWPORT_SIZE.x, RAY_VIEWPORT_SIZE.y);
+        camera.computed.clip_from_view = projection.get_clip_from_view();
+        camera
+    }
+
+    fn perspective_camera() -> Camera {
+        seeded_camera(Projection::Perspective(PerspectiveProjection::default()))
+    }
+
+    fn orthographic_camera() -> Camera {
+        seeded_camera(Projection::Orthographic(
+            OrthographicProjection::default_3d(),
+        ))
+    }
+
+    fn window_pair() -> (Entity, Entity) {
+        let mut world = World::new();
+        (world.spawn_empty().id(), world.spawn_empty().id())
+    }
+
+    /// Owned inputs for one captured-camera ray projection.
+    struct RayScene {
+        camera:            Camera,
+        camera_transform:  GlobalTransform,
+        render_target:     RenderTarget,
+        primary_window:    Option<Entity>,
+        captured_target:   NormalizedRenderTarget,
+        panel:             DiegeticPanel,
+        panel_transform:   GlobalTransform,
+        viewport_position: Vec2,
+    }
+
+    impl RayScene {
+        /// A camera on a secondary window at `(0, 0, 5)` facing a world panel
+        /// at the origin, with the pointer at the viewport center.
+        fn secondary_window(camera: Camera) -> Self {
+            let (window, _) = window_pair();
+            let render_target = RenderTarget::Window(WindowRef::Entity(window));
+            let captured_target = render_target
+                .normalize(None)
+                .expect("entity window targets normalize without a primary window");
+            Self {
+                camera,
+                camera_transform: GlobalTransform::from(
+                    Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+                ),
+                render_target,
+                primary_window: None,
+                captured_target,
+                panel: DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .world_height(0.5)
+                    .build()
+                    .expect("panel should build"),
+                panel_transform: GlobalTransform::IDENTITY,
+                viewport_position: RAY_VIEWPORT_SIZE * 0.5,
+            }
+        }
+
+        fn project_with_live_target(
+            &self,
+            render_target: Option<&RenderTarget>,
+        ) -> Result<Vec2, FlatPanelRayError> {
+            let captured_camera_ray = CapturedCameraRay {
+                camera: &self.camera,
+                camera_transform: &self.camera_transform,
+                render_target,
+                primary_window: self.primary_window,
+                captured_target: &self.captured_target,
+                viewport_position: self.viewport_position,
+            };
+            project_flat_panel_ray_hit(&captured_camera_ray, &self.panel, &self.panel_transform)
+        }
+
+        fn project(&self) -> Result<Vec2, FlatPanelRayError> {
+            self.project_with_live_target(Some(&self.render_target))
+        }
+    }
+
+    #[track_caller]
+    fn assert_layout_close(actual: Vec2, expected: Vec2) {
+        assert!(
+            (actual - expected).length() < 0.05,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn perspective_and_orthographic_center_rays_map_through_project_flat_panel_hit() {
+        for camera in [perspective_camera(), orthographic_camera()] {
+            let scene = RayScene::secondary_window(camera);
+            let projected = scene.project().expect("center ray should hit the panel");
+            // The viewport-center ray meets the panel plane at the world
+            // origin, so the ray path must agree with the world-hit converter.
+            let expected = project_flat_panel_hit(Vec3::ZERO, &scene.panel, &scene.panel_transform)
+                .expect("panel scale should convert the plane origin");
+            assert_layout_close(projected, expected);
+        }
+    }
+
+    #[test]
+    fn off_center_orthographic_ray_projects_the_offset_world_hit() {
+        let mut scene = RayScene::secondary_window(orthographic_camera());
+        // `OrthographicProjection::default_3d` window-size scaling maps one
+        // viewport pixel to one world unit; viewport y grows downward while
+        // world y grows upward.
+        scene.viewport_position = RAY_VIEWPORT_SIZE.mul_add(Vec2::splat(0.5), Vec2::new(10.0, 5.0));
+        let projected = scene.project().expect("offset ray should hit the panel");
+        let expected = project_flat_panel_hit(
+            Vec3::new(10.0, -5.0, 0.0),
+            &scene.panel,
+            &scene.panel_transform,
+        )
+        .expect("panel scale should convert the offset hit");
+        assert_layout_close(projected, expected);
+    }
+
+    #[test]
+    fn front_and_back_rays_project_the_same_layout_coordinates() {
+        let front = RayScene::secondary_window(perspective_camera());
+        let mut back = RayScene::secondary_window(perspective_camera());
+        back.camera_transform = GlobalTransform::from(
+            Transform::from_xyz(0.0, 0.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        );
+
+        let front_hit = front.project().expect("front ray should hit the panel");
+        let back_hit = back
+            .project()
+            .expect("back ray should hit the two-sided panel plane");
+        assert_layout_close(front_hit, back_hit);
+    }
+
+    #[test]
+    fn primary_window_target_normalizes_and_matches_capture() {
+        let (window, _) = window_pair();
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.render_target = RenderTarget::Window(WindowRef::Primary);
+        scene.primary_window = Some(window);
+        scene.captured_target = scene
+            .render_target
+            .normalize(scene.primary_window)
+            .expect("primary window targets normalize with a primary window");
+        assert!(scene.project().is_ok());
+
+        // Normalization equates the two spellings of the same window: a live
+        // entity reference still matches the captured primary reference.
+        let live_entity_target = RenderTarget::Window(WindowRef::Entity(window));
+        assert!(
+            scene
+                .project_with_live_target(Some(&live_entity_target))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn missing_unresolvable_and_mismatched_targets_reject_projection() {
+        let (live_window, captured_window) = window_pair();
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        assert_eq!(
+            scene.project_with_live_target(None),
+            Err(FlatPanelRayError::TargetMissing),
+        );
+
+        let primary_target = RenderTarget::Window(WindowRef::Primary);
+        assert_eq!(
+            scene.project_with_live_target(Some(&primary_target)),
+            Err(FlatPanelRayError::TargetUnresolvable),
+        );
+
+        scene.captured_target = RenderTarget::Window(WindowRef::Entity(captured_window))
+            .normalize(None)
+            .expect("entity window targets normalize without a primary window");
+        let moved_target = RenderTarget::Window(WindowRef::Entity(live_window));
+        assert_eq!(
+            scene.project_with_live_target(Some(&moved_target)),
+            Err(FlatPanelRayError::TargetMismatched),
+        );
+    }
+
+    #[test]
+    fn camera_without_computed_viewport_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.camera = Camera::default();
+        assert_eq!(scene.project(), Err(FlatPanelRayError::CameraUnavailable));
+    }
+
+    #[test]
+    fn non_invertible_panel_transform_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.panel_transform =
+            GlobalTransform::from(Transform::from_scale(Vec3::new(1.0, 0.0, 1.0)));
+        assert_eq!(
+            scene.project(),
+            Err(FlatPanelRayError::TransformNonInvertible),
+        );
+    }
+
+    #[test]
+    fn non_finite_panel_transform_rejects_projection() {
+        // A non-finite translation keeps the linear part invertible
+        // (determinant 1), so only the affine finiteness guard rejects it; a
+        // non-finite scale is also caught by the determinant guard.
+        for transform in [
+            Transform::from_translation(Vec3::new(f32::NAN, 0.0, 0.0)),
+            Transform::from_scale(Vec3::new(f32::INFINITY, 1.0, 1.0)),
+        ] {
+            let mut scene = RayScene::secondary_window(perspective_camera());
+            scene.panel_transform = GlobalTransform::from(transform);
+            assert_eq!(
+                scene.project(),
+                Err(FlatPanelRayError::TransformNonInvertible),
+            );
+        }
+    }
+
+    #[test]
+    fn ray_parallel_to_the_panel_plane_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        // An exact 90-degree rotation about Y turns the panel plane parallel
+        // to the camera's -Z center ray; a trigonometric rotation would leave
+        // a residual normal component and a finite plane crossing.
+        scene.panel_transform = GlobalTransform::from(Mat4::from_mat3(Mat3::from_cols(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::Y,
+            Vec3::X,
+        )));
+        scene.camera_transform = GlobalTransform::from(Transform::from_xyz(3.0, 0.0, 5.0));
+        assert_eq!(scene.project(), Err(FlatPanelRayError::RayParallel));
+    }
+
+    #[test]
+    fn plane_crossing_behind_the_camera_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        // The camera sits at z = -5 facing -Z, so the panel plane at z = 0
+        // lies behind it.
+        scene.camera_transform = GlobalTransform::from(Transform::from_xyz(0.0, 0.0, -5.0));
+        assert_eq!(scene.project(), Err(FlatPanelRayError::HitBehindCamera));
+    }
+
+    #[test]
+    fn invalid_panel_scale_rejects_the_world_hit_conversion() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .world_height(0.0)
+            .build()
+            .expect("panel should build");
+        assert_eq!(
+            project_flat_panel_hit(Vec3::ZERO, &scene.panel, &scene.panel_transform),
+            None,
+        );
+        assert_eq!(scene.project(), Err(FlatPanelRayError::ScaleInvalid));
+    }
+
+    #[test]
+    fn non_finite_panel_scale_rejects_the_world_hit_conversion() {
+        for world_height in [f32::NAN, f32::INFINITY] {
+            let mut scene = RayScene::secondary_window(perspective_camera());
+            scene.panel = DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .world_height(world_height)
+                .build()
+                .expect("panel should build");
+            assert_eq!(
+                project_flat_panel_hit(Vec3::ZERO, &scene.panel, &scene.panel_transform),
+                None,
+            );
+            assert_eq!(scene.project(), Err(FlatPanelRayError::ScaleInvalid));
+        }
     }
 }
