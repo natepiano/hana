@@ -586,11 +586,12 @@ impl<L> El<L> {
     /// be authored without its identity. A [`Button::on_click`] callback on
     /// the declaration stays a cloneable template here; the builder never
     /// touches a `World`, and reify registers the callback when the widget
-    /// entity exists.
+    /// entity exists. The element also receives the private root visual slot
+    /// that the button's state presentation builders patch at runtime.
     pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> Self {
         self.common.id = Some(id.into());
         self.common.widget = Some(WidgetSpec::Button(button));
-        self
+        self.visual_slot(VisualSlotId::BUTTON_ROOT)
     }
 
     /// Marks this element as a slider with panel-local semantic identity `id`.
@@ -614,11 +615,11 @@ impl<L> El<L> {
     /// Attaches a stable private visual-slot id to this element's retained
     /// render records.
     ///
-    /// Presets author slot ids on ordinary primitives inside a widget
-    /// subtree; widget state then patches those retained records through
-    /// crate-private overrides without regenerating the tree. No production
-    /// preset currently consumes this test-only hook.
-    #[cfg(test)]
+    /// Crate widget authoring assigns slot ids to ordinary primitives inside
+    /// a widget subtree; widget state then patches those retained records
+    /// through crate-private overrides without regenerating the tree.
+    /// [`Self::button`] authors [`VisualSlotId::BUTTON_ROOT`] through this
+    /// hook.
     pub(crate) const fn visual_slot(mut self, slot: VisualSlotId) -> Self {
         self.common.visual_slot = Some(slot);
         self

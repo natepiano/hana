@@ -1335,7 +1335,9 @@ fn route_sdf_batch_records(
 /// Runs inside `route_sdf_batch_records`, so the override reaches the same
 /// frame material rows, `SdfBatchKey` selection, and `SdfBatchStore` upsert
 /// as authored data: a color patches every authored role's material row in
-/// place — an element authoring both a fill and a border recolors both — an
+/// place — an element authoring both a fill and a border recolors both,
+/// while the role-specific `fill_color`/`border_color` recolor one role and
+/// take precedence over `color` for it — an
 /// offset translates only its `local_transform`, and a replacement material
 /// that changes `PipelineCompatibility`/`ResourceCompatibility` re-keys the
 /// record to its compatible destination batch. Authored registry surfaces
@@ -1347,13 +1349,15 @@ fn apply_sdf_visual_override<'a>(
 ) {
     let fill_authored = surface.fill_material.authorship.is_authored();
     let border_authored = surface.border_material.authorship.is_authored();
-    if let Some(color) = slot_override.color {
-        if fill_authored {
-            surface.fill_material.color = Some(color);
-        }
-        if border_authored {
-            surface.border_material.color = Some(color);
-        }
+    if let Some(color) = slot_override.fill_color.or(slot_override.color)
+        && fill_authored
+    {
+        surface.fill_material.color = Some(color);
+    }
+    if let Some(color) = slot_override.border_color.or(slot_override.color)
+        && border_authored
+    {
+        surface.border_material.color = Some(color);
     }
     if let Some(material) = &slot_override.material {
         if fill_authored {
@@ -4315,6 +4319,109 @@ mod tests {
         assert_eq!(
             border_row_color(&app, &records[0]),
             linear_color(IMAGE_BORDER_COLOR),
+        );
+    }
+
+    #[test]
+    fn role_specific_colors_recolor_fill_and_border_independently() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_bordered_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(PEER_FILL_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(PEER_FILL_COLOR),
+            "the border role takes its own override color",
+        );
+
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_fill_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(IMAGE_BORDER_COLOR),
+            "a fill-only override leaves the authored border color",
+        );
+
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_color(PEER_FILL_COLOR)
+                .with_fill_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+            "the role-specific color wins over the shared color for its role",
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(PEER_FILL_COLOR),
+            "the shared color still recolors the role without a specific color",
+        );
+    }
+
+    #[test]
+    fn role_specific_colors_never_author_a_missing_fill_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_border_only_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(PEER_FILL_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].fill_material,
+            SdfPaintMaterial::NotAuthored,
+            "a fill-role color must not author a missing fill role",
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(PEER_FILL_COLOR),
         );
     }
 

@@ -29,7 +29,12 @@ use super::WidgetOf;
 pub(crate) struct VisualSlotId(u32);
 
 impl VisualSlotId {
-    /// Creates a slot id from a preset-chosen stable value in renderer tests.
+    /// Root-surface slot authored by [`El::button`](crate::El::button) on the
+    /// element carrying the widget. Button state presentation writes only this
+    /// slot.
+    pub(crate) const BUTTON_ROOT: Self = Self(u32::MAX);
+
+    /// Creates a slot id from a test-chosen stable value in renderer tests.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn new(value: u32) -> Self { Self(value) }
@@ -71,7 +76,10 @@ impl WidgetVisualSlots {
 /// State-only presentation override for one visual slot.
 ///
 /// `color` recolors the slot's authored fill, border, image tint, text, or
-/// panel-line records without changing batch routing. `offset` translates
+/// panel-line records without changing batch routing. `fill_color` and
+/// `border_color` recolor only the slot's SDF fill or border role and take
+/// precedence over `color` for that role; image, text, and panel-line records
+/// never read them. `offset` translates
 /// the slot's SDF, image, text, and panel-line records in the panel-local XY
 /// plane while preserving authored draw depth. `material`
 /// replaces the SDF, text, or panel-line source material and re-keys the
@@ -81,13 +89,17 @@ impl WidgetVisualSlots {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct VisualSlotOverride {
     /// Replacement color for authored fill/tint/text/line color.
-    pub color:    Option<Color>,
+    pub color:        Option<Color>,
+    /// Replacement color for the SDF fill role only.
+    pub fill_color:   Option<Color>,
+    /// Replacement color for the SDF border role only.
+    pub border_color: Option<Color>,
     /// Panel-local XY translation added to retained record transforms.
-    pub offset:   Option<Vec2>,
+    pub offset:       Option<Vec2>,
     /// Replacement source material for SDF, text, and panel-line records.
-    pub material: Option<Handle<StandardMaterial>>,
+    pub material:     Option<Handle<StandardMaterial>>,
     /// Replacement sampled texture for image records.
-    pub texture:  Option<Handle<Image>>,
+    pub texture:      Option<Handle<Image>>,
 }
 
 /// Fluent construction helpers for retained-renderer tests.
@@ -96,6 +108,18 @@ impl VisualSlotOverride {
     #[must_use]
     pub(crate) const fn with_color(mut self, color: Color) -> Self {
         self.color = Some(color);
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_fill_color(mut self, color: Color) -> Self {
+        self.fill_color = Some(color);
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_border_color(mut self, color: Color) -> Self {
+        self.border_color = Some(color);
         self
     }
 
@@ -125,6 +149,15 @@ pub(crate) struct WidgetVisualOverrides {
 }
 
 impl WidgetVisualOverrides {
+    /// Returns the stored override for `slot`.
+    #[must_use]
+    pub(crate) fn get(&self, slot: VisualSlotId) -> Option<&VisualSlotOverride> {
+        self.overrides
+            .iter()
+            .find(|(id, _)| *id == slot)
+            .map(|(_, value)| value)
+    }
+
     /// Sets or replaces the override for `slot`; an equal stored value is
     /// left untouched.
     ///
@@ -134,12 +167,10 @@ impl WidgetVisualOverrides {
     /// widget's index entries. The repeated-identical no-op guarantee lives
     /// at the retained renderer level — every route rebuilds the same record
     /// values and the batch stores compare before dirtying, so no GPU buffer
-    /// re-uploads. Production writers must compare immutably before taking a
-    /// mutable component reference, keeping unchanged frames out of
-    /// `Changed<WidgetVisualOverrides>` entirely.
-    ///
-    /// Test-only mutation hook for retained-renderer coverage.
-    #[cfg(test)]
+    /// re-uploads. Production writers go through [`write_slot_override`],
+    /// which compares immutably before taking a mutable component reference,
+    /// keeping unchanged frames out of `Changed<WidgetVisualOverrides>`
+    /// entirely.
     pub(crate) fn set(&mut self, slot: VisualSlotId, value: VisualSlotOverride) {
         match self.overrides.iter_mut().find(|(id, _)| *id == slot) {
             Some((_, current)) => {
@@ -152,15 +183,55 @@ impl WidgetVisualOverrides {
     }
 
     /// Removes the override for `slot`, restoring authored presentation.
-    ///
-    /// Test-only mutation hook for retained-renderer coverage.
-    #[cfg(test)]
     pub(crate) fn clear(&mut self, slot: VisualSlotId) {
         self.overrides.retain(|(id, _)| *id != slot);
     }
 
     fn iter(&self) -> impl Iterator<Item = (VisualSlotId, &VisualSlotOverride)> {
         self.overrides.iter().map(|(slot, value)| (*slot, value))
+    }
+}
+
+/// Writes one widget slot's desired override, touching mutable state only for
+/// a real change.
+///
+/// A `desired` equal to [`VisualSlotOverride::default`] clears the slot. The
+/// current component is read immutably first: an equal stored value (or an
+/// absent value when clearing) returns before any `Mut` borrow, so unchanged
+/// frames never enter `Changed<WidgetVisualOverrides>`. The first insertion
+/// on a widget without the component is queued through `commands` and becomes
+/// visible after `WidgetSystems::PresentationCommandsApplied`.
+pub(crate) fn write_slot_override(
+    widget: Entity,
+    slot: VisualSlotId,
+    desired: VisualSlotOverride,
+    overrides: &mut Query<&mut WidgetVisualOverrides>,
+    commands: &mut Commands<'_, '_>,
+) {
+    let clear = desired == VisualSlotOverride::default();
+    let Ok(current) = overrides.get(widget) else {
+        if clear {
+            return;
+        }
+        let mut component = WidgetVisualOverrides::default();
+        component.set(slot, desired);
+        commands.entity(widget).insert(component);
+        return;
+    };
+    let unchanged = match current.get(slot) {
+        Some(existing) => !clear && *existing == desired,
+        None => clear,
+    };
+    if unchanged {
+        return;
+    }
+    let Ok(mut current) = overrides.get_mut(widget) else {
+        return;
+    };
+    if clear {
+        current.clear(slot);
+    } else {
+        current.set(slot, desired);
     }
 }
 
@@ -209,8 +280,9 @@ impl VisualOverrideIndex {
 
 /// Resolves changed widget overrides into the [`VisualOverrideIndex`].
 ///
-/// Runs after `WidgetSystems::ReifyCommandsApplied` so slot references
-/// attached by this frame's reify are visible; the `PostUpdate` batch routes
+/// Runs after `WidgetSystems::PresentationCommandsApplied`, so slot
+/// references attached by this frame's reify and the button state writer's
+/// first override insertion are both visible; the `PostUpdate` batch routes
 /// read the index later the same frame.
 ///
 /// Removal of stale keys happens for every changed and removed widget before

@@ -738,6 +738,20 @@ impl LayoutTree {
                 if precompose == PrecomposeMode::Ldr {
                     return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
                 }
+                if let Some(WidgetSpec::Button(button)) = &element.widget {
+                    if button.has_state_background() && element.background.is_none() {
+                        return Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id));
+                    }
+                    if button.has_state_border_color() && element.border.is_none() {
+                        return Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id));
+                    }
+                    if button.has_state_material()
+                        && element.background.is_none()
+                        && element.border.is_none()
+                    {
+                        return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
+                    }
+                }
                 Some(id)
             } else {
                 owning_widget
@@ -1611,6 +1625,35 @@ mod tests {
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
         assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn button_state_value_change_classifies_as_visual_only() {
+        let tree = root_tree(El::new().background(Color::WHITE).button(
+            "action",
+            Button::new().hovered_background(Color::srgb(0.2, 0.4, 0.8)),
+        ));
+        let next = root_tree(El::new().background(Color::WHITE).button(
+            "action",
+            Button::new().hovered_background(Color::srgb(0.8, 0.4, 0.2)),
+        ));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn button_elements_carry_the_root_visual_slot() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("action", Button::new()), |_| {});
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(records.len(), 1);
+        let slots = records[0].visual_slots();
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].slot, VisualSlotId::BUTTON_ROOT);
     }
 
     #[test]

@@ -59,6 +59,15 @@ pub enum PanelBuildError {
     /// A widget is inside a subtree rendered through precomposition.
     #[error("widget `{0}` is inside a precomposed subtree")]
     WidgetInsidePrecomposedSubtree(PanelElementId),
+    /// A button authored a state background without a normal background.
+    #[error("button `{0}` state background requires an authored background")]
+    ButtonStateBackgroundRequiresBackground(PanelElementId),
+    /// A button authored a state border color without a normal border.
+    #[error("button `{0}` state border color requires an authored border")]
+    ButtonStateBorderColorRequiresBorder(PanelElementId),
+    /// A button authored a state material without a background or border.
+    #[error("button `{0}` state material requires an authored background or border")]
+    ButtonStateMaterialRequiresSurface(PanelElementId),
 }
 
 // ── Typestate marker types ──────────────────────────────────────────────────
@@ -931,9 +940,12 @@ mod tests {
     use std::error::Error;
 
     use bevy::prelude::AlphaMode;
+    use bevy::prelude::Color;
+    use bevy::prelude::Handle;
     use bevy_kana::Cascade;
 
     use super::PanelBuildError;
+    use crate::Border;
     use crate::Button;
     use crate::DiegeticPanel;
     use crate::El;
@@ -980,6 +992,24 @@ mod tests {
             (
                 PanelBuildError::WidgetInsidePrecomposedSubtree(PanelElementId::named("button")),
                 "widget `button` is inside a precomposed subtree",
+            ),
+            (
+                PanelBuildError::ButtonStateBackgroundRequiresBackground(PanelElementId::named(
+                    "action",
+                )),
+                "button `action` state background requires an authored background",
+            ),
+            (
+                PanelBuildError::ButtonStateBorderColorRequiresBorder(PanelElementId::named(
+                    "action",
+                )),
+                "button `action` state border color requires an authored border",
+            ),
+            (
+                PanelBuildError::ButtonStateMaterialRequiresSurface(PanelElementId::named(
+                    "action",
+                )),
+                "button `action` state material requires an authored background or border",
             ),
         ];
 
@@ -1098,6 +1128,93 @@ mod tests {
             Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id))
                 if id == PanelElementId::named("action")
         ));
+    }
+
+    #[test]
+    fn button_state_background_without_background_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new().button(
+                        "action",
+                        Button::new().hovered_background(Color::srgb(0.2, 0.4, 0.8)),
+                    ),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id))
+                if id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn button_state_border_color_without_border_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new().background(Color::srgb(0.1, 0.1, 0.1)).button(
+                        "action",
+                        Button::new().focused_border_color(Color::srgb(0.9, 0.8, 0.2)),
+                    ),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id))
+                if id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn button_state_material_without_surface_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new().button("action", Button::new().pressed_material(Handle::default())),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id))
+                if id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn button_state_builders_with_authored_targets_build_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .background(Color::srgb(0.1, 0.1, 0.1))
+                        .border(Border::all(1.0, Color::srgb(0.4, 0.4, 0.4)))
+                        .button(
+                            "action",
+                            Button::new()
+                                .hovered_background(Color::srgb(0.2, 0.4, 0.8))
+                                .focused_border_color(Color::srgb(0.9, 0.8, 0.2))
+                                .pressed_material(Handle::default()),
+                        ),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(result.is_ok());
     }
 
     #[test]
