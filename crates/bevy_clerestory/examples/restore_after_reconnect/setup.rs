@@ -750,7 +750,7 @@ pub(super) mod tests {
         let ratio = placement_scale_ratio(Platform::MacOs, 2.0, target.scale);
 
         assert_eq!(centered, IVec2::new(-2_936, -1_799));
-        assert_eq!(ratio, 2.0);
+        assert!((ratio - 2.0).abs() <= PROBE_SCALE_EPSILON);
         assert_eq!(
             compensated_window_position(centered, ratio),
             IVec2::new(-5_872, -3_598),

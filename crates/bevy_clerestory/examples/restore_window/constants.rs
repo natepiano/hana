@@ -74,7 +74,7 @@ pub(crate) const PRIMARY_WINDOW_TITLE: &str = "Window Restore - Primary Window";
 pub(crate) const MILLIHERTZ_PER_HERTZ: u32 = 1000;
 
 // test mode
-pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "BWM_TEST_MODE";
+pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_MODE";
 
 // video mode scrolling
 /// When the selected video mode falls below the visible window, scroll down so

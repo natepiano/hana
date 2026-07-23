@@ -526,7 +526,7 @@ def launch_app(
 
     env = dict(os.environ)
     if test_mode:
-        env["BWM_TEST_MODE"] = "1"
+        env["CLERESTORY_TEST_MODE"] = "1"
     if backend == "x11":
         env["WAYLAND_DISPLAY"] = ""
 
