@@ -46,6 +46,7 @@ use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::El;
 use hana_diegetic::FacePicking;
+use hana_diegetic::Fit;
 use hana_diegetic::FitMax;
 use hana_diegetic::FocusPreviousWidget;
 use hana_diegetic::LayoutBuilder;
@@ -72,7 +73,6 @@ use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
-use hana_diegetic::WidgetFocused;
 use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
@@ -139,7 +139,7 @@ const SCREEN_TARGET_ID: &str = "screen-target-button";
 const SCREEN_TARGET_LABEL: &str = "Target widget";
 const STATE_STATUS_ID: &str = "state-status";
 const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal";
-const STATE_STATUS_MEASURE: &str = "State: pri=hover,focus,off sec=hover,focus,off";
+const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off";
 const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
 const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
 const SLIDER_HEIGHT: Px = Px(36.0);
@@ -157,9 +157,8 @@ const STATUS_GAP: f32 = 0.012;
 const STATUS_LINE_GAP: Px = Px(4.0);
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = Px(7.0);
-const WORLD_READOUT_MAX_HEIGHT: Px = Px(116.0);
 const WORLD_READOUT_MAX_WIDTH: Px = Px(420.0);
-const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.12;
+const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.15;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum SecondaryMode {
@@ -584,10 +583,7 @@ fn spawn_widget_lab(
         .with_tree(widget_tree(slider))
         .build();
     let readout = DiegeticPanel::world()
-        .size(
-            FitMax(WORLD_READOUT_MAX_WIDTH.into()),
-            FitMax(WORLD_READOUT_MAX_HEIGHT.into()),
-        )
+        .size(FitMax(WORLD_READOUT_MAX_WIDTH.into()), Fit)
         .world_height(WORLD_READOUT_WORLD_HEIGHT)
         .anchor(Anchor::Center)
         .material(material.clone())
@@ -914,10 +910,10 @@ fn report_interaction_changes(
     }
 }
 
-/// Mirrors each world button's app-visible presentation inputs into the
-/// `State:` diagnostic row. Hover comes from `PickingInteraction`, focus from
-/// `WidgetFocused`, and disabled from `WidgetDisabled`; press already appears
-/// on the `Button:` row through its events.
+/// Mirrors each world button's pointer and availability presentation inputs
+/// into the `State:` diagnostic row. The separate `Focus:` row reports the
+/// retained keyboard target; its border is drawn only while keyboard focus is
+/// visible.
 fn report_presentation_states(
     panel: Single<Entity, With<WidgetLabPanel>>,
     readout: Single<Entity, With<WidgetInteractionReadout>>,
@@ -925,7 +921,6 @@ fn report_presentation_states(
         &PanelWidget,
         &WidgetOf,
         Option<&PickingInteraction>,
-        Has<WidgetFocused>,
         Has<WidgetDisabled>,
     )>,
     mut panel_text: PanelText,
@@ -938,16 +933,12 @@ fn report_presentation_states(
             })
             .map_or_else(
                 || "?".to_owned(),
-                |(_, _, interaction, focused, disabled)| {
+                |(_, _, interaction, disabled)| {
                     let mut parts = Vec::new();
-                    if matches!(
-                        interaction,
-                        Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
-                    ) {
-                        parts.push("hover");
-                    }
-                    if focused {
-                        parts.push("focus");
+                    match interaction {
+                        Some(PickingInteraction::Hovered) => parts.push("hover"),
+                        Some(PickingInteraction::Pressed) => parts.push("pressed"),
+                        None | Some(PickingInteraction::None) => {},
                     }
                     if disabled {
                         parts.push("off");

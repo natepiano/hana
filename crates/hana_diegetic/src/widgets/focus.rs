@@ -23,6 +23,15 @@ pub struct WidgetFocusable;
 #[reflect(Component)]
 pub struct WidgetFocused(());
 
+/// Marks a widget whose retained focus should currently be drawn.
+///
+/// [`WidgetFocused`] remains the keyboard-input target after a pointer press,
+/// while this private marker is removed. Keyboard traversal restores this
+/// marker without changing the focused widget.
+#[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
+#[component(immutable)]
+pub(crate) struct WidgetFocusVisible(());
+
 /// Requests focus for a live widget in one window.
 #[derive(Clone, Copy, Debug, EntityEvent)]
 pub struct RequestWidgetFocus {
@@ -74,9 +83,16 @@ pub enum WidgetFocusChangeCause {
     ScopeLost,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FocusIndicator {
+    Hidden,
+    Visible,
+}
+
 #[derive(Clone, Copy)]
 struct WindowFocusScope {
     active_panel: Entity,
+    indicator:    FocusIndicator,
     widget:       Option<Entity>,
 }
 
@@ -98,6 +114,12 @@ impl WidgetFocusAuthority {
         self.scopes
             .values()
             .any(|scope| scope.widget == Some(widget))
+    }
+
+    fn shows_focus(&self, widget: Entity) -> bool {
+        self.scopes
+            .values()
+            .any(|scope| scope.widget == Some(widget) && scope.indicator == FocusIndicator::Visible)
     }
 }
 
@@ -128,6 +150,7 @@ pub(super) fn request_widget_focus(
         request.window,
         Some(WindowFocusScope {
             active_panel: widget_of.panel(),
+            indicator:    FocusIndicator::Visible,
             widget:       Some(request.widget),
         }),
         WidgetFocusChangeCause::Application,
@@ -146,6 +169,7 @@ pub(super) fn clear_widget_focus(
         .get(&request.window)
         .map(|scope| WindowFocusScope {
             active_panel: scope.active_panel,
+            indicator:    FocusIndicator::Hidden,
             widget:       None,
         });
     transition_focus(
@@ -184,6 +208,7 @@ pub(super) fn focus_from_pointer_press(
         window,
         Some(WindowFocusScope {
             active_panel: widget_of.panel(),
+            indicator:    FocusIndicator::Hidden,
             widget:       Some(widget),
         }),
         WidgetFocusChangeCause::Pointer,
@@ -294,6 +319,7 @@ pub(super) fn traverse_focus(
         window,
         Some(WindowFocusScope {
             active_panel: panel,
+            indicator:    FocusIndicator::Visible,
             widget:       Some(target),
         }),
         WidgetFocusChangeCause::Traversal,
@@ -358,6 +384,7 @@ fn clear_removed_widget_focus(
             window,
             Some(WindowFocusScope {
                 active_panel,
+                indicator: FocusIndicator::Hidden,
                 widget: None,
             }),
             cause,
@@ -397,6 +424,21 @@ fn transition_focus(
     commands: &mut Commands<'_, '_>,
 ) {
     let previous = authority.focused_widget(window);
+    let next_widget = next.and_then(|scope| scope.widget);
+    let affected_widgets = [previous, next_widget]
+        .into_iter()
+        .flatten()
+        .collect::<HashSet<_>>();
+    let previous_markers = affected_widgets
+        .iter()
+        .map(|&widget| {
+            (
+                widget,
+                authority.focuses(widget),
+                authority.shows_focus(widget),
+            )
+        })
+        .collect::<Vec<_>>();
     match next {
         Some(scope) => {
             authority.scopes.insert(window, scope);
@@ -406,16 +448,26 @@ fn transition_focus(
         },
     }
     let current = authority.focused_widget(window);
+    for (widget, was_focused, was_visible) in previous_markers {
+        let is_focused = authority.focuses(widget);
+        let is_visible = authority.shows_focus(widget);
+        if was_focused != is_focused {
+            if is_focused {
+                commands.entity(widget).insert(WidgetFocused(()));
+            } else {
+                commands.entity(widget).try_remove::<WidgetFocused>();
+            }
+        }
+        if was_visible != is_visible {
+            if is_visible {
+                commands.entity(widget).insert(WidgetFocusVisible(()));
+            } else {
+                commands.entity(widget).try_remove::<WidgetFocusVisible>();
+            }
+        }
+    }
     if previous == current {
         return;
-    }
-    if let Some(previous) = previous
-        && !authority.focuses(previous)
-    {
-        commands.entity(previous).try_remove::<WidgetFocused>();
-    }
-    if let Some(current) = current {
-        commands.entity(current).insert(WidgetFocused(()));
     }
     commands.trigger(WidgetFocusChanged {
         window,
@@ -446,6 +498,7 @@ mod tests {
     use super::WidgetFocusAuthority;
     use super::WidgetFocusChangeCause;
     use super::WidgetFocusChanged;
+    use super::WidgetFocusVisible;
     use super::WidgetFocusable;
     use super::WidgetFocused;
     use crate::Button;
@@ -727,6 +780,7 @@ mod tests {
         let remembered = widget(&mut app, panel, "remembered");
         let target = widget(&mut app, panel, "target");
         request_focus(&mut app, primary_window, remembered);
+        assert!(app.world().get::<WidgetFocusVisible>(remembered).is_some());
         let none_camera = app
             .world_mut()
             .spawn((Camera::default(), RenderTarget::None { size: UVec2::ONE }))
@@ -774,6 +828,8 @@ mod tests {
         app.world_mut().flush();
         assert_eq!(focused(&app, primary_window), Some(target));
         assert_eq!(focused(&app, pointer_window), None);
+        assert!(app.world().get::<WidgetFocused>(target).is_some());
+        assert!(app.world().get::<WidgetFocusVisible>(target).is_none());
         assert_eq!(
             app.world()
                 .resource::<FocusChanges>()
@@ -781,6 +837,20 @@ mod tests {
                 .last()
                 .map(|change| change.cause),
             Some(WidgetFocusChangeCause::Pointer)
+        );
+
+        app.world_mut().resource_mut::<FocusChanges>().0.clear();
+        app.world_mut().write_message(FocusLastWidget {
+            window: primary_window,
+        });
+        app.update();
+
+        assert_eq!(focused(&app, primary_window), Some(target));
+        assert!(app.world().get::<WidgetFocused>(target).is_some());
+        assert!(app.world().get::<WidgetFocusVisible>(target).is_some());
+        assert!(
+            app.world().resource::<FocusChanges>().0.is_empty(),
+            "revealing the indicator must not report a semantic focus transition",
         );
     }
 

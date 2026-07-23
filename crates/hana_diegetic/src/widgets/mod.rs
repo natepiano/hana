@@ -33,6 +33,7 @@ pub use focus::RequestWidgetFocus;
 pub(crate) use focus::WidgetFocusAuthority;
 pub use focus::WidgetFocusChangeCause;
 pub use focus::WidgetFocusChanged;
+pub(crate) use focus::WidgetFocusVisible;
 pub use focus::WidgetFocusable;
 pub use focus::WidgetFocused;
 pub(crate) use focus::finalize_panel_focus;
