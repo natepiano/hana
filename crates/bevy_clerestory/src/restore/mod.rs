@@ -41,6 +41,7 @@ pub(crate) use winit_info::queue_primary_restore;
 
 use crate::ClerestoryPreStartupSet;
 use crate::ClerestoryUpdateSet;
+use crate::macos_tabbing_fix;
 use crate::monitors;
 use crate::recovery;
 pub(crate) struct RestorePlugin;
@@ -49,7 +50,7 @@ impl Plugin for RestorePlugin {
     fn build(&self, app: &mut App) {
         #[cfg(target_os = "macos")]
         app.insert_non_send(crate::macos_tabbing_fix::NativeFullscreenObservations::default())
-            .add_observer(crate::macos_tabbing_fix::clear_fullscreen_observation);
+            .add_observer(macos_tabbing_fix::clear_fullscreen_observation);
 
         app.init_resource::<RestoreAttemptIds>()
             .init_resource::<ObservedScaleInputs>()
