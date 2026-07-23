@@ -1223,6 +1223,7 @@ pub(crate) fn finalize_panel_buttons(
 #[cfg(test)]
 mod tests {
     use bevy::camera::NormalizedRenderTarget;
+    use bevy::ecs::change_detection::Tick;
     use bevy::ecs::observer::ObservedBy;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::input::ButtonState;
@@ -1326,7 +1327,6 @@ mod tests {
     use crate::widgets::WidgetVisualOverrides;
     use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
-    use bevy::ecs::change_detection::Tick;
 
     const BUTTON_ID: &str = "action";
     const FIELD_ID: &str = "field";

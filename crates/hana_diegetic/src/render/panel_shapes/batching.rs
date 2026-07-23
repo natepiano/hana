@@ -27,6 +27,7 @@ use bevy_kana::ToUsize;
 
 use super::path;
 use super::path::PanelShapeMember;
+use super::path::PanelShapePath;
 use super::path::PanelShapePathContext;
 use super::primitive::PanelShapeRenderKey;
 use super::relationship::PanelShape;
@@ -86,7 +87,6 @@ use crate::render::material_table::MaterialSlotInput;
 use crate::render::material_table::SdfPaintMaterial;
 use crate::widgets::VisualOverrideIndex;
 use crate::widgets::VisualSlotOverride;
-use super::path::PanelShapePath;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
