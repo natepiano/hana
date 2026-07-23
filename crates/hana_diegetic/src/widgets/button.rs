@@ -35,6 +35,7 @@ use super::WidgetOf;
 use super::WidgetSpec;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
+use super::capture::WidgetCaptures;
 use super::visual;
 use crate::PanelElementId;
 use crate::ime;
@@ -378,8 +379,9 @@ pub(super) fn presentation_inputs_changed(
 /// [`presentation_inputs_changed`] reports a relevant authored or state edge,
 /// so a quiet frame never walks the live buttons.
 /// Hover reads the all-pointer [`PickingInteraction`] aggregate and pressed
-/// reads the private [`ButtonPress`] marker; [`ButtonCaptures`] stays
-/// lifecycle authority and is never consulted for presentation. Writes go
+/// reads the private [`ButtonPress`] marker; [`WidgetCaptures`] and
+/// [`ButtonCaptures`] stay lifecycle authority and are never consulted for
+/// presentation. Writes go
 /// through [`visual::write_slot_override`], which compares immutably first,
 /// so an unchanged state never marks [`WidgetVisualOverrides`] changed.
 pub(super) fn present_button_state(
@@ -517,19 +519,15 @@ impl ButtonCallbackHandle {
     pub(super) fn system_entity(&self) -> Entity { self.0.entity() }
 }
 
-struct CapturedButtonPress {
-    entity:   Entity,
+struct PendingButtonPress {
     id:       PanelElementId,
-    sequence: u64,
     terminal: ButtonTerminal,
 }
 
-impl CapturedButtonPress {
-    const fn new(entity: Entity, id: PanelElementId, sequence: u64) -> Self {
+impl PendingButtonPress {
+    const fn new(id: PanelElementId) -> Self {
         Self {
-            entity,
             id,
-            sequence,
             terminal: ButtonTerminal::Pending,
         }
     }
@@ -574,69 +572,35 @@ enum ButtonReleaseOutcome {
     Clicked,
 }
 
+/// Pending button-press payloads keyed by the captured widget entity.
+///
+/// Pointer/widget occupancy and raw-action ordering live in the shared
+/// [`WidgetCaptures`]; this resource holds only the button facts event
+/// emission needs — the panel-local id and the terminal outcome. Entries are
+/// inserted and removed together with their [`WidgetCaptures`] occupancy, so
+/// membership here always has a live owning pointer.
 #[derive(Default, Resource)]
 pub(crate) struct ButtonCaptures {
-    presses:         HashMap<PointerId, CapturedButtonPress>,
-    latest_observed: HashMap<PointerId, (Entity, u64)>,
-    sequence:        u64,
+    presses: HashMap<Entity, PendingButtonPress>,
 }
 
 impl ButtonCaptures {
-    fn observe_press(&mut self, pointer_id: PointerId, entity: Entity) -> Option<u64> {
-        let Some(sequence) = self.sequence.checked_add(1) else {
-            error!("Hana button press sequence exhausted; ignoring press for {pointer_id:?}");
-            return None;
-        };
-        self.sequence = sequence;
-        self.latest_observed.insert(pointer_id, (entity, sequence));
-        Some(sequence)
+    fn begin_press(&mut self, entity: Entity, id: PanelElementId) {
+        self.presses.insert(entity, PendingButtonPress::new(id));
     }
 
-    fn can_capture(&self, pointer_id: PointerId, widget: Entity) -> bool {
-        !self.presses.contains_key(&pointer_id)
-            && !self.presses.values().any(|press| press.entity == widget)
-    }
-
-    fn captures(&self, pointer_id: PointerId, widget: Entity) -> bool {
-        self.presses
-            .get(&pointer_id)
-            .is_some_and(|press| press.entity == widget)
-    }
-
-    fn widget(&self, pointer_id: PointerId) -> Option<Entity> {
-        self.presses.get(&pointer_id).map(|press| press.entity)
-    }
-
-    fn insert(&mut self, pointer_id: PointerId, entity: Entity, id: PanelElementId, sequence: u64) {
-        self.presses
-            .insert(pointer_id, CapturedButtonPress::new(entity, id, sequence));
-    }
-
-    fn press_mut(
-        &mut self,
-        pointer_id: PointerId,
-        entity: Entity,
-    ) -> Option<&mut CapturedButtonPress> {
-        self.presses
-            .get_mut(&pointer_id)
-            .filter(|press| press.entity == entity)
+    fn press_mut(&mut self, entity: Entity) -> Option<&mut PendingButtonPress> {
+        self.presses.get_mut(&entity)
     }
 
     fn cancel(&mut self, entity: Entity, cause: ButtonCancelCause) -> bool {
         self.presses
-            .values_mut()
-            .find(|press| press.entity == entity)
+            .get_mut(&entity)
             .is_some_and(|press| press.cancel(cause))
     }
 
-    fn take(&mut self, entity: Entity) -> Option<(PointerId, CapturedButtonPress)> {
-        let pointer_id = self
-            .presses
-            .iter()
-            .find_map(|(&pointer_id, press)| (press.entity == entity).then_some(pointer_id))?;
-        self.presses
-            .remove(&pointer_id)
-            .map(|press| (pointer_id, press))
+    fn take(&mut self, entity: Entity) -> Option<PendingButtonPress> {
+        self.presses.remove(&entity)
     }
 }
 
@@ -651,7 +615,8 @@ pub(super) fn press_from_pointer(
         ),
         With<WidgetOf>,
     >,
-    mut captures: ResMut<ButtonCaptures>,
+    mut captures: ResMut<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     if press.button != PointerButton::Primary {
@@ -668,11 +633,11 @@ pub(super) fn press_from_pointer(
     let Some(sequence) = captures.observe_press(press.pointer_id, entity) else {
         return;
     };
-    if disabled || pressed || !captures.can_capture(press.pointer_id, entity) {
+    if disabled || pressed || !captures.try_capture(press.pointer_id, entity, sequence) {
         return;
     }
 
-    captures.insert(press.pointer_id, entity, widget.id().clone(), sequence);
+    button_captures.begin_press(entity, widget.id().clone());
     commands.entity(entity).insert(ButtonPress);
     commands.trigger(ButtonPressed {
         entity,
@@ -684,7 +649,8 @@ pub(super) fn press_from_pointer(
 pub(super) fn click_from_pointer(
     mut click: On<Pointer<Click>>,
     mut widgets: Query<(&PanelWidget, &WidgetKind, &WidgetOf, Has<WidgetDisabled>)>,
-    mut captures: ResMut<ButtonCaptures>,
+    captures: Res<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     editor_state: Option<Res<ImeEditorState>>,
     mut blur_intent: Option<ResMut<ImeBlurIntent>>,
 ) {
@@ -708,7 +674,7 @@ pub(super) fn click_from_pointer(
     if disabled || !captures.captures(click.pointer_id, entity) {
         return;
     }
-    if let Some(button_press) = captures.press_mut(click.pointer_id, entity) {
+    if let Some(button_press) = button_captures.press_mut(entity) {
         button_press.release(ButtonReleaseOutcome::Clicked);
     }
 }
@@ -716,7 +682,8 @@ pub(super) fn click_from_pointer(
 pub(super) fn release_from_pointer(
     mut release: On<Pointer<Release>>,
     widgets: Query<&WidgetKind>,
-    mut captures: ResMut<ButtonCaptures>,
+    captures: Res<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     if release.button != PointerButton::Primary {
@@ -733,7 +700,7 @@ pub(super) fn release_from_pointer(
     if !captures.captures(release.pointer_id, entity) {
         return;
     }
-    let Some(button_press) = captures.press_mut(release.pointer_id, entity) else {
+    let Some(button_press) = button_captures.press_mut(entity) else {
         return;
     };
     button_press.release(ButtonReleaseOutcome::WithoutClick);
@@ -742,7 +709,8 @@ pub(super) fn release_from_pointer(
 
 pub(super) fn cancel_from_pointer(
     mut cancel: On<Pointer<Cancel>>,
-    mut captures: ResMut<ButtonCaptures>,
+    captures: Res<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     let entity = cancel.event_target();
@@ -751,7 +719,7 @@ pub(super) fn cancel_from_pointer(
         cancel_button_press(
             entity,
             ButtonCancelCause::PointerCanceled,
-            &mut captures,
+            &mut button_captures,
             &mut commands,
         );
     }
@@ -759,7 +727,8 @@ pub(super) fn cancel_from_pointer(
 
 pub(super) fn cancel_from_drag_end(
     mut drag_end: On<Pointer<DragEnd>>,
-    mut captures: ResMut<ButtonCaptures>,
+    captures: Res<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     let entity = drag_end.event_target();
@@ -768,7 +737,7 @@ pub(super) fn cancel_from_drag_end(
         cancel_button_press(
             entity,
             ButtonCancelCause::CaptureLost,
-            &mut captures,
+            &mut button_captures,
             &mut commands,
         );
     }
@@ -799,14 +768,15 @@ pub(super) fn reconcile_pointer_input(
     hover_map: Res<HoverMap>,
     picking_settings: Res<PickingSettings>,
     widgets: Query<(&WidgetKind, Has<WidgetDisabled>), (With<PanelWidget>, With<WidgetOf>)>,
-    mut captures: ResMut<ButtonCaptures>,
+    mut captures: ResMut<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     let (primary_presses, terminals) = read_primary_actions(&mut inputs);
-    let latest_observed = std::mem::take(&mut captures.latest_observed);
+    let latest_observed = captures.take_latest_observed();
     let mut removed_at = HashMap::new();
     for (order, pointer_id, terminal) in terminals {
-        let Some(button_press) = captures.presses.get(&pointer_id) else {
+        let Some(owner) = captures.owner(pointer_id) else {
             continue;
         };
         if removed_at.contains_key(&pointer_id) {
@@ -814,7 +784,7 @@ pub(super) fn reconcile_pointer_input(
         }
         let accepted_is_latest = latest_observed
             .get(&pointer_id)
-            .is_some_and(|(_, sequence)| *sequence == button_press.sequence);
+            .is_some_and(|(_, sequence)| *sequence == owner.sequence());
         if matches!(terminal, ButtonTerminal::Release(_))
             && accepted_is_latest
             && primary_presses
@@ -824,12 +794,12 @@ pub(super) fn reconcile_pointer_input(
             continue;
         }
 
-        let entity = button_press.entity;
+        let entity = owner.entity();
         let final_is_later =
             latest_observed
                 .get(&pointer_id)
                 .is_some_and(|(latest_entity, sequence)| {
-                    *sequence > button_press.sequence
+                    *sequence > owner.sequence()
                         && pointer_state
                             .get(pointer_id, PointerButton::Primary)
                             .is_some_and(|state| state.pressing.contains_key(latest_entity))
@@ -839,7 +809,7 @@ pub(super) fn reconcile_pointer_input(
             ButtonTerminal::Cancel(_) => cancel_button_press(
                 entity,
                 ButtonCancelCause::PointerCanceled,
-                &mut captures,
+                &mut button_captures,
                 &mut commands,
             ),
             ButtonTerminal::Release(_) => {
@@ -855,7 +825,7 @@ pub(super) fn reconcile_pointer_input(
                         .get(&pointer_id)
                         .is_some_and(|hovered| hovered.contains_key(&entity));
                 if released_over_capture {
-                    if let Some(button_press) = captures.press_mut(pointer_id, entity) {
+                    if let Some(button_press) = button_captures.press_mut(entity) {
                         button_press.release(ButtonReleaseOutcome::Clicked);
                     }
                     commands.entity(entity).remove::<ButtonPress>();
@@ -863,7 +833,7 @@ pub(super) fn reconcile_pointer_input(
                     cancel_button_press(
                         entity,
                         ButtonCancelCause::CaptureLost,
-                        &mut captures,
+                        &mut button_captures,
                         &mut commands,
                     );
                 }
@@ -939,7 +909,7 @@ fn queue_final_presses(
         (&WidgetKind, Has<WidgetDisabled>),
         (With<PanelWidget>, With<WidgetOf>),
     >,
-    captures: &ButtonCaptures,
+    captures: &WidgetCaptures,
     commands: &mut Commands<'_, '_>,
 ) {
     let mut final_presses = latest_observed
@@ -956,26 +926,21 @@ fn queue_final_presses(
 
     for (order, pointer_id, entity, sequence) in final_presses {
         if captures
-            .presses
-            .get(&pointer_id)
-            .is_some_and(|button_press| button_press.sequence == sequence)
+            .owner(pointer_id)
+            .is_some_and(|owner| owner.sequence() == sequence)
         {
             continue;
         }
-        let pointer_is_freed = captures.presses.get(&pointer_id).is_none_or(|_| {
+        let pointer_is_freed = captures.owner(pointer_id).is_none_or(|_| {
             removed_at
                 .get(&pointer_id)
                 .is_some_and(|removed_order| *removed_order < order)
         });
-        let widget_is_freed = captures
-            .presses
-            .iter()
-            .find(|(_, button_press)| button_press.entity == entity)
-            .is_none_or(|(captured_pointer, _)| {
-                removed_at
-                    .get(captured_pointer)
-                    .is_some_and(|removed_order| *removed_order < order)
-            });
+        let widget_is_freed = captures.pointer(entity).is_none_or(|captured_pointer| {
+            removed_at
+                .get(&captured_pointer)
+                .is_some_and(|removed_order| *removed_order < order)
+        });
         if pointer_is_freed
             && widget_is_freed
             && let Ok((kind, disabled)) = widgets.get(entity)
@@ -1002,9 +967,6 @@ fn capture_reconciled_press(
         || world.get::<WidgetOf>(entity).is_none()
         || world.get::<WidgetDisabled>(entity).is_some()
         || world.get::<ButtonPress>(entity).is_some()
-        || !world
-            .resource::<ButtonCaptures>()
-            .can_capture(pointer_id, entity)
     {
         return;
     }
@@ -1014,10 +976,16 @@ fn capture_reconciled_press(
     else {
         return;
     };
+    if !world
+        .resource_mut::<WidgetCaptures>()
+        .try_capture(pointer_id, entity, sequence)
+    {
+        return;
+    }
 
     world
         .resource_mut::<ButtonCaptures>()
-        .insert(pointer_id, entity, id.clone(), sequence);
+        .begin_press(entity, id.clone());
     world.entity_mut(entity).insert(ButtonPress);
     world.trigger(ButtonPressed {
         entity,
@@ -1029,7 +997,8 @@ fn capture_reconciled_press(
 pub(super) fn cancel_from_pointer_removal(
     removed: On<Remove, PointerId>,
     pointers: Query<&PointerId>,
-    mut captures: ResMut<ButtonCaptures>,
+    captures: Res<WidgetCaptures>,
+    mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
 ) {
     let Ok(&pointer_id) = pointers.get(removed.entity) else {
@@ -1041,7 +1010,7 @@ pub(super) fn cancel_from_pointer_removal(
     cancel_button_press(
         widget,
         ButtonCancelCause::PointerRemoved,
-        &mut captures,
+        &mut button_captures,
         &mut commands,
     );
 }
@@ -1131,15 +1100,24 @@ pub(super) fn dispatch_click_callback(
 
 fn emit_button_terminal(mut world: DeferredWorld, context: HookContext) {
     let entity = context.entity;
-    let (id, pointer_id, terminal) = {
-        let Some(mut captures) = world.get_resource_mut::<ButtonCaptures>() else {
-            return;
-        };
-        let Some((pointer_id, button_press)) = captures.take(entity) else {
-            return;
-        };
-        (button_press.id, pointer_id, button_press.terminal)
+    let Some(button_press) = world
+        .get_resource_mut::<ButtonCaptures>()
+        .and_then(|mut captures| captures.take(entity))
+    else {
+        return;
     };
+    let Some(pointer_id) = world
+        .get_resource_mut::<WidgetCaptures>()
+        .and_then(|mut captures| captures.release_widget(entity))
+    else {
+        warn!(
+            "button {:?} ({entity}) has a pending press but no capture owner; skipping terminal \
+             events",
+            button_press.id
+        );
+        return;
+    };
+    let (id, terminal) = (button_press.id, button_press.terminal);
 
     match terminal {
         ButtonTerminal::Release(outcome) => {
@@ -1267,6 +1245,7 @@ mod tests {
     use super::ButtonPressed;
     use super::ButtonReleased;
     use super::ButtonTerminal;
+    use super::WidgetCaptures;
     use super::cancel_before_widget_despawn;
     use super::cancel_from_disabled;
     use super::cancel_from_drag_end;
@@ -1327,6 +1306,7 @@ mod tests {
     use crate::widgets::WidgetVisualOverrides;
     use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
+    use crate::widgets::capture::CapturedWidget;
 
     const BUTTON_ID: &str = "action";
     const FIELD_ID: &str = "field";
@@ -1425,7 +1405,8 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.init_resource::<ButtonCaptures>()
+        app.init_resource::<WidgetCaptures>()
+            .init_resource::<ButtonCaptures>()
             .init_resource::<RecordedButtonEvents>()
             .init_resource::<HoverMap>()
             .init_resource::<PickingSettings>()
@@ -1772,23 +1753,29 @@ mod tests {
 
     fn assert_pending_capture(app: &App, widget: Entity, pointer_id: PointerId) {
         assert!(app.world().get::<ButtonPress>(widget).is_some());
-        let captures = app.world().resource::<ButtonCaptures>();
+        let captures = app.world().resource::<WidgetCaptures>();
         assert_eq!(captures.widget(pointer_id), Some(widget));
+        assert_eq!(captures.pointer(widget), Some(pointer_id));
         assert!(matches!(
-            captures
+            app.world()
+                .resource::<ButtonCaptures>()
                 .presses
-                .get(&pointer_id)
+                .get(&widget)
                 .map(|press| press.terminal),
             Some(ButtonTerminal::Pending)
         ));
     }
 
+    fn assert_no_captures(app: &App) {
+        assert!(app.world().resource::<WidgetCaptures>().is_empty());
+        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+    }
+
     fn capture_sequence(app: &App, pointer_id: PointerId) -> Option<u64> {
         app.world()
-            .resource::<ButtonCaptures>()
-            .presses
-            .get(&pointer_id)
-            .map(|press| press.sequence)
+            .resource::<WidgetCaptures>()
+            .owner(pointer_id)
+            .map(CapturedWidget::sequence)
     }
 
     fn click_count(app: &App, widget: Entity, pointer_id: PointerId) -> Option<u8> {
@@ -1841,7 +1828,7 @@ mod tests {
             ]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -1894,7 +1881,7 @@ mod tests {
             ]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -1922,7 +1909,7 @@ mod tests {
             ]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -1953,7 +1940,7 @@ mod tests {
             )]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2228,7 +2215,7 @@ mod tests {
             ]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2270,7 +2257,7 @@ mod tests {
                 .is_some_and(|state| state.pressing.contains_key(&widget))
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
 
         {
             let mut settings = app.world_mut().resource_mut::<PickingSettings>();
@@ -2293,7 +2280,7 @@ mod tests {
                 .is_some_and(|state| !state.pressing.contains_key(&widget))
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
 
         app.update();
 
@@ -2305,7 +2292,7 @@ mod tests {
             )]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2350,7 +2337,7 @@ mod tests {
             )]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2388,7 +2375,7 @@ mod tests {
         );
         assert!(app.world().get::<ButtonPress>(captured_widget).is_none());
         assert!(app.world().get::<ButtonPress>(hovered_widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2441,7 +2428,7 @@ mod tests {
             ]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2506,6 +2493,30 @@ mod tests {
                 RecordedButtonEvent::Released(pointer_id),
             ]
         );
+    }
+
+    #[test]
+    fn exhausted_press_sequence_rejects_new_press_and_preserves_the_owner() {
+        let mut app = test_app();
+        let captured_widget = spawn_button(&mut app);
+        let other_widget = spawn_button(&mut app);
+        let captured = PointerId::Touch(61);
+        let other = PointerId::Touch(62);
+
+        press(&mut app, captured_widget, captured);
+        clear_events(&mut app);
+        app.world_mut()
+            .resource_mut::<WidgetCaptures>()
+            .saturate_sequence();
+
+        press(&mut app, other_widget, other);
+        assert!(events(&app).is_empty());
+        assert!(app.world().get::<ButtonPress>(other_widget).is_none());
+        assert_pending_capture(&app, captured_widget, captured);
+
+        release(&mut app, captured_widget, captured);
+        assert_eq!(events(&app), [RecordedButtonEvent::Released(captured)]);
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2592,7 +2603,7 @@ mod tests {
             ]
         );
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -2816,7 +2827,7 @@ mod tests {
 
         assert_eq!(events(&app), [RecordedButtonEvent::Clicked(None)]);
         assert!(app.world().get::<ButtonPress>(widget).is_none());
-        assert!(app.world().resource::<ButtonCaptures>().presses.is_empty());
+        assert_no_captures(&app);
     }
 
     #[test]
@@ -3002,6 +3013,7 @@ mod tests {
         let observation = app.world().resource::<TeardownObservation>();
         assert_eq!(observation.cancellations, 1);
         assert_eq!(observation.relations_seen, 1);
+        assert_no_captures(&app);
 
         let result = app.world_mut().commands().set_tree(panel, button_tree());
         assert!(result.is_ok());
@@ -3023,6 +3035,7 @@ mod tests {
         assert_eq!(observation.cancellations, 2);
         assert_eq!(observation.relations_seen, 2);
         assert!(app.world().get_entity(widget).is_err());
+        assert_no_captures(&app);
     }
 
     fn install_attachment_relations(app: &mut App, widget: Entity) {
@@ -3518,16 +3531,21 @@ mod tests {
         let widget = resolve_widget(&mut app, panel);
 
         // A capture without the `ButtonPress` marker shows no pressed state.
-        app.world_mut().resource_mut::<ButtonCaptures>().insert(
-            PointerId::Mouse,
-            widget,
-            PanelElementId::named(BUTTON_ID),
-            1,
-        );
+        let captured = app
+            .world_mut()
+            .resource_mut::<WidgetCaptures>()
+            .try_capture(PointerId::Mouse, widget, 1);
+        assert!(captured);
+        app.world_mut()
+            .resource_mut::<ButtonCaptures>()
+            .begin_press(widget, PanelElementId::named(BUTTON_ID));
         app.update();
         assert_eq!(root_override(&app, widget), None);
 
         // The marker alone drives pressed presentation.
+        app.world_mut()
+            .resource_mut::<WidgetCaptures>()
+            .release_widget(widget);
         app.world_mut()
             .resource_mut::<ButtonCaptures>()
             .presses
