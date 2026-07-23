@@ -73,6 +73,8 @@ use crate::text::GlyphCache;
 use crate::text::GlyphQuadExtents;
 use crate::text::PreparedTextRun;
 use crate::text::RunStorageKey;
+use crate::widgets::VisualOverrideIndex;
+use crate::widgets::VisualSlotOverride;
 
 /// Marker on every batch render entity, BRP-inspectable.
 #[derive(Component, Reflect)]
@@ -225,7 +227,12 @@ pub(super) fn update_panel_text_batches(
         With<TextContent>,
     >,
     mut emptied_runs: RemovedComponents<PreparedPanelText>,
-    panels: Query<(&DiegeticPanel, Option<&RenderLayers>, Option<&Visibility>)>,
+    panels: Query<(
+        &DiegeticPanel,
+        Option<&RenderLayers>,
+        Option<&Visibility>,
+        &GlobalTransform,
+    )>,
     cascades: PathBatchKeyCascades,
     anti_alias: Res<AntiAlias>,
     mut backend: ResMut<GlyphCache>,
@@ -236,6 +243,7 @@ pub(super) fn update_panel_text_batches(
     text_material_default: Res<CascadeDefault<TextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut material_table: ResMut<FrameMaterialTableBuild>,
+    visual_overrides: Res<VisualOverrideIndex>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -267,7 +275,9 @@ pub(super) fn update_panel_text_batches(
     ) in &runs
     {
         let storage_key = RunStorageKey::from(label_entity);
-        let Ok((_panel, panel_layers, panel_visibility)) = panels.get(child_of.parent()) else {
+        let Ok((_panel, panel_layers, panel_visibility, panel_transform)) =
+            panels.get(child_of.parent())
+        else {
             backend.batch_store_mut().remove_run(storage_key);
             continue;
         };
@@ -281,9 +291,14 @@ pub(super) fn update_panel_text_batches(
         let sidedness = cascades.sidedness(label_entity);
         let shadow = cascades.visual_shadow(label_entity);
         let material = cascades.material(label_entity, &text_material_default);
+        let slot_override = visual_overrides.get(child_of.parent(), panel_text_child.element_idx);
+        let (fill_color, material) =
+            apply_text_visual_override(slot_override, prepared.fill_color, material);
+        let record_transform =
+            text_run_record_transform(label_transform, panel_transform, slot_override);
         let Some(material_candidate) = text_material_candidate_for_frame(
             &material,
-            prepared.fill_color,
+            fill_color,
             alpha_mode,
             lighting,
             sidedness,
@@ -324,7 +339,7 @@ pub(super) fn update_panel_text_batches(
                 batch_key,
                 prepared: &prepared,
                 panel_text_child: &panel_text_child,
-                label_transform,
+                record_transform,
                 anti_alias: cascades.anti_alias(label_entity),
                 hdr_text_coverage_bias: cascades.hdr_text_coverage_bias(label_entity),
                 material_candidate,
@@ -344,6 +359,11 @@ pub(super) fn update_panel_text_batches(
         commands:        &mut commands,
     });
 
+    record_panel_text_batch_perf(&mut perf, mesh_build_start);
+}
+
+/// Records the completed text-batching duration and recomputes its total.
+fn record_panel_text_batch_perf(perf: &mut DiegeticPerfStats, mesh_build_start: Instant) {
     perf.panel_text.mesh_build_ms =
         mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
@@ -401,7 +421,7 @@ struct RebuiltTextRunInput<'a> {
     batch_key:              PathBatchKey,
     prepared:               &'a PreparedPanelText,
     panel_text_child:       &'a PanelTextLayout,
-    label_transform:        &'a GlobalTransform,
+    record_transform:       Mat4,
     anti_alias:             AntiAlias,
     hdr_text_coverage_bias: HdrTextCoverageBias,
     material_candidate:     MaterialSlotCandidate,
@@ -425,7 +445,7 @@ fn apply_text_run_update(
             storage_key:            input.storage_key,
             prepared:               input.prepared,
             panel_text_child:       input.panel_text_child,
-            label_transform:        input.label_transform,
+            record_transform:       input.record_transform,
             anti_alias:             input.anti_alias,
             hdr_text_coverage_bias: input.hdr_text_coverage_bias,
             material_candidate:     input.material_candidate,
@@ -448,7 +468,7 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         batch_key,
         prepared,
         panel_text_child,
-        label_transform,
+        record_transform,
         anti_alias,
         hdr_text_coverage_bias,
         material_candidate,
@@ -481,7 +501,7 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
     let record = run_record_for(
         prepared,
         panel_text_child,
-        label_transform,
+        record_transform,
         anti_alias,
         hdr_text_coverage_bias,
         material_slot,
@@ -501,7 +521,7 @@ struct RenderOnlyTextRunInput<'a> {
     storage_key:            RunStorageKey,
     prepared:               &'a PreparedPanelText,
     panel_text_child:       &'a PanelTextLayout,
-    label_transform:        &'a GlobalTransform,
+    record_transform:       Mat4,
     anti_alias:             AntiAlias,
     hdr_text_coverage_bias: HdrTextCoverageBias,
     material_candidate:     MaterialSlotCandidate,
@@ -516,7 +536,7 @@ fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
         storage_key,
         prepared,
         panel_text_child,
-        label_transform,
+        record_transform,
         anti_alias,
         hdr_text_coverage_bias,
         material_candidate,
@@ -528,7 +548,7 @@ fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
     let record = run_record_for(
         prepared,
         panel_text_child,
-        label_transform,
+        record_transform,
         anti_alias,
         hdr_text_coverage_bias,
         material_slot,
@@ -540,6 +560,60 @@ fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
 
 const fn is_hidden(visibility: Option<&Visibility>) -> bool {
     matches!(visibility, Some(Visibility::Hidden))
+}
+
+/// Applies one widget visual-slot override to a routed text run.
+///
+/// Runs inside `update_panel_text_batches` before the frame material row is
+/// appended: a replacement `color` patches only the run's material-table row
+/// values, while a replacement `material` that changes
+/// `PipelineCompatibility`/`ResourceCompatibility` changes the computed
+/// `PathBatchKey` and `TextRunBatchStore::upsert_run` moves the run to its
+/// compatible destination batch. A panel-local `offset` is applied to the
+/// run's `PathRenderRecord` matrix instead, by [`text_run_record_transform`]
+/// at record build and by [`write_batch_run_transforms`] after propagation.
+fn apply_text_visual_override(
+    slot_override: Option<&VisualSlotOverride>,
+    fill_color: Color,
+    material: Handle<StandardMaterial>,
+) -> (Color, Handle<StandardMaterial>) {
+    let Some(slot_override) = slot_override else {
+        return (fill_color, material);
+    };
+    (
+        slot_override.color.unwrap_or(fill_color),
+        slot_override.material.clone().unwrap_or(material),
+    )
+}
+
+/// World matrix for one run's `PathRenderRecord`: the label's
+/// `GlobalTransform` matrix plus any slot-override `offset` composed through
+/// the owning panel's global transform via [`offset_record_matrix`]. The
+/// text-run entity `Transform` and `PanelTextLayout` payload stay untouched.
+fn text_run_record_transform(
+    label_transform: &GlobalTransform,
+    panel_transform: &GlobalTransform,
+    slot_override: Option<&VisualSlotOverride>,
+) -> Mat4 {
+    let matrix = label_transform.to_matrix();
+    slot_override
+        .and_then(|slot_override| slot_override.offset)
+        .map_or(matrix, |offset| {
+            offset_record_matrix(matrix, panel_transform, offset)
+        })
+}
+
+/// Adds a panel-local `offset` to a world `matrix` by rotating and scaling
+/// the offset vector through the panel's global transform, so an offset on a
+/// rotated or scaled panel moves the record in the panel plane rather than
+/// along world axes.
+fn offset_record_matrix(matrix: Mat4, panel_transform: &GlobalTransform, offset: Vec2) -> Mat4 {
+    let mut matrix = matrix;
+    matrix.w_axis += panel_transform
+        .affine()
+        .transform_vector3(offset.extend(0.0))
+        .extend(0.0);
+    matrix
 }
 
 fn text_material_candidate_for_frame(
@@ -607,7 +681,7 @@ fn batch_key_for_run(
 fn run_record_for(
     prepared: &PreparedPanelText,
     panel_text_child: &PanelTextLayout,
-    label_transform: &GlobalTransform,
+    record_transform: Mat4,
     anti_alias: AntiAlias,
     hdr_text_coverage_bias: HdrTextCoverageBias,
     material: MaterialSlotId,
@@ -615,7 +689,7 @@ fn run_record_for(
     PathRenderRecord {
         // Pre-propagation snapshot; write_batch_run_transforms corrects it
         // after TransformSystems::Propagate the same frame.
-        transform:          label_transform.to_matrix(),
+        transform:          record_transform,
         material:           material.into(),
         render_mode:        u32::from(RenderMode::from(prepared.render_mode)),
         clip_depth_nudge:   panel_text_child.depth_bias,
@@ -687,19 +761,36 @@ fn reconcile_batch_entities(input: ReconcileBatchEntities<'_, '_, '_>) {
 }
 
 /// Copies each routed label's propagated `GlobalTransform` into its
-/// `PathRenderRecord` slot. The store dirties the run table only when the matrix
-/// actually changed, so a static frame uploads nothing.
+/// `PathRenderRecord` slot, composing any widget slot-override `offset`
+/// through the owning panel's global transform. A label whose transform did
+/// not change is recomputed only when the `VisualOverrideIndex` changed this
+/// frame, and the store dirties the run table only when the matrix actually
+/// changed, so a static frame uploads nothing.
 pub(super) fn write_batch_run_transforms(
-    labels: Query<(Entity, Ref<GlobalTransform>), (With<TextContent>, With<PreparedPanelText>)>,
+    labels: Query<
+        (Entity, Ref<GlobalTransform>, &ChildOf, &PanelTextLayout),
+        (With<TextContent>, With<PreparedPanelText>),
+    >,
+    panels: Query<&GlobalTransform, With<DiegeticPanel>>,
+    visual_overrides: Res<VisualOverrideIndex>,
     mut backend: ResMut<GlyphCache>,
 ) {
-    for (label_entity, transform) in &labels {
-        if !transform.is_changed() {
+    let overrides_changed = visual_overrides.is_changed();
+    for (label_entity, transform, child_of, panel_text_child) in &labels {
+        if !transform.is_changed() && !overrides_changed {
             continue;
+        }
+        let mut matrix = transform.to_matrix();
+        if let Some(offset) = visual_overrides
+            .get(child_of.parent(), panel_text_child.element_idx)
+            .and_then(|slot_override| slot_override.offset)
+            && let Ok(panel_transform) = panels.get(child_of.parent())
+        {
+            matrix = offset_record_matrix(matrix, panel_transform, offset);
         }
         backend
             .batch_store_mut()
-            .update_run_transform(RunStorageKey::from(label_entity), transform.to_matrix());
+            .update_run_transform(RunStorageKey::from(label_entity), matrix);
     }
 }
 
@@ -1186,16 +1277,20 @@ const fn batch_gpu_alpha_mode(authored: AlphaMode) -> AlphaMode {
 )]
 mod tests {
     use std::collections::hash_map::DefaultHasher;
+    use std::f32::consts::FRAC_PI_2;
     use std::hash::Hasher;
     use std::sync::Arc;
 
     use bevy::asset::AssetPlugin;
+    use bevy::ecs::change_detection::Tick;
     use bevy::image::Image;
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
     use super::*;
+    use crate::Button;
     use crate::Mm;
+    use crate::PanelWidget;
     use crate::cascade;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::HdrTextCoverageBias;
@@ -1210,6 +1305,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
+    use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants;
@@ -1223,10 +1319,19 @@ mod tests {
     use crate::render::text_shaping::TextShapingContext;
     use crate::text::DiegeticTextMeasurer;
     use crate::text::FontRegistry;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetsPlugin;
 
     const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
     const NON_INTERSECTING_CLIP_RECT: [f32; 4] = [f32::MAX; 4];
     const RAISED_LEVEL: DrawZIndex = DrawZIndex(1);
+    const TEXT_OVERRIDE_COLOR: Color = Color::srgb(0.9, 0.1, 0.3);
+    const TEXT_SLOT: VisualSlotId = VisualSlotId::new(9);
+    /// Panel-local offset with distinct axis values so a rotated panel maps
+    /// it to a visibly different world delta.
+    const TEXT_SLOT_OFFSET: Vec2 = Vec2::new(4.0, -2.0);
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -1266,6 +1371,7 @@ mod tests {
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
             .init_resource::<AntiAlias>()
+            .init_resource::<VisualOverrideIndex>()
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
             .init_asset::<PathExtendedMaterial>()
@@ -2318,5 +2424,341 @@ mod tests {
                 "run payload length must equal capacity at {count} records"
             );
         }
+    }
+
+    // ── Widget visual-slot overrides ────────────────────────────────────────
+
+    fn widget_pipeline_app() -> App {
+        let mut app = pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        app
+    }
+
+    fn slotted_text_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("styled", Button::new()), |builder| {
+            builder.text(
+                Text::new("Alpha", TextStyle::new(10.0)).layout(El::new().visual_slot(TEXT_SLOT)),
+            );
+        });
+        builder.text(("Beta", TextStyle::new(10.0)));
+        builder.build()
+    }
+
+    fn styled_widget(app: &mut App) -> Entity {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<PanelWidget>>();
+        let widgets: Vec<Entity> = query.iter(app.world()).collect();
+        assert_eq!(widgets.len(), 1, "expected exactly one reified widget");
+        widgets[0]
+    }
+
+    fn set_text_slot_override(app: &mut App, widget: Entity, value: VisualSlotOverride) {
+        let mut overrides = WidgetVisualOverrides::default();
+        overrides.set(TEXT_SLOT, value);
+        app.world_mut().entity_mut(widget).insert(overrides);
+    }
+
+    fn run_material_base_colors(app: &App) -> Vec<Vec4> {
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        app.world()
+            .resource::<GlyphCache>()
+            .batch_store()
+            .batches()
+            .flat_map(|(_, batch)| batch.run_records().to_vec())
+            .map(|record| table[record.material.as_u32().to_usize()].base_color)
+            .collect()
+    }
+
+    #[test]
+    fn text_color_override_patches_material_row_without_rerouting() {
+        let mut app = widget_pipeline_app();
+        spawn_panel(&mut app, slotted_text_tree());
+        settle(&mut app);
+        let entities_before = batch_entities(&mut app);
+        assert_eq!(entities_before.len(), 1);
+        let (batches, runs, _) = store_stats(&app);
+        assert_eq!((batches, runs), (1, 2));
+        let colors_before = run_material_base_colors(&app);
+        assert_eq!(colors_before[0], colors_before[1]);
+        let authored_color = colors_before[0];
+
+        let widget = styled_widget(&mut app);
+        set_text_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(TEXT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let colors_after = run_material_base_colors(&app);
+        let override_linear = TEXT_OVERRIDE_COLOR.to_linear();
+        let override_color = Vec4::new(
+            override_linear.red,
+            override_linear.green,
+            override_linear.blue,
+            override_linear.alpha,
+        );
+        assert_eq!(
+            colors_after
+                .iter()
+                .filter(|color| **color == override_color)
+                .count(),
+            1,
+            "exactly the slotted run's material row should recolor",
+        );
+        assert_eq!(
+            colors_after
+                .iter()
+                .filter(|color| **color == authored_color)
+                .count(),
+            1,
+            "the unslotted run's material row stays authored",
+        );
+        assert_eq!(store_stats(&app).0, 1, "a color change must not re-route");
+        assert_eq!(batch_entities(&mut app), entities_before);
+
+        app.world_mut()
+            .get_mut::<WidgetVisualOverrides>(widget)
+            .expect("widget should keep its override component")
+            .clear(TEXT_SLOT);
+        app.update();
+        assert_eq!(
+            run_material_base_colors(&app),
+            vec![authored_color, authored_color],
+        );
+    }
+
+    #[test]
+    fn text_material_override_rekeys_run_and_retires_the_emptied_batch() {
+        let mut app = widget_pipeline_app();
+        let textured_material = material_with_texture(&mut app, Handle::default());
+        spawn_panel(&mut app, slotted_text_tree());
+        settle(&mut app);
+        let entities_before = batch_entities(&mut app);
+        assert_eq!(entities_before.len(), 1);
+
+        let widget = styled_widget(&mut app);
+        set_text_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_material(textured_material),
+        );
+        app.update();
+
+        let entities_after = batch_entities(&mut app);
+        assert_eq!(entities_after.len(), 2);
+        assert_eq!(store_stats(&app), (2, 2, store_stats(&app).2));
+        let destination = entities_after
+            .iter()
+            .copied()
+            .find(|entity| !entities_before.contains(entity))
+            .expect("the re-keyed run should spawn a destination batch");
+        let pickable = app
+            .world()
+            .get::<Pickable>(destination)
+            .expect("destination batch entity should carry Pickable::IGNORE");
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
+
+        app.world_mut()
+            .get_mut::<WidgetVisualOverrides>(widget)
+            .expect("widget should keep its override component")
+            .clear(TEXT_SLOT);
+        app.update();
+        assert_eq!(batch_entities(&mut app), entities_before);
+        assert!(
+            app.world().get_entity(destination).is_err(),
+            "the emptied destination batch should be retired",
+        );
+    }
+
+    fn spawn_rotated_panel(app: &mut App, tree: LayoutTree, rotation: Quat) -> Entity {
+        app.world_mut()
+            .spawn((
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(tree)
+                    .build()
+                    .expect("panel should build"),
+                Transform::from_rotation(rotation),
+            ))
+            .id()
+    }
+
+    fn text_run_records(app: &App) -> Vec<PathRenderRecord> {
+        app.world()
+            .resource::<GlyphCache>()
+            .batch_store()
+            .batches()
+            .flat_map(|(_, batch)| batch.run_records().to_vec())
+            .collect()
+    }
+
+    fn text_upload_counts(app: &App) -> (usize, usize) {
+        let perf = app.world().resource::<DiegeticPerfStats>();
+        (perf.batch.instance_uploads, perf.batch.run_table_uploads)
+    }
+
+    struct TextOverrideAuthoritySnapshot {
+        labels:        Vec<(Entity, Transform)>,
+        widget:        Transform,
+        panel_tick:    Tick,
+        computed_tick: Tick,
+    }
+
+    fn text_override_authority_snapshot(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        labels: &[Entity],
+    ) -> TextOverrideAuthoritySnapshot {
+        TextOverrideAuthoritySnapshot {
+            labels:        labels
+                .iter()
+                .map(|&label| {
+                    (
+                        label,
+                        *app.world()
+                            .get::<Transform>(label)
+                            .expect("label should carry a transform"),
+                    )
+                })
+                .collect(),
+            widget:        *app
+                .world()
+                .get::<Transform>(widget)
+                .expect("widget should carry a transform"),
+            panel_tick:    app
+                .world()
+                .entity(panel)
+                .get_ref::<DiegeticPanel>()
+                .expect("panel role should be live")
+                .last_changed(),
+            computed_tick: app
+                .world()
+                .entity(panel)
+                .get_ref::<ComputedDiegeticPanel>()
+                .expect("panel should have computed output")
+                .last_changed(),
+        }
+    }
+
+    fn assert_text_override_authority_unchanged(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        snapshot: &TextOverrideAuthoritySnapshot,
+    ) {
+        for (label, transform) in &snapshot.labels {
+            assert_eq!(
+                app.world().get::<Transform>(*label),
+                Some(transform),
+                "an override must not move a text-run entity transform",
+            );
+        }
+        assert_eq!(app.world().get::<Transform>(widget), Some(&snapshot.widget));
+        assert_eq!(
+            app.world()
+                .entity(panel)
+                .get_ref::<DiegeticPanel>()
+                .expect("panel role should be live")
+                .last_changed(),
+            snapshot.panel_tick,
+            "an override must not fire Changed<DiegeticPanel>",
+        );
+        assert_eq!(
+            app.world()
+                .entity(panel)
+                .get_ref::<ComputedDiegeticPanel>()
+                .expect("panel should have computed output")
+                .last_changed(),
+            snapshot.computed_tick,
+            "an override must not fire Changed<ComputedDiegeticPanel>",
+        );
+    }
+
+    #[test]
+    fn text_offset_override_moves_only_the_slotted_run_in_panel_space() {
+        let mut app = widget_pipeline_app();
+        let panel = spawn_rotated_panel(
+            &mut app,
+            slotted_text_tree(),
+            Quat::from_rotation_z(FRAC_PI_2),
+        );
+        settle(&mut app);
+        assert_eq!(
+            text_upload_counts(&app),
+            (0, 0),
+            "settled pipeline should be quiet"
+        );
+        let records_before = text_run_records(&app);
+        assert_eq!(records_before.len(), 2);
+        let labels = label_entities(&mut app);
+        let widget = styled_widget(&mut app);
+        let authority = text_override_authority_snapshot(&app, panel, widget, &labels);
+
+        set_text_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(TEXT_SLOT_OFFSET),
+        );
+        app.update();
+
+        // The offset is panel-local: the rotated panel's global transform
+        // maps it to the world-space delta the record matrix must carry.
+        let panel_global = *app
+            .world()
+            .get::<GlobalTransform>(panel)
+            .expect("panel should carry a global transform");
+        let world_delta = panel_global
+            .affine()
+            .transform_vector3(TEXT_SLOT_OFFSET.extend(0.0))
+            .extend(0.0);
+        let records_after = text_run_records(&app);
+        assert_eq!(records_after.len(), 2);
+        let moved: Vec<usize> = records_before
+            .iter()
+            .zip(&records_after)
+            .enumerate()
+            .filter(|(_, (before, after))| before.transform != after.transform)
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(moved.len(), 1, "exactly the slotted run's record moves");
+        let mut expected_transform = records_before[moved[0]].transform;
+        expected_transform.w_axis += world_delta;
+        assert_eq!(records_after[moved[0]].transform, expected_transform);
+        assert_text_override_authority_unchanged(&app, panel, widget, &authority);
+
+        // Author the identical override a second time: the routes rebuild
+        // equal records, so no record changes and no GPU buffer re-uploads.
+        set_text_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(TEXT_SLOT_OFFSET),
+        );
+        app.update();
+        assert_eq!(
+            text_upload_counts(&app),
+            (0, 0),
+            "a repeated identical override is a no-op",
+        );
+        assert_eq!(text_run_records(&app), records_after);
+
+        app.world_mut()
+            .get_mut::<WidgetVisualOverrides>(widget)
+            .expect("widget should keep its override component")
+            .clear(TEXT_SLOT);
+        app.update();
+        assert_eq!(
+            text_run_records(&app),
+            records_before,
+            "clearing the override restores the authored record transforms",
+        );
     }
 }

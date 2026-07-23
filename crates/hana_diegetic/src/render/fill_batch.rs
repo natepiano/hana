@@ -85,6 +85,8 @@ use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
+use crate::widgets::VisualOverrideIndex;
+use crate::widgets::VisualSlotOverride;
 
 /// Extra `clip_depth_nudge` layer-units pushing an opaque/alpha-mask SDF fill away
 /// from the camera so coplanar panel text, drawn at its true depth, wins the
@@ -1195,6 +1197,7 @@ impl Plugin for FillBatchPlugin {
         app.init_resource::<SdfBatchStore>()
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<SdfRecordDiagnostics>()
+            .init_resource::<VisualOverrideIndex>()
             .add_plugins(MaterialPlugin::<SdfExtendedMaterial>::default())
             .add_systems(
                 PostUpdate,
@@ -1247,6 +1250,7 @@ fn route_sdf_batch_records(
     sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
     lighting_default: Res<CascadeDefault<Lighting>>,
     sidedness_default: Res<CascadeDefault<Sidedness>>,
+    visual_overrides: Res<VisualOverrideIndex>,
     panels: Query<(
         &DiegeticPanel,
         Option<&RenderLayers>,
@@ -1283,14 +1287,17 @@ fn route_sdf_batch_records(
         let panel_sidedness = resolved_sidedness.map_or(sidedness_default.0, |resolved| resolved.0);
         let panel_shadow_casting =
             resolved_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0);
-        resolved_surfaces.push((
-            stored_surface.as_resolved(
-                panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
-                panel_shadow_casting,
-            ),
-            panel_lighting,
-            panel_sidedness,
-        ));
+        let mut resolved = stored_surface.as_resolved(
+            panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
+            panel_shadow_casting,
+        );
+        if let Some(slot_override) = visual_overrides.get(
+            stored_surface.panel_entity(),
+            stored_surface.element_index().get(),
+        ) {
+            apply_sdf_visual_override(&mut resolved, slot_override);
+        }
+        resolved_surfaces.push((resolved, panel_lighting, panel_sidedness));
     }
     let mut appended = Vec::new();
     let builder = build.builder_mut();
@@ -1320,6 +1327,44 @@ fn route_sdf_batch_records(
     drop(resolved_surfaces);
     for panel_entity in stale_panels {
         surfaces.remove_panel(panel_entity);
+    }
+}
+
+/// Applies one widget visual-slot override to a routed SDF surface.
+///
+/// Runs inside `route_sdf_batch_records`, so the override reaches the same
+/// frame material rows, `SdfBatchKey` selection, and `SdfBatchStore` upsert
+/// as authored data: a color patches every authored role's material row in
+/// place — an element authoring both a fill and a border recolors both — an
+/// offset translates only its `local_transform`, and a replacement material
+/// that changes `PipelineCompatibility`/`ResourceCompatibility` re-keys the
+/// record to its compatible destination batch. Authored registry surfaces
+/// stay untouched, and every branch checks `SdfRoleAuthorship` first:
+/// overrides never author a missing fill or border role.
+fn apply_sdf_visual_override<'a>(
+    surface: &mut ResolvedSdfSurface<'a>,
+    slot_override: &'a VisualSlotOverride,
+) {
+    let fill_authored = surface.fill_material.authorship.is_authored();
+    let border_authored = surface.border_material.authorship.is_authored();
+    if let Some(color) = slot_override.color {
+        if fill_authored {
+            surface.fill_material.color = Some(color);
+        }
+        if border_authored {
+            surface.border_material.color = Some(color);
+        }
+    }
+    if let Some(material) = &slot_override.material {
+        if fill_authored {
+            surface.fill_material.base_material = Some(material);
+        }
+        if border_authored {
+            surface.border_material.base_material = Some(material);
+        }
+    }
+    if let Some(offset) = slot_override.offset {
+        surface.local_transform.translation += offset.extend(0.0);
     }
 }
 
@@ -1665,6 +1710,7 @@ mod tests {
     use bevy::asset::AssetEvent;
     use bevy::asset::AssetPlugin;
     use bevy::camera::visibility::RenderLayers;
+    use bevy::ecs::change_detection::Tick;
     use bevy::ecs::message::Messages;
     use bevy::image::Image;
     use bevy::prelude::AlphaMode;
@@ -1675,7 +1721,9 @@ mod tests {
     use bevy_kana::ToF32;
 
     use super::*;
+    use crate::Button;
     use crate::Mm;
+    use crate::PanelWidget;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
     use crate::layout::DrawZIndex;
@@ -1690,6 +1738,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
+    use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::PathExtendedMaterial;
@@ -1710,6 +1759,12 @@ mod tests {
     use crate::render::panel_geometry::ResolvedSdfSurface;
     use crate::render::panel_geometry::SdfRoleAuthorship;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::ComputedWidgetRecord;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetAnchorRect;
+    use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetsPlugin;
 
     const ANIMATED_BASE_BLUE_SPEED: f32 = 0.29;
     const ANIMATED_BASE_COLOR_SWING: f32 = 0.05;
@@ -1717,7 +1772,12 @@ mod tests {
     const ANIMATED_BASE_RED_SPEED: f32 = 0.19;
     const IMAGE_BORDER_COLOR: Color = Color::srgb(0.9, 0.8, 0.2);
     const IMAGE_BORDER_WIDTH_MM: f32 = 1.0;
+    const OVERRIDE_OFFSET: Vec2 = Vec2::new(0.005, -0.002);
+    const PEER_FILL_COLOR: Color = Color::srgb(0.2, 0.3, 0.8);
     const SDF_SETTLE_FRAMES: usize = 3;
+    const SLOT_OVERRIDE_COLOR: Color = Color::srgb(0.1, 0.9, 0.2);
+    const TEST_SLOT: VisualSlotId = VisualSlotId::new(1);
+    const WIDGET_FILL_COLOR: Color = Color::srgb(0.8, 0.2, 0.1);
 
     fn zero_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -2037,8 +2097,16 @@ mod tests {
     }
 
     fn fill_row_color(app: &App, record: &ResolvedSdfBatchRecord) -> Vec4 {
-        let SdfPaintMaterial::Authored(slot) = record.fill_material else {
-            panic!("record should have an authored fill material");
+        authored_row_color(app, record.fill_material)
+    }
+
+    fn border_row_color(app: &App, record: &ResolvedSdfBatchRecord) -> Vec4 {
+        authored_row_color(app, record.border_material)
+    }
+
+    fn authored_row_color(app: &App, material: SdfPaintMaterial) -> Vec4 {
+        let SdfPaintMaterial::Authored(slot) = material else {
+            panic!("material role should be authored");
         };
         let row_index = usize::try_from(slot.as_u32()).expect("slot index should fit usize");
         app.world()
@@ -3838,6 +3906,7 @@ mod tests {
         ResolvedSdfSurface {
             panel_entity:    Entity::from_bits(1),
             command_index:   CommandIndex::from(command_index),
+            element_index:   draw_order::ElementIndex::from(command_index),
             draw_depth:      draw_depth_for_test(command_index),
             fill_material:   ResolvedSdfMaterial {
                 authorship:    fill_authorship,
@@ -3912,5 +3981,678 @@ mod tests {
         draw_order::DrawOrder::from_commands(&commands)
             .depth_for(index)
             .expect("draw command should have depth")
+    }
+
+    // ── Widget visual-slot overrides ────────────────────────────────────────
+
+    fn widget_sdf_pipeline_app() -> App {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        app
+    }
+
+    fn slotted_widget_fill_tree(peer_z_index: i8) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_FILL_COLOR)
+                        .button("styled", Button::new())
+                        .visual_slot(TEST_SLOT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(PEER_FILL_COLOR)
+                        .z_index(peer_z_index),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn slotted_widget_bordered_fill_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(WIDGET_FILL_COLOR)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR))
+                .button("styled", Button::new())
+                .visual_slot(TEST_SLOT),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn slotted_widget_border_only_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR))
+                .button("styled", Button::new())
+                .visual_slot(TEST_SLOT),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn styled_widget(app: &mut App) -> Entity {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<PanelWidget>>();
+        let widgets: Vec<Entity> = query.iter(app.world()).collect();
+        assert_eq!(widgets.len(), 1, "expected exactly one reified widget");
+        widgets[0]
+    }
+
+    fn set_slot_override(app: &mut App, widget: Entity, value: VisualSlotOverride) {
+        let mut entity = app.world_mut().entity_mut(widget);
+        if let Some(mut overrides) = entity.get_mut::<WidgetVisualOverrides>() {
+            overrides.set(TEST_SLOT, value);
+        } else {
+            let mut overrides = WidgetVisualOverrides::default();
+            overrides.set(TEST_SLOT, value);
+            entity.insert(overrides);
+        }
+    }
+
+    fn clear_slot_override(app: &mut App, widget: Entity) {
+        let mut entity = app.world_mut().entity_mut(widget);
+        if let Some(mut overrides) = entity.get_mut::<WidgetVisualOverrides>() {
+            overrides.clear(TEST_SLOT);
+        }
+    }
+
+    fn sdf_upload_count(app: &App) -> usize {
+        app.world()
+            .resource::<DiegeticPerfStats>()
+            .panel_geometry
+            .sdf_uploads
+    }
+
+    fn assert_ignores_picking(app: &App, entity: Entity) {
+        let pickable = app
+            .world()
+            .get::<Pickable>(entity)
+            .expect("batch entity should carry Pickable::IGNORE");
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
+    }
+
+    /// Widget/panel state that a state-only visual override must not touch.
+    struct WidgetGeometrySnapshot {
+        transform:      Transform,
+        anchor_rect:    WidgetAnchorRect,
+        widget_records: Vec<ComputedWidgetRecord>,
+        panel_tick:     Tick,
+        computed_tick:  Tick,
+    }
+
+    fn widget_geometry_snapshot(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+    ) -> WidgetGeometrySnapshot {
+        WidgetGeometrySnapshot {
+            transform:      *app
+                .world()
+                .get::<Transform>(widget)
+                .expect("widget should carry a transform"),
+            anchor_rect:    *app
+                .world()
+                .get::<WidgetAnchorRect>(widget)
+                .expect("widget should carry an anchor rect"),
+            widget_records: app
+                .world()
+                .get::<ComputedDiegeticPanel>(panel)
+                .expect("panel should have computed output")
+                .widget_records()
+                .to_vec(),
+            panel_tick:     app
+                .world()
+                .entity(panel)
+                .get_ref::<DiegeticPanel>()
+                .expect("panel role should be live")
+                .last_changed(),
+            computed_tick:  app
+                .world()
+                .entity(panel)
+                .get_ref::<ComputedDiegeticPanel>()
+                .expect("panel should have computed output")
+                .last_changed(),
+        }
+    }
+
+    fn assert_widget_geometry_unchanged(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        snapshot: &WidgetGeometrySnapshot,
+    ) {
+        let current = widget_geometry_snapshot(app, panel, widget);
+        assert_eq!(
+            current.panel_tick, snapshot.panel_tick,
+            "an override must not fire Changed<DiegeticPanel>",
+        );
+        assert_eq!(
+            current.computed_tick, snapshot.computed_tick,
+            "an override must not fire Changed<ComputedDiegeticPanel> or solve geometry",
+        );
+        assert_eq!(
+            current.transform, snapshot.transform,
+            "an override must not move the widget transform",
+        );
+        assert_eq!(
+            current.anchor_rect, snapshot.anchor_rect,
+            "an override must not change the widget hit rectangle",
+        );
+        assert_eq!(
+            current.widget_records, snapshot.widget_records,
+            "an override must not change widget rects or interaction rank",
+        );
+    }
+
+    #[test]
+    fn same_key_offset_override_dirties_only_the_referenced_sdf_batch() {
+        let mut app = widget_sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(1),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        app.update();
+        assert_eq!(
+            sdf_upload_count(&app),
+            0,
+            "settled pipeline should be quiet"
+        );
+        let records_before = sdf_records(&app);
+        assert_eq!(records_before.len(), 2);
+        assert_eq!(
+            app.world().resource::<SdfBatchStore>().batches().count(),
+            2,
+            "distinct z-indexes should split the two fills into two batches",
+        );
+
+        let widget = styled_widget(&mut app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(OVERRIDE_OFFSET),
+        );
+        app.update();
+
+        assert_eq!(
+            sdf_upload_count(&app),
+            1,
+            "only the referenced batch should re-upload",
+        );
+        let records_after = sdf_records(&app);
+        assert_eq!(
+            records_after[0].local_transform.translation,
+            records_before[0].local_transform.translation + OVERRIDE_OFFSET.extend(0.0),
+        );
+        assert_eq!(records_after[1], records_before[1], "peer record untouched");
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+
+        // Author the identical override a second time: the changed component
+        // re-dispatches, but the routes rebuild equal records, so no retained
+        // record, batch entity, or GPU row changes.
+        let entities_before = live_sdf_batch_entities(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(OVERRIDE_OFFSET),
+        );
+        app.update();
+        assert_eq!(
+            sdf_upload_count(&app),
+            0,
+            "a repeated identical override is a no-op",
+        );
+        assert_eq!(sdf_records(&app), records_after);
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+    }
+
+    #[test]
+    fn color_override_patches_material_row_without_rekeying() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(0),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        assert_eq!(live_sdf_batch_count(&mut app), 1);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 2);
+        assert_fill_row_colors(&app, &records, &[WIDGET_FILL_COLOR, PEER_FILL_COLOR]);
+        let entities_before = live_sdf_batch_entities(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_fill_row_colors(&app, &records, &[SLOT_OVERRIDE_COLOR, PEER_FILL_COLOR]);
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+        assert_eq!(
+            sdf_upload_count(&app),
+            0,
+            "a color override flows through the frame material table, not the record buffer",
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let records = sdf_records(&app);
+        assert_fill_row_colors(&app, &records, &[WIDGET_FILL_COLOR, PEER_FILL_COLOR]);
+    }
+
+    #[test]
+    fn color_override_recolors_every_authored_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_bordered_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(WIDGET_FILL_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(IMAGE_BORDER_COLOR),
+        );
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+            "an element authoring fill and border recolors both roles",
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(WIDGET_FILL_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(IMAGE_BORDER_COLOR),
+        );
+    }
+
+    #[test]
+    fn color_override_never_authors_a_missing_fill_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_border_only_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].fill_material, SdfPaintMaterial::NotAuthored);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].fill_material,
+            SdfPaintMaterial::NotAuthored,
+            "an override must not author a missing fill role",
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+    }
+
+    #[test]
+    fn material_override_rekeys_record_and_retires_the_emptied_batch() {
+        let mut app = widget_sdf_pipeline_app();
+        let blend_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(1),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let entities_before = live_sdf_batch_entities(&mut app);
+        assert_eq!(entities_before.len(), 2);
+        let (origin_entity, peer_entity, peer_records) = {
+            let store = app.world().resource::<SdfBatchStore>();
+            let origin = store
+                .batches()
+                .find(|(key, _)| key.z_index == 0.into())
+                .and_then(|(_, batch)| batch.entity)
+                .expect("the widget fill batch should be spawned");
+            let (_, peer_batch) = store
+                .batches()
+                .find(|(key, _)| key.z_index == 1.into())
+                .expect("the peer fill batch should exist");
+            let peer = peer_batch.entity.expect("peer batch should be spawned");
+            (origin, peer, peer_batch.records().to_vec())
+        };
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_material(blend_material.clone()),
+        );
+        app.update();
+
+        let store = app.world().resource::<SdfBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        let blend_entity = store
+            .batches()
+            .find(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Blend)
+            .and_then(|(_, batch)| batch.entity)
+            .expect("the re-keyed record should live in a spawned Blend batch");
+        let blend_records: Vec<ResolvedSdfBatchRecord> = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .filter(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Blend)
+            .flat_map(|(_, batch)| batch.records().iter().cloned())
+            .collect();
+        assert_eq!(blend_records.len(), 1);
+        assert!(!entities_before.contains(&blend_entity));
+        assert_ignores_picking(&app, blend_entity);
+        assert!(
+            app.world().get_entity(origin_entity).is_err(),
+            "the emptied origin batch should be retired",
+        );
+        let peer_after = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find(|(key, _)| key.z_index == 1.into())
+            .map(|(_, batch)| (batch.entity, batch.records().to_vec()))
+            .expect("the peer batch should survive the re-key");
+        assert_eq!(peer_after, (Some(peer_entity), peer_records));
+
+        // The stable slot resolves the destination batch for later overrides.
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_material(blend_material)
+                .with_offset(OVERRIDE_OFFSET),
+        );
+        app.update();
+        let moved_translation = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .filter(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Blend)
+            .flat_map(|(_, batch)| batch.records().iter())
+            .map(|record| record.local_transform.translation)
+            .next()
+            .expect("moved record should stay resolvable through its slot");
+        assert_eq!(
+            moved_translation,
+            blend_records[0].local_transform.translation + OVERRIDE_OFFSET.extend(0.0),
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let store = app.world().resource::<SdfBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        assert!(
+            store
+                .batches()
+                .all(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Opaque),
+        );
+        assert!(
+            app.world().get_entity(blend_entity).is_err(),
+            "the emptied Blend batch should be retired",
+        );
+    }
+
+    /// Widget image pipeline app plus one panel: a slotted image inside the
+    /// `styled` button widget and an unslotted peer image, both sampling
+    /// `image_a`.
+    fn slotted_image_fixture() -> (App, Entity) {
+        let mut app = image_sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let image_a = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .button("styled", Button::new()),
+                    |builder| {
+                        builder.image(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::GROW)
+                                .visual_slot(TEST_SLOT),
+                            image_a.clone(),
+                            Color::WHITE,
+                        );
+                    },
+                );
+                builder.image(
+                    El::new().width(Sizing::GROW).height(Sizing::GROW),
+                    image_a.clone(),
+                    Color::WHITE,
+                );
+            },
+        );
+        let panel = spawn_sdf_panel(&mut app, builder.build(), StandardMaterial::default());
+        settle_sdf_pipeline(&mut app);
+        (app, panel)
+    }
+
+    /// `ImageRenderRecord` storage buffer of the single live image batch.
+    fn image_record_buffer(app: &App) -> Handle<ShaderBuffer> {
+        let buffers: Vec<Handle<ShaderBuffer>> = app
+            .world()
+            .resource::<ImageBatchStore>()
+            .batches()
+            .filter_map(|(_, batch)| batch.gpu.as_ref().map(|gpu| gpu.records.clone()))
+            .collect();
+        assert_eq!(buffers.len(), 1, "expected exactly one image record buffer");
+        buffers[0].clone()
+    }
+
+    /// Drains both retained `AssetEvent<ShaderBuffer>` buffers: the message
+    /// update system moves events written during `app.update()` into the
+    /// previous buffer, which `iter_current_update_messages` does not visit.
+    fn image_record_buffer_uploads(app: &mut App, records: &Handle<ShaderBuffer>) -> usize {
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<ShaderBuffer>>>()
+            .drain()
+            .filter(|event| matches!(event, AssetEvent::Modified { id } if *id == records.id()))
+            .count()
+    }
+
+    #[test]
+    fn tint_override_patches_only_the_referenced_image_record() {
+        let (mut app, panel) = slotted_image_fixture();
+        let records_before = image_records(&app);
+        assert_eq!(records_before.len(), 2);
+        assert_eq!(
+            app.world().resource::<ImageBatchStore>().batches().count(),
+            1,
+        );
+
+        let widget = styled_widget(&mut app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+        let record_buffer = image_record_buffer(&app);
+        clear_asset_events::<ShaderBuffer>(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = image_records(&app);
+        assert_eq!(records[0].tint, linear_color(SLOT_OVERRIDE_COLOR));
+        assert_eq!(records[1], records_before[1], "peer record untouched");
+        assert_eq!(
+            app.world().resource::<ImageBatchStore>().batches().count(),
+            1,
+        );
+        // `commit_image_batch_buffers` mutates the `ShaderBuffer` in
+        // `PostUpdate`, where `Assets::<ShaderBuffer>::asset_events` may
+        // already have run; the `AssetEvent::Modified` message then lands
+        // during the next `app.update()`.
+        app.update();
+        assert_eq!(
+            image_record_buffer_uploads(&mut app, &record_buffer),
+            1,
+            "the changed tint uploads the image record buffer once",
+        );
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+
+        // Author the identical override a second time: the route rebuilds an
+        // equal record, so no retained record changes and the record buffer
+        // does not re-upload.
+        let records_after = image_records(&app);
+        clear_asset_events::<ShaderBuffer>(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        assert_eq!(image_records(&app), records_after);
+        // Same flush as above: any `AssetEvent::Modified` from the previous
+        // update's `PostUpdate` commit is written by this extra update.
+        app.update();
+        assert_eq!(
+            image_record_buffer_uploads(&mut app, &record_buffer),
+            0,
+            "a repeated identical override is a no-op",
+        );
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+    }
+
+    #[test]
+    fn texture_override_moves_image_record_to_the_destination_batch() {
+        let (mut app, panel) = slotted_image_fixture();
+        let image_b = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let records_before = image_records(&app);
+        let origin_entity = app
+            .world()
+            .resource::<ImageBatchStore>()
+            .batches()
+            .next()
+            .and_then(|(_, batch)| batch.entity)
+            .expect("settled image batch should be spawned");
+
+        // A texture override changes the `ImageBatchKey` and moves the record.
+        let widget = styled_widget(&mut app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_texture(image_b.clone()),
+        );
+        app.update();
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+        let store = app.world().resource::<ImageBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        let destination_entity = store
+            .batches()
+            .find(|(key, _)| key.texture == image_b)
+            .and_then(|(_, batch)| batch.entity)
+            .expect("the moved record should live in a spawned destination batch");
+        assert_ne!(destination_entity, origin_entity);
+        assert_ignores_picking(&app, destination_entity);
+
+        // The stable slot resolves the destination batch for later overrides.
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_texture(image_b.clone())
+                .with_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        let destination_tints: Vec<Vec4> = app
+            .world()
+            .resource::<ImageBatchStore>()
+            .batches()
+            .filter(|(key, _)| key.texture == image_b)
+            .flat_map(|(_, batch)| batch.records().iter())
+            .map(|record| record.tint)
+            .collect();
+        assert_eq!(destination_tints, vec![linear_color(SLOT_OVERRIDE_COLOR)]);
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ImageBatchStore>().batches().count(),
+            1,
+        );
+        assert!(
+            app.world().get_entity(destination_entity).is_err(),
+            "the emptied destination batch should be retired",
+        );
+        assert_eq!(image_records(&app), records_before);
     }
 }

@@ -19,6 +19,7 @@ use super::WidgetFocusable;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
+use super::WidgetVisualSlots;
 use super::button;
 use super::button::ButtonCallback;
 use super::button::ButtonCallbackHandle;
@@ -136,6 +137,7 @@ pub(super) fn reify_widgets(
         &WidgetAnchorRect,
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
+        Option<&WidgetVisualSlots>,
     )>,
     mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
@@ -150,7 +152,7 @@ pub(super) fn reify_widgets(
                 existing_widgets
                     .get(*entity)
                     .ok()
-                    .map(|(widget, _, _, _, _, _, _, _)| (widget.id(), *entity))
+                    .map(|(widget, ..)| (widget.id(), *entity))
             })
             .collect();
 
@@ -158,6 +160,7 @@ pub(super) fn reify_widgets(
         let mut next_widget_index = HashMap::with_capacity(computed.widget_records().len());
         for record in computed.widget_records() {
             let anchor_rect = WidgetAnchorRect::new(panel, record.rect());
+            let visual_slots = WidgetVisualSlots::new(record.visual_slots().to_vec());
             let entity = match existing_by_id.get(record.id()).copied() {
                 None => spawn_widget(
                     &mut commands,
@@ -169,6 +172,7 @@ pub(super) fn reify_widgets(
                     record.preorder(),
                     record.interactivity(),
                     anchor_rect,
+                    visual_slots,
                 ),
                 Some(entity) => {
                     update_widget(
@@ -179,6 +183,7 @@ pub(super) fn reify_widgets(
                         record.preorder(),
                         record.interactivity(),
                         anchor_rect,
+                        visual_slots,
                         panel_entity,
                         &existing_widgets,
                         &mut button_captures,
@@ -216,6 +221,7 @@ fn spawn_widget(
     preorder: usize,
     interactivity: Cascade<super::WidgetInteractivity>,
     anchor_rect: WidgetAnchorRect,
+    visual_slots: WidgetVisualSlots,
 ) -> Entity {
     let transform = anchor_rect.transform();
     let global_transform = panel_global.mul_transform(transform);
@@ -236,6 +242,7 @@ fn spawn_widget(
                 interactivity,
                 CascadeFrom::new(panel),
                 PanelOwned::from(panel),
+                visual_slots,
             ))
             .id();
     });
@@ -253,6 +260,7 @@ fn update_widget(
     preorder: usize,
     interactivity: Cascade<super::WidgetInteractivity>,
     anchor_rect: WidgetAnchorRect,
+    visual_slots: WidgetVisualSlots,
     panel: Entity,
     existing_widgets: &Query<(
         &PanelWidget,
@@ -263,6 +271,7 @@ fn update_widget(
         &WidgetAnchorRect,
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
+        Option<&WidgetVisualSlots>,
     )>,
     button_captures: &mut ButtonCaptures,
 ) {
@@ -275,6 +284,7 @@ fn update_widget(
         existing_anchor_rect,
         existing_interactivity,
         existing_cascade_from,
+        existing_visual_slots,
     )) = existing_widgets.get(entity)
     else {
         return;
@@ -303,6 +313,9 @@ fn update_widget(
     }
     if *existing_anchor_rect != anchor_rect {
         widget.insert(anchor_rect);
+    }
+    if existing_visual_slots != Some(&visual_slots) {
+        widget.insert(visual_slots);
     }
     if existing_interactivity != Some(&interactivity) {
         widget.insert(interactivity);
@@ -658,8 +671,13 @@ mod tests {
     use crate::widgets::PanelWidgetIndex;
     use crate::widgets::ScreenWidgetAnchorProxy;
     use crate::widgets::ScreenWidgetAnchoredTo;
+    use crate::widgets::VisualOverrideIndex;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetKind;
     use crate::widgets::WidgetSpec;
+    use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
     use crate::widgets::button::ButtonCallbackHandle;
     use crate::widgets::button::ButtonPress;
@@ -1943,5 +1961,88 @@ mod tests {
             app.world().get_entity(system_entity).is_err(),
             "final tracked-handle drop must release the registered system",
         );
+    }
+
+    #[test]
+    fn slot_attachment_and_overrides_preserve_authored_spec_and_callback() {
+        const TEST_SLOT: VisualSlotId = VisualSlotId::new(3);
+
+        fn slotted_callback_tree(button: Button) -> LayoutTree {
+            let mut builder = LayoutBuilder::new(100.0, 50.0);
+            builder.with(
+                El::new()
+                    .background(Color::WHITE)
+                    .button("action", button)
+                    .visual_slot(TEST_SLOT),
+                |_| {},
+            );
+            builder.build()
+        }
+
+        let mut app = test_app();
+        app.init_resource::<CallbackRuns>();
+        let button = Button::new().on_click(record_authored_callback);
+        let panel =
+            spawn_panel(&mut app, callback_tree(button.clone())).expect("panel should build");
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("action"))
+            .expect("widget should be reified");
+        let callback_system = callback_system_entity(&app, widget)
+            .expect("reify should install a tracked callback handle");
+        let authored_spec = app
+            .world()
+            .get::<WidgetSpec>(widget)
+            .cloned()
+            .expect("widget should carry its authored spec");
+        assert!(
+            app.world()
+                .get::<WidgetVisualSlots>(widget)
+                .is_some_and(|slots| slots.element_index(TEST_SLOT).is_none()),
+            "an unslotted tree reifies empty slot references",
+        );
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, slotted_callback_tree(button))
+            .expect("slotted tree should be accepted");
+        app.update();
+
+        let element_index = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .and_then(|slots| slots.element_index(TEST_SLOT))
+            .expect("slot attachment should reify onto the widget");
+        assert_eq!(
+            callback_system_entity(&app, widget),
+            Some(callback_system),
+            "slot attachment must preserve the tracked callback handle",
+        );
+        assert_eq!(
+            app.world().get::<WidgetSpec>(widget),
+            Some(&authored_spec),
+            "slot attachment must preserve the authored spec",
+        );
+
+        let mut overrides = WidgetVisualOverrides::default();
+        overrides.set(
+            TEST_SLOT,
+            VisualSlotOverride::default().with_color(Color::BLACK),
+        );
+        app.world_mut().entity_mut(widget).insert(overrides);
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<VisualOverrideIndex>()
+                .get(panel, element_index)
+                .is_some(),
+            "the dispatched override should resolve through the reified slot",
+        );
+        assert_eq!(
+            callback_system_entity(&app, widget),
+            Some(callback_system),
+            "slot updates must retain the unchanged button's callback system",
+        );
+        assert_eq!(app.world().get::<WidgetSpec>(widget), Some(&authored_spec));
     }
 }

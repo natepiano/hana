@@ -84,6 +84,8 @@ use crate::render::material_table::MaterialSlotAppend;
 use crate::render::material_table::MaterialSlotCandidate;
 use crate::render::material_table::MaterialSlotInput;
 use crate::render::material_table::SdfPaintMaterial;
+use crate::widgets::VisualOverrideIndex;
+use crate::widgets::VisualSlotOverride;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
@@ -574,6 +576,7 @@ pub(super) struct PanelShapeMaterialAssets<'w> {
     standard_materials: Res<'w, Assets<StandardMaterial>>,
     asset_server:       Res<'w, AssetServer>,
     shape_default:      Res<'w, CascadeDefault<ShapeMaterial>>,
+    visual_overrides:   Res<'w, VisualOverrideIndex>,
 }
 
 struct ShapePrimitiveSource<'a> {
@@ -819,6 +822,7 @@ pub(super) fn reconcile_panel_line_batches(
                 &shape_sources,
                 &result.commands,
             ),
+            &material_assets.visual_overrides,
         );
         store.upsert_panel(panel_entity, records);
     }
@@ -846,13 +850,14 @@ fn collect_panel_records(
     draw_order: &DrawOrder,
     material_table: &mut FrameMaterialTableBuilder,
     source_entities: &HashMap<PanelShapeSourceKey, Entity>,
+    visual_overrides: &VisualOverrideIndex,
 ) -> Vec<(PathBatchKey, ShapeBatchRecord)> {
     group_line_primitives(
         collect_line_primitives(render_commands, draw_order, source_entities),
         context,
     )
     .into_iter()
-    .filter_map(|group| build_panel_line_group(context, group, material_table))
+    .filter_map(|group| build_panel_line_group(context, group, material_table, visual_overrides))
     .map(|built| (built.batch_key, built.record))
     .collect()
 }
@@ -983,6 +988,7 @@ fn build_panel_line_group(
     context: &PanelShapeReconcileContext<'_>,
     group: Vec<ShapePrimitiveSource<'_>>,
     material_table: &mut FrameMaterialTableBuilder,
+    visual_overrides: &VisualOverrideIndex,
 ) -> Option<BuiltPanelShapePrimitive> {
     let members: Vec<&ShapePrimitiveSource<'_>> = group
         .iter()
@@ -1015,7 +1021,12 @@ fn build_panel_line_group(
         .iter()
         .map(|source| primitive_oit_depth_offset(source))
         .fold(f32::INFINITY, f32::min);
-    let material_handle = resolved_source_material(first, context);
+    let slot_override = visual_overrides.get(context.panel_entity, first.element_index);
+    let (fill_color, material_handle) = apply_shape_visual_override(
+        slot_override,
+        first.primitive.color(),
+        resolved_source_material(first, context),
+    );
     let base = render::material_asset_for_frame(
         context.standard_materials,
         context.asset_server,
@@ -1035,7 +1046,7 @@ fn build_panel_line_group(
             shape: first.source_entity,
         },
         base_material: &base,
-        fill_color: first.primitive.color(),
+        fill_color,
         alpha_mode,
         lighting,
         sidedness,
@@ -1062,7 +1073,7 @@ fn build_panel_line_group(
         .element_anti_alias(first.element_index)
         .resolve(context.panel_anti_alias);
     let run = PathRenderRecord {
-        transform: context.panel_transform,
+        transform: shape_run_transform(context.panel_transform, slot_override),
         material: appended.slot.into(),
         render_mode: u32::from(RenderMode::Text),
         clip_depth_nudge,
@@ -1070,17 +1081,7 @@ fn build_panel_line_group(
         aa_flags: anti_alias.aa_flags(),
         text_coverage_bias: 0.0,
     };
-    let instance = PathQuadRecord {
-        rect_min:          path.rect_min,
-        rect_size:         path.rect_size,
-        uv_min:            path.uv_min,
-        uv_size:           path.uv_size,
-        box_uv_min:        path.box_uv_min,
-        box_uv_size:       path.box_uv_size,
-        packed_path_index: 0,
-        render_index:      0,
-        box_uv_flip_x:     0,
-    };
+    let instance = path_quad_record(&path);
     Some(BuiltPanelShapePrimitive {
         batch_key,
         record: ShapeBatchRecord {
@@ -1091,6 +1092,58 @@ fn build_panel_line_group(
             run,
         },
     })
+}
+
+/// Builds the merged group's quad instance from its built analytic path; the
+/// atlas rebuild stamps `packed_path_index` and `render_index` later.
+const fn path_quad_record(path: &path::PanelShapePath) -> PathQuadRecord {
+    PathQuadRecord {
+        rect_min:          path.rect_min,
+        rect_size:         path.rect_size,
+        uv_min:            path.uv_min,
+        uv_size:           path.uv_size,
+        box_uv_min:        path.box_uv_min,
+        box_uv_size:       path.box_uv_size,
+        packed_path_index: 0,
+        render_index:      0,
+        box_uv_flip_x:     0,
+    }
+}
+
+/// Applies one widget visual-slot override to a routed panel-line group.
+///
+/// Runs inside `build_panel_line_group` before the frame material row is
+/// appended: a replacement `color` patches only the group's material-table
+/// row values, while a replacement `material` that changes
+/// `PipelineCompatibility`/`ResourceCompatibility` changes the computed
+/// `PathBatchKey` and `ShapeBatchStore::upsert_panel` moves the group to its
+/// compatible destination batch. A panel-local `offset` is composed into the
+/// group's `PathRenderRecord` matrix by [`shape_run_transform`] instead.
+fn apply_shape_visual_override<'a>(
+    slot_override: Option<&'a VisualSlotOverride>,
+    fill_color: Color,
+    material: &'a Handle<StandardMaterial>,
+) -> (Color, &'a Handle<StandardMaterial>) {
+    let Some(slot_override) = slot_override else {
+        return (fill_color, material);
+    };
+    (
+        slot_override.color.unwrap_or(fill_color),
+        slot_override.material.as_ref().unwrap_or(material),
+    )
+}
+
+/// `PathRenderRecord` matrix for one panel-line group: the panel's global
+/// matrix, right-multiplied by any slot-override `offset` as a panel-local
+/// translation so a rotated or scaled panel moves the group in the panel
+/// plane. The authored `PathOutline` contours and `PathQuadRecord` rect stay
+/// untouched.
+fn shape_run_transform(panel_transform: Mat4, slot_override: Option<&VisualSlotOverride>) -> Mat4 {
+    slot_override
+        .and_then(|slot_override| slot_override.offset)
+        .map_or(panel_transform, |offset| {
+            panel_transform * Mat4::from_translation(offset.extend(0.0))
+        })
 }
 
 fn strip_tangent_dependent_maps(material: &StandardMaterial) -> StandardMaterial {
@@ -1556,6 +1609,7 @@ fn refresh_batch_material_depth_biases(
 #[cfg(test)]
 #[allow(clippy::panic, reason = "tests should panic on unexpected values")]
 mod tests {
+    use std::f32::consts::FRAC_PI_2;
     use std::sync::Arc;
 
     use bevy::asset::AssetPlugin;
@@ -1563,9 +1617,11 @@ mod tests {
     use bevy::math::Vec4;
 
     use super::*;
+    use crate::Button;
     use crate::CalloutCap;
     use crate::El;
     use crate::Mm;
+    use crate::PanelWidget;
     use crate::cascade;
     use crate::cascade::Cascade;
     use crate::cascade::CascadeSet;
@@ -1582,6 +1638,7 @@ mod tests {
     use crate::layout::TextMeasure;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::render::BatchAlphaMode;
     use crate::render::Bounds;
     use crate::render::HairlineWidth;
     use crate::render::PathContour;
@@ -1591,6 +1648,16 @@ mod tests {
     use crate::render::material_table::MaterialTableAppendReady;
     use crate::render::material_table::MaterialTablePlugin;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetsPlugin;
+
+    const SHAPE_OVERRIDE_COLOR: Color = Color::srgb(0.2, 0.8, 0.4);
+    const SHAPE_SLOT: VisualSlotId = VisualSlotId::new(4);
+    /// Panel-local offset with distinct axis values so a rotated panel maps
+    /// it to a visibly different world delta.
+    const SHAPE_SLOT_OFFSET: Vec2 = Vec2::new(3.0, 1.5);
 
     /// Headless app wired with panel layout, the AA/fade cascade plugins
     /// (via [`HeadlessLayoutPlugin`]), the lighting/sidedness cascade plugins
@@ -1615,6 +1682,7 @@ mod tests {
             .init_resource::<AntiAlias>()
             .init_resource::<HairlineWidth>()
             .init_resource::<ShapeBatchStore>()
+            .init_resource::<VisualOverrideIndex>()
             .init_asset::<Mesh>()
             .init_asset::<PathExtendedMaterial>()
             .init_asset::<ShaderBuffer>()
@@ -3012,5 +3080,271 @@ mod tests {
             Some(draw_depth) => draw_depth,
             None => panic!("line command should receive draw depth"),
         }
+    }
+
+    // ── Widget visual-slot overrides ────────────────────────────────────────
+
+    fn widget_line_batch_app() -> App {
+        let mut app = line_batch_app();
+        app.add_plugins(WidgetsPlugin);
+        app
+    }
+
+    fn spawn_slotted_widget_line_panel(app: &mut App, transform: Transform) -> Entity {
+        let tree = LayoutBuilder::with_root(
+            El::new()
+                .size(40.0, 20.0)
+                .draw(PanelDraw::lines([horizontal_line()]))
+                .button("styled", Button::new())
+                .visual_slot(SHAPE_SLOT),
+        )
+        .build();
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .with_tree(tree)
+            .build()
+            .unwrap_or_else(|error| panic!("slotted line panel should build: {error:?}"));
+        app.world_mut().spawn((panel, transform)).id()
+    }
+
+    fn styled_widget(app: &mut App) -> Entity {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<PanelWidget>>();
+        let widgets: Vec<Entity> = query.iter(app.world()).collect();
+        assert_eq!(widgets.len(), 1, "expected exactly one reified widget");
+        widgets[0]
+    }
+
+    fn set_shape_slot_override(app: &mut App, widget: Entity, value: VisualSlotOverride) {
+        let mut overrides = WidgetVisualOverrides::default();
+        overrides.set(SHAPE_SLOT, value);
+        app.world_mut().entity_mut(widget).insert(overrides);
+    }
+
+    fn one_shape_batch_state(app: &App) -> (BatchAlphaMode, Option<Entity>) {
+        let store = app.world().resource::<ShapeBatchStore>();
+        let batches: Vec<(&PathBatchKey, &ShapeBatch)> = store.batches().collect();
+        assert_eq!(batches.len(), 1, "expected exactly one panel-line batch");
+        let (key, batch) = batches[0];
+        (key.pipeline_compatibility.alpha, batch.entity)
+    }
+
+    #[test]
+    fn shape_color_override_patches_material_row_without_rekeying() {
+        let mut app = widget_line_batch_app();
+        spawn_slotted_widget_line_panel(&mut app, Transform::default());
+        settle(&mut app);
+        let (_, entity_before) = one_shape_batch_state(&app);
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(Color::WHITE),
+        );
+
+        let widget = styled_widget(&mut app);
+        set_shape_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_color(SHAPE_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(SHAPE_OVERRIDE_COLOR),
+        );
+        let (_, entity_after) = one_shape_batch_state(&app);
+        assert_eq!(
+            entity_after, entity_before,
+            "a color change must not re-key"
+        );
+
+        app.world_mut()
+            .get_mut::<WidgetVisualOverrides>(widget)
+            .unwrap_or_else(|| panic!("widget should keep its override component"))
+            .clear(SHAPE_SLOT);
+        app.update();
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(Color::WHITE),
+        );
+    }
+
+    #[test]
+    fn shape_material_override_rekeys_group_and_retires_the_emptied_batch() {
+        let mut app = widget_line_batch_app();
+        let opaque_material = material_asset(
+            &mut app,
+            StandardMaterial {
+                alpha_mode: AlphaMode::Opaque,
+                ..Default::default()
+            },
+        );
+        spawn_slotted_widget_line_panel(&mut app, Transform::default());
+        settle(&mut app);
+        let (alpha_before, entity_before) = one_shape_batch_state(&app);
+        let origin_entity =
+            entity_before.unwrap_or_else(|| panic!("settled panel-line batch should be spawned"));
+        assert_ne!(alpha_before, BatchAlphaMode::Opaque);
+
+        let widget = styled_widget(&mut app);
+        set_shape_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_material(opaque_material),
+        );
+        app.update();
+
+        let (alpha_after, entity_after) = one_shape_batch_state(&app);
+        assert_eq!(alpha_after, BatchAlphaMode::Opaque);
+        let destination_entity = entity_after
+            .unwrap_or_else(|| panic!("destination panel-line batch should be spawned"));
+        assert_ne!(destination_entity, origin_entity);
+        assert!(
+            app.world().get_entity(origin_entity).is_err(),
+            "the emptied origin batch should be retired",
+        );
+        let pickable = app
+            .world()
+            .get::<Pickable>(destination_entity)
+            .unwrap_or_else(|| panic!("destination batch entity should carry Pickable::IGNORE"));
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
+
+        app.world_mut()
+            .get_mut::<WidgetVisualOverrides>(widget)
+            .unwrap_or_else(|| panic!("widget should keep its override component"))
+            .clear(SHAPE_SLOT);
+        app.update();
+        let (alpha_restored, _) = one_shape_batch_state(&app);
+        assert_eq!(alpha_restored, alpha_before);
+        assert!(
+            app.world().get_entity(destination_entity).is_err(),
+            "the emptied destination batch should be retired",
+        );
+    }
+
+    fn single_shape_record(app: &App) -> (PathRenderRecord, PathQuadRecord) {
+        let store = app.world().resource::<ShapeBatchStore>();
+        let records: Vec<&ShapeBatchRecord> = store
+            .batches()
+            .flat_map(|(_, batch)| batch.records.iter())
+            .collect();
+        assert_eq!(records.len(), 1, "expected exactly one panel-line record");
+        (records[0].run, records[0].instance)
+    }
+
+    fn shape_upload_count(app: &App) -> usize {
+        app.world()
+            .resource::<DiegeticPerfStats>()
+            .line_batch
+            .uploads
+    }
+
+    #[test]
+    fn shape_offset_override_moves_the_record_in_panel_space() {
+        let mut app = widget_line_batch_app();
+        let panel = spawn_slotted_widget_line_panel(
+            &mut app,
+            Transform::from_rotation(Quat::from_rotation_z(FRAC_PI_2)),
+        );
+        settle(&mut app);
+        assert_eq!(
+            shape_upload_count(&app),
+            0,
+            "settled pipeline should be quiet"
+        );
+        let (record_before, instance_before) = single_shape_record(&app);
+        let widget = styled_widget(&mut app);
+        let widget_transform = *app
+            .world()
+            .get::<Transform>(widget)
+            .unwrap_or_else(|| panic!("widget should carry a transform"));
+        let panel_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<DiegeticPanel>()
+            .unwrap_or_else(|| panic!("panel role should be live"))
+            .last_changed();
+        let computed_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<ComputedDiegeticPanel>()
+            .unwrap_or_else(|| panic!("panel should have computed output"))
+            .last_changed();
+
+        set_shape_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(SHAPE_SLOT_OFFSET),
+        );
+        app.update();
+
+        // The offset is panel-local: it composes to the right of the rotated
+        // panel's global matrix, not as a world-axis translation.
+        let panel_matrix = app
+            .world()
+            .get::<GlobalTransform>(panel)
+            .unwrap_or_else(|| panic!("panel should carry a global transform"))
+            .to_matrix();
+        let (record_after, instance_after) = single_shape_record(&app);
+        assert_eq!(
+            record_after.transform,
+            panel_matrix * Mat4::from_translation(SHAPE_SLOT_OFFSET.extend(0.0)),
+        );
+        assert_eq!(
+            instance_after, instance_before,
+            "authored quad geometry stays untouched",
+        );
+        assert_eq!(
+            app.world().get::<Transform>(widget),
+            Some(&widget_transform),
+            "an offset override must not move the widget transform",
+        );
+        assert_eq!(
+            app.world()
+                .entity(panel)
+                .get_ref::<DiegeticPanel>()
+                .unwrap_or_else(|| panic!("panel role should be live"))
+                .last_changed(),
+            panel_tick,
+            "an override must not fire Changed<DiegeticPanel>",
+        );
+        assert_eq!(
+            app.world()
+                .entity(panel)
+                .get_ref::<ComputedDiegeticPanel>()
+                .unwrap_or_else(|| panic!("panel should have computed output"))
+                .last_changed(),
+            computed_tick,
+            "an override must not fire Changed<ComputedDiegeticPanel>",
+        );
+
+        // Author the identical override a second time: the reconcile rebuilds
+        // an equal record, so nothing re-uploads and nothing changes.
+        set_shape_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(SHAPE_SLOT_OFFSET),
+        );
+        app.update();
+        assert_eq!(
+            shape_upload_count(&app),
+            0,
+            "a repeated identical override is a no-op",
+        );
+        assert_eq!(single_shape_record(&app), (record_after, instance_after));
+
+        app.world_mut()
+            .get_mut::<WidgetVisualOverrides>(widget)
+            .unwrap_or_else(|| panic!("widget should keep its override component"))
+            .clear(SHAPE_SLOT);
+        app.update();
+        let (record_restored, instance_restored) = single_shape_record(&app);
+        assert_eq!(
+            record_restored.transform, record_before.transform,
+            "clearing the override restores the authored record transform",
+        );
+        assert_eq!(instance_restored, instance_before);
     }
 }

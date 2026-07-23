@@ -61,6 +61,7 @@ use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::widgets::Button;
 use crate::widgets::Slider;
+use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetSpec;
 
@@ -292,6 +293,7 @@ struct CommonEl {
     interactivity:   Cascade<WidgetInteractivity>,
     editable:        Option<ImePanelField>,
     widget:          Option<WidgetSpec>,
+    visual_slot:     Option<VisualSlotId>,
     draw:            Option<PanelDraw>,
     z_index:         DrawZIndex,
     anti_alias:      Cascade<AntiAlias>,
@@ -320,6 +322,7 @@ impl Default for CommonEl {
             interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
+            visual_slot:     None,
             draw:            None,
             z_index:         DrawZIndex::default(),
             anti_alias:      Cascade::Inherit,
@@ -348,6 +351,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         interactivity: common.interactivity,
         editable: common.editable,
         widget: common.widget,
+        visual_slot: common.visual_slot,
         draw: common.draw,
         z_index: common.z_index,
         anti_alias: common.anti_alias,
@@ -607,6 +611,19 @@ impl<L> El<L> {
         self
     }
 
+    /// Attaches a stable private visual-slot id to this element's retained
+    /// render records.
+    ///
+    /// Presets author slot ids on ordinary primitives inside a widget
+    /// subtree; widget state then patches those retained records through
+    /// crate-private overrides without regenerating the tree. No production
+    /// preset currently consumes this test-only hook.
+    #[cfg(test)]
+    pub(crate) const fn visual_slot(mut self, slot: VisualSlotId) -> Self {
+        self.common.visual_slot = Some(slot);
+        self
+    }
+
     /// Sets paint-only draw primitives owned by this element.
     ///
     /// `PanelDraw` does not affect layout measurement. It is stored for later
@@ -696,6 +713,7 @@ impl<L> El<L> {
             interactivity: common.interactivity,
             editable: common.editable,
             widget: common.widget,
+            visual_slot: common.visual_slot,
             draw: common.draw,
             z_index: common.z_index,
             anti_alias: common.anti_alias,

@@ -41,7 +41,9 @@ use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::ComputedVisualSlot;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetSpec;
 
@@ -132,6 +134,8 @@ pub(super) struct Element {
     pub(super) editable:        Option<ImePanelField>,
     /// Optional authored widget contract.
     pub(super) widget:          Option<WidgetSpec>,
+    /// Optional stable visual-slot id for widget-owned retained records.
+    pub(super) visual_slot:     Option<VisualSlotId>,
     /// Optional paint-only draw data.
     pub(super) draw:            Option<PanelDraw>,
     /// `DrawZIndex` stamped onto this element's render commands.
@@ -208,6 +212,7 @@ impl Default for Element {
             interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
+            visual_slot:     None,
             draw:            None,
             z_index:         DrawZIndex::default(),
             anti_alias:      Cascade::Inherit,
@@ -756,9 +761,11 @@ impl LayoutTree {
             return Vec::new();
         };
         let mut ranked_records = Vec::new();
-        let mut stack = vec![(root, Cascade::Inherit, root_layout.bounds)];
+        let mut stack = vec![(root, Cascade::Inherit, root_layout.bounds, None::<usize>)];
         let mut preorder = 0;
-        while let Some((index, inherited_interactivity, inherited_clip)) = stack.pop() {
+        while let Some((index, inherited_interactivity, inherited_clip, inherited_owner)) =
+            stack.pop()
+        {
             let (Some(element), Some(computed)) =
                 (self.elements.get(index), result.computed.get(index))
             else {
@@ -768,7 +775,7 @@ impl LayoutTree {
                 Cascade::Inherit => inherited_interactivity,
                 Cascade::Override(value) => Cascade::Override(value),
             };
-            if let (Some(id), Some(widget)) = (&element.id, &element.widget) {
+            let owning_record = if let (Some(id), Some(widget)) = (&element.id, &element.widget) {
                 ranked_records.push((
                     element.z_index,
                     ComputedWidgetRecord::new(
@@ -780,6 +787,17 @@ impl LayoutTree {
                         computed.bounds.intersect(&inherited_clip),
                     ),
                 ));
+                Some(ranked_records.len() - 1)
+            } else {
+                inherited_owner
+            };
+            if let (Some(slot), Some(record_index)) = (element.visual_slot, owning_record) {
+                ranked_records[record_index]
+                    .1
+                    .push_visual_slot(ComputedVisualSlot {
+                        slot,
+                        element_index: index,
+                    });
             }
             preorder += 1;
             let child_clip = if matches!(element.overflow, ChildOverflow::Clipped) {
@@ -790,7 +808,7 @@ impl LayoutTree {
                 inherited_clip
             };
             for &child in self.children_of(index).iter().rev() {
-                stack.push((child, interactivity, child_clip));
+                stack.push((child, interactivity, child_clip, owning_record));
             }
         }
 
@@ -967,6 +985,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         interactivity,
         editable,
         widget,
+        visual_slot,
         draw,
         z_index,
         anti_alias,
@@ -992,6 +1011,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         interactivity: n_interactivity,
         editable: n_editable,
         widget: n_widget,
+        visual_slot: n_visual_slot,
         draw: n_draw,
         z_index: n_z_index,
         anti_alias: n_anti_alias,
@@ -1024,35 +1044,20 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     let mut change = border_change.combine(child_layout_change);
-    if id != n_id {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-    if widget != n_widget {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-    if interactivity != n_interactivity {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-    if background != n_background || corner_radius != n_corner_radius {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if draw != n_draw || z_index != n_z_index {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if anti_alias != n_anti_alias
+    if id != n_id
+        || widget != n_widget
+        || visual_slot != n_visual_slot
+        || interactivity != n_interactivity
+        || background != n_background
+        || corner_radius != n_corner_radius
+        || draw != n_draw
+        || z_index != n_z_index
+        || anti_alias != n_anti_alias
         || hairline_fade != n_hairline_fade
         || shadow_casting != n_shadow_casting
+        || precompose != n_precompose
+        || material != n_material
     {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if precompose != n_precompose {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if material != n_material {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
@@ -1264,6 +1269,7 @@ mod tests {
     use crate::layout::TextStyle;
     use crate::layout::Unit;
     use crate::layout::child_layout::ChildLayout;
+    use crate::widgets::VisualSlotId;
 
     const LARGE_CHILD_GAP: f32 = 2.0;
     const SMALL_CHILD_GAP: f32 = 1.0;
@@ -1592,6 +1598,58 @@ mod tests {
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn visual_slot_add_remove_classifies_as_visual_only() {
+        let tree = root_tree(El::new().button("action", Button::new()));
+        let next = root_tree(
+            El::new()
+                .button("action", Button::new())
+                .visual_slot(VisualSlotId::new(1)),
+        );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+        assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn computed_widgets_carry_subtree_visual_slot_references() {
+        const WIDGET_SLOT: VisualSlotId = VisualSlotId::new(1);
+        const CHILD_SLOT: VisualSlotId = VisualSlotId::new(2);
+        const ORPHAN_SLOT: VisualSlotId = VisualSlotId::new(3);
+
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .button("styled", Button::new())
+                .visual_slot(WIDGET_SLOT),
+            |builder| {
+                builder.with(El::new().visual_slot(CHILD_SLOT), |_| {});
+            },
+        );
+        builder.with(El::new().visual_slot(ORPHAN_SLOT), |_| {});
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(records.len(), 1);
+        let slots = records[0].visual_slots();
+        assert_eq!(slots.len(), 2);
+        let widget_slot = slots.iter().find(|slot| slot.slot == WIDGET_SLOT);
+        let child_slot = slots.iter().find(|slot| slot.slot == CHILD_SLOT);
+        assert!(widget_slot.is_some());
+        assert!(child_slot.is_some());
+        assert_ne!(
+            widget_slot.map(|slot| slot.element_index),
+            child_slot.map(|slot| slot.element_index),
+            "each slot references its own element's records",
+        );
+        assert!(
+            slots.iter().all(|slot| slot.slot != ORPHAN_SLOT),
+            "slots outside a widget subtree belong to no widget",
+        );
     }
 
     #[test]

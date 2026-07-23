@@ -7,6 +7,7 @@ mod picking;
 mod reify;
 mod relationship;
 mod slider;
+mod visual;
 
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;
@@ -76,6 +77,13 @@ pub use slider::SliderConfigError;
 pub use slider::SliderDirection;
 pub use slider::SliderRange;
 pub use slider::SliderStep;
+pub(crate) use visual::ComputedVisualSlot;
+pub(crate) use visual::VisualOverrideIndex;
+pub(crate) use visual::VisualSlotId;
+pub(crate) use visual::VisualSlotOverride;
+#[cfg(test)]
+pub(crate) use visual::WidgetVisualOverrides;
+pub(crate) use visual::WidgetVisualSlots;
 
 use crate::PanelSystems;
 use crate::cascade;
@@ -107,6 +115,7 @@ impl Plugin for WidgetsPlugin {
         app.init_resource::<MeshPickingSettings>()
             .init_resource::<WidgetFocusAuthority>()
             .init_resource::<ButtonCaptures>()
+            .init_resource::<VisualOverrideIndex>()
             .add_message::<WindowFocused>()
             .add_message::<FocusNextWidget>()
             .add_message::<FocusPreviousWidget>()
@@ -176,6 +185,7 @@ impl Plugin for WidgetsPlugin {
                 (
                     reify::reify_widgets.in_set(WidgetSystems::Reify),
                     ApplyDeferred.in_set(WidgetSystems::ReifyCommandsApplied),
+                    visual::dispatch_visual_overrides.after(WidgetSystems::ReifyCommandsApplied),
                     interactivity::resolve_interactivity
                         .in_set(WidgetSystems::ResolveInteractivity),
                     ApplyDeferred.in_set(WidgetSystems::InteractivityCommandsApplied),

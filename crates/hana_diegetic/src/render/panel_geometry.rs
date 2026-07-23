@@ -513,6 +513,9 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     pub(crate) command_index:   CommandIndex,
+    /// Index of the source element in the panel's `LayoutTree`; widget
+    /// visual-slot overrides key on `(panel_entity, element_index)`.
+    pub(crate) element_index:   ElementIndex,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     pub(crate) draw_depth:      DrawCommandDepth,
     /// Fill material input consumed by the SDF material table.
@@ -611,6 +614,8 @@ pub(crate) struct StoredResolvedSdfSurface {
     panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     command_index:   CommandIndex,
+    /// Index of the source element in the panel's `LayoutTree`.
+    element_index:   ElementIndex,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     draw_depth:      DrawCommandDepth,
     /// Fill material source for the SDF material table.
@@ -638,6 +643,7 @@ impl StoredResolvedSdfSurface {
         Self {
             panel_entity:    surface.panel_entity,
             command_index:   surface.command_index,
+            element_index:   surface.element_index,
             draw_depth:      surface.draw_depth,
             fill_material:   StoredResolvedSdfMaterial::from_resolved(&surface.fill_material),
             border_material: StoredResolvedSdfMaterial::from_resolved(&surface.border_material),
@@ -654,6 +660,9 @@ impl StoredResolvedSdfSurface {
     /// Returns the owning `DiegeticPanel` entity.
     pub(crate) const fn panel_entity(&self) -> Entity { self.panel_entity }
 
+    /// Returns the source element index in the panel's `LayoutTree`.
+    pub(crate) const fn element_index(&self) -> ElementIndex { self.element_index }
+
     /// Borrows the stored surface with current panel render state.
     pub(crate) const fn as_resolved(
         &self,
@@ -663,6 +672,7 @@ impl StoredResolvedSdfSurface {
         ResolvedSdfSurface {
             panel_entity: self.panel_entity,
             command_index: self.command_index,
+            element_index: self.element_index,
             draw_depth: self.draw_depth,
             fill_material: self.fill_material.as_resolved(),
             border_material: self.border_material.as_resolved(),
@@ -846,6 +856,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
     ResolvedSdfSurface {
         panel_entity: context.panel_entity,
         command_index: surface.command_index,
+        element_index: surface.index,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
             authorship:    if fill_color.is_some() || material_override_authors_fill {

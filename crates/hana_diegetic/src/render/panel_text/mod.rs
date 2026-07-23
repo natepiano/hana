@@ -46,6 +46,7 @@ use crate::layout::Sidedness;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPerfStats;
 use crate::text::PreparedTextRun;
+use crate::widgets::VisualOverrideIndex;
 
 /// Stores a prepared text run for a panel [`TextContent`](crate::TextContent) child.
 ///
@@ -91,6 +92,7 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
+        app.init_resource::<VisualOverrideIndex>();
         app.add_systems(
             PostUpdate,
             (
