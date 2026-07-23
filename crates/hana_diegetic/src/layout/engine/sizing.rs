@@ -2,6 +2,7 @@ use bevy::math::Vec2;
 use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
+use crate::layout::BoundingBox;
 use crate::layout::Sizing;
 use crate::layout::TextSizing;
 use crate::layout::TextWrap;
@@ -50,6 +51,22 @@ pub(super) fn border_leading(element: &Element, axis: Axis) -> f32 {
         Axis::X => b.left.value,
         Axis::Y => b.top.value,
     })
+}
+
+/// Returns `element`'s solved content box in the same coordinate space as
+/// `border_box`, excluding its padding and border.
+///
+/// `border_box` is the element's solved border box (its outer bounds). This
+/// reuses the [`content_box`] formula so widget reify records the exact
+/// padding/border-excluded interior the layout engine positions children in.
+pub(crate) fn content_box_bounds(element: &Element, border_box: BoundingBox) -> BoundingBox {
+    let content = content_box(element, Vec2::new(border_box.width, border_box.height));
+    BoundingBox {
+        x:      border_box.x + content.origin.x,
+        y:      border_box.y + content.origin.y,
+        width:  content.size.x,
+        height: content.size.y,
+    }
 }
 
 /// Returns the parent content box for a resolved element size.

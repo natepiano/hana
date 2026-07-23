@@ -15,6 +15,8 @@ use super::PanelWidgetIndex;
 use super::PanelWidgets;
 use super::ScreenWidgetAnchorProxy;
 use super::ScreenWidgetAnchoredHere;
+use super::SliderCancelCause;
+use super::SliderCaptures;
 use super::SliderState;
 use super::WidgetFocusable;
 use super::WidgetKind;
@@ -26,6 +28,7 @@ use super::button::ButtonCallback;
 use super::button::ButtonCallbackHandle;
 use super::button::ButtonCancelCause;
 use super::button::ButtonCaptures;
+use super::slider;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::cascade::CascadeFrom;
@@ -142,6 +145,7 @@ pub(super) fn reify_widgets(
         Option<&SliderState>,
     )>,
     mut button_captures: ResMut<ButtonCaptures>,
+    mut slider_captures: ResMut<SliderCaptures>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, panel_global, computed, panel_widgets, mut widget_index) in
@@ -189,6 +193,7 @@ pub(super) fn reify_widgets(
                         panel_entity,
                         &existing_widgets,
                         &mut button_captures,
+                        &mut slider_captures,
                     );
                     entity
                 },
@@ -203,6 +208,12 @@ pub(super) fn reify_widgets(
                     entity,
                     ButtonCancelCause::WidgetRemoved,
                     &mut button_captures,
+                    &mut commands,
+                );
+                slider::cancel_slider_drag(
+                    entity,
+                    SliderCancelCause::WidgetRemoved,
+                    &mut slider_captures,
                     &mut commands,
                 );
                 commands.entity(entity).despawn();
@@ -284,6 +295,7 @@ fn update_widget(
         Option<&SliderState>,
     )>,
     button_captures: &mut ButtonCaptures,
+    slider_captures: &mut SliderCaptures,
 ) {
     let Ok((
         _,
@@ -301,13 +313,23 @@ fn update_widget(
         return;
     };
     if *existing_kind != kind {
-        if *existing_kind == WidgetKind::Button {
-            button::cancel_button_press(
-                entity,
-                ButtonCancelCause::WidgetKindChanged,
-                button_captures,
-                commands,
-            );
+        match *existing_kind {
+            WidgetKind::Button => {
+                button::cancel_button_press(
+                    entity,
+                    ButtonCancelCause::WidgetKindChanged,
+                    button_captures,
+                    commands,
+                );
+            },
+            WidgetKind::Slider => {
+                slider::cancel_slider_drag(
+                    entity,
+                    SliderCancelCause::WidgetKindChanged,
+                    slider_captures,
+                    commands,
+                );
+            },
         }
         commands.entity(entity).insert(kind);
     }

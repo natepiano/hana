@@ -8,6 +8,7 @@
 //! provides a fluent API that converts into an `Element` via `into_element()`. Think of `El`
 //! as the ergonomic front door and `Element` as the canonical storage format.
 
+use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -45,6 +46,7 @@ use crate::widgets::ComputedVisualSlot;
 use crate::widgets::ComputedWidgetRecord;
 use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetKind;
 use crate::widgets::WidgetSpec;
 
 /// Result of replacing the display text for a panel field.
@@ -709,7 +711,12 @@ impl LayoutTree {
         let Some(root) = self.root else {
             return Ok(());
         };
-        let mut stack = vec![(root, Option::<PanelElementId>::None, PrecomposeMode::Direct)];
+        let mut sliders_with_thumb = HashSet::new();
+        let mut stack = vec![(
+            root,
+            Option::<(PanelElementId, WidgetKind)>::None,
+            PrecomposeMode::Direct,
+        )];
         while let Some((index, owning_widget, inherited_precompose)) = stack.pop() {
             let Some(element) = self.elements.get(index) else {
                 continue;
@@ -720,14 +727,28 @@ impl LayoutTree {
             };
 
             if (element.widget.is_some() || element.editable.is_some())
-                && let Some(widget_id) = owning_widget.as_ref()
+                && let Some((widget_id, _)) = owning_widget.as_ref()
             {
                 return Err(PanelBuildError::WidgetContainsInteractiveDescendant(
                     widget_id.clone(),
                 ));
             }
 
-            let next_owning_widget = if element.widget.is_some() {
+            if element.visual_slot == Some(VisualSlotId::SLIDER_THUMB) {
+                if let Some((slider_id, WidgetKind::Slider)) = owning_widget.as_ref() {
+                    if !sliders_with_thumb.insert(slider_id.clone()) {
+                        return Err(PanelBuildError::SliderHasMultipleThumbs(slider_id.clone()));
+                    }
+                } else {
+                    let thumb_id = element
+                        .id
+                        .clone()
+                        .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
+                    return Err(PanelBuildError::SliderThumbOutsideSlider(thumb_id));
+                }
+            }
+
+            let next_owning_widget = if let Some(widget) = &element.widget {
                 let id = element
                     .id
                     .clone()
@@ -738,21 +759,41 @@ impl LayoutTree {
                 if precompose == PrecomposeMode::Ldr {
                     return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
                 }
-                if let Some(WidgetSpec::Button(button)) = &element.widget {
-                    if button.has_state_background() && element.background.is_none() {
-                        return Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id));
-                    }
-                    if button.has_state_border_color() && element.border.is_none() {
-                        return Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id));
-                    }
-                    if button.has_state_material()
-                        && element.background.is_none()
-                        && element.border.is_none()
-                    {
-                        return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
-                    }
+                match widget {
+                    WidgetSpec::Button(button) => {
+                        if button.has_state_background() && element.background.is_none() {
+                            return Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(
+                                id,
+                            ));
+                        }
+                        if button.has_state_border_color() && element.border.is_none() {
+                            return Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id));
+                        }
+                        if button.has_state_material()
+                            && element.background.is_none()
+                            && element.border.is_none()
+                        {
+                            return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
+                        }
+                    },
+                    WidgetSpec::Slider(slider) => {
+                        if slider.has_state_background() && element.background.is_none() {
+                            return Err(PanelBuildError::SliderStateBackgroundRequiresBackground(
+                                id,
+                            ));
+                        }
+                        if slider.has_state_border_color() && element.border.is_none() {
+                            return Err(PanelBuildError::SliderStateBorderColorRequiresBorder(id));
+                        }
+                        if slider.has_state_material()
+                            && element.background.is_none()
+                            && element.border.is_none()
+                        {
+                            return Err(PanelBuildError::SliderStateMaterialRequiresSurface(id));
+                        }
+                    },
                 }
-                Some(id)
+                Some((id, widget.kind()))
             } else {
                 owning_widget
             };
@@ -806,11 +847,15 @@ impl LayoutTree {
                 inherited_owner
             };
             if let (Some(slot), Some(record_index)) = (element.visual_slot, owning_record) {
+                let border_box = computed.bounds;
+                let content_box = super::engine::content_box_bounds(element, border_box);
                 ranked_records[record_index]
                     .1
                     .push_visual_slot(ComputedVisualSlot {
                         slot,
                         element_index: index,
+                        border_box,
+                        content_box,
                     });
             }
             preorder += 1;

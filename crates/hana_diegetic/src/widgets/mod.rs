@@ -14,6 +14,7 @@ use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::picking::PickingSettings;
 use bevy::picking::PickingSystems;
+use bevy::picking::backend::ray::RayMap;
 use bevy::picking::events::PointerState;
 use bevy::picking::hover::HoverMap;
 use bevy::picking::mesh_picking::MeshPickingSettings;
@@ -77,12 +78,19 @@ pub use relationship::WidgetOf;
 pub use slider::RequestSliderAdjustment;
 pub use slider::Slider;
 pub use slider::SliderAdjustment;
+pub use slider::SliderCancelCause;
+pub use slider::SliderCanceled;
+pub(crate) use slider::SliderCaptures;
 pub use slider::SliderChangeRequested;
 pub use slider::SliderConfigError;
 pub use slider::SliderDirection;
+pub(crate) use slider::SliderDrag;
+pub use slider::SliderGrabbed;
 pub use slider::SliderRange;
+pub use slider::SliderReleased;
 pub use slider::SliderState;
 pub use slider::SliderStep;
+pub(crate) use slider::finalize_panel_sliders;
 pub use slider::slider_self_update;
 pub(crate) use visual::ComputedVisualSlot;
 pub(crate) use visual::VisualOverrideIndex;
@@ -134,7 +142,10 @@ impl Plugin for WidgetsPlugin {
             .add_message::<FocusLastWidget>()
             .add_message::<ActivateFocusedWidget>()
             .add_message::<CancelFocusedWidget>()
-            .add_plugins(cascade::cascade_plugin::<WidgetInteractivity>())
+            .add_plugins((
+                cascade::cascade_plugin::<WidgetInteractivity>(),
+                slider::SliderPlugin,
+            ))
             .configure_sets(
                 Update,
                 (
@@ -163,10 +174,7 @@ impl Plugin for WidgetsPlugin {
             .add_systems(
                 PreUpdate,
                 picking::update_hits
-                    .run_if(
-                        resource_exists::<bevy::picking::backend::ray::RayMap>
-                            .and_then(resource_exists::<Assets<Mesh>>),
-                    )
+                    .run_if(resource_exists::<RayMap>.and_then(resource_exists::<Assets<Mesh>>))
                     .in_set(PickingSystems::Backend),
             )
             .add_observer(focus::request_widget_focus)
@@ -183,10 +191,9 @@ impl Plugin for WidgetsPlugin {
             .add_observer(button::cancel_before_widget_despawn)
             .add_observer(button::handle_semantic_intent)
             .add_observer(button::dispatch_click_callback)
-            .add_observer(slider::handle_adjustment_request)
             .add_systems(
                 PreUpdate,
-                button::reconcile_pointer_input
+                capture::reconcile_pointer_input
                     .run_if(
                         resource_exists::<Messages<PointerInput>>
                             .and_then(resource_exists::<PointerState>)
@@ -208,6 +215,10 @@ impl Plugin for WidgetsPlugin {
                     ApplyDeferred.in_set(WidgetSystems::FocusCommandsApplied),
                     button::present_button_state
                         .run_if(button::presentation_inputs_changed)
+                        .after(WidgetSystems::FocusCommandsApplied)
+                        .before(WidgetSystems::PresentationCommandsApplied),
+                    slider::present_slider_state
+                        .run_if(slider::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),
                     ApplyDeferred.in_set(WidgetSystems::PresentationCommandsApplied),
