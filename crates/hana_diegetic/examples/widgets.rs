@@ -70,14 +70,21 @@ use hana_diegetic::SliderRange;
 use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
+use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
+use hana_diegetic::WidgetFocused;
 use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
 
 // widget lab
 const BUTTON_BORDER: Color = Color::srgba(0.30, 0.62, 1.0, 0.82);
+const BUTTON_BORDER_DISABLED: Color = Color::srgba(0.34, 0.36, 0.40, 0.60);
+const BUTTON_BORDER_FOCUSED: Color = Color::srgba(1.0, 0.86, 0.30, 0.94);
 const BUTTON_FILL: Color = Color::srgba(0.03, 0.10, 0.24, 0.82);
+const BUTTON_FILL_DISABLED: Color = Color::srgba(0.10, 0.11, 0.13, 0.66);
+const BUTTON_FILL_HOVERED: Color = Color::srgba(0.10, 0.26, 0.52, 0.88);
+const BUTTON_FILL_PRESSED: Color = Color::srgba(0.55, 0.30, 0.08, 0.94);
 const BUTTON_HEIGHT: Px = Px(42.0);
 const CONTROL_BORDER_WIDTH: Px = Px(1.0);
 const CONTROL_GAP: Px = Px(8.0);
@@ -87,8 +94,8 @@ const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
 const DESCRIPTION_LINES: [&str; 6] = [
-    "Hover each control; interaction changes are logged in the terminal.",
-    "D changes the secondary button through PanelWidgetReader and PanelWidgetWriter.",
+    "Buttons restyle on hover, press, and focus; interaction changes log in the terminal.",
+    "D disables the secondary button, which then shows its disabled surface.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
     "The primary button's on_click callback counts clicks in the status readout.",
     "The world status panel follows the level slider below the cube controls.",
@@ -130,6 +137,9 @@ const SCREEN_READOUT_ID: &str = "screen-anchor-status";
 const SCREEN_READOUT_TEXT: &str = "^ Attached panel";
 const SCREEN_TARGET_ID: &str = "screen-target-button";
 const SCREEN_TARGET_LABEL: &str = "Target widget";
+const STATE_STATUS_ID: &str = "state-status";
+const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal";
+const STATE_STATUS_MEASURE: &str = "State: pri=hover,focus,off sec=hover,focus,off";
 const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
 const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
 const SLIDER_HEIGHT: Px = Px(36.0);
@@ -315,6 +325,7 @@ fn main() {
                 anchor_interaction_readout,
                 anchor_screen_interaction_readout,
                 report_interaction_changes,
+                report_presentation_states,
                 request_initial_widget_focus,
             ),
         )
@@ -721,14 +732,16 @@ fn widget_tree(slider: Slider) -> LayoutTree {
         PRIMARY_BUTTON_ID,
         "Primary button",
         CONTROL_WIDTH,
-        Button::new().on_click(count_primary_click),
+        state_styled(Button::new().on_click(count_primary_click)),
     );
     add_button(
         &mut builder,
         SECONDARY_BUTTON_ID,
         "Secondary button",
         CONTROL_WIDTH,
-        Button::new(),
+        state_styled(Button::new())
+            .disabled_background(BUTTON_FILL_DISABLED)
+            .disabled_border_color(BUTTON_BORDER_DISABLED),
     );
     builder.with(
         El::new()
@@ -793,6 +806,14 @@ fn interaction_status_tree() -> LayoutTree {
         .id(CALLBACK_STATUS_ID)
         .measure_as(CALLBACK_STATUS_MEASURE),
     );
+    builder.text(
+        Text::new(
+            STATE_STATUS_IDLE,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        )
+        .id(STATE_STATUS_ID)
+        .measure_as(STATE_STATUS_MEASURE),
+    );
     builder.build()
 }
 
@@ -807,6 +828,16 @@ fn interaction_status_transform() -> Transform {
     transform.translation.y -=
         (PANEL_WORLD_HEIGHT + WORLD_READOUT_WORLD_HEIGHT).mul_add(0.5, STATUS_GAP);
     transform
+}
+
+/// Direct state presentation shared by the world-panel buttons: hover and
+/// press restyle the fill while focus restyles only the border, so the two
+/// properties visibly layer independently.
+fn state_styled(button: Button) -> Button {
+    button
+        .hovered_background(BUTTON_FILL_HOVERED)
+        .pressed_background(BUTTON_FILL_PRESSED)
+        .focused_border_color(BUTTON_BORDER_FOCUSED)
 }
 
 fn add_button(
@@ -881,6 +912,62 @@ fn report_interaction_changes(
     {
         warn!("widgets: interaction status has not been reified");
     }
+}
+
+/// Mirrors each world button's app-visible presentation inputs into the
+/// `State:` diagnostic row. Hover comes from `PickingInteraction`, focus from
+/// `WidgetFocused`, and disabled from `WidgetDisabled`; press already appears
+/// on the `Button:` row through its events.
+fn report_presentation_states(
+    panel: Single<Entity, With<WidgetLabPanel>>,
+    readout: Single<Entity, With<WidgetInteractionReadout>>,
+    widgets: Query<(
+        &PanelWidget,
+        &WidgetOf,
+        Option<&PickingInteraction>,
+        Has<WidgetFocused>,
+        Has<WidgetDisabled>,
+    )>,
+    mut panel_text: PanelText,
+) {
+    let flags = |id: &str| {
+        widgets
+            .iter()
+            .find(|(widget, widget_of, ..)| {
+                widget_of.panel() == *panel && *widget.id() == PanelElementId::named(id)
+            })
+            .map_or_else(
+                || "?".to_owned(),
+                |(_, _, interaction, focused, disabled)| {
+                    let mut parts = Vec::new();
+                    if matches!(
+                        interaction,
+                        Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
+                    ) {
+                        parts.push("hover");
+                    }
+                    if focused {
+                        parts.push("focus");
+                    }
+                    if disabled {
+                        parts.push("off");
+                    }
+                    if parts.is_empty() {
+                        "normal".to_owned()
+                    } else {
+                        parts.join(",")
+                    }
+                },
+            )
+    };
+    let status = format!(
+        "State: pri={} sec={}",
+        flags(PRIMARY_BUTTON_ID),
+        flags(SECONDARY_BUTTON_ID)
+    );
+    // `PanelText` skips the layout revision bump for an unchanged string, so
+    // writing every frame stays free of relayout work.
+    panel_text.set_text(*readout, &PanelElementId::named(STATE_STATUS_ID), status);
 }
 
 fn toggle_secondary_button(

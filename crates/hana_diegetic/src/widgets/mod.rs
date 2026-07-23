@@ -81,7 +81,6 @@ pub(crate) use visual::ComputedVisualSlot;
 pub(crate) use visual::VisualOverrideIndex;
 pub(crate) use visual::VisualSlotId;
 pub(crate) use visual::VisualSlotOverride;
-#[cfg(test)]
 pub(crate) use visual::WidgetVisualOverrides;
 pub(crate) use visual::WidgetVisualSlots;
 
@@ -105,6 +104,10 @@ pub(crate) enum WidgetSystems {
     Focus,
     /// Routes window-scoped semantic requests to focus or widget intents.
     SemanticInput,
+    /// Applies pointer, app, and semantic-traversal focus marker commands.
+    FocusCommandsApplied,
+    /// Applies first-insertion commands from state presentation writers.
+    PresentationCommandsApplied,
 }
 
 /// Installs headless panel widget identity and reification.
@@ -144,6 +147,9 @@ impl Plugin for WidgetsPlugin {
                     WidgetSystems::SemanticInput
                         .after(WidgetSystems::Focus)
                         .before(PanelSystems::ResolvePanelAttachments),
+                    WidgetSystems::FocusCommandsApplied.after(WidgetSystems::SemanticInput),
+                    WidgetSystems::PresentationCommandsApplied
+                        .after(WidgetSystems::FocusCommandsApplied),
                 ),
             )
             .add_systems(
@@ -185,12 +191,19 @@ impl Plugin for WidgetsPlugin {
                 (
                     reify::reify_widgets.in_set(WidgetSystems::Reify),
                     ApplyDeferred.in_set(WidgetSystems::ReifyCommandsApplied),
-                    visual::dispatch_visual_overrides.after(WidgetSystems::ReifyCommandsApplied),
                     interactivity::resolve_interactivity
                         .in_set(WidgetSystems::ResolveInteractivity),
                     ApplyDeferred.in_set(WidgetSystems::InteractivityCommandsApplied),
                     focus::cleanup_removed_focus_participants.in_set(WidgetSystems::Focus),
                     input::route_semantic_input.in_set(WidgetSystems::SemanticInput),
+                    ApplyDeferred.in_set(WidgetSystems::FocusCommandsApplied),
+                    button::present_button_state
+                        .run_if(button::presentation_inputs_changed)
+                        .after(WidgetSystems::FocusCommandsApplied)
+                        .before(WidgetSystems::PresentationCommandsApplied),
+                    ApplyDeferred.in_set(WidgetSystems::PresentationCommandsApplied),
+                    visual::dispatch_visual_overrides
+                        .after(WidgetSystems::PresentationCommandsApplied),
                 ),
             )
             .add_systems(

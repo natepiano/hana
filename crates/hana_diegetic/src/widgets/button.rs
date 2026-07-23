@@ -18,6 +18,7 @@ use bevy::ecs::world::EntityWorldMut;
 use bevy::picking::PickingSettings;
 use bevy::picking::events::PointerState;
 use bevy::picking::hover::HoverMap;
+use bevy::picking::hover::PickingInteraction;
 use bevy::picking::pointer::PointerAction;
 use bevy::picking::pointer::PointerId;
 use bevy::picking::pointer::PointerInput;
@@ -25,9 +26,16 @@ use bevy::prelude::*;
 
 use super::PanelWidget;
 use super::SemanticWidgetIntent;
+use super::VisualSlotId;
+use super::VisualSlotOverride;
 use super::WidgetDisabled;
+use super::WidgetFocused;
 use super::WidgetKind;
 use super::WidgetOf;
+use super::WidgetSpec;
+use super::WidgetVisualOverrides;
+use super::WidgetVisualSlots;
+use super::visual;
 use crate::PanelElementId;
 use crate::ime;
 use crate::ime::ImeBlurIntent;
@@ -73,18 +81,49 @@ impl fmt::Debug for ButtonCallback {
     }
 }
 
+/// Per-state presentation values for one button state layer.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ButtonStateValues {
+    background:   Option<Color>,
+    border_color: Option<Color>,
+    material:     Option<Handle<StandardMaterial>>,
+}
+
+/// One [`ButtonStateValues`] layer per widget state, authored by the direct
+/// `Button` state builders.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ButtonStatePresentation {
+    hovered:  ButtonStateValues,
+    pressed:  ButtonStateValues,
+    focused:  ButtonStateValues,
+    disabled: ButtonStateValues,
+}
+
 /// Authored configuration for a panel button.
 ///
-/// Attach it to an element with [`El::button`](crate::El::button).
+/// Attach it to an element with [`El::button`](crate::El::button). The
+/// normal surface stays on the element's ordinary
+/// [`El::background`](crate::El::background),
+/// [`El::border`](crate::El::border), and
+/// [`El::material`](crate::El::material) declarations; the state builders
+/// here patch only that root surface's retained records at runtime, layering
+/// normal → focused → hovered → pressed → disabled per property with missing
+/// values falling through to the prior layer.
 #[must_use]
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Button {
     callback: Option<ButtonCallback>,
+    states:   Option<Box<ButtonStatePresentation>>,
 }
 
 impl Button {
     /// Creates a button declaration with default behavior.
-    pub const fn new() -> Self { Self { callback: None } }
+    pub const fn new() -> Self {
+        Self {
+            callback: None,
+            states:   None,
+        }
+    }
 
     /// Runs `system` with each completed [`ButtonClicked`] for this button.
     ///
@@ -100,7 +139,287 @@ impl Button {
         self
     }
 
+    /// Sets the root background color shown while a pointer hovers the button.
+    ///
+    /// Requires an authored [`El::background`](crate::El::background) on the
+    /// button element.
+    pub fn hovered_background(mut self, color: Color) -> Self {
+        self.states_mut().hovered.background = Some(color);
+        self
+    }
+
+    /// Sets the root background color shown while the button is pressed.
+    ///
+    /// Requires an authored [`El::background`](crate::El::background) on the
+    /// button element.
+    pub fn pressed_background(mut self, color: Color) -> Self {
+        self.states_mut().pressed.background = Some(color);
+        self
+    }
+
+    /// Sets the root background color shown while the button holds widget
+    /// focus.
+    ///
+    /// Requires an authored [`El::background`](crate::El::background) on the
+    /// button element.
+    pub fn focused_background(mut self, color: Color) -> Self {
+        self.states_mut().focused.background = Some(color);
+        self
+    }
+
+    /// Sets the root background color shown while the button is disabled.
+    ///
+    /// Requires an authored [`El::background`](crate::El::background) on the
+    /// button element.
+    pub fn disabled_background(mut self, color: Color) -> Self {
+        self.states_mut().disabled.background = Some(color);
+        self
+    }
+
+    /// Sets the root border color shown while a pointer hovers the button.
+    ///
+    /// Requires an authored [`El::border`](crate::El::border) on the button
+    /// element; border widths and radii stay as authored.
+    pub fn hovered_border_color(mut self, color: Color) -> Self {
+        self.states_mut().hovered.border_color = Some(color);
+        self
+    }
+
+    /// Sets the root border color shown while the button is pressed.
+    ///
+    /// Requires an authored [`El::border`](crate::El::border) on the button
+    /// element; border widths and radii stay as authored.
+    pub fn pressed_border_color(mut self, color: Color) -> Self {
+        self.states_mut().pressed.border_color = Some(color);
+        self
+    }
+
+    /// Sets the root border color shown while the button holds widget focus.
+    ///
+    /// Requires an authored [`El::border`](crate::El::border) on the button
+    /// element; border widths and radii stay as authored.
+    pub fn focused_border_color(mut self, color: Color) -> Self {
+        self.states_mut().focused.border_color = Some(color);
+        self
+    }
+
+    /// Sets the root border color shown while the button is disabled.
+    ///
+    /// Requires an authored [`El::border`](crate::El::border) on the button
+    /// element; border widths and radii stay as authored.
+    pub fn disabled_border_color(mut self, color: Color) -> Self {
+        self.states_mut().disabled.border_color = Some(color);
+        self
+    }
+
+    /// Sets the root surface material shown while a pointer hovers the
+    /// button.
+    ///
+    /// Applies to both the authored fill and border. Requires an authored
+    /// root surface — [`El::background`](crate::El::background) or
+    /// [`El::border`](crate::El::border) — on the button element.
+    pub fn hovered_material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.states_mut().hovered.material = Some(material);
+        self
+    }
+
+    /// Sets the root surface material shown while the button is pressed.
+    ///
+    /// Applies to both the authored fill and border. Requires an authored
+    /// root surface — [`El::background`](crate::El::background) or
+    /// [`El::border`](crate::El::border) — on the button element.
+    pub fn pressed_material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.states_mut().pressed.material = Some(material);
+        self
+    }
+
+    /// Sets the root surface material shown while the button holds widget
+    /// focus.
+    ///
+    /// Applies to both the authored fill and border. Requires an authored
+    /// root surface — [`El::background`](crate::El::background) or
+    /// [`El::border`](crate::El::border) — on the button element.
+    pub fn focused_material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.states_mut().focused.material = Some(material);
+        self
+    }
+
+    /// Sets the root surface material shown while the button is disabled.
+    ///
+    /// Applies to both the authored fill and border. Requires an authored
+    /// root surface — [`El::background`](crate::El::background) or
+    /// [`El::border`](crate::El::border) — on the button element.
+    pub fn disabled_material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.states_mut().disabled.material = Some(material);
+        self
+    }
+
     pub(crate) const fn callback(&self) -> Option<&ButtonCallback> { self.callback.as_ref() }
+
+    fn states_mut(&mut self) -> &mut ButtonStatePresentation {
+        self.states.get_or_insert_with(Default::default).as_mut()
+    }
+
+    /// Whether any state layer authors a background color.
+    pub(crate) fn has_state_background(&self) -> bool {
+        self.states.as_deref().is_some_and(|states| {
+            states.focused.background.is_some()
+                || states.hovered.background.is_some()
+                || states.pressed.background.is_some()
+                || states.disabled.background.is_some()
+        })
+    }
+
+    /// Whether any state layer authors a border color.
+    pub(crate) fn has_state_border_color(&self) -> bool {
+        self.states.as_deref().is_some_and(|states| {
+            states.focused.border_color.is_some()
+                || states.hovered.border_color.is_some()
+                || states.pressed.border_color.is_some()
+                || states.disabled.border_color.is_some()
+        })
+    }
+
+    /// Whether any state layer authors a surface material.
+    pub(crate) fn has_state_material(&self) -> bool {
+        self.states.as_deref().is_some_and(|states| {
+            states.focused.material.is_some()
+                || states.hovered.material.is_some()
+                || states.pressed.material.is_some()
+                || states.disabled.material.is_some()
+        })
+    }
+
+    /// Composes the desired root-slot override for the active state set.
+    ///
+    /// Each property layers independently in the fixed order normal →
+    /// focused → hovered → pressed → disabled; a state without a value for a
+    /// property leaves the prior layer intact, and `None` means the authored
+    /// normal value.
+    fn state_override(&self, active: [bool; 4]) -> VisualSlotOverride {
+        let Some(states) = self.states.as_deref() else {
+            return VisualSlotOverride::default();
+        };
+        let mut layered = ButtonStateValues::default();
+        for (active, values) in active.into_iter().zip([
+            &states.focused,
+            &states.hovered,
+            &states.pressed,
+            &states.disabled,
+        ]) {
+            if !active {
+                continue;
+            }
+            if let Some(background) = values.background {
+                layered.background = Some(background);
+            }
+            if let Some(border_color) = values.border_color {
+                layered.border_color = Some(border_color);
+            }
+            if let Some(material) = &values.material {
+                layered.material = Some(material.clone());
+            }
+        }
+        VisualSlotOverride {
+            fill_color: layered.background,
+            border_color: layered.border_color,
+            material: layered.material,
+            ..VisualSlotOverride::default()
+        }
+    }
+}
+
+/// Run condition for [`present_button_state`]: reports whether any authored
+/// presentation or presented state input changed since the last run.
+///
+/// `Changed<WidgetSpec>` / `Changed<WidgetVisualSlots>` cover reify and
+/// re-authoring, `Changed<PickingInteraction>` covers the hover/pressed
+/// aggregate, and `Changed` on [`WidgetFocused`], [`WidgetDisabled`], and
+/// [`ButtonPress`] covers marker insertion. The [`RemovedComponents`] streams
+/// report the edges back to normal; every stream is drained each run so a
+/// consumed removal cannot re-trigger a later quiet frame.
+pub(super) fn presentation_inputs_changed(
+    changed: Query<
+        (),
+        (
+            With<WidgetOf>,
+            Or<(
+                Changed<WidgetSpec>,
+                Changed<WidgetVisualSlots>,
+                Changed<PickingInteraction>,
+                Changed<WidgetFocused>,
+                Changed<WidgetDisabled>,
+                Changed<ButtonPress>,
+            )>,
+        ),
+    >,
+    mut removed_interactions: RemovedComponents<PickingInteraction>,
+    mut removed_focus: RemovedComponents<WidgetFocused>,
+    mut removed_disabled: RemovedComponents<WidgetDisabled>,
+    mut removed_presses: RemovedComponents<ButtonPress>,
+) -> bool {
+    let removed = !removed_interactions.is_empty()
+        || !removed_focus.is_empty()
+        || !removed_disabled.is_empty()
+        || !removed_presses.is_empty();
+    removed_interactions.clear();
+    removed_focus.clear();
+    removed_disabled.clear();
+    removed_presses.clear();
+    removed || !changed.is_empty()
+}
+
+/// Maps each button's live state onto its root visual-slot override.
+///
+/// Runs after `WidgetSystems::FocusCommandsApplied`, so pointer, app, and
+/// semantic-traversal focus marker commands from the same frame are visible,
+/// and only when [`presentation_inputs_changed`] reports a relevant authored
+/// or state edge, so a quiet frame never walks the live buttons.
+/// Hover reads the all-pointer [`PickingInteraction`] aggregate and pressed
+/// reads the private [`ButtonPress`] marker; [`ButtonCaptures`] stays
+/// lifecycle authority and is never consulted for presentation. Writes go
+/// through [`visual::write_slot_override`], which compares immutably first,
+/// so an unchanged state never marks [`WidgetVisualOverrides`] changed.
+pub(super) fn present_button_state(
+    buttons: Query<
+        (
+            Entity,
+            &WidgetSpec,
+            &WidgetVisualSlots,
+            Option<&PickingInteraction>,
+            Has<WidgetDisabled>,
+            Has<WidgetFocused>,
+            Has<ButtonPress>,
+        ),
+        With<WidgetOf>,
+    >,
+    mut overrides: Query<&mut WidgetVisualOverrides>,
+    mut commands: Commands,
+) {
+    for (entity, authored, slots, interaction, disabled, focused, pressed) in &buttons {
+        let WidgetSpec::Button(button) = authored else {
+            continue;
+        };
+        if slots.element_index(VisualSlotId::BUTTON_ROOT).is_none() {
+            continue;
+        }
+        let active = [
+            focused,
+            matches!(
+                interaction,
+                Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
+            ),
+            pressed,
+            disabled,
+        ];
+        visual::write_slot_override(
+            entity,
+            VisualSlotId::BUTTON_ROOT,
+            button.state_override(active),
+            &mut overrides,
+            &mut commands,
+        );
+    }
 }
 
 /// Reports the beginning of a pointer-driven button press.
@@ -918,6 +1237,7 @@ mod tests {
     use bevy::picking::events::PointerState;
     use bevy::picking::events::pointer_events;
     use bevy::picking::hover::HoverMap;
+    use bevy::picking::hover::PickingInteraction;
     use bevy::picking::hover::PreviousHoverMap;
     use bevy::picking::pointer::Location;
     use bevy::picking::pointer::PointerAction;
@@ -928,6 +1248,7 @@ mod tests {
     use bevy::picking::pointer::update_pointer_map;
     use bevy::prelude::*;
     use bevy::window::Ime;
+    use bevy::window::PrimaryWindow;
     use bevy::window::WindowClosed;
     use bevy::window::WindowFocused;
     use bevy::window::WindowRef;
@@ -955,10 +1276,15 @@ mod tests {
     use super::reconcile_pointer_input;
     use super::release_from_pointer;
     use crate::ActivateFocusedWidget;
+    use crate::Border;
     use crate::Button;
+    use crate::CascadeEntityCommandsExt;
+    use crate::ClearWidgetFocus;
+    use crate::ComputedDiegeticPanel;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::El;
+    use crate::FocusNextWidget;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
     use crate::ImeCommitCause;
@@ -971,6 +1297,7 @@ mod tests {
     use crate::LayoutBuilder;
     use crate::LayoutTree;
     use crate::Mm;
+    use crate::PanelBuildError;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
     use crate::PanelWidgetWriter;
@@ -986,8 +1313,15 @@ mod tests {
     use crate::widgets::ScreenWidgetAnchoredHere;
     use crate::widgets::ScreenWidgetAnchoredTo;
     use crate::widgets::SemanticWidgetIntent;
+    use crate::widgets::VisualOverrideIndex;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetDisabled;
     use crate::widgets::WidgetKind;
     use crate::widgets::WidgetOf;
+    use crate::widgets::WidgetSystems;
+    use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
 
     const BUTTON_ID: &str = "action";
@@ -2797,5 +3131,909 @@ mod tests {
         send_key(&mut app, window, KeyCode::Escape, ButtonState::Pressed);
         app.update();
         assert!(events(&app).is_empty());
+    }
+
+    // ── Direct state presentation builders ─────────────────────────────────
+
+    const NORMAL_FILL: Color = Color::srgb(0.05, 0.10, 0.20);
+    const NORMAL_BORDER: Color = Color::srgb(0.30, 0.30, 0.30);
+    const HOVER_FILL: Color = Color::srgb(0.15, 0.30, 0.60);
+    const PRESS_FILL: Color = Color::srgb(0.60, 0.30, 0.10);
+    const FOCUS_FILL: Color = Color::srgb(0.20, 0.20, 0.45);
+    const FOCUS_BORDER: Color = Color::srgb(0.95, 0.85, 0.25);
+    const DISABLED_BORDER: Color = Color::srgb(0.35, 0.35, 0.40);
+    const DISABLED_FILL: Color = Color::srgb(0.12, 0.12, 0.14);
+    const PEER_HOVER_FILL: Color = Color::srgb(0.10, 0.55, 0.25);
+
+    fn styled_button_tree(id: &'static str, button: Button) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(NORMAL_FILL)
+                .border(Border::all(1.0, NORMAL_BORDER))
+                .button(id, button),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn two_styled_buttons_tree(first_hover: Color, second_hover: Color) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        for (id, hover) in [("first", first_hover), ("second", second_hover)] {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(NORMAL_FILL)
+                    .border(Border::all(1.0, NORMAL_BORDER))
+                    .button(id, Button::new().hovered_background(hover)),
+                |_| {},
+            );
+        }
+        builder.build()
+    }
+
+    fn widget_by_id(app: &mut App, panel: Entity, id: &'static str) -> Entity {
+        let id = PanelElementId::named(id);
+        let result = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| reader.entity(panel, &id));
+        assert!(result.is_ok());
+        let widget = result.ok().flatten();
+        assert!(widget.is_some());
+        widget.unwrap_or(Entity::PLACEHOLDER)
+    }
+
+    fn root_override(app: &App, widget: Entity) -> Option<VisualSlotOverride> {
+        app.world()
+            .get::<WidgetVisualOverrides>(widget)
+            .and_then(|overrides| overrides.get(VisualSlotId::BUTTON_ROOT).cloned())
+    }
+
+    fn root_element_index(app: &App, widget: Entity) -> Option<usize> {
+        app.world()
+            .get::<WidgetVisualSlots>(widget)
+            .and_then(|slots| slots.element_index(VisualSlotId::BUTTON_ROOT))
+    }
+
+    fn indexed_root_override(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+    ) -> Option<VisualSlotOverride> {
+        let element_index = root_element_index(app, widget)?;
+        app.world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, element_index)
+            .cloned()
+    }
+
+    fn computed_tick(app: &App, panel: Entity) -> Option<bevy::ecs::change_detection::Tick> {
+        app.world()
+            .entity(panel)
+            .get_ref::<ComputedDiegeticPanel>()
+            .map(|computed| computed.last_changed())
+    }
+
+    #[test]
+    fn hovered_background_patches_only_the_fill_and_reaches_dispatch_same_frame() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        assert_eq!(root_override(&app, widget), None);
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        let expected = VisualSlotOverride {
+            fill_color: Some(HOVER_FILL),
+            ..VisualSlotOverride::default()
+        };
+        assert_eq!(root_override(&app, widget), Some(expected.clone()));
+        assert_eq!(
+            indexed_root_override(&app, panel, widget),
+            Some(expected),
+            "the first insertion must reach dispatch in the same frame",
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::None);
+        app.update();
+        assert_eq!(root_override(&app, widget), None);
+        assert_eq!(indexed_root_override(&app, panel, widget), None);
+    }
+
+    #[test]
+    fn border_color_and_material_builders_patch_their_own_properties() {
+        let mut app = integrated_test_app();
+        let material: Handle<StandardMaterial> = Handle::default();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(
+                BUTTON_ID,
+                Button::new()
+                    .hovered_border_color(FOCUS_BORDER)
+                    .pressed_material(material.clone()),
+            ),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                border_color: Some(FOCUS_BORDER),
+                ..VisualSlotOverride::default()
+            }),
+            "a border-color builder must not touch fill or material",
+        );
+
+        app.world_mut().entity_mut(widget).insert(ButtonPress);
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                border_color: Some(FOCUS_BORDER),
+                material: Some(material),
+                ..VisualSlotOverride::default()
+            }),
+            "a state material applies without touching state colors",
+        );
+    }
+
+    #[test]
+    fn state_precedence_layers_independently_per_property() {
+        let mut app = integrated_test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(
+                BUTTON_ID,
+                Button::new()
+                    .focused_background(FOCUS_FILL)
+                    .focused_border_color(FOCUS_BORDER)
+                    .hovered_background(HOVER_FILL)
+                    .pressed_background(PRESS_FILL)
+                    .disabled_border_color(DISABLED_BORDER),
+            ),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        app.world_mut()
+            .trigger(RequestWidgetFocus { window, widget });
+        app.world_mut().flush();
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(FOCUS_FILL),
+                border_color: Some(FOCUS_BORDER),
+                ..VisualSlotOverride::default()
+            }),
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(HOVER_FILL),
+                border_color: Some(FOCUS_BORDER),
+                ..VisualSlotOverride::default()
+            }),
+            "hover replaces the focused fill while the border falls through to focus",
+        );
+
+        app.world_mut().entity_mut(widget).insert(ButtonPress);
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(PRESS_FILL),
+                border_color: Some(FOCUS_BORDER),
+                ..VisualSlotOverride::default()
+            }),
+            "press replaces the hovered fill while the border still falls through",
+        );
+
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .override_widget_interactivity(WidgetInteractivity::Disabled);
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        assert!(app.world().get::<WidgetDisabled>(widget).is_some());
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(PRESS_FILL),
+                border_color: Some(DISABLED_BORDER),
+                ..VisualSlotOverride::default()
+            }),
+            "disabled replaces the border while the fill falls through to press",
+        );
+    }
+
+    #[test]
+    fn set_tree_rejects_missing_state_targets_and_preserves_the_tree() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(&mut app, styled_button_tree(BUTTON_ID, Button::new()));
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        let mut background_only = LayoutBuilder::new(100.0, 50.0);
+        background_only.with(
+            El::new().button(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            |_| {},
+        );
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, background_only.build());
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id))
+                if id == PanelElementId::named(BUTTON_ID)
+        ));
+
+        let mut border_only = LayoutBuilder::new(100.0, 50.0);
+        border_only.with(
+            El::new()
+                .background(NORMAL_FILL)
+                .button(BUTTON_ID, Button::new().hovered_border_color(FOCUS_BORDER)),
+            |_| {},
+        );
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, border_only.build());
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id))
+                if id == PanelElementId::named(BUTTON_ID)
+        ));
+
+        let mut material_only = LayoutBuilder::new(100.0, 50.0);
+        material_only.with(
+            El::new().button(
+                BUTTON_ID,
+                Button::new().disabled_material(Handle::default()),
+            ),
+            |_| {},
+        );
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, material_only.build());
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id))
+                if id == PanelElementId::named(BUTTON_ID)
+        ));
+
+        app.update();
+        assert_eq!(
+            resolve_widget(&mut app, panel),
+            widget,
+            "the rejected trees must leave the current widget live",
+        );
+    }
+
+    #[test]
+    fn buttons_retain_distinct_state_values_through_computed_output_and_reify() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            two_styled_buttons_tree(HOVER_FILL, PEER_HOVER_FILL),
+        );
+        app.update();
+        let first = widget_by_id(&mut app, panel, "first");
+        let second = widget_by_id(&mut app, panel, "second");
+        app.world_mut()
+            .entity_mut(first)
+            .insert(PickingInteraction::Hovered);
+        app.world_mut()
+            .entity_mut(second)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        let fill =
+            |app: &App, widget| root_override(app, widget).and_then(|value| value.fill_color);
+        assert_eq!(fill(&app, first), Some(HOVER_FILL));
+        assert_eq!(fill(&app, second), Some(PEER_HOVER_FILL));
+
+        // Same-id replacement swaps the authored hover colors; the live
+        // widgets keep their entities and adopt the new authored values.
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, two_styled_buttons_tree(PEER_HOVER_FILL, HOVER_FILL));
+        assert!(result.is_ok());
+        app.update();
+        assert_eq!(widget_by_id(&mut app, panel, "first"), first);
+        assert_eq!(widget_by_id(&mut app, panel, "second"), second);
+        app.update();
+        assert_eq!(fill(&app, first), Some(PEER_HOVER_FILL));
+        assert_eq!(fill(&app, second), Some(HOVER_FILL));
+    }
+
+    #[test]
+    fn removing_state_builders_on_reify_clears_the_stale_override() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(root_override(&app, widget).is_some());
+
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, styled_button_tree(BUTTON_ID, Button::new()));
+        assert!(result.is_ok());
+        app.update();
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            None,
+            "a same-id button without state builders must drop the old override",
+        );
+    }
+
+    #[test]
+    fn pressed_presentation_reads_button_press_and_ignores_captures() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().pressed_background(PRESS_FILL)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        // A capture without the `ButtonPress` marker shows no pressed state.
+        app.world_mut().resource_mut::<ButtonCaptures>().insert(
+            PointerId::Mouse,
+            widget,
+            PanelElementId::named(BUTTON_ID),
+            1,
+        );
+        app.update();
+        assert_eq!(root_override(&app, widget), None);
+
+        // The marker alone drives pressed presentation.
+        app.world_mut()
+            .resource_mut::<ButtonCaptures>()
+            .presses
+            .clear();
+        app.world_mut().entity_mut(widget).insert(ButtonPress);
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(PRESS_FILL),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn traversal_focus_is_visible_to_presentation_in_the_same_frame() {
+        let mut app = integrated_test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let mut tree = LayoutBuilder::new(100.0, 50.0);
+        for (id, button) in [
+            ("first", Button::new()),
+            ("second", Button::new().focused_border_color(FOCUS_BORDER)),
+        ] {
+            tree.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(NORMAL_FILL)
+                    .border(Border::all(1.0, NORMAL_BORDER))
+                    .button(id, button),
+                |_| {},
+            );
+        }
+        let panel = spawn_panel(&mut app, tree.build());
+        app.update();
+        let first = widget_by_id(&mut app, panel, "first");
+        let widget = widget_by_id(&mut app, panel, "second");
+        app.world_mut().trigger(RequestWidgetFocus {
+            window,
+            widget: first,
+        });
+        app.world_mut().flush();
+        app.update();
+        assert_eq!(root_override(&app, widget), None);
+
+        app.world_mut().write_message(FocusNextWidget { window });
+        app.update();
+
+        let expected = VisualSlotOverride {
+            border_color: Some(FOCUS_BORDER),
+            ..VisualSlotOverride::default()
+        };
+        assert_eq!(
+            root_override(&app, widget),
+            Some(expected.clone()),
+            "semantic traversal focus must restyle in the frame it lands",
+        );
+        assert_eq!(indexed_root_override(&app, panel, widget), Some(expected));
+    }
+
+    fn pointer_presentation_app(pointer_id: PointerId) -> App {
+        let mut app = integrated_test_app();
+        app.add_plugins(InteractionPlugin)
+            .add_message::<PointerInput>()
+            .add_message::<PointerHits>()
+            .init_resource::<PointerMap>();
+        add_pointer(&mut app, pointer_id);
+        app
+    }
+
+    fn write_widget_hit(app: &mut App, pointer_id: PointerId, camera: Entity, widget: Entity) {
+        let hit = HitData::new(camera, 0.0, None, None);
+        app.world_mut()
+            .write_message(PointerHits::new(pointer_id, vec![(widget, hit)], 0.0));
+    }
+
+    #[test]
+    fn pointer_input_presents_hover_press_and_focus_in_the_same_update() {
+        let pointer_id = PointerId::Mouse;
+        let mut app = pointer_presentation_app(pointer_id);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        let camera = app.world_mut().spawn(Camera::default()).id();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(
+                BUTTON_ID,
+                Button::new()
+                    .hovered_background(HOVER_FILL)
+                    .pressed_background(PRESS_FILL)
+                    .focused_border_color(FOCUS_BORDER),
+            ),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        assert_eq!(root_override(&app, widget), None);
+
+        // A backend hit alone: `generate_hovermap` and `update_interactions`
+        // produce the hovered `PickingInteraction`, and presentation reaches
+        // the override in the same `app.update()`.
+        write_widget_hit(&mut app, pointer_id, camera, widget);
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(HOVER_FILL),
+                ..VisualSlotOverride::default()
+            }),
+            "a real backend hover hit must restyle in the update it lands",
+        );
+
+        // A raw primary press through Bevy's real `pointer_events` dispatcher:
+        // the press observers insert `ButtonPress` and pointer focus, and both
+        // present in the same `app.update()`.
+        write_widget_hit(&mut app, pointer_id, camera, widget);
+        app.world_mut().write_message(PointerInput::new(
+            pointer_id,
+            location(),
+            PointerAction::Press(PointerButton::Primary),
+        ));
+        app.update();
+        assert!(app.world().get::<ButtonPress>(widget).is_some());
+        assert!(app.world().get::<crate::WidgetFocused>(widget).is_some());
+        let expected = VisualSlotOverride {
+            fill_color: Some(PRESS_FILL),
+            border_color: Some(FOCUS_BORDER),
+            ..VisualSlotOverride::default()
+        };
+        assert_eq!(
+            root_override(&app, widget),
+            Some(expected.clone()),
+            "a real pointer press must present pressed state and pointer focus in one update",
+        );
+        assert_eq!(indexed_root_override(&app, panel, widget), Some(expected));
+    }
+
+    /// One application focus operation held until [`trigger_queued_focus_change`]
+    /// takes it inside `Update`.
+    #[derive(Clone, Copy)]
+    enum FocusChange {
+        Request { window: Entity, widget: Entity },
+        Clear { window: Entity },
+    }
+
+    #[derive(Default, Resource)]
+    struct QueuedFocusChange(Option<FocusChange>);
+
+    /// Triggers the queued [`FocusChange`] from inside `Update`. Scheduled after
+    /// `WidgetSystems::SemanticInput` and before
+    /// `WidgetSystems::FocusCommandsApplied`, so the `RequestWidgetFocus` /
+    /// `ClearWidgetFocus` observer commands are applied by the production focus
+    /// fence rather than a test-side `World::flush`.
+    fn trigger_queued_focus_change(
+        mut queued_focus_change: ResMut<QueuedFocusChange>,
+        mut commands: Commands,
+    ) {
+        match queued_focus_change.0.take() {
+            Some(FocusChange::Request { window, widget }) => {
+                commands.trigger(RequestWidgetFocus { window, widget });
+            },
+            Some(FocusChange::Clear { window }) => {
+                commands.trigger(ClearWidgetFocus { window });
+            },
+            None => {},
+        }
+    }
+
+    fn queue_focus_change(app: &mut App, focus_change: FocusChange) {
+        app.world_mut().resource_mut::<QueuedFocusChange>().0 = Some(focus_change);
+    }
+
+    #[test]
+    fn application_focus_request_is_visible_to_presentation_in_the_same_frame() {
+        let mut app = integrated_test_app();
+        app.init_resource::<QueuedFocusChange>().add_systems(
+            Update,
+            trigger_queued_focus_change
+                .after(WidgetSystems::SemanticInput)
+                .before(WidgetSystems::FocusCommandsApplied),
+        );
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().focused_border_color(FOCUS_BORDER)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        assert_eq!(root_override(&app, widget), None);
+
+        queue_focus_change(&mut app, FocusChange::Request { window, widget });
+        app.update();
+
+        let expected = VisualSlotOverride {
+            border_color: Some(FOCUS_BORDER),
+            ..VisualSlotOverride::default()
+        };
+        assert_eq!(
+            root_override(&app, widget),
+            Some(expected.clone()),
+            "application focus must restyle in the same update that triggers the request",
+        );
+        assert_eq!(indexed_root_override(&app, panel, widget), Some(expected));
+
+        queue_focus_change(&mut app, FocusChange::Clear { window });
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            None,
+            "application focus clear must restyle in the same update that triggers it",
+        );
+        assert_eq!(indexed_root_override(&app, panel, widget), None);
+    }
+
+    #[test]
+    fn disabled_presentation_adds_no_second_panel_or_computed_change() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(
+                BUTTON_ID,
+                Button::new()
+                    .disabled_background(DISABLED_FILL)
+                    .disabled_border_color(DISABLED_BORDER),
+            ),
+        );
+        app.update();
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        // A panel-level cascade edge restyles without touching the panel or
+        // its computed output at all.
+        let before = computed_tick(&app, panel);
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .override_widget_interactivity(WidgetInteractivity::Disabled);
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        assert!(app.world().get::<WidgetDisabled>(widget).is_some());
+        assert_eq!(
+            computed_tick(&app, panel),
+            before,
+            "a cascade disabled edge must not refresh the computed panel",
+        );
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                fill_color: Some(DISABLED_FILL),
+                border_color: Some(DISABLED_BORDER),
+                ..VisualSlotOverride::default()
+            }),
+        );
+
+        // A widget-local authored edit performs its one visual-only computed
+        // refresh; presentation then adds no second change.
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .inherit_widget_interactivity();
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        assert!(app.world().get::<WidgetDisabled>(widget).is_none());
+        let before = computed_tick(&app, panel);
+        let result =
+            app.world_mut()
+                .run_system_once(move |mut writer: crate::PanelWidgetWriter| {
+                    writer.override_interactivity(widget, WidgetInteractivity::Disabled)
+                });
+        assert_eq!(result.ok(), Some(true));
+        app.update();
+        let after_edit = computed_tick(&app, panel);
+        assert_ne!(
+            after_edit, before,
+            "the authored edit performs its Phase 2 visual-only refresh",
+        );
+        app.update();
+        app.update();
+        assert!(app.world().get::<WidgetDisabled>(widget).is_some());
+        assert_eq!(
+            root_override(&app, widget).and_then(|value| value.fill_color),
+            Some(DISABLED_FILL),
+        );
+        assert_eq!(
+            computed_tick(&app, panel),
+            after_edit,
+            "presentation must not add another panel/computed change",
+        );
+    }
+
+    #[test]
+    fn repeated_identical_state_leaves_the_override_tick_unchanged() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        let tick = app
+            .world()
+            .entity(widget)
+            .get_ref::<WidgetVisualOverrides>()
+            .map(|overrides| overrides.last_changed());
+        assert!(tick.is_some());
+
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world()
+                .entity(widget)
+                .get_ref::<WidgetVisualOverrides>()
+                .map(|overrides| overrides.last_changed()),
+            tick,
+            "an unchanged state must not mark the override component changed",
+        );
+    }
+
+    fn presentation_gate(app: &mut App) -> Option<bool> {
+        app.world_mut()
+            .run_system_cached(super::presentation_inputs_changed)
+            .ok()
+    }
+
+    #[test]
+    fn quiet_frames_skip_the_presentation_walk() {
+        let mut app = integrated_test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        // The first probe consumes the reify-time authored changes; a frame
+        // with no relevant input change must then skip the walk.
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(
+            presentation_gate(&mut app),
+            Some(false),
+            "a quiet frame must not run the all-button presentation walk",
+        );
+
+        // Hover aggregate insertion, change, and removal each re-arm the gate
+        // exactly once.
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Pressed);
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.world_mut()
+            .entity_mut(widget)
+            .remove::<PickingInteraction>();
+        assert_eq!(
+            presentation_gate(&mut app),
+            Some(true),
+            "removal must re-arm the gate so the edge back to normal presents",
+        );
+        assert_eq!(presentation_gate(&mut app), Some(false));
+
+        // The private press marker re-arms on insertion and removal.
+        app.world_mut().entity_mut(widget).insert(ButtonPress);
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.world_mut().entity_mut(widget).remove::<ButtonPress>();
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+
+        // Focus request and clear re-arm through their marker commands.
+        app.world_mut()
+            .trigger(RequestWidgetFocus { window, widget });
+        app.world_mut().flush();
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.world_mut().trigger(ClearWidgetFocus { window });
+        app.world_mut().flush();
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+
+        // A widget-local interactivity edit inserts `WidgetDisabled` during
+        // the update; the marker and authored changes re-arm the gate.
+        let result = app
+            .world_mut()
+            .run_system_once(move |mut writer: PanelWidgetWriter| {
+                writer.override_interactivity(widget, WidgetInteractivity::Disabled)
+            });
+        assert_eq!(result.ok(), Some(true));
+        app.update();
+        assert!(app.world().get::<WidgetDisabled>(widget).is_some());
+        assert_eq!(presentation_gate(&mut app), Some(true));
+        assert_eq!(presentation_gate(&mut app), Some(false));
+    }
+
+    #[test]
+    fn interaction_removal_presents_the_edge_back_to_normal() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(root_override(&app, widget).is_some());
+
+        app.world_mut()
+            .entity_mut(widget)
+            .remove::<PickingInteraction>();
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            None,
+            "an aggregate removal must clear the stale hover override",
+        );
+        assert_eq!(indexed_root_override(&app, panel, widget), None);
+    }
+
+    #[test]
+    fn state_overrides_leave_unrelated_slots_and_widgets_untouched() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            two_styled_buttons_tree(HOVER_FILL, PEER_HOVER_FILL),
+        );
+        app.update();
+        let first = widget_by_id(&mut app, panel, "first");
+        let second = widget_by_id(&mut app, panel, "second");
+
+        app.world_mut()
+            .entity_mut(first)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert!(root_override(&app, first).is_some());
+        assert_eq!(
+            root_override(&app, second),
+            None,
+            "an unhovered peer button must stay unstyled",
+        );
+        assert_eq!(indexed_root_override(&app, panel, second), None);
+        let first_index = root_element_index(&app, first);
+        let second_index = root_element_index(&app, second);
+        assert_ne!(first_index, second_index);
+    }
+
+    #[test]
+    fn on_click_fires_once_and_keeps_its_system_through_state_changes() {
+        let mut app = integrated_test_app();
+        app.init_resource::<CallbackClicks>();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(
+                BUTTON_ID,
+                Button::new()
+                    .on_click(record_callback_click)
+                    .hovered_background(HOVER_FILL),
+            ),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        let system_entity = app
+            .world()
+            .get::<super::ButtonCallbackHandle>(widget)
+            .map(super::ButtonCallbackHandle::system_entity);
+        assert!(system_entity.is_some());
+
+        app.world_mut().trigger(ButtonClicked {
+            entity:     widget,
+            id:         PanelElementId::named(BUTTON_ID),
+            pointer_id: None,
+        });
+        app.update();
+        assert_eq!(app.world().resource::<CallbackClicks>().0.len(), 1);
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(root_override(&app, widget).is_some());
+        app.world_mut().trigger(ButtonClicked {
+            entity:     widget,
+            id:         PanelElementId::named(BUTTON_ID),
+            pointer_id: None,
+        });
+        app.update();
+        assert_eq!(
+            app.world().resource::<CallbackClicks>().0.len(),
+            2,
+            "each click runs the callback exactly once through state changes",
+        );
+        assert_eq!(
+            app.world()
+                .get::<super::ButtonCallbackHandle>(widget)
+                .map(super::ButtonCallbackHandle::system_entity),
+            system_entity,
+            "presentation state changes must not replace the tracked system",
+        );
     }
 }
