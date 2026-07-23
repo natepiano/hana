@@ -1,4 +1,5 @@
 mod button;
+mod capture;
 mod focus;
 mod id;
 mod input;
@@ -123,6 +124,7 @@ impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MeshPickingSettings>()
             .init_resource::<WidgetFocusAuthority>()
+            .init_resource::<capture::WidgetCaptures>()
             .init_resource::<ButtonCaptures>()
             .init_resource::<VisualOverrideIndex>()
             .add_message::<WindowFocused>()
