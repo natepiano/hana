@@ -347,11 +347,15 @@ pub use widgets::PanelWidget;
 pub use widgets::PanelWidgetReader;
 pub use widgets::PanelWidgetWriter;
 pub use widgets::PanelWidgets;
+pub use widgets::RequestSliderAdjustment;
 pub use widgets::RequestWidgetFocus;
 pub use widgets::Slider;
+pub use widgets::SliderAdjustment;
+pub use widgets::SliderChangeRequested;
 pub use widgets::SliderConfigError;
 pub use widgets::SliderDirection;
 pub use widgets::SliderRange;
+pub use widgets::SliderState;
 pub use widgets::SliderStep;
 pub use widgets::WidgetControlSummary;
 pub use widgets::WidgetDisabled;
@@ -368,6 +372,7 @@ pub use widgets::WidgetInputPlugin;
 pub use widgets::WidgetInteractivity;
 pub use widgets::WidgetOf;
 use widgets::WidgetsPlugin;
+pub use widgets::slider_self_update;
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///

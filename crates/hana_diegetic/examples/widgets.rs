@@ -10,6 +10,7 @@
 //!   Home / End - Focus the first/last widget through Hana's adapter
 //!   Enter or Space / Escape - Activate/cancel through Hana's adapter
 //!   P - Focus the previous widget through an app-owned Bevy Kana action
+//!   [ / ] (held) - Step the level slider through app-owned Bevy Kana actions
 
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
@@ -17,6 +18,7 @@ use bevy::window::PrimaryWindow;
 use bevy_enhanced_input::prelude::ActionSettings;
 use bevy_enhanced_input::prelude::ActionSpawner;
 use bevy_enhanced_input::prelude::Actions;
+use bevy_enhanced_input::prelude::Fire;
 use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::InputContextAppExt;
 use bevy_kana::Keybindings;
@@ -62,12 +64,16 @@ use hana_diegetic::PanelWidget;
 use hana_diegetic::PanelWidgetReader;
 use hana_diegetic::PanelWidgetWriter;
 use hana_diegetic::Px;
+use hana_diegetic::RequestSliderAdjustment;
 use hana_diegetic::RequestWidgetFocus;
 use hana_diegetic::Sizing;
 use hana_diegetic::Slider;
+use hana_diegetic::SliderAdjustment;
+use hana_diegetic::SliderChangeRequested;
 use hana_diegetic::SliderConfigError;
 use hana_diegetic::SliderDirection;
 use hana_diegetic::SliderRange;
+use hana_diegetic::SliderState;
 use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
@@ -93,11 +99,12 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 6] = [
+const DESCRIPTION_LINES: [&str; 7] = [
     "Buttons restyle on hover, press, and focus; interaction changes log in the terminal.",
     "D disables the secondary button, which then shows its disabled surface.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
     "The primary button's on_click callback counts clicks in the status readout.",
+    "Hold [ or ] to step the level slider; the app applies each proposed value.",
     "The world status panel follows the level slider below the cube controls.",
     "The screen status panel follows the separate top-right screen widget.",
 ];
@@ -140,13 +147,20 @@ const SCREEN_TARGET_LABEL: &str = "Target widget";
 const STATE_STATUS_ID: &str = "state-status";
 const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal";
 const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off";
+const SLIDER_ADJUST_STEPS: f32 = 1.0;
 const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
 const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
 const SLIDER_HEIGHT: Px = Px(36.0);
 const SLIDER_ID: &str = "level-slider";
 const SLIDER_INITIAL_VALUE: f32 = 0.5;
+const SLIDER_LABEL_ID: &str = "slider-label";
+const SLIDER_LABEL_IDLE: &str = "Level slider — 50%";
+const SLIDER_LABEL_MEASURE: &str = "Level slider — 100%";
 const SLIDER_RANGE_END: f32 = 1.0;
 const SLIDER_RANGE_START: f32 = 0.0;
+const SLIDER_STATUS_ID: &str = "slider-status";
+const SLIDER_STATUS_IDLE: &str = "Slider: 0.50 (50%)";
+const SLIDER_STATUS_MEASURE: &str = "Slider: 0.00 (100%)";
 const SLIDER_STEP: f32 = 0.05;
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
 const STATUS_ANCHOR_OFFSET: Px = Px(12.0);
@@ -258,6 +272,16 @@ action!(
     AppWidgetShift
 );
 
+action!(
+    /// App-owned held action that steps the level slider down.
+    AppSliderDecrease
+);
+
+action!(
+    /// App-owned held action that steps the level slider up.
+    AppSliderIncrease
+);
+
 event!(
     /// App-owned event that invokes the core widget-focus request system.
     AppFocusPreviousEvent
@@ -268,7 +292,9 @@ struct AppOwnedWidgetInputPlugin;
 impl Plugin for AppOwnedWidgetInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_input_context::<AppWidgetInputContext>()
-            .add_systems(Startup, spawn_app_widget_input);
+            .add_systems(Startup, spawn_app_widget_input)
+            .add_observer(decrease_slider_from_held)
+            .add_observer(increase_slider_from_held);
         bind_action_system!(
             app,
             AppFocusPrevious,
@@ -317,6 +343,7 @@ fn main() {
         .add_observer(report_button_clicked)
         .add_observer(report_button_canceled)
         .add_observer(report_widget_focus_changed)
+        .add_observer(apply_slider_change)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
             Update,
@@ -438,6 +465,99 @@ fn spawn_app_widget_input(mut commands: Commands) {
 fn spawn_app_widget_actions(spawner: &mut ActionSpawner<AppWidgetInputContext>) {
     let keybindings = Keybindings::new::<AppWidgetShift>(spawner, ActionSettings::default());
     keybindings.spawn_key::<AppFocusPrevious>(spawner, KeyCode::KeyP);
+    keybindings.spawn_key::<AppSliderDecrease>(spawner, KeyCode::BracketLeft);
+    keybindings.spawn_key::<AppSliderIncrease>(spawner, KeyCode::BracketRight);
+}
+
+/// Held app-owned continuous path: while `[` stays held, each `Fire` edge
+/// sends one step-down adjustment request.
+fn decrease_slider_from_held(
+    _: On<Fire<AppSliderDecrease>>,
+    panels: Query<Entity, With<WidgetLabPanel>>,
+    reader: PanelWidgetReader,
+    mut commands: Commands,
+) {
+    request_slider_steps(&panels, &reader, -SLIDER_ADJUST_STEPS, &mut commands);
+}
+
+/// Held app-owned continuous path: while `]` stays held, each `Fire` edge
+/// sends one step-up adjustment request.
+fn increase_slider_from_held(
+    _: On<Fire<AppSliderIncrease>>,
+    panels: Query<Entity, With<WidgetLabPanel>>,
+    reader: PanelWidgetReader,
+    mut commands: Commands,
+) {
+    request_slider_steps(&panels, &reader, SLIDER_ADJUST_STEPS, &mut commands);
+}
+
+fn request_slider_steps(
+    panels: &Query<Entity, With<WidgetLabPanel>>,
+    reader: &PanelWidgetReader,
+    steps: f32,
+    commands: &mut Commands,
+) {
+    let Ok(panel) = panels.single() else {
+        return;
+    };
+    let Some(widget) = reader.entity(panel, &PanelElementId::named(SLIDER_ID)) else {
+        warn!("widgets: level slider has not been reified");
+        return;
+    };
+    commands.trigger(RequestSliderAdjustment {
+        entity:     widget,
+        adjustment: SliderAdjustment::RelativeSteps(steps),
+    });
+}
+
+/// Applies each slider proposal explicitly — the app stays authoritative over
+/// the applied value — then mirrors the accepted value into the slider label
+/// and the diagnostic readout.
+fn apply_slider_change(
+    change: On<SliderChangeRequested>,
+    mut sliders: Query<&mut SliderState>,
+    panels: Query<Entity, With<WidgetLabPanel>>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    mut panel_text: PanelText,
+) {
+    let Ok(mut state) = sliders.get_mut(change.event_target()) else {
+        return;
+    };
+    match state.bypass_change_detection().set_value(change.value) {
+        Ok(true) => state.set_changed(),
+        Ok(false) => return,
+        Err(error) => {
+            warn!("widgets: rejected slider proposal: {error}");
+            return;
+        },
+    }
+    let range = state.range();
+    let span = range.end() - range.start();
+    let percent = (state.value() - range.start()) / span * 100.0;
+    info!(
+        "widgets: {} applied value {:.2} ({percent:.0}%)",
+        change.id,
+        state.value()
+    );
+    if let Ok(panel) = panels.single()
+        && !panel_text.set_text(
+            panel,
+            &PanelElementId::named(SLIDER_LABEL_ID),
+            format!("Level slider — {percent:.0}%"),
+        )
+    {
+        warn!("widgets: slider label has not been reified");
+    }
+    let Ok(readout) = readouts.single() else {
+        return;
+    };
+    if !panel_text.set_text(
+        readout,
+        &PanelElementId::named(SLIDER_STATUS_ID),
+        format!("Slider: {:.2} ({percent:.0}%)", state.value()),
+    ) {
+        warn!("widgets: slider status has not been reified");
+    }
 }
 
 fn request_initial_widget_focus(
@@ -749,10 +869,14 @@ fn widget_tree(slider: Slider) -> LayoutTree {
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
             .slider(SLIDER_ID, slider),
         |builder| {
-            builder.text((
-                "Level slider — 50%",
-                TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
-            ));
+            builder.text(
+                Text::new(
+                    SLIDER_LABEL_IDLE,
+                    TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+                )
+                .id(SLIDER_LABEL_ID)
+                .measure_as(SLIDER_LABEL_MEASURE),
+            );
         },
     );
     builder.build()
@@ -809,6 +933,14 @@ fn interaction_status_tree() -> LayoutTree {
         )
         .id(STATE_STATUS_ID)
         .measure_as(STATE_STATUS_MEASURE),
+    );
+    builder.text(
+        Text::new(
+            SLIDER_STATUS_IDLE,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        )
+        .id(SLIDER_STATUS_ID)
+        .measure_as(SLIDER_STATUS_MEASURE),
     );
     builder.build()
 }

@@ -73,11 +73,16 @@ pub(crate) use relationship::ScreenWidgetAnchorProxy;
 pub(crate) use relationship::ScreenWidgetAnchoredHere;
 pub(crate) use relationship::ScreenWidgetAnchoredTo;
 pub use relationship::WidgetOf;
+pub use slider::RequestSliderAdjustment;
 pub use slider::Slider;
+pub use slider::SliderAdjustment;
+pub use slider::SliderChangeRequested;
 pub use slider::SliderConfigError;
 pub use slider::SliderDirection;
 pub use slider::SliderRange;
+pub use slider::SliderState;
 pub use slider::SliderStep;
+pub use slider::slider_self_update;
 pub(crate) use visual::ComputedVisualSlot;
 pub(crate) use visual::VisualOverrideIndex;
 pub(crate) use visual::VisualSlotId;
@@ -176,6 +181,7 @@ impl Plugin for WidgetsPlugin {
             .add_observer(button::cancel_before_widget_despawn)
             .add_observer(button::handle_semantic_intent)
             .add_observer(button::dispatch_click_callback)
+            .add_observer(slider::handle_adjustment_request)
             .add_systems(
                 PreUpdate,
                 button::reconcile_pointer_input

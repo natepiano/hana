@@ -1068,7 +1068,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 - Phase 10 now names `src/panel/builder.rs`; its existing placement and invalid-associated-tooltip decisions remain deferred to its pre-dispatch check.
 - Phase 10.5 now fixes the post-transform reveal schedule and deterministic pointer path, while its existing picking-policy decision and a new materialization/behavior split remain deferred to its pre-dispatch check.
 
-### Phase 8 — Slider state and request behavior  · status: todo
+### Phase 8 — Slider state and request behavior  · status: done (`21b2eec3`)
 
 #### Work Order
 
@@ -1094,6 +1094,32 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 
 **Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with Phase 1's construction/error tests retained and new tests for: `SliderState` retains each of the four authored directions; lattice anchoring plus snap/clamp order; first-spawn normalization of out-of-range and off-step authored initial values; app accept/reject and opt-in self-update; absolute/relative/relative-step requests, including a remote request sent to an entity resolved from `(panel, id)`; an app-owned held Bevy Kana action emits repeated `Fire` edges that each send one `RequestSliderAdjustment`; spawn-only initial value and authored range-change clamping; disabled sliders ignore semantic requests. Directional pointer projection and thumb movement remain owned by Phases 8.5 and 9. Extend and smoke-test the public path in `examples/widgets.rs` while preserving the built-in and app-owned input paths and expanding the measured diagnostic readout.
 
+#### Retrospective
+
+**What worked:**
+- `SliderState`, `SliderChangeRequested`, and `RequestSliderAdjustment` keep application acceptance explicit while supporting absolute, relative, and held-step input.
+- Same-id reify preserves the live applied value and revalidates it only when authored range, step, or direction changes.
+
+**What deviated from the plan:**
+- Adjustment proposals now carry the finite raw target value; `SliderState::set_value` is the sole snap-and-clamp boundary when an application accepts a proposal.
+- The canonical example's held `BracketRight` action demonstrates repeated app-owned requests and stops emitting once the applied value reaches the endpoint.
+
+**Surprises:**
+- Normalizing a proposal before emitting it and again on acceptance can move an endpoint proposal backward on a step lattice whose endpoint is off lattice.
+- Held-input tests must create Bevy Enhanced Input's application resources before spawning action-bearing entities.
+
+**Implications for remaining phases:**
+- Phase 8.5 pointer projection must emit raw target values and leave every snap-and-clamp decision to `SliderState::set_value`.
+- Phase 9 presentation must read only the accepted `SliderState::value()` and use the quiet-frame change gate established for buttons.
+
+### Phase 8 Review
+
+- Phase 8.25 now names the exact shared occupancy/order facts and includes `widgets/reify.rs` plus widget-kind transition regressions.
+- The former combined Phase 8.5 is split: Phase 8.5 owns captured-camera and raw-value projection, while Phase 8.75 owns grab/drag/release/cancel behavior and preserves application authority.
+- Phase 8.5 uses explicit synthetic thumb metrics until Phase 9 records live root-content and thumb bounds in the existing visual-slot path.
+- Phase 9 now reads only accepted `SliderState` values and uses the same solved slot geometry for pointer endpoints and thumb presentation.
+- Existing Phase 10 and 10.5 pending decisions remain at their pre-dispatch gates; Phase 11 and Phase 12 received only mechanical cleanup below.
+
 ### Phase 8.25 — Shared private pointer-capture authority  · status: todo
 
 #### Work Order
@@ -1101,72 +1127,77 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 **Goal:** Extract the smallest private pointer/widget occupancy and raw-action ordering authority that buttons and sliders can share without changing the public button API or behavior.
 
 **Spec:**
-- Move only cross-widget facts out of Phase 6's button-specific `ButtonCaptures`: which `PointerId` currently owns which widget, which widget is occupied, and the checked raw-action sequence used to order release/cancel before a later press. Button-specific `ButtonPress`, terminal state, causes, and event emission remain in `button.rs`.
+- Move only cross-widget facts out of Phase 6's button-specific `ButtonCaptures`: pointer → widget ownership, widget → pointer ownership, the attempted-press sequence used by raw reconciliation, and checked sequence/exhaustion handling. Button ids, `ButtonPress`, terminal outcomes, cancellation causes, and event emission remain in `button.rs`.
 - One pointer cannot own two widgets and one widget cannot be owned by two pointers. Releasing or canceling frees both directions before a later raw action in the same unread batch can claim either side.
 - Keep the shared authority crate-private. Do not expose a capture component, resource, trait, event, or generic public terminal payload. Phase 8.5 consumes the private operations from slider behavior.
-- Adapt button press/release/cancel and both panel teardown paths to the extracted authority without changing when or which `ButtonPressed`, `ButtonReleased`, `ButtonClicked`, or `ButtonCanceled` events fire.
+- Adapt button press/release/cancel, same-entity widget-kind replacement/removal in `widgets/reify.rs`, and both panel teardown paths to the extracted authority without changing when or which `ButtonPressed`, `ButtonReleased`, `ButtonClicked`, or `ButtonCanceled` events fire. A button → slider replacement, slider → button replacement, or removal frees both occupancy indexes before reify queues the replacement or despawn.
 - Preserve Phase 6's real-dispatcher and raw-reconciliation behavior, including partial picking-plugin composition, stale hover, pointer removal, checked sequence exhaustion, and remove/despawn terminal hooks.
 
 **Files:**
 - `src/widgets/button.rs` — retain button terminal state/events while delegating only occupancy/order facts
 - `src/widgets/capture.rs` — new private shared pointer/widget occupancy and raw-order authority
 - `src/widgets/mod.rs` — private module/resource initialization and system ordering
+- `src/widgets/reify.rs` — release shared occupancy before widget-kind replacement or removal
 - `src/panel/lifecycle.rs`, `src/panel/mod.rs` — preserve button finalization through role removal and full despawn
 
 **Constraints from prior phases:** Phases 6 and 7 are the behavioral baseline and their public APIs must remain unchanged. Preserve the exact insertion/removal timing of the private `ButtonPress` marker because Phase 7.5 reads it for pressed presentation; moving occupancy authority must not introduce an earlier visual release or a lingering pressed frame. Phase 6.5 supplies the final hit stream but does not participate in capture. Phase 5 supplies the paired component-removal/full-despawn finalization timing. This phase adds no slider lifecycle yet and no public type.
 
-**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with every Phase 6 and Phase 7 button regression retained plus focused cross-authority tests: one pointer/one widget occupancy, two pointers competing for one button, release or cancel freeing both indexes before a same-batch new press, stale entities retiring without leaks, and checked sequence exhaustion preserving the prior owner. Pointer and semantic clicks each dispatch `.on_click` exactly once after extraction. The public button event sequence and payloads and private `ButtonPress` timing remain unchanged, and the canonical widget example's pointer/focus/button/callback readout behaves unchanged in a live smoke.
+**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with every Phase 6 and Phase 7 button regression retained plus focused cross-authority tests: one pointer/one widget occupancy, two pointers competing for one button, release or cancel freeing both indexes before a same-batch new press, button → slider, slider → button, and removal transitions freeing both indexes before reify changes the widget, stale entities retiring without leaks, a rejected later press preserving the accepted owner, raw cancel followed by another action preserving exact ordering, and checked sequence exhaustion preserving the prior owner. Pointer and semantic clicks each dispatch `.on_click` exactly once after extraction. The public button event sequence and payloads and private `ButtonPress` timing remain unchanged, and the canonical widget example's pointer/focus/button/callback readout behaves unchanged in a live smoke.
 
-### Phase 8.5 — Slider pointer lifecycle and projection  · status: todo
+### Phase 8.5 — Captured-camera slider projection  · status: todo
 
 #### Work Order
 
-**Goal:** Add slider grab, drag projection, release, and exact-once cancellation on top of Phase 8's applied-state and proposal API.
+**Goal:** Establish one reusable flat-panel camera-ray and slider-value projection boundary before slider capture owns lifecycle state.
 
 **Approved slider axis and thumb-travel contract:**
 - The active rectangle for pointer projection and thumb presentation is the slider root's content box, excluding its border and padding.
 - When the slider has a marked thumb, let `C` be the content-box extent and `T` the thumb extent on the active axis. The usable visual travel is `max(C - T, 0)`. The thumb's authored position is its range-start baseline; the presentation writer translates it by the normalized applied value times that usable travel toward the range end, changes no cross-axis position, and preserves authored depth.
 - Pointer projection follows the thumb center's actual path, not the content box's full extent. Its directed start/end coordinates are: left plus `T / 2` → right minus `T / 2` for `LeftToRight`; the reverse for `RightToLeft`; top plus `T / 2` → bottom minus `T / 2` for `TopToBottom`; and the reverse for `BottomToTop`. Clamp outside that directed interval, then normalize to `[0, 1]` and map through the raw slider range.
 - If `T >= C`, there is no visible thumb travel, so pointer projection returns `ProjectionUnavailable` and emits no proposal. A headless slider instead projects over the full directed content-box extent; zero active-axis content extent returns `ProjectionUnavailable`.
-- Phase 8.5 pointer tests and Phase 9 presentation tests share this endpoint table so clicking the thumb center at either visual endpoint yields the matching range endpoint without a jump.
-
-**Pending decision: split projection from slider capture lifecycle**
-
-Actual problem:
-This Work Order currently combines a reusable captured-camera ray-to-panel projection boundary with button/slider occupancy, raw action ordering, drag proposals, terminal events, teardown, and the cumulative example. That is too much coupled behavior for one fresh delegated session and makes a projection defect expensive to isolate.
-
-What exists now:
-- `render::project_flat_panel_hit` is already the single flat-panel conversion boundary and can be extended and tested without slider terminal behavior.
-- Phase 8.25 supplies the shared private occupancy/order authority; the remaining slider lifecycle can consume a completed projection API.
-
-What should change:
-- Split the reusable captured-camera projection work into Phase 8.5, then move slider capture, drag proposals, terminal events, and teardown into a new Phase 8.75.
-- Keep Phase 9 after both subphases and update each Work Order's Files and acceptance tests to match its narrower responsibility.
-
-Recommendation:
-Use Phase 8.5 for captured-camera/render-target validation, ray intersection, panel-local coordinates, directional normalization, and deterministic projection tests. Add Phase 8.75 for slider grab/drag/release/cancel behavior using that boundary and Phase 8.25's shared authority.
+- Phase 8.5 projection tests and Phase 9 presentation tests share this endpoint table so the thumb center at either visual endpoint yields the matching range endpoint without a jump.
 
 **Spec:**
-- **Drag mapping:** map panel-local position through the approved content-box/thumb-center endpoint table above to a normalized value, then through the chosen range. Each `Pointer<Drag>` reprojects `pointer_location.position` via the **captured press camera and render target** → `Camera::viewport_to_world` → ray → flat panel intersection → panel-local map → clamp. Extend the existing `render::project_flat_panel_hit` boundary in `render/panel_geometry.rs` with the ray-intersection input slider dragging needs; do not create a second `panel_local_from_ray` authority in `widgets/picking.rs`. `Drag.delta` is invalid for perspective world panels. Cancel if the captured camera/target disappears or no longer matches. Surface-panel integration later replaces only this shared flat projection boundary.
-- **Lifecycle:** reuse Phase 6's proven ordering and lifecycle pattern: a private checked press sequence, terminal state set before marker removal, remove/despawn hooks, raw pointer reconciliation, and finalize-before-despawn handling. `SliderGrabbed`/`SliderReleased` carry `{ entity, id, pointer_id }`; `SliderCanceled` adds `cause`, whose variants are `PointerCanceled | PointerRemoved | CaptureLost | Disabled | ProjectionUnavailable | WidgetRemoved | WidgetKindChanged | Explicit`. Pointer drags emit Phase 8's non-final `SliderChangeRequested` proposals plus one final proposal on valid release. `WidgetDisabled` cancels an active drag and blocks pointer changes. A same-panel/same-id/same-kind tree refresh preserves capture and the live applied value; only removal, kind change, disable, projection/capture loss, explicit cancel, or owner-panel teardown terminates it.
-- **Cross-widget ownership:** consume Phase 8.25's private shared authority. One `PointerId` cannot simultaneously capture a button and a slider, and one widget cannot be captured by two pointers. Button and slider terminal payloads remain typed in their own modules; expose no public capture API. Release/cancel finalization occurs before a later raw press can claim either freed pointer or freed widget.
-- **Semantic cancel:** `SemanticWidgetIntent::Cancel` terminates an active slider drag on its resolved target exactly once with the stored `PointerId` and `Explicit` cause. It is a no-op when that slider has no active capture; the built-in Escape binding and an application-written `CancelFocusedWidget` message use this same path.
-- **Panel teardown order:** extend both lifecycle paths shipped by Phase 5. Component-only role removal finalizes slider capture from `On<Remove, DiegeticPanel>` before Phase 4.5's combined `finalize_widget_anchor_state`; full panel despawn finalizes from the earlier `On<Despawn, DiegeticPanel>` observer before linked-child despawn is queued. Emit one terminal event while `WidgetOf` and both world and screen attachment relations remain queryable, with duplicate suppression when full despawn later reaches the remove observer.
+- **Ray boundary:** add crate-private `project_flat_panel_ray_hit` beside `project_flat_panel_hit`. Its inputs are the captured `Camera`, captured camera `GlobalTransform`, captured `NormalizedRenderTarget`, current pointer viewport position, target `DiegeticPanel`, and target panel `GlobalTransform`; it returns panel-layout coordinates or a private typed projection failure. It verifies the live camera still has the captured render target, calls `Camera::viewport_to_world`, intersects that ray with the panel's two-sided local z=0 plane, rejects non-invertible transforms, parallel rays, intersections behind the camera, invalid panel scale, unavailable cameras, and missing or mismatched render targets, then delegates world-hit conversion to the existing `project_flat_panel_hit`. Do not create a second ray-to-panel-local authority in `widgets/picking.rs`; surface-panel integration later replaces this one flat boundary.
+- **Value boundary:** add a crate-private pure projection helper whose explicit inputs are panel-layout pointer position, slider content `BoundingBox`, optional thumb extent on the active axis, `SliderRange`, and `SliderDirection`. It implements the approved endpoint table, returns a finite raw-domain target without snap/step normalization, and reports `ProjectionUnavailable` for zero headless extent or `T >= C`.
+- **Sequencing with anatomy:** Phase 9 does not yet supply live thumb anatomy. This phase tests the value helper with explicit synthetic content bounds/thumb extents. Phase 8.75 uses the shipped headless path (`thumb_extent = None`); Phase 9 records live root-content and thumb geometry and adds the integration coverage without replacing either helper.
 
 **Files:**
-- `src/widgets/slider.rs` — pointer lifecycle, terminal events, and projection use
-- `src/widgets/capture.rs`, `src/widgets/button.rs`, `src/widgets/mod.rs` — consume the shipped private occupancy/order authority without changing button behavior
 - `src/render/panel_geometry.rs` — extend the existing flat panel-hit projection boundary for captured-pointer rays
+- `src/render/mod.rs` — crate-private export of the captured-camera projection boundary
+- `src/widgets/slider.rs` — pure content-box/thumb-center value projection
 - `src/widgets/picking.rs` — read-only consumer/integration; no second ray-to-panel-local implementation
+
+**Constraints from prior phases:** Phase 8 supplies `SliderRange`, `SliderDirection`, the applied state, and the raw proposal contract: projection produces a raw target and only application acceptance through `SliderState::set_value` snaps and clamps it. Phase 3 supplies panel-local geometry and `render::project_flat_panel_hit`; preserve that helper as the final world-hit → layout-coordinate conversion. Panels are two-sided for interaction. This phase adds no capture, lifecycle event, public type, or example behavior.
+
+**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with deterministic tests for perspective and orthographic captured cameras, secondary render targets, two-sided world panels, missing/mismatched targets, unavailable cameras, non-invertible transforms, parallel/behind-plane rays, and the same world hit mapping through `project_flat_panel_hit`. Pure value tests cover all four directions, outside clamping, finite raw output, border/padding-excluded synthetic content bounds, exact endpoint centers, headless full-content travel, zero headless extent, and `T >= C`; off-lattice targets remain raw rather than being snapped.
+
+### Phase 8.75 — Slider pointer lifecycle  · status: todo
+
+#### Work Order
+
+**Goal:** Add slider grab, drag, release, application-owned value proposals, and exact-once cancellation using the shipped shared occupancy and projection boundaries.
+
+**Spec:**
+- **Press, drag, and release:** an accepted pointer press claims shared occupancy, stores the captured camera/render target and latest successfully projected raw target, emits `SliderGrabbed { entity, id, pointer_id }`, then emits one non-final `SliderChangeRequested` for the press position. A click without movement therefore still proposes the clicked value. Every drag reprojects the current pointer position through Phase 8.5, replaces the stored raw target, and emits one non-final proposal. A valid release reprojects the release position, terminalizes and frees shared occupancy, emits one final raw proposal, then emits `SliderReleased { entity, id, pointer_id }`; a later raw action in the same unread batch may claim the freed pointer or widget. A projection failure cancels instead and emits no value proposal for that failed position.
+- **Application authority:** capture stores its latest raw projected target independently of `SliderState`. Rejecting any or every non-final proposal does not alter applied state or the target later used by release. Accepting a proposal calls `SliderState::set_value` exactly once through application code or the opt-in `slider_self_update`; capture never snaps, clamps, or writes `SliderState` itself.
+- **Lifecycle:** reuse Phase 6's checked raw-action ordering, terminal-before-marker-removal, remove/despawn hooks, and reconciliation pattern. `SliderCanceled { entity, id, pointer_id, cause }` uses `SliderCancelCause::{PointerCanceled, PointerRemoved, CaptureLost, Disabled, ProjectionUnavailable, WidgetRemoved, WidgetKindChanged, Explicit}`. `WidgetDisabled` cancels an active drag and blocks pointer changes. Same-panel/same-id/same-kind refresh preserves capture and live applied value; removal, kind change, disable, projection/capture loss, explicit cancel, or owner-panel teardown terminates it exactly once.
+- **Cross-widget ownership:** consume Phase 8.25's private authority. One `PointerId` cannot simultaneously capture a button and a slider, and one widget cannot be captured by two pointers. Button and slider terminal payloads remain typed in their modules; expose no public capture API.
+- **Semantic cancel:** `SemanticWidgetIntent::Cancel` terminates an active slider drag on its resolved target exactly once with the stored `PointerId` and `Explicit` cause. It is a no-op without an active capture; built-in Escape and application-written `CancelFocusedWidget` use this same path.
+- **Panel teardown order:** component-only role removal finalizes slider capture from `On<Remove, DiegeticPanel>` before `finalize_widget_anchor_state`; full panel despawn finalizes from the earlier `On<Despawn, DiegeticPanel>` observer before linked-child despawn is queued. Emit one terminal event while `WidgetOf` and world/screen attachment relations remain queryable, with duplicate suppression at the later remove observer.
+- **Initial anatomy boundary:** this phase exercises the headless full-content-box projection path. Phase 9 adds live thumb geometry and proves the same lifecycle uses thumb-center endpoints without changing capture behavior.
+
+**Files:**
+- `src/widgets/slider.rs` — pointer capture, latest raw target, terminal events, and Phase 8.5 projection use
+- `src/widgets/capture.rs`, `src/widgets/button.rs`, `src/widgets/mod.rs` — consume shared occupancy/order authority without changing button behavior
 - `src/widgets/reify.rs` — finalize slider lifecycle on kind replacement/removal
-- `src/panel/lifecycle.rs` — finalize active slider capture before anchor and owned-entity cleanup
-- `src/panel/mod.rs` — extend the early full-panel-despawn finalizer registration
+- `src/panel/lifecycle.rs`, `src/panel/mod.rs` — finalize active slider capture before anchor and owned-entity cleanup
 - `src/lib.rs` — curated slider lifecycle-event and cancellation exports
-- `crates/hana_diegetic/examples/widgets.rs` — canonical slider pointer-lifecycle exercise
+- `crates/hana_diegetic/examples/widgets.rs` — canonical headless slider pointer-lifecycle exercise
 
-**Constraints from prior phases:** Phase 8 supplies applied state and the proposal API. Phase 8.25 supplies the private cross-button/slider occupancy and raw-order authority while preserving button-specific terminal hooks and `ButtonPress` timing. Same-id/same-kind reify preserves active drag state, Phase 7.25 stable slots/current overrides, and all direct authored widget presentation values. Phase 6.5 supplies the final per-face hit stream: `Interactive` and `WidgetsOnly` may target a slider, while `PanelOnly` and `PassThrough` cannot. Phase 3 supplies panel-local geometry, `render::project_flat_panel_hit`, and the press hit's camera. Phase 4.5 supplies combined world/screen attachment cleanup through `finalize_widget_anchor_state`; Phase 5 supplies the post-interactivity fence over Phase 2's `WidgetDisabled` plus paired `On<Remove>`/early `On<Despawn>` panel finalization. Slider capture finalization extends both lifecycle paths and runs while both attachment relation forms remain queryable. Deterministic pointer integration feeds synthetic `PointerHits` and raw `PointerInput` through Bevy's real dispatcher; it never moves the operating-system pointer or substitutes directly triggered target events.
+**Constraints from prior phases:** Phase 8 supplies applied state and raw application-controlled proposals; `SliderState::set_value` is the sole snap-and-clamp boundary. Phase 8.25 supplies private cross-button/slider occupancy and checked raw ordering while preserving button terminals and `ButtonPress` timing. Phase 8.5 supplies captured-camera ray projection and headless content-box value projection. Phase 6.5 supplies the final per-face hit stream: `Interactive` and `WidgetsOnly` may target a slider, while `PanelOnly` and `PassThrough` cannot. Phase 4.5 supplies combined world/screen attachment cleanup; Phase 5 supplies the post-interactivity fence and paired panel lifecycle paths. Deterministic pointer integration feeds synthetic `PointerHits` and raw `PointerInput` through Bevy's real dispatcher; it never moves the operating-system pointer or substitutes directly triggered target events.
 
-**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with tests driven through Bevy's real `pointer_events` dispatcher and real message-maintenance timing, not only manually triggered target events: `Interactive` and `WidgetsOnly` produce slider grabs while `PanelOnly` and `PassThrough` do not; release-over and release-away; non-final/final proposal ordering; zero-size track; drag beyond panel bounds; captured-camera loss and multi-camera reprojection through the shared flat projection boundary; pointer loss, kind change, component-only owner-role removal, full owner-panel despawn, disable-while-dragging, and built-in Escape each terminate exactly once; Escape preserves the captured pointer id and does nothing without active capture; same-id/same-kind refresh preserves an active drag; disabled sliders ignore grabs; both owner teardown paths emit exactly one terminal event while `WidgetOf` and world/screen attachment state remain queryable, before anchor cleanup or linked widget despawn, with no duplicate on the later remove observer. Raw-batch regressions cover release or cancel followed by a new press in both button→slider and slider→button directions, including same-pointer handoff and a second pointer competing for the freed widget; disabled or stale hover processing, resumed hover maintenance, `PickingPlugin` without `InteractionPlugin`, press-count reset/saturation independence, and actions after raw cancel preserve Phase 6's exact-once ordering rules. Extend and smoke-test the public path in `examples/widgets.rs` while preserving all existing diagnostic and input paths and expanding the measured readout instead of clipping it.
+**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with tests driven through Bevy's real pointer dispatcher and message-maintenance timing: press immediately emits grabbed then one raw non-final proposal; click-without-drag emits the release-position final proposal; each drag updates the stored raw target; final proposal precedes `SliderReleased` after occupancy is freed; rejecting all non-final proposals leaves `SliderState` unchanged while the final proposal still carries the raw release position; opt-in acceptance calls `set_value` once per proposal. Cover `Interactive`/`WidgetsOnly` versus `PanelOnly`/`PassThrough`, release-over/release-away, zero-size track, beyond-panel clamping, camera/target loss, pointer loss, disable, kind change, component-only role removal, full panel despawn, Escape, same-id refresh, and exact-once terminal behavior. Raw-batch regressions cover button → slider and slider → button handoff, same-pointer reuse, a second pointer competing for the freed widget, stale hover, `PickingPlugin` without `InteractionPlugin`, rejected later presses, raw cancel followed by another action, and sequence exhaustion. Extend and smoke-test `examples/widgets.rs` through BRP keyboard/state inspection or user-performed pointer input without moving the operating-system pointer programmatically.
 
 ### Phase 9 — Direct slider state and thumb presentation  · status: todo
 
@@ -1176,23 +1207,24 @@ Use Phase 8.5 for captured-camera/render-target validation, ray intersection, pa
 
 **Spec:**
 - **Direct anatomy authoring:** add `El::slider_thumb()` as a marker on one ordinary descendant of the nearest `El::slider`. It creates no ECS child and exposes no anatomy component; computed output associates that element's private stable slot with the owning slider. `VisualSlotId::SLIDER_ROOT` and `VisualSlotId::SLIDER_THUMB` are distinct crate-private fixed identities. Zero marked thumbs leaves the headless slider valid with no automatic value visualization.
+- **Solved geometry source:** extend the existing private `ComputedVisualSlot` carried through `ComputedWidgetRecord` → `WidgetVisualSlots` with the slot element's solved border-box bounds and padding/border-excluded content-box bounds. The slider root slot supplies its content box; the thumb slot supplies its border-box extent and authored range-start baseline. Compute these values once with the layout result in `layout/element.rs`, reusing the layout engine's content-box formula; pointer projection and presentation read the same reified slot record rather than recomputing padding or querying retained render batches.
 - **Stable validation contract:** an orphan thumb returns `PanelBuildError::SliderThumbOutsideSlider(PanelElementId)` with "slider thumb `{0}` must be inside a slider subtree"; a second thumb returns `PanelBuildError::SliderHasMultipleThumbs(PanelElementId)` with "slider `{0}` contains more than one thumb". Root state builders mirror the button errors: `SliderStateBackgroundRequiresBackground` displays "slider `{0}` state background requires an authored background"; `SliderStateBorderColorRequiresBorder` displays "slider `{0}` state border color requires an authored border"; and `SliderStateMaterialRequiresSurface` displays "slider `{0}` state material requires an authored background or border". Each carries the slider's `PanelElementId`. Panel construction and `set_tree` return the same variants before any partial update is queued.
 - **Application-owned structure:** applications author the track, thumb, optional labels, fixed decoration, sizes, and `DrawZIndex` with ordinary `El` trees. An `El::overlay()` is the natural arrangement but is not required by the API. Widgets v1 supplies no variable-length fill; retained fill resizing and preset structure are deferred to [`widgets-deferred.md`](widgets-deferred.md).
 - **Value presentation:** the marked thumb's authored position is the range-start baseline. Use the approved content-box/thumb-center endpoint table from Phase 8.5: translate the thumb by the normalized applied value times `max(content extent - thumb extent, 0)` toward the directed range end, and write only that panel-local XY translation to its private retained slot. Respect all four directions, leave the cross axis unchanged, preserve authored z/depth and hit geometry, and perform no `LayoutTree` or `ComputedDiegeticPanel` regeneration per value change.
-- **Direct root state builders:** mirror Phase 7.5's `Slider` builders for optional hovered, pressed, focused, and disabled background, border-color, and `Handle<StandardMaterial>` overrides on the slider root. They use the same authored-target validation, property composition, and root-surface boundary as `Button`; child thumb/label appearance remains application-authored and constant in widgets v1.
+- **Direct root state builders:** mirror Phase 7.5's `Button` state builders on `Slider` for optional hovered, pressed, focused, and disabled background, border-color, and `Handle<StandardMaterial>` overrides on the slider root. They use the same authored-target validation, property composition, and root-surface boundary as `Button`; child thumb/label appearance remains application-authored and constant in widgets v1.
 - **Presentation ordering and gate:** reuse Phase 7.5's order: focus/applied state → slider state/thumb writer → `WidgetSystems::PresentationCommandsApplied` → `dispatch_visual_overrides` → retained renderer routes. Add a private slider presentation run condition covering changed `SliderState`, authored `WidgetSpec`/slots, `PickingInteraction`, focus, disabled, and the private drag/press marker, including removal edges back to normal. A quiet frame never walks all sliders. The writer still immutable-compares before mutable override access so an unchanged requested override produces no change tick or upload.
 
 **Files:**
 - `src/widgets/slider.rs` — direct root-state builders and value/state presentation writer
-- `src/layout/builder.rs`, `src/layout/element.rs`, `src/widgets/id.rs` — `El::slider_thumb`, computed association, and validation
+- `src/layout/builder.rs`, `src/layout/element.rs`, `src/layout/engine/sizing.rs`, `src/widgets/id.rs` — `El::slider_thumb`, solved content/slot geometry, computed association, and validation
 - `src/panel/builder.rs` — exact public `PanelBuildError` variants and stable messages
-- `src/widgets/visual.rs`, `src/widgets/mod.rs` — reuse retained overrides and presentation ordering
+- `src/widgets/visual.rs`, `src/widgets/reify.rs`, `src/widgets/mod.rs` — carry solved slot geometry, reuse retained overrides, and order presentation
 - `src/lib.rs` — keep the curated slider exports; add no preset/style exports
 - `crates/hana_diegetic/examples/widgets.rs` — canonical direct slider-presentation exercise
 
-**Constraints from prior phases:** Phase 8 supplies `SliderDirection` and the applied-value contract; Phase 8.5 supplies the completed pointer lifecycle and pressed/drag state. Phase 7.25 supplies stable visual slots and batch re-keying while preserving authored depth. Phase 7.5 supplies the direct root-state convention, role-specific private color overrides, shared immutable-before-mutable writer, and presentation command fence. Slider reuses those paths and does not introduce a second presentation component, theme/preset abstraction, or material surface.
+**Constraints from prior phases:** Phase 8 supplies `SliderDirection` and the accepted applied-value contract. Phase 8.5 supplies the pure captured-camera/value projection boundaries and the shared endpoint table; Phase 8.75 supplies pointer lifecycle and private pressed/drag state, initially through the headless path. Phase 7.25 supplies stable visual slots and batch re-keying while preserving authored depth. Phase 7.5 supplies the direct root-state convention, role-specific private color overrides, shared immutable-before-mutable writer, and presentation command fence. Slider reuses those paths and does not introduce a second presentation component, theme/preset abstraction, or material surface.
 
-**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests: zero thumbs leaves headless behavior intact; orphan, duplicate-thumb, and missing root-surface targets return the exact stable construction and `set_tree` errors above; the slider-root and thumb slots remain distinct; one thumb tracks the applied value in all four directions from its range-start baseline; pointer projection and thumb presentation share the approved directed endpoint table, including content-box padding/border exclusion, exact center alignment at both endpoints, outside clamping, `T >= C`, and zero-extent headless behavior; direct hover/press/focus/disabled root values follow Phase 7.5 precedence and target rules; first override insertion reaches dispatch through `WidgetSystems::PresentationCommandsApplied`; a value or state change dirties/re-keys only the expected root/thumb records and causes no relayout; a direct run-condition test proves one authored/state insertion, change, or removal re-arms presentation once and a quiet frame skips the all-slider walk; repeated value/state leaves override change ticks and retained uploads untouched; authored thumb depth, slider hit bounds, and child content remain unchanged. Extend and smoke-test the public path in `examples/widgets.rs` while preserving all existing diagnostic and input paths and expanding the measured diagnostic readout.
+**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests: zero thumbs leaves headless behavior intact; orphan, duplicate-thumb, and missing root-surface targets return the exact stable construction and `set_tree` errors above; the slider-root and thumb slots remain distinct and carry current solved border/content bounds through reify; one thumb tracks the accepted applied value in all four directions from its authored range-start baseline; live pointer projection and thumb presentation read the same slot geometry and approved endpoint table, including padding/border exclusion, exact center alignment at both endpoints, outside clamping, `T >= C`, and zero-extent headless behavior; direct hover/press/focus/disabled root values follow Phase 7.5 precedence and target rules; first override insertion reaches dispatch through `WidgetSystems::PresentationCommandsApplied`; a value or state change dirties/re-keys only the expected root/thumb records and causes no relayout; a direct run-condition test proves one authored/state insertion, change, or removal re-arms presentation once and a quiet frame skips the all-slider walk; repeated value/state leaves override change ticks and retained uploads untouched; authored thumb depth, slider hit bounds, and child content remain unchanged. Extend and smoke-test the public path in `examples/widgets.rs` while preserving all existing diagnostic and input paths and expanding the measured diagnostic readout.
 
 ### Phase 10 — Tooltip template, relationship, and controller reify  · status: todo
 
@@ -1248,6 +1280,22 @@ What should change:
 
 Recommendation:
 Add `PanelBuildError::TooltipRequiresWidget(PanelElementId)` with a direct `thiserror` message naming the offending element. Reject the entire panel build or tree replacement synchronously and queue no partial controller changes, matching the existing widget validation contract.
+
+**Pending decision: invalid standalone tooltip target**
+
+Actual problem:
+Standalone authoring currently permits `commands.spawn((template, TooltipFor::new(target)))`, but Phase 10 can derive `PanelOwned` only when `target` is a live widget or a live `DiegeticPanel`. A relationship observer cannot return a construction error after an arbitrary entity tuple has already spawned.
+
+What exists now:
+- Associated authoring has a synchronous `PanelBuildError` path because it is validated as part of a panel tree.
+- Standalone authoring is described as an unrestricted component tuple, with no checked command that can reject a stale or unrelated target before controller setup.
+
+What should change:
+- Decide whether standalone tooltips use a checked `DiegeticPanelCommands` method that validates the target and returns `Result<Entity, TooltipTargetError>`, or retain raw component spawning with an inert-controller plus warning contract for invalid targets.
+- Fold the chosen behavior into controller ownership, cleanup, and exact acceptance tests.
+
+Recommendation:
+Add one checked standalone spawn command and document raw `TooltipFor` insertion as an advanced path that warns and remains inert until its target becomes a live widget or panel. This gives ordinary callers an immediate error without making the public relationship itself impossible to construct.
 
 - **Template equality and deferred creation:** equality compares panel-blueprint pointer identity plus policy values. Associated authoring carries the same value through `ComputedTooltipRecord`, cloning only the `Arc`; standalone authoring inserts it directly. An identical clone is unchanged, a policy-only replacement is distinguishable from a blueprint replacement, and no phase spawns panel/render components merely because a template exists.
 - **Controller reify and fence:** add `TooltipSystems::ReifyControllers` after `WidgetSystems::ReifyCommandsApplied`. It uses `PanelWidgetReader` to create/reuse associated controllers and synchronizes the template plus `TooltipFor(widget)` independently. Follow it with `TooltipSystems::ControllerCommandsApplied`, an explicit `ApplyDeferred` fence consumed by Phase 10.5. Ordering after the widget fence alone is insufficient for systems that need newly created tooltip controllers and relationships.
@@ -1366,13 +1414,13 @@ Make first-version materialized tooltips `PanelPicking::PASS_THROUGH` on both fa
 
 **Spec:**
 - Stop after Phase 11 and use `crates/hana_diegetic/examples/widgets.rs` as the cumulative dual-space Fairy Dust baseline: Phase 4's world readout still follows the bottom slider through typed world handles, Phase 4.5 adds a distinct typed screen-widget attachment exercise, Phase 5.5 leaves both Hana's built-in per-window controls and an app-owned Bevy Kana action visibly exercised, Phase 6 leaves visible `Pointer`, `Focus`, and `Button` rows proving pointer and semantic activation separately, Phase 7 adds the persistent `Callback` row and primary-button callback count, and Phase 6.5 leaves the world Widget Lab front `Interactive`/back `PanelOnly` while Fairy Dust screen overlays remain `PASS_THROUGH`. Design together how that lab is extended or supplemented; do not reopen which example owns the cumulative widget path, remove either input integration proof, replace those diagnostic rows, change those established picking policies, or clip them when adding later output.
-- The plan must prove the pieces work together in real diegetic UI: buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and existing IME/text input coexisting on one panel.
+- The discussion must design how a subsequent implementation phase will prove the pieces work together in real diegetic UI: buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and existing IME/text input coexisting on one panel. The written plan must name both the live demonstration and deterministic integration gate; this discussion phase does not claim the runtime proof itself.
 
 **Files:** `crates/hana_diegetic/examples/widgets.rs` is the read-only baseline until the discussion lands; no implementation files are selected yet.
 
 **Constraints from prior phases:** All widget subsystems through Phase 11 complete and are tested through deterministic minimal-app coverage before demonstration work begins; the canonical example already retains both world- and screen-widget anchoring paths through the same-space public API plus the built-in adapter and app-owned Bevy Kana input paths, and conversion tests demonstrate detach → convert → reattach rather than cross-space fallback.
 
-**Acceptance gate:** A written demonstration plan agreed with the project owner, anchored on the existing `examples/widgets.rs` lab and naming any supplemental examples; no code gate.
+**Acceptance gate:** A written demonstration plan agreed with the project owner, anchored on the existing `examples/widgets.rs` lab, naming any supplemental examples, and adding a subsequent implementation phase with live and deterministic integration gates; no code gate in this discussion phase.
 
 ## Team review record — 2026-07-15
 

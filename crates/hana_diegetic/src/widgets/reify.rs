@@ -15,6 +15,7 @@ use super::PanelWidgetIndex;
 use super::PanelWidgets;
 use super::ScreenWidgetAnchorProxy;
 use super::ScreenWidgetAnchoredHere;
+use super::SliderState;
 use super::WidgetFocusable;
 use super::WidgetKind;
 use super::WidgetOf;
@@ -138,6 +139,7 @@ pub(super) fn reify_widgets(
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
         Option<&WidgetVisualSlots>,
+        Option<&SliderState>,
     )>,
     mut button_captures: ResMut<ButtonCaptures>,
     mut commands: Commands,
@@ -226,6 +228,10 @@ fn spawn_widget(
     let transform = anchor_rect.transform();
     let global_transform = panel_global.mul_transform(transform);
     let callback = widget_callback(&authored).cloned();
+    let slider_state = match &authored {
+        WidgetSpec::Slider(slider) => Some(slider.initial_state()),
+        WidgetSpec::Button(_) => None,
+    };
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel).with_children(|children| {
         spawned = children
@@ -246,6 +252,9 @@ fn spawn_widget(
             ))
             .id();
     });
+    if let Some(state) = slider_state {
+        commands.entity(spawned).insert(state);
+    }
     if let Some(callback) = callback {
         install_callback_handle(commands, spawned, callback);
     }
@@ -272,6 +281,7 @@ fn update_widget(
         Option<&Cascade<super::WidgetInteractivity>>,
         Option<&CascadeFrom>,
         Option<&WidgetVisualSlots>,
+        Option<&SliderState>,
     )>,
     button_captures: &mut ButtonCaptures,
 ) {
@@ -285,6 +295,7 @@ fn update_widget(
         existing_interactivity,
         existing_cascade_from,
         existing_visual_slots,
+        existing_slider_state,
     )) = existing_widgets.get(entity)
     else {
         return;
@@ -322,6 +333,22 @@ fn update_widget(
     }
     if existing_cascade_from.is_none_or(|relationship| relationship.target() != panel) {
         widget.insert(CascadeFrom::new(panel));
+    }
+    match authored {
+        WidgetSpec::Slider(slider) => match existing_slider_state {
+            None => {
+                widget.insert(slider.initial_state());
+            },
+            Some(state) if !state.matches_configuration(slider) => {
+                widget.insert(SliderState::with_configuration(slider, state.value()));
+            },
+            Some(_) => {},
+        },
+        WidgetSpec::Button(_) => {
+            if existing_slider_state.is_some() {
+                widget.remove::<SliderState>();
+            }
+        },
     }
     let existing_callback = widget_callback(existing_authored);
     let next_callback = widget_callback(authored);
