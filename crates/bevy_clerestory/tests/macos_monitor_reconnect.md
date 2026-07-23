@@ -117,7 +117,7 @@ windowed cases. Its power changes are autonomous, but its focus, move, resize,
 4. After every off command, the next power command must be the matching on
    command. If the probe, terminal, or a check fails, turn the Dell on before
    diagnosing the failure.
-5. Allow 1 second after the off shortcut and 10 seconds after the on shortcut
+5. Allow 1 second after the off shortcut and 5 seconds after the on shortcut
    for the physical device action. These waits are not proof that macOS
    processed the change; wait for the corresponding trace record as well.
 6. Never use `pkill`, a global quit shortcut, AppleScript input, pointer
@@ -157,7 +157,7 @@ Dell is listed by macOS:
 
 ```sh
 shortcuts run "dell monitor on"
-sleep 10
+sleep 5
 system_profiler SPDisplaysDataType
 ```
 
@@ -205,7 +205,7 @@ reconnect evidence:
    installed topology revision, and the expected `recovery-pending` records.
 4. Confirm macOS no longer lists the Dell.
 5. Run `shortcuts run "dell monitor on"`.
-6. Wait 10 seconds, then wait for the Dell's monitor connection record and the
+6. Wait 5 seconds, then wait for the Dell's monitor connection record and the
    eligible restore results.
 
 If step 3 or 4 fails, run the on shortcut and stop. A dark panel that remains
@@ -216,7 +216,7 @@ enumerated over USB-C is not a monitor disconnect and cannot validate recovery.
 Use a new process and log for each subsection. Always wait for trace milestones;
 the operating system and the Shortcuts service may take different amounts of
 time on different cycles. After each off shortcut, wait 1 second before checking
-the display state or issuing the on shortcut. After each on shortcut, wait 10
+the display state or issuing the on shortcut. After each on shortcut, wait 5
 seconds before checking the display state. Continue waiting for the required
 trace milestone if macOS has not reported it yet.
 
@@ -261,7 +261,7 @@ the two automatic keys to return. Neither automatic key may emit another
 1. Launch in `windowed` mode and wait for `recovery-ready`.
 2. Run the off shortcut.
 3. Wait 1 second, then run the on shortcut.
-4. Wait 10 seconds, then wait for the resulting trace records.
+4. Wait 5 seconds, then wait for the resulting trace records.
 5. Report the physical request interval separately from macOS's notification
    interval.
 
@@ -475,7 +475,7 @@ substitute Bevy's `WindowMode` value for visible AppKit fullscreen completion.
 Before ending for any reason:
 
 1. Run `shortcuts run "dell monitor on"`.
-2. Wait 10 seconds, then confirm macOS lists the Dell again.
+2. Wait 5 seconds, then confirm macOS lists the Dell again.
 3. Stop only the attached probe process, normally with `Ctrl-C` in its terminal
    session if the primary window was not closed.
 4. Preserve every log and screenshot path.
