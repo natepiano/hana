@@ -18,6 +18,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
+use constants::FIRST_SCREEN_SPACE_VIEW_RENDER_LAYER;
 use constants::SCREEN_SPACE_CAMERA_FAR;
 use constants::SCREEN_SPACE_CAMERA_Z;
 use constants::SCREEN_SPACE_LIGHT_ILLUMINANCE;
@@ -34,20 +35,62 @@ use crate::panel::ResolvedScreenPanelPosition;
 use crate::panel::ScreenPosition;
 use crate::render::PanelChildSystems;
 
-/// Marker on overlay cameras spawned by the screen-space system. Carries the
-/// `(camera_order, render_layers, window)` triple so observers can match
-/// panels against existing cameras without a side registry.
+/// Marker on overlay cameras spawned by the screen-space system.
+///
+/// Carries the authored `(camera_order, render_layers, window)` key plus the
+/// private view layer that prevents another overlay camera from drawing the
+/// same panels.
 #[derive(Component)]
 pub struct ScreenSpaceCamera {
-    render_layers: RenderLayers,
-    order:         isize,
-    window:        Entity,
+    authored_layers: RenderLayers,
+    view_layers:     RenderLayers,
+    order:           isize,
+    window:          Entity,
 }
 
 /// Marker on directional lights spawned alongside overlay cameras.
 #[derive(Component)]
 pub struct ScreenSpaceLight {
-    render_layers: RenderLayers,
+    view_layers: RenderLayers,
+}
+
+#[derive(Resource)]
+struct ScreenSpaceViewLayers {
+    next: usize,
+}
+
+impl Default for ScreenSpaceViewLayers {
+    fn default() -> Self {
+        Self {
+            next: FIRST_SCREEN_SPACE_VIEW_RENDER_LAYER,
+        }
+    }
+}
+
+impl ScreenSpaceViewLayers {
+    fn allocate(
+        &mut self,
+        panels: &Query<&DiegeticPanel>,
+        entity_layers: &Query<&RenderLayers>,
+    ) -> Option<RenderLayers> {
+        loop {
+            let candidate = self.next;
+            self.next = self.next.checked_add(1)?;
+            let authored = panels.iter().any(|panel| {
+                matches!(
+                    panel.coordinate_space(),
+                    CoordinateSpace::Screen { render_layers, .. }
+                        if render_layers.iter().any(|layer| layer == candidate)
+                )
+            });
+            let assigned = entity_layers
+                .iter()
+                .any(|layers| layers.iter().any(|layer| layer == candidate));
+            if !authored && !assigned {
+                return Some(RenderLayers::from_layers(&[candidate]));
+            }
+        }
+    }
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -65,6 +108,7 @@ impl Plugin for ScreenSpacePlugin {
             .add_observer(cleanup_screen_space_view)
             .add_observer(cleanup_screen_space_on_window_close)
             .init_resource::<AnchorResolveDiagnostics>()
+            .init_resource::<ScreenSpaceViewLayers>()
             .configure_sets(
                 Update,
                 (
@@ -320,12 +364,11 @@ pub(crate) fn resolve_screen_axis(
 /// Spawns overlay cameras and lights for newly added screen-space panels.
 ///
 /// For each unique `(camera_order, render_layers, window)` triple, a single
-/// shared orthographic camera is created with `ScalingMode::WindowSize`
-/// (1 world unit = 1 logical pixel) and pinned to its target window via
-/// `Camera.target`. A directional light on the same render layers provides
-/// stable illumination for PBR text materials; the light is keyed by
-/// `render_layers` only because directional-light contributions accumulate
-/// across cameras sharing a layer.
+/// orthographic camera is created with `ScalingMode::WindowSize` (1 world unit
+/// = 1 logical pixel) and pinned to its target window via `Camera.target`.
+/// The camera, its panels, and its directional light receive one private
+/// `RenderLayers` value so cameras for other windows or orders cannot draw
+/// those panels.
 ///
 /// Sharing is detected by querying existing cameras for a matching triple —
 /// no central registry is maintained.
@@ -334,7 +377,9 @@ fn setup_screen_space_view(
     panels: Query<&DiegeticPanel>,
     cameras: Query<&ScreenSpaceCamera>,
     lights: Query<&ScreenSpaceLight>,
+    entity_layers: Query<&RenderLayers>,
     primary: Query<Entity, With<PrimaryWindow>>,
+    mut view_layers: ResMut<ScreenSpaceViewLayers>,
     mut commands: Commands,
 ) {
     let Ok(panel) = panels.get(trigger.entity) else {
@@ -345,16 +390,22 @@ fn setup_screen_space_view(
         panel,
         &cameras,
         &lights,
+        &panels,
+        &entity_layers,
         &primary,
+        &mut view_layers,
         &mut commands,
     );
 }
 
 fn setup_changed_screen_space_views(
     panels: Query<(Entity, &DiegeticPanel), Changed<DiegeticPanel>>,
+    all_panels: Query<&DiegeticPanel>,
     cameras: Query<&ScreenSpaceCamera>,
     lights: Query<&ScreenSpaceLight>,
+    entity_layers: Query<&RenderLayers>,
     primary: Query<Entity, With<PrimaryWindow>>,
+    mut view_layers: ResMut<ScreenSpaceViewLayers>,
     mut commands: Commands,
 ) {
     for (entity, panel) in &panels {
@@ -363,7 +414,10 @@ fn setup_changed_screen_space_views(
             panel,
             &cameras,
             &lights,
+            &all_panels,
+            &entity_layers,
             &primary,
+            &mut view_layers,
             &mut commands,
         );
     }
@@ -374,7 +428,10 @@ fn setup_screen_space_view_for_panel(
     panel: &DiegeticPanel,
     cameras: &Query<&ScreenSpaceCamera>,
     lights: &Query<&ScreenSpaceLight>,
+    panels: &Query<&DiegeticPanel>,
+    entity_layers: &Query<&RenderLayers>,
     primary: &Query<Entity, With<PrimaryWindow>>,
+    view_layers: &mut ScreenSpaceViewLayers,
     commands: &mut Commands,
 ) {
     let CoordinateSpace::Screen {
@@ -390,19 +447,29 @@ fn setup_screen_space_view_for_panel(
         return;
     };
 
-    commands.entity(entity).insert(render_layers.clone());
-
-    let camera_exists = cameras.iter().any(|cam| {
+    let existing_camera = cameras.iter().find(|cam| {
         cam.order == camera_order
-            && cam.render_layers == *render_layers
+            && cam.authored_layers == *render_layers
             && cam.window == window_entity
     });
+    let (camera_exists, assigned_layers) = if let Some(camera) = existing_camera {
+        (true, camera.view_layers.clone())
+    } else {
+        let Some(assigned_layers) = view_layers.allocate(panels, entity_layers) else {
+            error!("hana_diegetic: screen-space view render-layer identifiers are exhausted");
+            return;
+        };
+        (false, assigned_layers)
+    };
+    commands.entity(entity).insert(assigned_layers.clone());
+
     if !camera_exists {
         commands.spawn((
             ScreenSpaceCamera {
-                render_layers: render_layers.clone(),
-                order:         camera_order,
-                window:        window_entity,
+                authored_layers: render_layers.clone(),
+                view_layers:     assigned_layers.clone(),
+                order:           camera_order,
+                window:          window_entity,
             },
             Camera3d {
                 depth_texture_usages: Camera3dDepthTextureUsage(
@@ -424,20 +491,20 @@ fn setup_screen_space_view_for_panel(
             }),
             Transform::from_xyz(0.0, 0.0, SCREEN_SPACE_CAMERA_Z).looking_at(Vec3::ZERO, Vec3::Y),
             bevy::render::view::Msaa::default(),
-            render_layers.clone(),
+            assigned_layers.clone(),
         ));
     }
 
     let light_exists = lights
         .iter()
-        .any(|light| light.render_layers == *render_layers);
+        .any(|light| light.view_layers == assigned_layers);
     if light_exists {
         return;
     }
 
     commands.spawn((
         ScreenSpaceLight {
-            render_layers: render_layers.clone(),
+            view_layers: assigned_layers.clone(),
         },
         DirectionalLight {
             illuminance: SCREEN_SPACE_LIGHT_ILLUMINANCE,
@@ -450,7 +517,7 @@ fn setup_screen_space_view_for_panel(
             std::f32::consts::FRAC_PI_4,
             0.0,
         )),
-        render_layers.clone(),
+        assigned_layers,
     ));
 }
 
@@ -510,15 +577,13 @@ fn propagate_layers_recursive(
     }
 }
 
-/// Despawns the overlay camera and light when the last panel using them is
-/// removed.
+/// Despawns the overlay camera and its light when the last panel using that
+/// screen-space view is removed.
 ///
 /// Reads the removed panel's `(camera_order, render_layers, window)` while
 /// the component is still live (`On<Remove>` fires before the component is
-/// dropped). Cameras are keyed by the full triple — despawned only when no
-/// surviving panel matches all three. Lights are keyed by `render_layers`
-/// alone (singleton per layer, app-wide) — despawned only when no panel on
-/// that layer survives in *any* window.
+/// dropped). A view is keyed by the full triple; its camera and light are
+/// despawned only when no surviving panel matches all three.
 ///
 /// This observer is the sole owner of camera and light despawn. The
 /// `cleanup_screen_space_on_window_close` observer despawns panels only;
@@ -550,7 +615,7 @@ fn cleanup_screen_space_view(
     // whose `WindowRef::Primary` panels can no longer be resolved because
     // the primary window itself was despawned.
     for (cam_entity, cam) in &cameras {
-        if cam.order != camera_order || cam.render_layers != *render_layers {
+        if cam.order != camera_order || cam.authored_layers != *render_layers {
             continue;
         }
         let still_used = panels.iter().any(|(entity, panel)| {
@@ -572,27 +637,11 @@ fn cleanup_screen_space_view(
         });
         if !still_used {
             commands.entity(cam_entity).despawn();
-        }
-    }
-
-    let light_still_in_use = panels.iter().any(|(entity, panel)| {
-        if entity == trigger.entity {
-            return false;
-        }
-        match panel.coordinate_space() {
-            CoordinateSpace::Screen {
-                render_layers: other_layers,
-                ..
-            } => other_layers == render_layers,
-            CoordinateSpace::World { .. } => false,
-        }
-    });
-    if light_still_in_use {
-        return;
-    }
-    for (entity, light) in &lights {
-        if light.render_layers == *render_layers {
-            commands.entity(entity).despawn();
+            for (light_entity, light) in &lights {
+                if light.view_layers == cam.view_layers {
+                    commands.entity(light_entity).despawn();
+                }
+            }
         }
     }
 }
@@ -631,6 +680,7 @@ mod tests {
     use std::sync::Arc;
 
     use bevy::camera::RenderTarget;
+    use bevy::camera::visibility::RenderLayers;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
@@ -1090,48 +1140,67 @@ mod tests {
         (app, primary, secondary, primary_panel, secondary_panel)
     }
 
-    /// Two windows, two panels on the same render layer: each spawns its
-    /// own overlay camera pointed at its own window; the directional light
-    /// is a single shared instance for the layer.
+    /// Two windows with the same authored layer receive disjoint private view
+    /// layers, one camera, and one light per window.
     #[test]
-    fn two_windows_spawn_one_camera_each_one_shared_light() {
-        let (mut app, primary, secondary, _, _) = build_two_window_app();
+    fn two_windows_isolate_each_panel_from_the_other_window_camera() {
+        let (mut app, primary, secondary, primary_panel, secondary_panel) = build_two_window_app();
+
+        let primary_layers = app
+            .world()
+            .get::<RenderLayers>(primary_panel)
+            .expect("primary panel receives a view layer")
+            .clone();
+        let secondary_layers = app
+            .world()
+            .get::<RenderLayers>(secondary_panel)
+            .expect("secondary panel receives a view layer")
+            .clone();
+        assert!(!primary_layers.intersects(&secondary_layers));
 
         let mut cam_q = app
             .world_mut()
-            .query::<(&ScreenSpaceCamera, &RenderTarget)>();
-        let mut cameras: Vec<(Entity, RenderTarget)> = Vec::new();
-        for (cam, target) in cam_q.iter(app.world()) {
-            cameras.push((cam.window, target.clone()));
-        }
+            .query::<(&ScreenSpaceCamera, &RenderTarget, &RenderLayers)>();
+        let cameras: Vec<_> = cam_q
+            .iter(app.world())
+            .map(|(camera, target, layers)| (camera.window, target.clone(), layers.clone()))
+            .collect();
         assert_eq!(cameras.len(), 2, "one camera per window");
 
         let mut targets_primary = false;
         let mut targets_secondary = false;
-        for (window, target) in &cameras {
+        for (window, target, layers) in &cameras {
             assert!(*window == primary || *window == secondary);
             if let RenderTarget::Window(WindowRef::Entity(e)) = target {
                 if *e == primary {
                     targets_primary = true;
+                    assert_eq!(layers, &primary_layers);
+                    assert!(!layers.intersects(&secondary_layers));
                 }
                 if *e == secondary {
                     targets_secondary = true;
+                    assert_eq!(layers, &secondary_layers);
+                    assert!(!layers.intersects(&primary_layers));
                 }
             }
         }
         assert!(targets_primary, "camera targets primary window");
         assert!(targets_secondary, "camera targets secondary window");
 
-        let mut light_q = app.world_mut().query::<&ScreenSpaceLight>();
-        assert_eq!(
-            light_q.iter(app.world()).count(),
-            1,
-            "one light shared across layer"
-        );
+        let mut light_q = app
+            .world_mut()
+            .query::<(&ScreenSpaceLight, &RenderLayers)>();
+        let lights: Vec<_> = light_q
+            .iter(app.world())
+            .map(|(light, layers)| (light.view_layers.clone(), layers.clone()))
+            .collect();
+        assert_eq!(lights.len(), 2, "one light per isolated view");
+        assert!(lights.contains(&(primary_layers.clone(), primary_layers)));
+        assert!(lights.contains(&(secondary_layers.clone(), secondary_layers)));
     }
 
-    /// Despawning one window despawns its panel and camera while leaving
-    /// the shared light and the other window's panel/camera intact.
+    /// Despawning one window despawns its panel, camera, and light while
+    /// leaving the other window's view intact.
     #[test]
     fn despawning_one_window_keeps_other_alive() {
         let (mut app, primary, secondary, primary_panel, secondary_panel) = build_two_window_app();
@@ -1156,7 +1225,7 @@ mod tests {
         assert_eq!(
             light_q.iter(app.world()).count(),
             1,
-            "light survives while a layer panel remains"
+            "the surviving view keeps its light"
         );
     }
 

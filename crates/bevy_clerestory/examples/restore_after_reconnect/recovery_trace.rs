@@ -2,6 +2,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::window::OnMonitor;
 use bevy::window::PrimaryWindow;
+use bevy::window::WindowMode;
 use bevy_clerestory::CancelWindowRecovery;
 use bevy_clerestory::CurrentMonitor;
 use bevy_clerestory::ManagedWindow;
@@ -90,11 +91,21 @@ const fn recovery_unarmed_reason(
     platform: Platform,
     identity: MonitorIdentity,
     window_recovery: WindowRecovery,
+    effective_window_mode: WindowMode,
 ) -> Option<&'static str> {
-    match (identity, platform.is_wayland(), window_recovery) {
+    match (identity, window_recovery, effective_window_mode) {
         (MonitorIdentity::Unverified, _, _) => Some(VALUE_UNARMED_UNVERIFIED),
-        (MonitorIdentity::Verified(_), true, WindowRecovery::FallbackAndReturn) => {
-            Some(VALUE_UNARMED_WAYLAND_WINDOWED)
+        (
+            MonitorIdentity::Verified(_),
+            WindowRecovery::FallbackAndReturn,
+            WindowMode::Fullscreen(..),
+        ) => Some(VALUE_UNARMED_EXCLUSIVE_FULLSCREEN),
+        (MonitorIdentity::Verified(_), WindowRecovery::FallbackAndReturn, WindowMode::Windowed) => {
+            if platform.is_wayland() {
+                Some(VALUE_UNARMED_WAYLAND_WINDOWED)
+            } else {
+                None
+            }
         },
         (MonitorIdentity::Verified(_), _, _) => None,
     }
@@ -144,7 +155,12 @@ fn recovery_association(
             (FIELD_MONITOR, &monitor_value),
         ],
     );
-    let reason = recovery_unarmed_reason(platform, installed.identity, window_recovery);
+    let reason = recovery_unarmed_reason(
+        platform,
+        installed.identity,
+        window_recovery,
+        current_monitor.effective_window_mode,
+    );
     match reason {
         Some(_) if acceptance_count != 0 => return None,
         None if acceptance_count != 1 => return None,
@@ -370,7 +386,10 @@ pub(super) fn prepare_application_window_restore(
 }
 
 pub(super) fn request_application_window_restore(
-    pending: Query<(Entity, &PendingApplicationRestore), With<setup::ProbeContentAttached>>,
+    pending: Query<
+        (Entity, &PendingApplicationRestore),
+        With<super::window_panel::ProbeContentAttached>,
+    >,
     mut commands: Commands,
     trace: Res<ProbeTrace>,
     frame_count: Res<FrameCount>,
@@ -472,6 +491,8 @@ pub(super) fn on_window_restore_mismatch(
 )]
 mod tests {
     use bevy::reflect::tuple_struct::DynamicTupleStruct;
+    use bevy::window::MonitorSelection;
+    use bevy::window::VideoModeSelection;
     use bevy::window::WindowMode;
     use bevy_clerestory::MonitorId;
 
@@ -701,7 +722,7 @@ mod tests {
 
     fn record_restore_request(
         event: On<RestoreWindow>,
-        content: Query<(), With<setup::ProbeContentAttached>>,
+        content: Query<(), With<super::super::window_panel::ProbeContentAttached>>,
         mut requests: ResMut<ConsumerRequests>,
     ) {
         assert!(content.contains(event.entity));
@@ -713,6 +734,9 @@ mod tests {
         app.init_resource::<FrameCount>()
             .init_resource::<ApplicationRecoveryCycles>()
             .init_resource::<ConsumerRequests>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .init_resource::<super::super::window_panel::ProbePanelMaterial>()
+            .init_resource::<super::super::window_panel::ProbeTarget>()
             .insert_resource(ProbeTrace::default())
             .add_observer(on_window_recovery_pending)
             .add_observer(prepare_application_window_restore)
@@ -721,7 +745,7 @@ mod tests {
             .add_systems(
                 PreUpdate,
                 (
-                    setup::attach_managed_content,
+                    super::super::window_panel::attach_window_content,
                     request_application_window_restore,
                 )
                     .chain(),
@@ -789,6 +813,222 @@ mod tests {
             monitors,
             current_monitor,
             &fixtures.accepted_windows,
+        );
+    }
+
+    fn assert_unarmed_association_records(
+        trace: &ProbeTrace,
+        window_key: &WindowKey,
+        reason: &'static str,
+    ) {
+        let window_key_value = format!("{window_key:?}");
+        let unarmed_value = format!("{VALUE_UNARMED:?}");
+        let zero_accepted_value = format!("{:?}", 0_usize);
+        let reason_value = format!("{:?}", Some(reason));
+        assert_eq!(
+            trace_record_count(
+                trace,
+                KIND_PRE_UNPLUG_ASSOCIATION,
+                &[
+                    (FIELD_WINDOW_KEY, &window_key_value),
+                    (FIELD_ACCEPTED_RECORDS, &zero_accepted_value),
+                    (FIELD_ARMING_STATE, &unarmed_value),
+                    (FIELD_RECOVERY_REASON, &reason_value),
+                ],
+            ),
+            1,
+        );
+        assert_eq!(
+            trace_record_count(
+                trace,
+                KIND_RECOVERY_UNARMED,
+                &[
+                    (FIELD_WINDOW_KEY, &window_key_value),
+                    (FIELD_RECOVERY_REASON, &reason_value),
+                ],
+            ),
+            1,
+        );
+        assert_eq!(trace_record_count(trace, KIND_RECOVERY_UNARMED, &[]), 1);
+    }
+
+    fn assert_armed_association_record(trace: &ProbeTrace, window_key: &WindowKey) {
+        let window_key_value = format!("{window_key:?}");
+        let armed_value = format!("{VALUE_ARMED:?}");
+        let accepted_records_value = format!("{ACCEPTED_RECORDS_PER_KEY:?}");
+        assert_eq!(
+            trace_record_count(
+                trace,
+                KIND_PRE_UNPLUG_ASSOCIATION,
+                &[
+                    (FIELD_WINDOW_KEY, &window_key_value),
+                    (FIELD_ACCEPTED_RECORDS, &accepted_records_value),
+                    (FIELD_ARMING_STATE, &armed_value),
+                ],
+            ),
+            1,
+        );
+    }
+
+    #[test]
+    fn recovery_readiness_records_exclusive_automatic_key_unarmed_without_acceptance() {
+        let (mut app, monitors) = setup::tests::production_system_app();
+        let current_monitor = CurrentMonitor {
+            monitor_info:          monitors.selected_monitor,
+            effective_window_mode: WindowMode::Windowed,
+        };
+        let fixtures = spawn_readiness_fixtures(&mut app, monitors, current_monitor);
+        let (automatic_key, automatic_entity, _) = fixtures.accepted_windows[1].clone();
+        app.world_mut()
+            .entity_mut(automatic_entity)
+            .insert(CurrentMonitor {
+                monitor_info:          monitors.selected_monitor,
+                effective_window_mode: WindowMode::Fullscreen(
+                    MonitorSelection::Current,
+                    VideoModeSelection::Current,
+                ),
+            });
+        let armed_windows = [
+            fixtures.accepted_windows[0].clone(),
+            fixtures.accepted_windows[2].clone(),
+        ];
+        let trace = install_recovery_acceptance_records(&mut app, monitors, &armed_windows);
+        app.world_mut()
+            .resource_mut::<AcceptedWindowKeys>()
+            .0
+            .insert(automatic_key.clone());
+
+        app.update();
+        app.update();
+        app.update();
+
+        assert_eq!(trace_record_count(&trace, KIND_RECOVERY_READY, &[]), 1);
+        assert_eq!(
+            trace_record_count(&trace, KIND_PRE_UNPLUG_ASSOCIATION, &[]),
+            expected_window_keys().len(),
+        );
+        assert_unarmed_association_records(
+            &trace,
+            &automatic_key,
+            VALUE_UNARMED_EXCLUSIVE_FULLSCREEN,
+        );
+        for (window_key, _, _) in &armed_windows {
+            assert_armed_association_record(&trace, window_key);
+        }
+    }
+
+    #[test]
+    fn recovery_readiness_arms_wayland_borderless_automatic_key() {
+        let (mut app, monitors) = setup::tests::production_system_app();
+        app.insert_resource(Platform::Wayland);
+        let current_monitor = CurrentMonitor {
+            monitor_info:          monitors.selected_monitor,
+            effective_window_mode: WindowMode::Windowed,
+        };
+        let fixtures = spawn_readiness_fixtures(&mut app, monitors, current_monitor);
+        let (automatic_key, automatic_entity, _) = fixtures.accepted_windows[1].clone();
+        app.world_mut()
+            .entity_mut(automatic_entity)
+            .insert(CurrentMonitor {
+                monitor_info:          monitors.selected_monitor,
+                effective_window_mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+            });
+        let armed_windows = [
+            fixtures.accepted_windows[1].clone(),
+            fixtures.accepted_windows[2].clone(),
+        ];
+        let trace = install_recovery_acceptance_records(&mut app, monitors, &armed_windows);
+        app.world_mut()
+            .resource_mut::<AcceptedWindowKeys>()
+            .0
+            .insert(WindowKey::Primary);
+
+        app.update();
+        app.update();
+        app.update();
+
+        assert_eq!(trace_record_count(&trace, KIND_RECOVERY_READY, &[]), 1);
+        assert_eq!(
+            trace_record_count(&trace, KIND_PRE_UNPLUG_ASSOCIATION, &[]),
+            expected_window_keys().len(),
+        );
+        assert_unarmed_association_records(
+            &trace,
+            &WindowKey::Primary,
+            VALUE_UNARMED_WAYLAND_WINDOWED,
+        );
+        assert_armed_association_record(&trace, &automatic_key);
+        assert_armed_association_record(&trace, &armed_windows[1].0);
+    }
+
+    #[test]
+    fn recovery_readiness_reason_tracks_identity_mode_and_platform() {
+        let verified = MonitorIdentity::Verified(recovery_monitor_id());
+        let exclusive =
+            WindowMode::Fullscreen(MonitorSelection::Current, VideoModeSelection::Current);
+        let borderless = WindowMode::BorderlessFullscreen(MonitorSelection::Current);
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::MacOs,
+                MonitorIdentity::Unverified,
+                WindowRecovery::FallbackAndReturn,
+                WindowMode::Windowed,
+            ),
+            Some(VALUE_UNARMED_UNVERIFIED),
+        );
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::MacOs,
+                verified,
+                WindowRecovery::FallbackAndReturn,
+                exclusive,
+            ),
+            Some(VALUE_UNARMED_EXCLUSIVE_FULLSCREEN),
+        );
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::Wayland,
+                verified,
+                WindowRecovery::FallbackAndReturn,
+                exclusive,
+            ),
+            Some(VALUE_UNARMED_EXCLUSIVE_FULLSCREEN),
+        );
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::Wayland,
+                verified,
+                WindowRecovery::FallbackAndReturn,
+                WindowMode::Windowed,
+            ),
+            Some(VALUE_UNARMED_WAYLAND_WINDOWED),
+        );
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::Wayland,
+                verified,
+                WindowRecovery::FallbackAndReturn,
+                borderless,
+            ),
+            None,
+        );
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::MacOs,
+                verified,
+                WindowRecovery::FallbackAndReturn,
+                WindowMode::Windowed,
+            ),
+            None,
+        );
+        assert_eq!(
+            recovery_unarmed_reason(
+                Platform::Wayland,
+                verified,
+                WindowRecovery::ApplicationControlled,
+                WindowMode::Windowed,
+            ),
+            None,
         );
     }
 
