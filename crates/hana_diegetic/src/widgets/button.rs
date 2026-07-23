@@ -29,7 +29,7 @@ use super::SemanticWidgetIntent;
 use super::VisualSlotId;
 use super::VisualSlotOverride;
 use super::WidgetDisabled;
-use super::WidgetFocused;
+use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
@@ -157,8 +157,8 @@ impl Button {
         self
     }
 
-    /// Sets the root background color shown while the button holds widget
-    /// focus.
+    /// Sets the root background color shown while the button's keyboard focus
+    /// indicator is visible.
     ///
     /// Requires an authored [`El::background`](crate::El::background) on the
     /// button element.
@@ -194,7 +194,8 @@ impl Button {
         self
     }
 
-    /// Sets the root border color shown while the button holds widget focus.
+    /// Sets the root border color shown while the button's keyboard focus
+    /// indicator is visible.
     ///
     /// Requires an authored [`El::border`](crate::El::border) on the button
     /// element; border widths and radii stay as authored.
@@ -233,8 +234,8 @@ impl Button {
         self
     }
 
-    /// Sets the root surface material shown while the button holds widget
-    /// focus.
+    /// Sets the root surface material shown while the button's keyboard focus
+    /// indicator is visible.
     ///
     /// Applies to both the authored fill and border. Requires an authored
     /// root surface — [`El::background`](crate::El::background) or
@@ -334,7 +335,7 @@ impl Button {
 ///
 /// `Changed<WidgetSpec>` / `Changed<WidgetVisualSlots>` cover reify and
 /// re-authoring, `Changed<PickingInteraction>` covers the hover/pressed
-/// aggregate, and `Changed` on [`WidgetFocused`], [`WidgetDisabled`], and
+/// aggregate, and `Changed` on [`WidgetFocusVisible`], [`WidgetDisabled`], and
 /// [`ButtonPress`] covers marker insertion. The [`RemovedComponents`] streams
 /// report the edges back to normal; every stream is drained each run so a
 /// consumed removal cannot re-trigger a later quiet frame.
@@ -347,14 +348,14 @@ pub(super) fn presentation_inputs_changed(
                 Changed<WidgetSpec>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
-                Changed<WidgetFocused>,
+                Changed<WidgetFocusVisible>,
                 Changed<WidgetDisabled>,
                 Changed<ButtonPress>,
             )>,
         ),
     >,
     mut removed_interactions: RemovedComponents<PickingInteraction>,
-    mut removed_focus: RemovedComponents<WidgetFocused>,
+    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
     mut removed_disabled: RemovedComponents<WidgetDisabled>,
     mut removed_presses: RemovedComponents<ButtonPress>,
 ) -> bool {
@@ -371,10 +372,11 @@ pub(super) fn presentation_inputs_changed(
 
 /// Maps each button's live state onto its root visual-slot override.
 ///
-/// Runs after `WidgetSystems::FocusCommandsApplied`, so pointer, app, and
-/// semantic-traversal focus marker commands from the same frame are visible,
-/// and only when [`presentation_inputs_changed`] reports a relevant authored
-/// or state edge, so a quiet frame never walks the live buttons.
+/// Runs after `WidgetSystems::FocusCommandsApplied`, so application and
+/// keyboard-traversal indicator commands, as well as pointer-driven indicator
+/// removal, are visible in the same frame. It runs only when
+/// [`presentation_inputs_changed`] reports a relevant authored or state edge,
+/// so a quiet frame never walks the live buttons.
 /// Hover reads the all-pointer [`PickingInteraction`] aggregate and pressed
 /// reads the private [`ButtonPress`] marker; [`ButtonCaptures`] stays
 /// lifecycle authority and is never consulted for presentation. Writes go
@@ -388,7 +390,7 @@ pub(super) fn present_button_state(
             &WidgetVisualSlots,
             Option<&PickingInteraction>,
             Has<WidgetDisabled>,
-            Has<WidgetFocused>,
+            Has<WidgetFocusVisible>,
             Has<ButtonPress>,
         ),
         With<WidgetOf>,
@@ -1317,12 +1319,14 @@ mod tests {
     use crate::widgets::VisualSlotId;
     use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetDisabled;
+    use crate::widgets::WidgetFocusVisible;
     use crate::widgets::WidgetKind;
     use crate::widgets::WidgetOf;
     use crate::widgets::WidgetSystems;
     use crate::widgets::WidgetVisualOverrides;
     use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
+    use bevy::ecs::change_detection::Tick;
 
     const BUTTON_ID: &str = "action";
     const FIELD_ID: &str = "field";
@@ -3210,7 +3214,7 @@ mod tests {
             .cloned()
     }
 
-    fn computed_tick(app: &App, panel: Entity) -> Option<bevy::ecs::change_detection::Tick> {
+    fn computed_tick(app: &App, panel: Entity) -> Option<Tick> {
         app.world()
             .entity(panel)
             .get_ref::<ComputedDiegeticPanel>()
@@ -3602,10 +3606,13 @@ mod tests {
     }
 
     #[test]
-    fn pointer_input_presents_hover_press_and_focus_in_the_same_update() {
+    fn pointer_input_retains_focus_without_showing_its_indicator() {
         let pointer_id = PointerId::Mouse;
         let mut app = pointer_presentation_app(pointer_id);
-        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
         let camera = app.world_mut().spawn(Camera::default()).id();
         let panel = spawn_panel(
             &mut app,
@@ -3636,8 +3643,8 @@ mod tests {
         );
 
         // A raw primary press through Bevy's real `pointer_events` dispatcher:
-        // the press observers insert `ButtonPress` and pointer focus, and both
-        // present in the same `app.update()`.
+        // the press observers insert `ButtonPress` and retain pointer focus,
+        // but pointer focus does not draw the keyboard focus indicator.
         write_widget_hit(&mut app, pointer_id, camera, widget);
         app.world_mut().write_message(PointerInput::new(
             pointer_id,
@@ -3647,6 +3654,22 @@ mod tests {
         app.update();
         assert!(app.world().get::<ButtonPress>(widget).is_some());
         assert!(app.world().get::<crate::WidgetFocused>(widget).is_some());
+        assert!(app.world().get::<WidgetFocusVisible>(widget).is_none());
+        let expected = VisualSlotOverride {
+            fill_color: Some(PRESS_FILL),
+            ..VisualSlotOverride::default()
+        };
+        assert_eq!(
+            root_override(&app, widget),
+            Some(expected.clone()),
+            "a pointer press must show pressed state without the keyboard focus border",
+        );
+        assert_eq!(indexed_root_override(&app, panel, widget), Some(expected));
+
+        app.world_mut().write_message(FocusNextWidget { window });
+        app.update();
+
+        assert!(app.world().get::<WidgetFocusVisible>(widget).is_some());
         let expected = VisualSlotOverride {
             fill_color: Some(PRESS_FILL),
             border_color: Some(FOCUS_BORDER),
@@ -3655,7 +3678,7 @@ mod tests {
         assert_eq!(
             root_override(&app, widget),
             Some(expected.clone()),
-            "a real pointer press must present pressed state and pointer focus in one update",
+            "keyboard traversal must reveal the indicator without changing the focused widget",
         );
         assert_eq!(indexed_root_override(&app, panel, widget), Some(expected));
     }

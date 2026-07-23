@@ -86,6 +86,7 @@ use crate::render::material_table::MaterialSlotInput;
 use crate::render::material_table::SdfPaintMaterial;
 use crate::widgets::VisualOverrideIndex;
 use crate::widgets::VisualSlotOverride;
+use super::path::PanelShapePath;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
@@ -1096,7 +1097,7 @@ fn build_panel_line_group(
 
 /// Builds the merged group's quad instance from its built analytic path; the
 /// atlas rebuild stamps `packed_path_index` and `render_index` later.
-const fn path_quad_record(path: &path::PanelShapePath) -> PathQuadRecord {
+const fn path_quad_record(path: &PanelShapePath) -> PathQuadRecord {
     PathQuadRecord {
         rect_min:          path.rect_min,
         rect_size:         path.rect_size,
