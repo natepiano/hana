@@ -123,6 +123,7 @@ pub(crate) struct ComputedWidgetRecord {
     rect:             BoundingBox,
     clipped_rect:     Option<BoundingBox>,
     interaction_rank: usize,
+    visual_slots:     Vec<super::ComputedVisualSlot>,
 }
 
 impl ComputedWidgetRecord {
@@ -144,6 +145,7 @@ impl ComputedWidgetRecord {
             rect,
             clipped_rect,
             interaction_rank: 0,
+            visual_slots: Vec::new(),
         }
     }
 
@@ -167,6 +169,12 @@ impl ComputedWidgetRecord {
 
     pub(crate) const fn set_interaction_rank(&mut self, interaction_rank: usize) {
         self.interaction_rank = interaction_rank;
+    }
+
+    pub(crate) fn visual_slots(&self) -> &[super::ComputedVisualSlot] { &self.visual_slots }
+
+    pub(crate) fn push_visual_slot(&mut self, slot: super::ComputedVisualSlot) {
+        self.visual_slots.push(slot);
     }
 }
 

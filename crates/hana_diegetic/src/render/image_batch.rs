@@ -58,6 +58,8 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::panel::PanelPrecomposeCache;
+use crate::widgets::VisualOverrideIndex;
+use crate::widgets::VisualSlotOverride;
 
 /// Per-command image record identity.
 ///
@@ -455,6 +457,7 @@ impl Plugin for ImageBatchPlugin {
         // explicitly.
         app.init_resource::<ImageBatchStore>()
             .init_resource::<DiegeticPerfStats>()
+            .init_resource::<VisualOverrideIndex>()
             .add_plugins(MaterialPlugin::<ImageExtendedMaterial>::default())
             .add_systems(
                 PostUpdate,
@@ -509,6 +512,7 @@ fn route_image_batch_records(
         Option<&Visibility>,
         Option<&Resolved<ShadowCasting>>,
     )>,
+    visual_overrides: Res<VisualOverrideIndex>,
     mut store: ResMut<ImageBatchStore>,
 ) {
     let mut active_records = HashSet::new();
@@ -538,6 +542,7 @@ fn route_image_batch_records(
             precompose_cache,
             layers.clone(),
             shadow_casting,
+            &visual_overrides,
         ) {
             active_records.insert(record.record_key);
             store.upsert_record(batch_key, record);
@@ -554,6 +559,7 @@ fn collect_panel_image_records(
     precompose_cache: &PanelPrecomposeCache,
     layers: RenderLayers,
     shadow_casting: ShadowCasting,
+    visual_overrides: &VisualOverrideIndex,
 ) -> Vec<(ImageBatchKey, ResolvedImageRecord)> {
     let clip_rects = clip::compute_clip_rects(commands);
     let viewport = clip::panel_viewport(panel);
@@ -566,6 +572,13 @@ fn collect_panel_image_records(
             clip::effective_clip(command.bounds, clip_rects[command_index], viewport)?;
             let draw_depth = computed.draw_order().depth_for(command_index)?;
             let (texture, tint) = image_record_source(command, precompose_cache)?;
+            let slot_override = visual_overrides.get(panel_entity, command.element_idx);
+            let (texture, tint, local_transform) = apply_image_visual_override(
+                slot_override,
+                texture,
+                tint,
+                local_transform_from_bounds(command.bounds, points_to_world, anchor_x, anchor_y),
+            );
             let batch_key = ImageBatchKey {
                 texture,
                 layers: BatchRenderLayers(layers.clone()),
@@ -581,12 +594,7 @@ fn collect_panel_image_records(
                 batch_key,
                 ResolvedImageRecord::new(
                     record_key,
-                    local_transform_from_bounds(
-                        command.bounds,
-                        points_to_world,
-                        anchor_x,
-                        anchor_y,
-                    ),
+                    local_transform,
                     image_size_from_bounds(command.bounds, points_to_world),
                     tint,
                     ImageUvRect::default(),
@@ -595,6 +603,30 @@ fn collect_panel_image_records(
             ))
         })
         .collect()
+}
+
+/// Applies one widget visual-slot override to a routed image record.
+///
+/// Runs inside `collect_panel_image_records`, so a replacement `texture`
+/// changes the selected `ImageBatchKey` and `ImageBatchStore::upsert_record`
+/// moves the record to the destination batch, while a `color` or `offset`
+/// patches only the record's `tint`/`local_transform` in its current batch.
+fn apply_image_visual_override(
+    slot_override: Option<&VisualSlotOverride>,
+    texture: Handle<Image>,
+    tint: Vec4,
+    local_transform: Transform,
+) -> (Handle<Image>, Vec4, Transform) {
+    let Some(slot_override) = slot_override else {
+        return (texture, tint, local_transform);
+    };
+    let texture = slot_override.texture.clone().unwrap_or(texture);
+    let tint = slot_override.color.map_or(tint, linear_tint);
+    let mut local_transform = local_transform;
+    if let Some(offset) = slot_override.offset {
+        local_transform.translation += offset.extend(0.0);
+    }
+    (texture, tint, local_transform)
 }
 
 fn image_record_source(
