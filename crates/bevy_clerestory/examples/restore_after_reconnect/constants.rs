@@ -1,3 +1,5 @@
+use bevy::prelude::Color;
+
 // components
 pub(super) const COMPONENT_HAS_WINDOWS: &str = "HasWindows";
 pub(super) const COMPONENT_MANAGED_WINDOW: &str = "ManagedWindow";
@@ -26,6 +28,7 @@ pub(super) const FIELD_RECOVERY_CYCLE: &str = "recovery_cycle";
 pub(super) const FIELD_RECOVERY_POLICY: &str = "recovery_policy";
 pub(super) const FIELD_RECOVERY_REASON: &str = "recovery_reason";
 pub(super) const FIELD_SELECTED_MONITOR_INDEX: &str = "selected_monitor_index";
+pub(super) const FIELD_STARTUP_MODE: &str = "startup_mode";
 pub(super) const FIELD_TOPOLOGY_REVISION: &str = "topology_revision";
 pub(super) const FIELD_TRANSITION: &str = "transition";
 pub(super) const FIELD_WINDOW: &str = "window";
@@ -64,6 +67,13 @@ pub(super) const KIND_WINDOW_MODE_CHANGED: &str = "window-mode-changed";
 pub(super) const KIND_WINDOW_MOVED: &str = "window-moved";
 pub(super) const KIND_WINDOW_RESIZED: &str = "window-resized";
 
+// panel
+pub(super) const PANEL_COLUMN_GAP: f32 = 14.0;
+pub(super) const PANEL_CONTENT_GAP: f32 = 6.0;
+pub(super) const PANEL_CLEAR_CAMERA_ORDER: isize = 0;
+pub(super) const PANEL_LABEL_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
+pub(super) const PANEL_LABEL_MEASURE: &str = "original target";
+
 // phases
 pub(super) const PHASE_ADD: &str = "add";
 pub(super) const PHASE_DISCARD: &str = "discard";
@@ -79,6 +89,7 @@ pub(super) const MONITOR_PROBE_TARGET: &str = "bevy_clerestory::monitor_probe";
 pub(super) const PERSISTENCE_FILE_PREFIX: &str = "bevy-clerestory-hotplug-probe";
 pub(super) const RECOVERY_PROBE_TARGET: &str = "bevy_clerestory::recovery_probe";
 pub(super) const SECOND_RECOVERY_CYCLE: usize = 2;
+pub(super) const STARTUP_MODE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_STARTUP_MODE";
 
 // producers
 pub(super) const PRODUCER_MONITOR_CONNECTED: &str = "observer::MonitorConnected";
@@ -103,6 +114,11 @@ pub(super) const PRODUCER_UPDATE_INTERNAL_WINDOW_MESSAGES: &str =
     "Update::trace_internal_window_messages";
 pub(super) const PRODUCER_UPDATE_OS_WINDOW_EVENTS: &str = "Update::trace_os_window_events";
 
+// startup modes
+pub(super) const STARTUP_MODE_BORDERLESS: &str = "borderless";
+pub(super) const STARTUP_MODE_EXCLUSIVE: &str = "exclusive";
+pub(super) const STARTUP_MODE_WINDOWED: &str = "windowed";
+
 // trace fields
 pub(super) const TRACE_FIELD_FRAME_COUNT: &str = "frame_count";
 pub(super) const TRACE_FIELD_PRODUCER_SCHEDULE: &str = "producer_schedule";
@@ -117,8 +133,10 @@ pub(super) const VALUE_CURRENT_MONITOR_HANDLE_RETURNED: &str = "current-monitor-
 pub(super) const VALUE_CURRENT_MONITOR_NO_HANDLE: &str = "current-monitor-no-handle";
 pub(super) const VALUE_NATIVE_WINDOW_UNAVAILABLE: &str = "native-window-unavailable";
 pub(super) const VALUE_UNARMED: &str = "unarmed";
+pub(super) const VALUE_UNARMED_EXCLUSIVE_FULLSCREEN: &str = "exclusive-fullscreen-return";
 pub(super) const VALUE_UNARMED_UNVERIFIED: &str = "unverified-monitor-identity";
 pub(super) const VALUE_UNARMED_WAYLAND_WINDOWED: &str = "wayland-windowed-placement";
+pub(super) const VALUE_UNREGISTERED: &str = "unregistered";
 pub(super) const VALUE_UNRESOLVED: &str = "unresolved";
 pub(super) const VALUE_UNBOUND: &str = "unbound";
 
@@ -128,10 +146,9 @@ pub(super) const APPLICATION_WINDOW_TITLE: &str =
     "Clerestory Reconnect Consumer - Application Controlled";
 pub(super) const AUTOMATIC_WINDOW_KEY: &str = "hotplug-automatic";
 pub(super) const AUTOMATIC_WINDOW_TITLE: &str = "Clerestory Reconnect Consumer - Managed Automatic";
-pub(super) const CONTENT_FONT_SIZE: f32 = 28.0;
-pub(super) const CONTENT_MARGIN: f32 = 24.0;
 pub(super) const CONTROL_WINDOW_TITLE: &str =
     "Clerestory Reconnect Consumer - Unregistered Control";
 pub(super) const PRIMARY_WINDOW_TITLE: &str = "Clerestory Reconnect Consumer - Primary Automatic";
+pub(super) const PROBE_SCALE_EPSILON: f64 = 0.001;
 pub(super) const PROBE_WINDOW_HEIGHT: u32 = 540;
 pub(super) const PROBE_WINDOW_WIDTH: u32 = 800;

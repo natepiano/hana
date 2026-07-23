@@ -43,6 +43,8 @@ tracing = { workspace = true, optional = true }
 bevy            = { workspace = true, features = ["bevy_pbr", "bevy_ui", "default_font"] }
 bevy_brp_extras = { workspace = true }
 bevy_remote     = { workspace = true }
+fairy_dust      = { workspace = true }
+hana_diegetic   = { workspace = true }
 serde_json      = { workspace = true }
 tempfile        = "3"
 
@@ -62,11 +64,18 @@ windows = { version = "0.62.2", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = [
   "NSResponder",
   "NSView",
   "NSWindow",
+] }
+objc2-foundation = { version = "0.3.2", features = [
+  "NSNotification",
+  "NSOperation",
+  "NSString",
+  "block2",
 ] }
 raw-window-handle = "0.6"
 

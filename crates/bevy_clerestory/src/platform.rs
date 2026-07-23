@@ -200,7 +200,9 @@ impl Platform {
     ///   needs the surface to be ready.
     /// - **X11**: `MoveToMonitor` — compositor needs time to process position before fullscreen
     ///   mode is applied.
-    /// - **macOS / Wayland**: `ApplyMode` — apply fullscreen directly.
+    /// - **macOS**: `LeaveFullscreen` — leave any existing fullscreen Space before entering
+    ///   fullscreen on the target monitor.
+    /// - **Wayland**: `ApplyMode` — apply fullscreen directly.
     #[must_use]
     pub(crate) const fn fullscreen_restore_state(self) -> FullscreenRestoreState {
         #[cfg(feature = "workaround-winit-3124")]
@@ -208,8 +210,9 @@ impl Platform {
             return FullscreenRestoreState::WaitForSurface;
         }
         match self {
+            Self::MacOs => FullscreenRestoreState::LeaveFullscreen,
             Self::X11 => FullscreenRestoreState::MoveToMonitor,
-            _ => FullscreenRestoreState::ApplyMode,
+            Self::Windows | Self::Wayland => FullscreenRestoreState::ApplyMode,
         }
     }
 

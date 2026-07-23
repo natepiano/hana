@@ -1,15 +1,12 @@
 use std::collections::HashSet;
 
-use bevy::camera::RenderTarget;
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::ui::UiTargetCamera;
 use bevy::window::MonitorSelection;
 use bevy::window::OnMonitor;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowMode;
-use bevy::window::WindowRef;
 use bevy::window::WindowResolution;
 use bevy_clerestory::CancelWindowRecovery;
 use bevy_clerestory::CurrentMonitor;
@@ -19,12 +16,15 @@ use bevy_clerestory::Monitors;
 use bevy_clerestory::Platform;
 use bevy_clerestory::WindowKey;
 use bevy_clerestory::WindowRecovery;
+use bevy_kana::ToI32;
+use bevy_kana::ToU32;
 
 use super::ProbeMonitorIndex;
+use super::ProbeStartupMode;
 use super::SmokeExitFrame;
 use super::constants::*;
-use super::selected_window_position;
 use super::trace::ProbeTrace;
+use super::window_panel::ProbeTarget;
 
 #[derive(Default, Resource)]
 pub(super) struct AcceptedWindowKeys(pub(super) HashSet<WindowKey>);
@@ -66,25 +66,18 @@ impl ProbeMonitors<'_> {
     }
 }
 
-#[derive(Component)]
-pub(super) struct ProbePlacementRequested;
-
-#[derive(Component)]
-pub(super) struct ProbeContentAttached;
+#[derive(Clone, Copy, Component, Debug, PartialEq, Eq)]
+pub(super) enum ProbePlacementRequested {
+    AwaitingMove,
+    AwaitingTarget { target_size: UVec2 },
+    Ready,
+}
 
 #[derive(Component)]
 pub(super) struct ControlPlacementConfirmed;
 
 #[derive(Component)]
 pub(super) struct AutomaticRecoveryCancelled;
-
-#[derive(Component)]
-struct ProbeContentRoot;
-
-#[derive(Clone, Copy, Component)]
-pub(super) struct ProbeContentOwner {
-    window: Entity,
-}
 
 #[derive(Component)]
 pub(super) struct UnregisteredControl;
@@ -144,89 +137,6 @@ pub(super) fn probe_window(title: &str, position: WindowPosition) -> Window {
     }
 }
 
-fn managed_content(window_key: &WindowKey) -> Option<&'static str> {
-    match window_key {
-        WindowKey::Managed(name) if name == AUTOMATIC_WINDOW_KEY => Some(AUTOMATIC_WINDOW_TITLE),
-        WindowKey::Managed(name) if name == APPLICATION_WINDOW_KEY => {
-            Some(APPLICATION_WINDOW_TITLE)
-        },
-        WindowKey::Primary | WindowKey::Managed(_) => None,
-    }
-}
-
-fn attach_content(
-    commands: &mut Commands,
-    window: Entity,
-    window_key: WindowKey,
-    label: &str,
-    trace: &ProbeTrace,
-    frame_count: u32,
-) {
-    commands.entity(window).insert(ProbeContentAttached);
-    let camera = commands
-        .spawn((
-            Camera2d,
-            RenderTarget::Window(WindowRef::Entity(window)),
-            ProbeContentOwner { window },
-        ))
-        .id();
-    commands.spawn((
-        Text::new(label),
-        TextFont {
-            font_size: FontSize::Px(CONTENT_FONT_SIZE),
-            ..default()
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(CONTENT_MARGIN),
-            left: Val::Px(CONTENT_MARGIN),
-            ..default()
-        },
-        UiTargetCamera(camera),
-        ProbeContentOwner { window },
-        ProbeContentRoot,
-    ));
-    trace.record(
-        frame_count,
-        PRODUCER_SETUP_CONTENT,
-        KIND_CONTENT_ATTACHED,
-        vec![
-            field(FIELD_WINDOW, window),
-            field(FIELD_WINDOW_KEY, window_key),
-        ],
-    );
-}
-
-pub(super) fn attach_primary_content(
-    windows: Query<Entity, (Added<PrimaryWindow>, Without<ProbeContentAttached>)>,
-    mut commands: Commands,
-    trace: Res<ProbeTrace>,
-    frame_count: Res<FrameCount>,
-) {
-    for window in &windows {
-        attach_content(
-            &mut commands,
-            window,
-            WindowKey::Primary,
-            PRIMARY_WINDOW_TITLE,
-            &trace,
-            frame_count.0,
-        );
-    }
-}
-
-pub(super) fn remove_window_content(
-    removed: On<Remove, Window>,
-    content: Query<(Entity, &ProbeContentOwner)>,
-    mut commands: Commands,
-) {
-    for (entity, owner) in &content {
-        if owner.window == removed.entity {
-            commands.entity(entity).despawn();
-        }
-    }
-}
-
 pub(super) fn control_automatic_window_mode(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut windows: Query<(&ManagedWindow, &mut Window), Without<PrimaryWindow>>,
@@ -256,7 +166,8 @@ pub(super) fn cancel_automatic_window_recovery(
     trace: Res<ProbeTrace>,
     frame_count: Res<FrameCount>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyC) {
+    let shift_pressed = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    if !shift_pressed || !keyboard.just_pressed(KeyCode::KeyC) {
         return;
     }
     for (entity, managed_window, window) in &windows {
@@ -280,35 +191,6 @@ pub(super) fn cancel_automatic_window_recovery(
     }
 }
 
-pub(super) fn attach_managed_content(
-    windows: Query<
-        (Entity, &ManagedWindow),
-        (
-            Added<ManagedWindow>,
-            Without<PrimaryWindow>,
-            Without<ProbeContentAttached>,
-        ),
-    >,
-    mut commands: Commands,
-    trace: Res<ProbeTrace>,
-    frame_count: Res<FrameCount>,
-) {
-    for (window, managed_window) in &windows {
-        let window_key = WindowKey::Managed(managed_window.name.clone());
-        let Some(label) = managed_content(&window_key) else {
-            continue;
-        };
-        attach_content(
-            &mut commands,
-            window,
-            window_key,
-            label,
-            &trace,
-            frame_count.0,
-        );
-    }
-}
-
 pub(super) fn exit_after_smoke_frame(
     exit_frame: Option<Res<SmokeExitFrame>>,
     frame_count: Res<FrameCount>,
@@ -319,9 +201,16 @@ pub(super) fn exit_after_smoke_frame(
     }
 }
 
-pub(super) fn spawn_probe_windows(mut commands: Commands) {
+pub(super) fn spawn_probe_windows(
+    startup_mode: Res<ProbeStartupMode>,
+    monitor_index: Res<ProbeMonitorIndex>,
+    mut commands: Commands,
+) {
     commands.spawn((
-        probe_window(AUTOMATIC_WINDOW_TITLE, WindowPosition::Automatic),
+        Window {
+            mode: startup_mode.automatic_window_mode(monitor_index.0),
+            ..probe_window(AUTOMATIC_WINDOW_TITLE, WindowPosition::Automatic)
+        },
         ManagedWindow {
             name: AUTOMATIC_WINDOW_KEY.into(),
         },
@@ -371,7 +260,9 @@ fn initial_window_action(
             && selected_monitor.is_some())
         .then_some(InitialWindowAction::RequestPlacement);
     }
-    Some(InitialWindowAction::Register(window_recovery))
+    placement_request
+        .is_none_or(|request| *request == ProbePlacementRequested::Ready)
+        .then_some(InitialWindowAction::Register(window_recovery))
 }
 
 fn initial_control_action(
@@ -387,7 +278,9 @@ fn initial_control_action(
     }
     let installed_monitor = installed_monitor?;
     if installed_monitor.index == selected_monitor_index {
-        return Some(InitialControlAction::ConfirmAssociation);
+        return placement_request
+            .is_none_or(|request| *request == ProbePlacementRequested::Ready)
+            .then_some(InitialControlAction::ConfirmAssociation);
     }
     (platform.position_available() && placement_request.is_none() && selected_monitor.is_some())
         .then_some(InitialControlAction::RequestPlacement)
@@ -452,7 +345,9 @@ pub(super) fn place_and_register_probe_windows(
             monitors.by_index(monitor_index.0),
         ) {
             Some(InitialWindowAction::RequestPlacement) => {
-                commands.entity(entity).insert(ProbePlacementRequested);
+                commands
+                    .entity(entity)
+                    .insert(ProbePlacementRequested::AwaitingMove);
             },
             Some(InitialWindowAction::Register(window_recovery)) => {
                 accepted_window_keys.0.insert(window_key);
@@ -508,30 +403,99 @@ pub(super) fn place_and_confirm_unregistered_control(
                 );
             },
             Some(InitialControlAction::RequestPlacement) => {
-                commands.entity(entity).insert(ProbePlacementRequested);
+                commands
+                    .entity(entity)
+                    .insert(ProbePlacementRequested::AwaitingMove);
             },
             None => {},
         }
     }
 }
 
+fn target_window_size(window: &Window, target: &MonitorInfo) -> UVec2 {
+    UVec2::new(
+        (f64::from(window.resolution.width()) * target.scale)
+            .round()
+            .to_u32(),
+        (f64::from(window.resolution.height()) * target.scale)
+            .round()
+            .to_u32(),
+    )
+}
+
+fn centered_window_position(target: &MonitorInfo, target_size: UVec2) -> IVec2 {
+    let horizontal_margin = target.physical_size.x.saturating_sub(target_size.x) / 2;
+    let vertical_margin = target.physical_size.y.saturating_sub(target_size.y) / 2;
+    target.physical_position + IVec2::new(horizontal_margin.to_i32(), vertical_margin.to_i32())
+}
+
+fn placement_scale_ratio(platform: Platform, starting_scale: f64, target_scale: f64) -> f64 {
+    match platform {
+        Platform::MacOs | Platform::X11 => starting_scale / target_scale,
+        Platform::Windows | Platform::Wayland => 1.0,
+    }
+}
+
+fn compensated_window_position(position: IVec2, scale_ratio: f64) -> IVec2 {
+    IVec2::new(
+        (f64::from(position.x) * scale_ratio).round().to_i32(),
+        (f64::from(position.y) * scale_ratio).round().to_i32(),
+    )
+}
+
 pub(super) fn request_probe_window_placement(
     monitor_index: Res<ProbeMonitorIndex>,
     platform: Res<Platform>,
-    mut windows: Query<&mut Window, Added<ProbePlacementRequested>>,
+    monitors: ProbeMonitors,
+    mut windows: Query<(&mut Window, &OnMonitor, &mut ProbePlacementRequested)>,
 ) {
-    for mut window in &mut windows {
-        window.position = selected_window_position(*platform, monitor_index.0);
+    let Some(target) = monitors.by_index(monitor_index.0) else {
+        return;
+    };
+    for (mut window, on_monitor, mut request) in &mut windows {
+        match *request {
+            ProbePlacementRequested::AwaitingMove => {
+                let Some(starting_monitor) = monitors.by_entity(on_monitor.0) else {
+                    continue;
+                };
+                let target_size = target_window_size(&window, target);
+                let target_position = centered_window_position(target, target_size);
+                let scale_ratio =
+                    placement_scale_ratio(*platform, starting_monitor.scale, target.scale);
+                window.position =
+                    WindowPosition::At(compensated_window_position(target_position, scale_ratio));
+                window
+                    .resolution
+                    .set_physical_resolution(target_size.x, target_size.y);
+                *request = ProbePlacementRequested::AwaitingTarget { target_size };
+            },
+            ProbePlacementRequested::AwaitingTarget { target_size }
+                if monitors
+                    .by_entity(on_monitor.0)
+                    .is_some_and(|monitor| monitor.index == monitor_index.0)
+                    && (f64::from(window.resolution.base_scale_factor()) - target.scale).abs()
+                        <= PROBE_SCALE_EPSILON =>
+            {
+                window
+                    .resolution
+                    .set_physical_resolution(target_size.x, target_size.y);
+                *request = ProbePlacementRequested::Ready;
+            },
+            ProbePlacementRequested::AwaitingTarget { .. } | ProbePlacementRequested::Ready => {},
+        }
     }
 }
 
 pub(super) fn trace_probe_session(
     monitor_index: Res<ProbeMonitorIndex>,
+    startup_mode: Res<ProbeStartupMode>,
     platform: Res<Platform>,
     monitors: Res<Monitors>,
+    mut target: ResMut<ProbeTarget>,
     trace: Res<ProbeTrace>,
     frame_count: Res<FrameCount>,
 ) {
+    target.capture(monitor_index.0, monitors.by_index(monitor_index.0));
     trace.record(
         frame_count.0,
         PRODUCER_STARTUP_SESSION,
@@ -539,6 +503,7 @@ pub(super) fn trace_probe_session(
         vec![
             field(FIELD_PLATFORM, *platform),
             field(FIELD_SELECTED_MONITOR_INDEX, monitor_index.0),
+            field(FIELD_STARTUP_MODE, startup_mode.selector()),
             field(FIELD_PLACEMENT_CAPABILITY, platform.position_available()),
             field(
                 FIELD_MONITOR,
@@ -570,8 +535,6 @@ pub(super) mod tests {
 
     use super::*;
 
-    const EXPECTED_CONTENT_ENTITIES_PER_WINDOW: usize = 2;
-    const EXPECTED_CONTENT_PER_WINDOW: usize = 1;
     const INITIAL_MONITOR_INDEX: usize = 3;
     const MONITOR_PHYSICAL_SIZE: UVec2 = UVec2::new(1_920, 1_080);
     const MONITOR_SCALE: f64 = 1.0;
@@ -588,29 +551,6 @@ pub(super) mod tests {
         pub(crate) mismatched_monitor: MonitorInfo,
         pub(crate) selected_entity:    Entity,
         pub(crate) selected_monitor:   MonitorInfo,
-    }
-
-    fn content_app() -> App {
-        let mut app = App::new();
-        app.init_resource::<FrameCount>()
-            .insert_resource(ProbeTrace::default())
-            .init_resource::<AcceptedWindowKeys>()
-            .add_observer(remove_window_content)
-            .add_systems(Update, (attach_primary_content, attach_managed_content));
-        app
-    }
-
-    fn current_monitor(index: usize) -> CurrentMonitor {
-        CurrentMonitor {
-            monitor_info:          MonitorInfo {
-                identity: MonitorIdentity::Unverified,
-                index,
-                scale: MONITOR_SCALE,
-                physical_position: IVec2::ZERO,
-                physical_size: MONITOR_PHYSICAL_SIZE,
-            },
-            effective_window_mode: WindowMode::Windowed,
-        }
     }
 
     fn monitor_component(physical_position: IVec2) -> Monitor {
@@ -724,84 +664,6 @@ pub(super) mod tests {
         )
     }
 
-    fn spawn_content_windows(
-        world: &mut World,
-        monitor_entity: Entity,
-        monitor_index: usize,
-    ) -> [Entity; 3] {
-        let primary = world
-            .spawn((
-                Window::default(),
-                PrimaryWindow,
-                OnMonitor(monitor_entity),
-                current_monitor(monitor_index),
-            ))
-            .id();
-        let automatic = world
-            .spawn((
-                Window::default(),
-                ManagedWindow {
-                    name: AUTOMATIC_WINDOW_KEY.into(),
-                },
-                OnMonitor(monitor_entity),
-                current_monitor(monitor_index),
-            ))
-            .id();
-        let application = world
-            .spawn((
-                Window::default(),
-                ManagedWindow {
-                    name: APPLICATION_WINDOW_KEY.into(),
-                },
-                OnMonitor(monitor_entity),
-                current_monitor(monitor_index),
-            ))
-            .id();
-        [primary, automatic, application]
-    }
-
-    fn owned_content(world: &mut World, window: Entity) -> Vec<Entity> {
-        let mut query = world.query::<(Entity, &ProbeContentOwner)>();
-        query
-            .iter(world)
-            .filter_map(|(entity, owner)| (owner.window == window).then_some(entity))
-            .collect()
-    }
-
-    fn assert_window_content(world: &mut World, window: Entity) {
-        let content = owned_content(world, window);
-        assert_eq!(content.len(), EXPECTED_CONTENT_ENTITIES_PER_WINDOW);
-        let cameras: Vec<_> = content
-            .iter()
-            .copied()
-            .filter(|entity| world.get::<Camera2d>(*entity).is_some())
-            .collect();
-        let roots: Vec<_> = content
-            .iter()
-            .copied()
-            .filter(|entity| world.get::<ProbeContentRoot>(*entity).is_some())
-            .collect();
-        assert_eq!(cameras.len(), EXPECTED_CONTENT_PER_WINDOW);
-        assert_eq!(roots.len(), EXPECTED_CONTENT_PER_WINDOW);
-
-        let Some(camera) = cameras.first().copied() else {
-            return;
-        };
-        let Some(root) = roots.first().copied() else {
-            return;
-        };
-        assert!(matches!(
-            world.get::<RenderTarget>(camera),
-            Some(RenderTarget::Window(WindowRef::Entity(target))) if *target == window
-        ));
-        assert!(world.get::<Node>(root).is_some());
-        assert!(world.get::<ChildOf>(root).is_none());
-        assert_eq!(
-            world.get::<UiTargetCamera>(root).map(|target| target.0),
-            Some(camera)
-        );
-    }
-
     fn automatic_mode_app(smoke_exit_frame: Option<u32>) -> App {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -855,13 +717,43 @@ pub(super) mod tests {
 
         app.update();
 
+        let expected_position = centered_window_position(
+            &monitors.selected_monitor,
+            UVec2::new(PROBE_WINDOW_WIDTH, PROBE_WINDOW_HEIGHT),
+        );
         assert_eq!(
             app.world()
                 .get::<Window>(control)
                 .map(|window| &window.position),
-            Some(&WindowPosition::Centered(MonitorSelection::Index(
-                SELECTED_MONITOR_INDEX,
-            )))
+            Some(&WindowPosition::At(expected_position))
+        );
+        assert_eq!(
+            app.world().get::<ProbePlacementRequested>(control),
+            Some(&ProbePlacementRequested::AwaitingTarget {
+                target_size: UVec2::new(PROBE_WINDOW_WIDTH, PROBE_WINDOW_HEIGHT),
+            })
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_high_to_low_dpi_placement_compensates_the_centered_position() {
+        let target = MonitorInfo {
+            identity:          MonitorIdentity::Unverified,
+            index:             1,
+            scale:             1.0,
+            physical_position: IVec2::new(-4_256, -2_249),
+            physical_size:     UVec2::new(3_440, 1_440),
+        };
+        let target_size = UVec2::new(PROBE_WINDOW_WIDTH, PROBE_WINDOW_HEIGHT);
+        let centered = centered_window_position(&target, target_size);
+        let ratio = placement_scale_ratio(Platform::MacOs, 2.0, target.scale);
+
+        assert_eq!(centered, IVec2::new(-2_936, -1_799));
+        assert_eq!(ratio, 2.0);
+        assert_eq!(
+            compensated_window_position(centered, ratio),
+            IVec2::new(-5_872, -3_598),
         );
     }
 
@@ -927,6 +819,7 @@ pub(super) mod tests {
     fn unregistered_control_stays_outside_recovery() {
         let mut app = App::new();
         app.insert_resource(ProbeMonitorIndex(INITIAL_MONITOR_INDEX))
+            .insert_resource(ProbeStartupMode::Windowed)
             .insert_resource(Platform::Windows)
             .insert_resource(ProbeTrace::default())
             .init_resource::<AcceptedWindowKeys>()
@@ -960,129 +853,91 @@ pub(super) mod tests {
         );
     }
 
-    #[test]
-    fn canonical_content_is_an_unparented_ui_root_targeted_to_its_window_camera_once() {
-        let mut app = content_app();
-        let monitor_entity = app.world_mut().spawn_empty().id();
-        let windows = spawn_content_windows(app.world_mut(), monitor_entity, INITIAL_MONITOR_INDEX);
+    fn startup_spawn_app(startup_mode: ProbeStartupMode) -> App {
+        let mut app = App::new();
+        app.insert_resource(ProbeMonitorIndex(INITIAL_MONITOR_INDEX))
+            .insert_resource(startup_mode)
+            .insert_resource(Platform::Windows)
+            .add_systems(Startup, spawn_probe_windows);
         app.update();
-        app.update();
+        app
+    }
 
-        for window in windows {
-            assert_window_content(app.world_mut(), window);
-        }
-
-        app.world_mut()
-            .entity_mut(windows[0])
-            .remove::<PrimaryWindow>();
-        app.world_mut().entity_mut(windows[0]).insert(PrimaryWindow);
-        app.world_mut()
-            .entity_mut(windows[1])
-            .remove::<ManagedWindow>();
-        app.world_mut()
-            .entity_mut(windows[1])
-            .insert(ManagedWindow {
-                name: AUTOMATIC_WINDOW_KEY.into(),
-            });
-        app.update();
-
-        for window in windows {
-            assert_window_content(app.world_mut(), window);
-        }
+    fn managed_window_entity(app: &mut App, name: &str) -> Entity {
+        let mut windows = app.world_mut().query::<(Entity, &ManagedWindow)>();
+        let entities: Vec<_> = windows
+            .iter(app.world())
+            .filter_map(|(entity, managed_window)| (managed_window.name == name).then_some(entity))
+            .collect();
+        assert_eq!(entities.len(), 1);
+        entities[0]
     }
 
     #[test]
-    fn window_removal_cleans_up_its_camera_and_ui_root() {
-        let mut app = content_app();
-        let monitor_entity = app.world_mut().spawn_empty().id();
-        let windows = spawn_content_windows(app.world_mut(), monitor_entity, INITIAL_MONITOR_INDEX);
-        app.update();
-
-        let removed_content = owned_content(app.world_mut(), windows[1]);
-        assert_eq!(removed_content.len(), EXPECTED_CONTENT_ENTITIES_PER_WINDOW);
-        app.world_mut().entity_mut(windows[1]).remove::<Window>();
-        app.world_mut().flush();
-
-        assert!(
-            removed_content
-                .into_iter()
-                .all(|entity| app.world().get_entity(entity).is_err())
-        );
-        for window in [windows[0], windows[2]] {
-            assert_window_content(app.world_mut(), window);
-        }
-    }
-
-    #[test]
-    fn accepted_reconstructed_windows_receive_content_without_registration_or_placement() {
-        for (window_key, title) in [
-            (WindowKey::Primary, PRIMARY_WINDOW_TITLE),
-            (
-                WindowKey::Managed(AUTOMATIC_WINDOW_KEY.into()),
-                AUTOMATIC_WINDOW_TITLE,
-            ),
+    fn startup_mode_selector_changes_only_the_managed_automatic_window() {
+        for startup_mode in [
+            ProbeStartupMode::Windowed,
+            ProbeStartupMode::Borderless,
+            ProbeStartupMode::Exclusive,
         ] {
-            let (mut app, monitors) = production_system_app();
-            app.add_systems(PreUpdate, (attach_primary_content, attach_managed_content));
-            app.world_mut()
-                .resource_mut::<AcceptedWindowKeys>()
-                .0
-                .insert(window_key.clone());
-            let reconstructed = app
+            let mut app = startup_spawn_app(startup_mode);
+            let automatic = managed_window_entity(&mut app, AUTOMATIC_WINDOW_KEY);
+            let application = managed_window_entity(&mut app, APPLICATION_WINDOW_KEY);
+            assert_eq!(
+                app.world()
+                    .get::<Window>(automatic)
+                    .map(|window| window.mode),
+                Some(startup_mode.automatic_window_mode(INITIAL_MONITOR_INDEX)),
+            );
+            assert_eq!(
+                app.world()
+                    .get::<Window>(application)
+                    .map(|window| window.mode),
+                Some(WindowMode::Windowed),
+            );
+            let mut controls = app
                 .world_mut()
-                .spawn((
-                    probe_window(title, WindowPosition::Automatic),
-                    OnMonitor(monitors.mismatched_entity),
-                    CurrentMonitor {
-                        monitor_info:          monitors.mismatched_monitor,
-                        effective_window_mode: WindowMode::Windowed,
-                    },
-                ))
-                .id();
-            match &window_key {
-                WindowKey::Primary => {
-                    app.world_mut()
-                        .entity_mut(reconstructed)
-                        .insert(PrimaryWindow);
-                },
-                WindowKey::Managed(name) => {
-                    app.world_mut()
-                        .entity_mut(reconstructed)
-                        .insert(ManagedWindow { name: name.clone() });
-                },
-            }
-
-            app.update();
-
-            assert!(
-                app.world()
-                    .get::<ProbeContentAttached>(reconstructed)
-                    .is_some()
-            );
-            assert_window_content(app.world_mut(), reconstructed);
-            assert!(app.world().get::<WindowRecovery>(reconstructed).is_none());
-            assert!(
-                app.world()
-                    .get::<ProbePlacementRequested>(reconstructed)
-                    .is_none()
-            );
-            assert!(matches!(
-                app.world()
-                    .get::<Window>(reconstructed)
-                    .map(|window| &window.position),
-                Some(WindowPosition::Automatic)
-            ));
-
-            app.update();
-
-            assert_window_content(app.world_mut(), reconstructed);
-            assert!(app.world().get::<WindowRecovery>(reconstructed).is_none());
-            assert!(
-                app.world()
-                    .get::<ProbePlacementRequested>(reconstructed)
-                    .is_none()
-            );
+                .query_filtered::<&Window, With<UnregisteredControl>>();
+            let control_modes: Vec<_> = controls
+                .iter(app.world())
+                .map(|window| window.mode)
+                .collect();
+            assert_eq!(control_modes, [WindowMode::Windowed]);
         }
+    }
+
+    #[test]
+    fn runtime_mode_keys_override_the_startup_selector_mode() {
+        let mut app = automatic_mode_app(None);
+        app.insert_resource(ProbeMonitorIndex(INITIAL_MONITOR_INDEX))
+            .insert_resource(ProbeStartupMode::Borderless)
+            .insert_resource(Platform::Windows)
+            .add_systems(Startup, spawn_probe_windows);
+        app.update();
+
+        let automatic = managed_window_entity(&mut app, AUTOMATIC_WINDOW_KEY);
+        assert_eq!(
+            app.world()
+                .get::<Window>(automatic)
+                .map(|window| window.mode),
+            Some(ProbeStartupMode::Borderless.automatic_window_mode(INITIAL_MONITOR_INDEX)),
+        );
+
+        app.world_mut()
+            .get_mut::<Window>(automatic)
+            .expect("managed automatic window should exist")
+            .focused = true;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<Window>(automatic)
+                .map(|window| window.mode),
+            Some(WindowMode::Windowed),
+        );
     }
 
     #[test]
@@ -1143,7 +998,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn keyboard_cancellation_targets_the_focused_managed_automatic_window_once() {
+    fn keyboard_cancellation_requires_shift_and_targets_the_focused_managed_window_once() {
         let mut app = automatic_mode_app(None);
         let automatic = app
             .world_mut()
@@ -1172,6 +1027,20 @@ pub(super) mod tests {
 
         app.update();
 
+        assert!(app.world().resource::<CancellationRequests>().0.is_empty());
+        assert!(
+            app.world()
+                .get::<AutomaticRecoveryCancelled>(automatic)
+                .is_none()
+        );
+
+        let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keyboard.release(KeyCode::KeyC);
+        keyboard.clear();
+        keyboard.press(KeyCode::ShiftLeft);
+        keyboard.press(KeyCode::KeyC);
+        app.update();
+
         assert_eq!(
             app.world().resource::<CancellationRequests>().0,
             [WindowKey::Managed(AUTOMATIC_WINDOW_KEY.into())],
@@ -1195,7 +1064,10 @@ pub(super) mod tests {
         );
 
         let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keyboard.release(KeyCode::ShiftLeft);
+        keyboard.release(KeyCode::KeyC);
         keyboard.clear();
+        keyboard.press(KeyCode::ShiftRight);
         keyboard.press(KeyCode::KeyC);
         app.update();
         assert_eq!(app.world().resource::<CancellationRequests>().0.len(), 1);
@@ -1220,6 +1092,10 @@ pub(super) mod tests {
             .world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyB);
+        smoke_app
+            .world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
         smoke_app
             .world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()

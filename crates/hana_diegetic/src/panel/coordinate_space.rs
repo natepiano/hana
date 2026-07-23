@@ -90,7 +90,9 @@ pub enum CoordinateSpace {
         height:        Sizing,
         /// Camera render order. Higher orders render on top. Default: `1`.
         camera_order:  isize,
-        /// Render layers for isolation from the scene camera.
+        /// Identifies panels that share an overlay view when their camera
+        /// order and target window also match. The overlay view receives a
+        /// private render layer so other windows cannot draw these panels.
         /// Default: `RenderLayers::layer(31)`.
         render_layers: RenderLayers,
         /// Window this panel renders into. Defaults to `WindowRef::Primary`.

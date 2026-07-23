@@ -19,8 +19,14 @@ pub(crate) use restore_attempt::reconcile_runtime_restore_attempts;
 pub(crate) use settle_state::check_restore_settling;
 pub(crate) use target_position::FullscreenRestoreState;
 pub(crate) use target_position::MonitorScaleStrategy;
+#[cfg(target_os = "macos")]
+pub(crate) use target_position::NativeFullscreenState;
 use target_position::ObservedScaleInputs;
-#[cfg(any(test, all(target_os = "linux", feature = "workaround-winit-4445")))]
+#[cfg(any(
+    test,
+    target_os = "macos",
+    all(target_os = "linux", feature = "workaround-winit-4445")
+))]
 pub(crate) use target_position::TargetPosition;
 pub(crate) use target_position::WindowRestoreState;
 pub(crate) use target_position::has_restoring_windows;
@@ -41,6 +47,10 @@ pub(crate) struct RestorePlugin;
 
 impl Plugin for RestorePlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(target_os = "macos")]
+        app.insert_non_send(crate::macos_tabbing_fix::NativeFullscreenObservations::default())
+            .add_observer(crate::macos_tabbing_fix::clear_fullscreen_observation);
+
         app.init_resource::<RestoreAttemptIds>()
             .init_resource::<ObservedScaleInputs>()
             .init_resource::<Time<Virtual>>()

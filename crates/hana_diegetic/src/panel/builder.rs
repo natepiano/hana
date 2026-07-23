@@ -517,7 +517,10 @@ impl DiegeticPanelBuilder<Screen, HasSize> {
         self
     }
 
-    /// Sets the render layers for camera isolation. Default: layer 31.
+    /// Chooses which screen-space panels share an overlay view. Panels with
+    /// the same layers, camera order, and target window share one view.
+    /// `hana_diegetic` assigns that view a private render layer so views for
+    /// other windows cannot draw these panels. Default: layer 31.
     #[must_use]
     pub fn render_layers(mut self, layers: RenderLayers) -> Self {
         if let CoordinateSpace::Screen { render_layers, .. } = &mut self.data.coordinate_space {

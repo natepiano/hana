@@ -2995,6 +2995,8 @@ mod tests {
 
     fn concurrent_scale_restores(scale_message_path: ScaleMessagePath) -> ConcurrentScaleRestores {
         let mut app = App::new();
+        #[cfg(target_os = "macos")]
+        app.insert_non_send(crate::macos_tabbing_fix::NativeFullscreenObservations::default());
         app.insert_resource(scale_message_path.platform())
             .init_resource::<InjectedWinitWindows>()
             .init_resource::<ObservedScaleInputs>()

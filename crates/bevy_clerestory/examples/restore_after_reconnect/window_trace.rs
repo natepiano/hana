@@ -12,6 +12,7 @@ use bevy::window::WindowMode;
 use bevy::winit::WINIT_WINDOWS;
 use bevy::winit::WinitMonitors;
 use bevy_clerestory::ManagedWindow;
+use bevy_clerestory::MonitorInfo;
 use bevy_clerestory::Monitors;
 use bevy_clerestory::WindowKey;
 
@@ -45,12 +46,47 @@ fn field(name: &str, value: impl std::fmt::Debug) -> (String, String) {
     (name.into(), format!("{value:?}"))
 }
 
-fn unmatched_native_monitor_fields(current_monitor_state: &str) -> Vec<(String, String)> {
-    vec![
-        field(FIELD_NATIVE_CURRENT_MONITOR_STATE, current_monitor_state),
-        field(FIELD_NATIVE_MATCHED_ENTITY, VALUE_UNRESOLVED),
-        field(FIELD_NATIVE_MATCHED_IDENTITY, VALUE_UNRESOLVED),
-    ]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum NativeMonitorState {
+    WindowUnavailable,
+    NoMonitorHandle,
+    HandleUnmatched,
+    Matched {
+        entity:  Entity,
+        monitor: MonitorInfo,
+    },
+}
+
+impl NativeMonitorState {
+    fn trace_fields(self) -> Vec<(String, String)> {
+        let (state, entity, identity) = match self {
+            Self::WindowUnavailable => (
+                VALUE_NATIVE_WINDOW_UNAVAILABLE,
+                VALUE_UNRESOLVED.into(),
+                VALUE_UNRESOLVED.into(),
+            ),
+            Self::NoMonitorHandle => (
+                VALUE_CURRENT_MONITOR_NO_HANDLE,
+                VALUE_UNRESOLVED.into(),
+                VALUE_UNRESOLVED.into(),
+            ),
+            Self::HandleUnmatched => (
+                VALUE_CURRENT_MONITOR_HANDLE_RETURNED,
+                VALUE_UNRESOLVED.into(),
+                VALUE_UNRESOLVED.into(),
+            ),
+            Self::Matched { entity, monitor } => (
+                VALUE_CURRENT_MONITOR_HANDLE_RETURNED,
+                format!("{entity:?}"),
+                format!("{:?}", monitor.identity),
+            ),
+        };
+        vec![
+            field(FIELD_NATIVE_CURRENT_MONITOR_STATE, state),
+            field(FIELD_NATIVE_MATCHED_ENTITY, entity),
+            field(FIELD_NATIVE_MATCHED_IDENTITY, identity),
+        ]
+    }
 }
 
 pub(super) fn window_key(
@@ -74,17 +110,17 @@ pub(super) fn window_key(
         .map_or_else(|| VALUE_UNBOUND.into(), |window_key| window_key.to_string())
 }
 
-pub(super) fn native_monitor_fields(
+pub(super) fn native_monitor_state(
     entity: Entity,
     monitors: Option<&Monitors>,
     winit_monitors: &WinitMonitors,
-) -> Vec<(String, String)> {
+) -> NativeMonitorState {
     WINIT_WINDOWS.with_borrow(|winit_windows| {
         let Some(winit_window) = winit_windows.get_window(entity) else {
-            return unmatched_native_monitor_fields(VALUE_NATIVE_WINDOW_UNAVAILABLE);
+            return NativeMonitorState::WindowUnavailable;
         };
         let Some(native_monitor) = winit_window.current_monitor() else {
-            return unmatched_native_monitor_fields(VALUE_CURRENT_MONITOR_NO_HANDLE);
+            return NativeMonitorState::NoMonitorHandle;
         };
 
         let matched = monitors.and_then(|monitors| {
@@ -94,27 +130,21 @@ pub(super) fn native_monitor_fields(
                     .is_some_and(|cached_handle| cached_handle == native_monitor)
             })
         });
-        vec![
-            field(
-                FIELD_NATIVE_CURRENT_MONITOR_STATE,
-                VALUE_CURRENT_MONITOR_HANDLE_RETURNED,
-            ),
-            field(
-                FIELD_NATIVE_MATCHED_ENTITY,
-                matched.map_or_else(
-                    || VALUE_UNRESOLVED.into(),
-                    |monitor| format!("{:?}", monitor.entity),
-                ),
-            ),
-            field(
-                FIELD_NATIVE_MATCHED_IDENTITY,
-                matched.map_or_else(
-                    || VALUE_UNRESOLVED.into(),
-                    |monitor| format!("{:?}", monitor.monitor_info.identity),
-                ),
-            ),
-        ]
+        matched.map_or(NativeMonitorState::HandleUnmatched, |monitor| {
+            NativeMonitorState::Matched {
+                entity:  monitor.entity,
+                monitor: *monitor.monitor_info,
+            }
+        })
     })
+}
+
+pub(super) fn native_monitor_fields(
+    entity: Entity,
+    monitors: Option<&Monitors>,
+    winit_monitors: &WinitMonitors,
+) -> Vec<(String, String)> {
+    native_monitor_state(entity, monitors, winit_monitors).trace_fields()
 }
 
 pub(super) fn trace_os_window_events(

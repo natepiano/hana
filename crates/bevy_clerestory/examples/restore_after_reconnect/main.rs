@@ -5,6 +5,7 @@ mod lifecycle;
 mod recovery_trace;
 mod setup;
 mod trace;
+mod window_panel;
 mod window_trace;
 
 use std::env::VarError;
@@ -21,12 +22,13 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use bevy::window::MonitorSelection;
+use bevy::window::VideoModeSelection;
+use bevy::window::WindowMode;
 use bevy::window::WindowPosition;
 use bevy::window::WindowResolution;
 use bevy_clerestory::MonitorConnected;
 use bevy_clerestory::MonitorDisconnected;
 use bevy_clerestory::MonitorTopologyRevision;
-use bevy_clerestory::Platform;
 use bevy_clerestory::WindowManagerPlugin;
 use constants::DEFAULT_EXTERNAL_MONITOR_INDEX;
 use constants::EXIT_AFTER_FRAME_ENVIRONMENT_VARIABLE;
@@ -35,6 +37,10 @@ use constants::PERSISTENCE_FILE_PREFIX;
 use constants::PRIMARY_WINDOW_TITLE;
 use constants::PROBE_WINDOW_HEIGHT;
 use constants::PROBE_WINDOW_WIDTH;
+use constants::STARTUP_MODE_BORDERLESS;
+use constants::STARTUP_MODE_ENVIRONMENT_VARIABLE;
+use constants::STARTUP_MODE_EXCLUSIVE;
+use constants::STARTUP_MODE_WINDOWED;
 use trace::ProbeTrace;
 
 struct HotplugProbePlugin;
@@ -44,6 +50,8 @@ impl Plugin for HotplugProbePlugin {
         app.init_resource::<setup::AcceptedWindowKeys>()
             .init_resource::<recovery_trace::ApplicationRecoveryCycles>()
             .init_resource::<recovery_trace::PreUnplugReadiness>()
+            .init_resource::<window_panel::ProbePanelMaterial>()
+            .init_resource::<window_panel::ProbeTarget>()
             .init_resource::<window_trace::WindowBindings>()
             .init_resource::<window_trace::WindowSnapshots>()
             .add_observer(lifecycle::on_primary_window_added)
@@ -53,7 +61,7 @@ impl Plugin for HotplugProbePlugin {
             .add_observer(lifecycle::on_window_added)
             .add_observer(lifecycle::on_window_removed)
             .add_observer(lifecycle::on_window_despawned)
-            .add_observer(setup::remove_window_content)
+            .add_observer(window_panel::remove_window_clear_camera)
             .add_observer(lifecycle::on_monitor_added)
             .add_observer(lifecycle::on_monitor_removed)
             .add_observer(lifecycle::on_monitor_despawned)
@@ -74,13 +82,17 @@ impl Plugin for HotplugProbePlugin {
             .add_observer(recovery_trace::prepare_application_window_restore)
             .add_systems(
                 Startup,
-                (setup::spawn_probe_windows, setup::trace_probe_session).chain(),
+                (
+                    window_panel::spawn_transparency_camera,
+                    setup::spawn_probe_windows,
+                    setup::trace_probe_session,
+                )
+                    .chain(),
             )
             .add_systems(
                 PreUpdate,
                 (
-                    setup::attach_primary_content,
-                    setup::attach_managed_content,
+                    window_panel::attach_window_content,
                     recovery_trace::request_application_window_restore,
                 )
                     .chain(),
@@ -104,13 +116,56 @@ impl Plugin for HotplugProbePlugin {
                 )
                     .chain_ignore_deferred(),
             )
-            .add_systems(PostUpdate, window_trace::trace_window_component_changes)
+            .add_systems(
+                PostUpdate,
+                (
+                    window_trace::trace_window_component_changes,
+                    window_panel::refresh_window_panels,
+                )
+                    .chain(),
+            )
             .add_systems(Last, setup::exit_after_smoke_frame);
     }
 }
 
 #[derive(Resource)]
 struct ProbeMonitorIndex(usize);
+
+/// Deterministic initial `WindowMode` for the managed automatic window,
+/// selected once at launch through `CLERESTORY_PROBE_STARTUP_MODE`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Resource)]
+enum ProbeStartupMode {
+    Windowed,
+    Borderless,
+    Exclusive,
+}
+
+impl ProbeStartupMode {
+    /// Initial mode for the managed automatic window. Both fullscreen modes
+    /// target the selected probe monitor index; exclusive fullscreen keeps the
+    /// monitor's current video mode.
+    const fn automatic_window_mode(self, monitor_index: usize) -> WindowMode {
+        match self {
+            Self::Windowed => WindowMode::Windowed,
+            Self::Borderless => {
+                WindowMode::BorderlessFullscreen(MonitorSelection::Index(monitor_index))
+            },
+            Self::Exclusive => WindowMode::Fullscreen(
+                MonitorSelection::Index(monitor_index),
+                VideoModeSelection::Current,
+            ),
+        }
+    }
+
+    /// Documented `CLERESTORY_PROBE_STARTUP_MODE` spelling for trace records.
+    const fn selector(self) -> &'static str {
+        match self {
+            Self::Windowed => STARTUP_MODE_WINDOWED,
+            Self::Borderless => STARTUP_MODE_BORDERLESS,
+            Self::Exclusive => STARTUP_MODE_EXCLUSIVE,
+        }
+    }
+}
 
 #[derive(Resource)]
 struct SmokeExitFrame(u32);
@@ -140,6 +195,25 @@ fn selected_monitor_index() -> std::io::Result<usize> {
     )
 }
 
+fn parse_startup_mode(value: Option<&str>) -> std::io::Result<ProbeStartupMode> {
+    match value {
+        None | Some(STARTUP_MODE_WINDOWED) => Ok(ProbeStartupMode::Windowed),
+        Some(STARTUP_MODE_BORDERLESS) => Ok(ProbeStartupMode::Borderless),
+        Some(STARTUP_MODE_EXCLUSIVE) => Ok(ProbeStartupMode::Exclusive),
+        Some(other) => Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!(
+                "invalid {STARTUP_MODE_ENVIRONMENT_VARIABLE}: {other:?} (expected \
+                 {STARTUP_MODE_WINDOWED}, {STARTUP_MODE_BORDERLESS}, or {STARTUP_MODE_EXCLUSIVE})"
+            ),
+        )),
+    }
+}
+
+fn selected_startup_mode() -> std::io::Result<ProbeStartupMode> {
+    parse_startup_mode(optional_environment_value(STARTUP_MODE_ENVIRONMENT_VARIABLE)?.as_deref())
+}
+
 fn persistence_path() -> PathBuf {
     std::env::temp_dir().join(format!("{PERSISTENCE_FILE_PREFIX}-{}.ron", id()))
 }
@@ -152,14 +226,6 @@ fn fresh_persistence_path() -> std::io::Result<PathBuf> {
         Err(error) => return Err(error),
     }
     Ok(path)
-}
-
-const fn selected_window_position(platform: Platform, monitor_index: usize) -> WindowPosition {
-    if platform.position_available() {
-        WindowPosition::Centered(MonitorSelection::Index(monitor_index))
-    } else {
-        WindowPosition::Automatic
-    }
 }
 
 fn smoke_exit_frame() -> std::io::Result<Option<u32>> {
@@ -177,11 +243,13 @@ fn smoke_exit_frame() -> std::io::Result<Option<u32>> {
 
 fn main() -> std::io::Result<()> {
     let monitor_index = selected_monitor_index()?;
+    let startup_mode = selected_startup_mode()?;
     let smoke_exit_frame = smoke_exit_frame()?;
     let persistence_path = fresh_persistence_path()?;
     let mut app = App::new();
     app.insert_resource(ProbeTrace::default())
         .insert_resource(ProbeMonitorIndex(monitor_index))
+        .insert_resource(startup_mode)
         .add_plugins(HotplugProbePlugin)
         .add_plugins(
             DefaultPlugins
@@ -200,10 +268,88 @@ fn main() -> std::io::Result<()> {
                     ..default()
                 }),
         )
+        .add_plugins(hana_diegetic::DiegeticUiPlugin)
         .add_plugins(WindowManagerPlugin::with_path(persistence_path));
     if let Some(frame) = smoke_exit_frame {
         app.insert_resource(SmokeExitFrame(frame));
     }
     app.run();
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
+mod tests {
+    use super::*;
+
+    const SELECTED_STARTUP_MONITOR_INDEX: usize = 2;
+
+    #[test]
+    fn startup_mode_selector_parses_each_documented_value_and_defaults_to_windowed() {
+        assert_eq!(
+            parse_startup_mode(None).expect("absent selector should default"),
+            ProbeStartupMode::Windowed,
+        );
+        assert_eq!(
+            parse_startup_mode(Some(STARTUP_MODE_WINDOWED)).expect("windowed should parse"),
+            ProbeStartupMode::Windowed,
+        );
+        assert_eq!(
+            parse_startup_mode(Some(STARTUP_MODE_BORDERLESS)).expect("borderless should parse"),
+            ProbeStartupMode::Borderless,
+        );
+        assert_eq!(
+            parse_startup_mode(Some(STARTUP_MODE_EXCLUSIVE)).expect("exclusive should parse"),
+            ProbeStartupMode::Exclusive,
+        );
+    }
+
+    #[test]
+    fn startup_mode_selector_rejects_unknown_values_naming_the_variable() {
+        let error = parse_startup_mode(Some("fullscreen"))
+            .expect_err("undocumented selector value should be rejected");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(
+            error
+                .to_string()
+                .contains(STARTUP_MODE_ENVIRONMENT_VARIABLE)
+        );
+    }
+
+    #[test]
+    fn startup_mode_trace_spelling_matches_the_documented_selector_values() {
+        assert_eq!(ProbeStartupMode::Windowed.selector(), STARTUP_MODE_WINDOWED);
+        assert_eq!(
+            ProbeStartupMode::Borderless.selector(),
+            STARTUP_MODE_BORDERLESS
+        );
+        assert_eq!(
+            ProbeStartupMode::Exclusive.selector(),
+            STARTUP_MODE_EXCLUSIVE
+        );
+    }
+
+    #[test]
+    fn startup_mode_fullscreen_modes_target_the_selected_monitor_index() {
+        assert_eq!(
+            ProbeStartupMode::Windowed.automatic_window_mode(SELECTED_STARTUP_MONITOR_INDEX),
+            WindowMode::Windowed,
+        );
+        assert_eq!(
+            ProbeStartupMode::Borderless.automatic_window_mode(SELECTED_STARTUP_MONITOR_INDEX),
+            WindowMode::BorderlessFullscreen(MonitorSelection::Index(
+                SELECTED_STARTUP_MONITOR_INDEX
+            )),
+        );
+        assert_eq!(
+            ProbeStartupMode::Exclusive.automatic_window_mode(SELECTED_STARTUP_MONITOR_INDEX),
+            WindowMode::Fullscreen(
+                MonitorSelection::Index(SELECTED_STARTUP_MONITOR_INDEX),
+                VideoModeSelection::Current,
+            ),
+        );
+    }
 }

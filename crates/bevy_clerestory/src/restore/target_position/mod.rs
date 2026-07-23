@@ -16,6 +16,7 @@ pub(crate) use monitor::resolve_target_monitor_and_position;
 pub(crate) use run_conditions::has_restoring_windows;
 pub(crate) use strategy::FullscreenRestoreState;
 pub(crate) use strategy::MonitorScaleStrategy;
+pub(crate) use strategy::NativeFullscreenState;
 pub(crate) use strategy::WindowRestoreState;
 pub(crate) use target::PreparedWindowPosition;
 pub(crate) use target::RestoreDiagnostics;
