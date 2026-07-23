@@ -2154,7 +2154,7 @@ policies while retaining its causal diagnostics.
   return behavior.
 - For automatic return, verify that target reconnect returns an eligible window
   despite fallback move, resize, or mode changes. Those changes never replace
-  the registered target. The example's `C` key explicitly triggers
+  the registered target. The example's `Shift+C` shortcut explicitly triggers
   `CancelWindowRecovery` for the focused managed automatic window and is the
   only second-cycle action that keeps it on fallback. If the OS moves a fallback
   window during the same update in which an exact return is already queued,
@@ -2273,7 +2273,7 @@ the accepted recovery generation remains unchanged.
 - The initial design inferred that a move, resize, or mode change after a short
   stable period meant the fallback placement should become the new target.
   The final behavior requires `CancelWindowRecovery` instead; the example maps
-  `C` to that request for the managed automatic window.
+  `Shift+C` to that request for the managed automatic window.
 - The unregistered control confirms its initial placement through public
   `OnMonitor` and installed `MonitorInfo`; it cannot rely on Clerestory's
   `CurrentMonitor`, which exists only for registered canonical windows.
@@ -2456,7 +2456,7 @@ unchanged, and event-loop doctests compile without running an application loop.
   concurrent full-workspace gate.
 - No user decision or phase-order change was needed.
 
-### Phase 14 — Record the macOS physical matrix  · status: todo
+### Phase 14 — Record the macOS physical matrix  · status: done (`c88d75ca`)
 
 #### Work Order
 
@@ -2501,7 +2501,7 @@ completed example.
   return. Its changed front-to-back order is permitted, not a failure.
 - Before adding new matrix rows, extend the shared example with a documented,
   deterministic startup mode selector for windowed, borderless, and exclusive
-  modes. Keep `B`, `W`, and `C` for runtime mode/cancellation checks. Test the
+  modes. Keep `B`, `W`, and `Shift+C` for runtime mode/cancellation checks. Test the
   selector and controls without physical monitor manipulation so macOS,
   Windows, X11, and Wayland consume one finalized harness.
 - Cover same-panel reconnect; same panel through another port/dock; a different
@@ -2584,6 +2584,62 @@ controls have automated coverage. Every row names its tested source revision;
 any source correction has a regression, green Clerestory Build/Test/Lint gates,
 and revalidated affected earlier rows.
 
+#### Retrospective
+
+**What worked:**
+
+- One shared four-window probe covered automatic return, application-controlled
+  return, cancellation, unregistered-window behavior, fullscreen modes, and
+  cross-DPI movement while retaining a trace for each window and monitor.
+- The macOS matrix recorded every scenario as a physical pass or an explicit
+  setup/hardware limit. The final gates passed 26 example tests, 194 library
+  tests, formatting, and lint.
+
+**What deviated from the plan:**
+
+- Physical borderless testing showed that a runtime fullscreen request could
+  update Bevy's `Window` before AppKit finished the native transition. The
+  macOS restore path now waits for AppKit's completed exit/enter notifications,
+  moves the window while it is windowed, and makes the returned native window
+  key and front after requesting borderless fullscreen.
+- The probe needed a centered metadata panel in every window. That exposed
+  cross-window drawing in `hana_diegetic`; each screen-space view now receives
+  a private render layer, and the example keeps one camera per window with
+  stable transparency.
+- A safe, observable zero-display run was unavailable on this MacBook. The row
+  is recorded as not run rather than inferred from lid-close or external-
+  display tests.
+
+**Surprises:**
+
+- Unplugging and reconnecting within about two seconds still produced separate
+  macOS disconnect and reconnect revisions about 5.6 seconds apart. The rapid
+  row passed without exercising the automated coalesced-revision branch.
+- A borderless fallback on the built-in display may leave the menu bar visible;
+  the returned Dell presentation, not fallback menu-bar coverage, is the
+  graded behavior.
+
+**Implications for remaining phases:**
+
+- Windows, X11, and Wayland use the same startup selector, keyboard controls,
+  trace, and per-window readout. A shared harness or panel correction requires
+  explicit revalidation of affected earlier-platform rows.
+- Rapid-hotplug rows record the revisions actually delivered by each OS; they
+  do not claim notification coalescing unless it occurs.
+- Hardware and setup limits are recorded directly. They are never inferred
+  from a different physical scenario.
+
+### Phase 14 Review
+
+- Phases 15–17 now name the per-window readout as part of the shared probe and
+  require rapid-hotplug reports to distinguish the operator's timing from the
+  operating system's delivered revisions.
+- Phases 15–17 now allow both unavailable hardware and unavailable safe setups
+  to be recorded without inference.
+- Phase 18 retains the shared probe and `hana_diegetic` view-isolation changes
+  in its final workspace gate. No user decision or phase-order change was
+  needed.
+
 ### Phase 15 — Record the Windows physical matrix  · status: todo
 
 #### Work Order
@@ -2597,6 +2653,10 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
   dock/port, duplicate, reorder, zero-display, reconnect-order, rapid-hotplug,
   mode, and cross-DPI scenarios as Phase 14. Use the finalized startup/mode
   controls from Phase 14 rather than creating a Windows-only harness.
+- Use the shared per-window metadata panel and trace to record each window's
+  key, recovery policy, original target, current monitor, mode, and placement.
+  For rapid hotplug, record the operator's action timing separately from the
+  revisions Windows actually delivers; do not claim coalescing unless observed.
 - Confirm verified evidence identifies a physical panel rather than device name
   or adapter and remains unverified when descriptor/serial evidence is missing
   or duplicated.
@@ -2631,6 +2691,9 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   shared selector/control configuration reference under the same correction
   rule.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/window_panel.rs` —
+  shared per-window evidence readout; edit only for an observed cross-platform
+  probe defect and revalidate affected macOS rows.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Windows
   rows/evidence.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — Win32 display-path
@@ -2654,12 +2717,15 @@ evidence do not substitute for a fresh Windows row on the tested source.
 `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
 `Monitors::by_index` matches the stored cached-winit enumeration index, and
 `Monitors::first()` is not guaranteed to be primary. Continuity uses verified
-`MonitorId`, never the selector, entity, index, or enumeration order.
+`MonitorId`, never the selector, entity, index, or enumeration order. The
+shared panel uses one isolated screen-space view per target window; do not add
+a Windows-only camera or readout.
 
 **Acceptance gate:** Every applicable Windows scenario has an evidence row and
-expected/actual result and tested source revision; unavailable hardware is
-explicit. Any correction has a regression test, green Windows Clerestory
-Build/Test/Lint gates, and revalidated affected earlier-platform rows.
+expected/actual result and tested source revision; unavailable hardware or a
+safe observable setup is explicit. Any correction has a regression test, green
+Windows Clerestory Build/Test/Lint gates, and revalidated affected earlier-
+platform rows.
 
 ### Phase 16 — Record the X11 physical matrix  · status: todo
 
@@ -2673,6 +2739,10 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 - Execute the shared script in an X11 session and record the core matrix. Use
   the finalized startup/mode controls from Phase 14 rather than creating an
   X11-only harness.
+- Use the shared per-window metadata panel and trace to record each window's
+  key, recovery policy, original target, current monitor, mode, and placement.
+  For rapid hotplug, record the operator's action timing separately from the
+  revisions X11 actually delivers; do not claim coalescing unless observed.
 - Confirm a RandR CRTC/connector alone never verifies a physical panel; require
   stable descriptor/serial evidence and preserve permanent duplicate ambiguity.
 - Compare `MonitorId` only across entity lifetimes in one running `App`; record
@@ -2710,6 +2780,9 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   shared selector/control configuration reference under the same correction
   rule.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/window_panel.rs` —
+  shared per-window evidence readout; edit only for an observed cross-platform
+  probe defect and revalidate affected macOS and Windows rows.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — X11
   rows/evidence.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — X11 RandR/EDID
@@ -2733,13 +2806,15 @@ automated startup evidence do not substitute for a fresh X11 row on the tested
 source. `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
 `Monitors::by_index` matches the stored cached-winit enumeration index, and
 `Monitors::first()` is not guaranteed to be primary. Continuity uses verified
-`MonitorId`, never the selector, entity, index, or enumeration order.
+`MonitorId`, never the selector, entity, index, or enumeration order. The
+shared panel uses one isolated screen-space view per target window; do not add
+an X11-only camera or readout.
 
 **Acceptance gate:** Every applicable X11 scenario has an evidence row and
-expected/actual result and tested source revision; unavailable hardware is
-explicit. Placement/fullscreen rows demonstrate compensation order. Any
-correction has a regression, green X11 Clerestory Build/Test/Lint gates, and
-revalidated affected earlier-platform rows.
+expected/actual result and tested source revision; unavailable hardware or a
+safe observable setup is explicit. Placement/fullscreen rows demonstrate
+compensation order. Any correction has a regression, green X11 Clerestory
+Build/Test/Lint gates, and revalidated affected earlier-platform rows.
 
 ### Phase 17 — Record the Wayland physical matrix  · status: todo
 
@@ -2753,6 +2828,10 @@ placement or unsupported exclusive fullscreen.
 - Execute the shared script in the available Wayland compositor(s) and record
   the core identity/lifetime/reconnect matrix using the finalized startup/mode
   controls from Phase 14.
+- Use the shared per-window metadata panel and trace to record each window's
+  key, recovery policy, original target, current monitor, mode, and placement.
+  For rapid hotplug, record the operator's action timing separately from the
+  revisions Wayland actually delivers; do not claim coalescing unless observed.
 - A `wl_output` object ID alone remains `Unverified`. Record whether the
   compositor exposes equivalent stable physical-panel evidence; do not infer
   continuity from output name, position, or index.
@@ -2792,6 +2871,9 @@ placement or unsupported exclusive fullscreen.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   shared selector/control configuration reference under the same correction
   rule.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/window_panel.rs` —
+  shared per-window evidence readout; edit only for an observed cross-platform
+  probe defect and revalidate affected earlier-platform rows.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Wayland
   rows/evidence.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — compositor evidence
@@ -2816,14 +2898,15 @@ for a fresh Wayland row on the tested source. `CLERESTORY_PROBE_MONITOR_INDEX`
 is only a run-local selector: `Monitors::by_index` matches the stored
 cached-winit enumeration index, and `Monitors::first()` is not guaranteed to
 be primary. Continuity uses verified `MonitorId`, never the selector, entity,
-index, or enumeration order.
+index, or enumeration order. The shared panel uses one isolated screen-space
+view per target window; do not add a Wayland-only camera or readout.
 
 **Acceptance gate:** Every applicable Wayland scenario has an evidence row and
 expected/actual result and tested source revision; compositor and
-unavailable-hardware limits are explicit. Windowed, borderless, and exclusive
-modes have separate results. Any correction has a regression, green Wayland
-Clerestory Build/Test/Lint gates, and revalidated affected earlier-platform
-rows.
+unavailable hardware/setup limits are explicit. Windowed, borderless, and
+exclusive modes have separate results. Any correction has a regression, green
+Wayland Clerestory Build/Test/Lint gates, and revalidated affected earlier-
+platform rows.
 
 ### Phase 18 — Release bevy_clerestory  · status: todo
 
@@ -2878,8 +2961,10 @@ reopens the affected Phase 13 gates and physical rows. Phase 11's README
 behavior and doctest contracts remain part of the released public API
 documentation. The `recovery-accepted` trace test intentionally gives only its
 test `App` a `SingleThreadedExecutor`: `with_default` is thread-local, while
-production scheduling remains unchanged. Hana adoption begins only after this
-release is independently verified.
+production scheduling remains unchanged. Retain the shared probe's per-window
+metadata panels and `hana_diegetic` private screen-space view layers in the
+final workspace gate. Hana adoption begins only after this release is
+independently verified.
 
 **Acceptance gate:** The full `release` workflow completes for
 the exact selected `bevy_clerestory` version (expected `0.2.0`), the published

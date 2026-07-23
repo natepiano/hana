@@ -36,7 +36,8 @@ pub(crate) enum WindowRestoreState {
 ///   apply fullscreen mode as a fresh change.
 /// - **Linux Wayland**: Apply mode directly (no position available).
 /// - **Windows (DX12)**: Wait for surface creation before applying fullscreen (see <https://github.com/rust-windowing/winit/issues/3124>).
-/// - **macOS**: Apply mode directly.
+/// - **macOS**: Leave the current fullscreen Space, move the windowed window to the target, then
+///   enter fullscreen there.
 ///
 /// On X11, `FullscreenRestoreState::MoveToMonitor` must complete before
 /// `FullscreenRestoreState::ApplyMode`; setting fullscreen mode in the same
@@ -44,6 +45,10 @@ pub(crate) enum WindowRestoreState {
 /// revert it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 pub(crate) enum FullscreenRestoreState {
+    /// Ask `AppKit` to leave the current fullscreen Space before changing monitor.
+    LeaveFullscreen,
+    /// Keep moving the windowed macOS window until it reaches the target monitor.
+    MoveWindowedToTarget,
     /// Move window to target monitor position. Skipped on Wayland (no position).
     MoveToMonitor,
     /// Wait for compositor to process the position change (1 frame).
@@ -52,6 +57,18 @@ pub(crate) enum FullscreenRestoreState {
     WaitForSurface,
     /// Apply the fullscreen mode.
     ApplyMode,
+    /// Make the macOS window key after winit sends the fullscreen request.
+    ActivateWindow,
+    /// Wait until `AppKit` reports both fullscreen presentation and the target monitor.
+    WaitForTarget,
+}
+
+/// Last native fullscreen transition that the platform confirmed as complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeFullscreenState {
+    Unavailable,
+    Windowed,
+    Fullscreen,
 }
 
 /// Restore strategy based on scale factor relationship between launch and target monitors.

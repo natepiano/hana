@@ -14,6 +14,7 @@ use bevy_kana::ToU32;
 
 use super::strategy::FullscreenRestoreState;
 use super::strategy::MonitorScaleStrategy;
+use super::strategy::NativeFullscreenState;
 use super::strategy::WindowRestoreState;
 use super::target::TargetPosition;
 use crate::Platform;
@@ -23,6 +24,7 @@ use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
 use crate::constants::SCALE_FACTOR_EPSILON;
 use crate::constants::SETTLE_STABILITY_SECS;
 use crate::constants::SETTLE_TIMEOUT_SECS;
+use crate::monitors::CurrentMonitor;
 use crate::monitors::MonitorTopologyRevision;
 use crate::monitors::Monitors;
 use crate::persistence::SavedWindowMode;
@@ -310,13 +312,51 @@ fn begin_cross_dpi_restore(
 }
 
 fn advance_fullscreen_restore(
+    #[cfg(target_os = "macos")] entity: Entity,
+    #[cfg(not(target_os = "macos"))] _entity: Entity,
     target_position: &mut TargetPosition,
     window: &mut Window,
+    current_monitor: Option<&CurrentMonitor>,
+    native_fullscreen: NativeFullscreenState,
 ) -> RestoreStatus {
     let Some(fullscreen_restore_state) = target_position.fullscreen_restore_state else {
         return RestoreStatus::Complete;
     };
     match fullscreen_restore_state {
+        FullscreenRestoreState::LeaveFullscreen => {
+            debug!("[restore_windows] macOS fullscreen: leaving the current fullscreen Space");
+            window.mode = WindowMode::Windowed;
+            target_position.fullscreen_restore_state =
+                Some(FullscreenRestoreState::MoveWindowedToTarget);
+            RestoreStatus::Waiting
+        },
+        FullscreenRestoreState::MoveWindowedToTarget => {
+            if native_fullscreen != NativeFullscreenState::Windowed {
+                debug!(
+                    "[restore_windows] macOS fullscreen: waiting for AppKit to finish leaving fullscreen"
+                );
+                return RestoreStatus::Waiting;
+            }
+            let target_monitor_reached = current_monitor.is_some_and(|current_monitor| {
+                current_monitor.monitor_info.index == target_position.monitor_index
+            });
+            if target_monitor_reached {
+                debug!(
+                    "[restore_windows] macOS fullscreen: windowed window reached target monitor {}",
+                    target_position.monitor_index
+                );
+                target_position.fullscreen_restore_state = Some(FullscreenRestoreState::ApplyMode);
+            } else {
+                debug!(
+                    "[restore_windows] macOS fullscreen: moving windowed window to target monitor {}",
+                    target_position.monitor_index
+                );
+                window.position = WindowPosition::Centered(MonitorSelection::Index(
+                    target_position.monitor_index,
+                ));
+            }
+            RestoreStatus::Waiting
+        },
         FullscreenRestoreState::MoveToMonitor => {
             if let Some(position) = target_position.physical_position {
                 debug!("[restore_windows] Fullscreen MoveToMonitor: position={position:?}");
@@ -336,6 +376,31 @@ fn advance_fullscreen_restore(
             RestoreStatus::Waiting
         },
         FullscreenRestoreState::ApplyMode => RestoreStatus::Complete,
+        FullscreenRestoreState::ActivateWindow => {
+            #[cfg(target_os = "macos")]
+            crate::macos_tabbing_fix::activate_fullscreen_window(entity);
+            debug!("[restore_windows] macOS fullscreen: activated window after mode request");
+            target_position.fullscreen_restore_state = Some(FullscreenRestoreState::WaitForTarget);
+            RestoreStatus::Waiting
+        },
+        FullscreenRestoreState::WaitForTarget => {
+            let target_monitor_reached = current_monitor.is_some_and(|current_monitor| {
+                current_monitor.monitor_info.index == target_position.monitor_index
+            });
+            if native_fullscreen != NativeFullscreenState::Fullscreen || !target_monitor_reached {
+                debug!(
+                    "[restore_windows] macOS fullscreen: waiting for fullscreen on target monitor {}",
+                    target_position.monitor_index
+                );
+                return RestoreStatus::Waiting;
+            }
+            debug!(
+                "[restore_windows] macOS fullscreen: AppKit reported fullscreen on target monitor {}",
+                target_position.monitor_index
+            );
+            target_position.fullscreen_restore_state = None;
+            RestoreStatus::Complete
+        },
     }
 }
 
@@ -347,10 +412,14 @@ pub(crate) fn restore_windows(
             &RestorePreparation,
             &mut TargetPosition,
             &mut Window,
+            Option<&CurrentMonitor>,
         ),
         With<X11FrameCompensated>,
     >,
     _: NonSendMarker,
+    #[cfg(target_os = "macos")] mut fullscreen_observations: NonSendMut<
+        crate::macos_tabbing_fix::NativeFullscreenObservations,
+    >,
     platform: Res<Platform>,
     scale_inputs: Res<ObservedScaleInputs>,
     registrations: Option<Res<RecoveryRegistrations>>,
@@ -358,7 +427,9 @@ pub(crate) fn restore_windows(
     revision: Option<Res<MonitorTopologyRevision>>,
     #[cfg(test)] injected_windows: Option<Res<InjectedWinitWindows>>,
 ) {
-    for (entity, restore_preparation, mut target_position, mut window) in &mut windows {
+    for (entity, restore_preparation, mut target_position, mut window, current_monitor) in
+        &mut windows
+    {
         if let (Some(restore_attempt), Some(registrations), Some(monitors), Some(revision)) = (
             restore_preparation.recovery_attempt(),
             &registrations,
@@ -378,6 +449,17 @@ pub(crate) fn restore_windows(
         let native_window_exists = native_window_exists(entity, injected_windows.as_deref());
         #[cfg(not(test))]
         let native_window_exists = native_window_exists(entity);
+        #[cfg(target_os = "macos")]
+        let native_fullscreen = if native_window_exists
+            && *platform == Platform::MacOs
+            && target_position.saved_window_mode.is_fullscreen()
+        {
+            fullscreen_observations.observe(entity)
+        } else {
+            NativeFullscreenState::Unavailable
+        };
+        #[cfg(not(target_os = "macos"))]
+        let native_fullscreen = NativeFullscreenState::Unavailable;
         restore_window(
             entity,
             restore_preparation,
@@ -386,7 +468,13 @@ pub(crate) fn restore_windows(
             &scale_inputs,
             *platform,
             native_window_exists,
+            current_monitor,
+            native_fullscreen,
         );
+        #[cfg(target_os = "macos")]
+        if target_position.settle_state.is_some() {
+            fullscreen_observations.stop(entity);
+        }
     }
 }
 
@@ -398,6 +486,8 @@ fn restore_window(
     scale_inputs: &ObservedScaleInputs,
     platform: Platform,
     native_window_exists: bool,
+    current_monitor: Option<&CurrentMonitor>,
+    native_fullscreen: NativeFullscreenState,
 ) {
     if target_position.settle_state.is_some() {
         return;
@@ -410,11 +500,30 @@ fn restore_window(
 
     correct_initial_starting_scale(entity, target_position, window, platform);
 
-    if matches!(
-        target_position.monitor_scale_strategy,
-        MonitorScaleStrategy::HigherToLower(WindowRestoreState::NeedInitialMove)
-            | MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::NeedInitialMove)
-    ) {
+    let macos_fullscreen =
+        platform == Platform::MacOs && target_position.saved_window_mode.is_fullscreen();
+    if macos_fullscreen
+        && matches!(
+            advance_fullscreen_restore(
+                entity,
+                target_position,
+                window,
+                current_monitor,
+                native_fullscreen,
+            ),
+            RestoreStatus::Waiting
+        )
+    {
+        return;
+    }
+
+    if !macos_fullscreen
+        && matches!(
+            target_position.monitor_scale_strategy,
+            MonitorScaleStrategy::HigherToLower(WindowRestoreState::NeedInitialMove)
+                | MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::NeedInitialMove)
+        )
+    {
         begin_cross_dpi_restore(target_position, window, restore_preparation.attempt_id());
         return;
     }
@@ -455,18 +564,33 @@ fn restore_window(
         _ => {},
     }
 
-    if matches!(
-        advance_fullscreen_restore(target_position, window),
-        RestoreStatus::Waiting
-    ) {
+    if !macos_fullscreen
+        && matches!(
+            advance_fullscreen_restore(
+                entity,
+                target_position,
+                window,
+                current_monitor,
+                native_fullscreen,
+            ),
+            RestoreStatus::Waiting
+        )
+    {
         return;
     }
 
-    if matches!(
-        try_apply_restore(target_position, window, platform),
-        RestoreStatus::Complete
-    ) && target_position.settle_state.is_none()
-    {
+    let applying_macos_fullscreen = macos_fullscreen
+        && target_position.fullscreen_restore_state == Some(FullscreenRestoreState::ApplyMode);
+    let restore_status = try_apply_restore(target_position, window, platform);
+    if matches!(restore_status, RestoreStatus::Waiting) {
+        return;
+    }
+    if applying_macos_fullscreen {
+        target_position.fullscreen_restore_state = Some(FullscreenRestoreState::ActivateWindow);
+        return;
+    }
+
+    if target_position.settle_state.is_none() {
         let settle_stability_ms = SETTLE_STABILITY_SECS * MILLIS_PER_SECOND;
         debug!(
             "[restore_windows] Restore applied, starting settle ({settle_stability_ms:.0}ms stability / {SETTLE_TIMEOUT_SECS:.0}s timeout)"
@@ -641,4 +765,173 @@ fn try_apply_restore(
 
     window.visible = true;
     RestoreStatus::Complete
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
+mod tests {
+    use bevy::window::MonitorSelection;
+
+    use super::*;
+    use crate::WindowKey;
+    use crate::monitors::MonitorIdentity;
+
+    const FALLBACK_MONITOR_INDEX: usize = 0;
+    const TARGET_MONITOR_INDEX: usize = 2;
+
+    const fn current_monitor(index: usize, scale: f64) -> CurrentMonitor {
+        CurrentMonitor {
+            monitor_info:          crate::MonitorInfo {
+                identity: MonitorIdentity::Unverified,
+                index,
+                scale,
+                physical_position: IVec2::ZERO,
+                physical_size: UVec2::new(3_440, 1_440),
+            },
+            effective_window_mode: WindowMode::BorderlessFullscreen(MonitorSelection::Index(index)),
+        }
+    }
+
+    const fn borderless_target() -> TargetPosition {
+        TargetPosition {
+            physical_position:        Some(IVec2::new(-4_256, -2_249)),
+            logical_position:         Some(IVec2::new(-4_256, -2_249)),
+            physical_size:            UVec2::new(3_440, 1_440),
+            logical_size:             UVec2::new(3_440, 1_440),
+            target_scale:             1.0,
+            starting_scale:           1.0,
+            monitor_scale_strategy:   MonitorScaleStrategy::ApplyUnchanged,
+            saved_window_mode:        SavedWindowMode::BorderlessFullscreen,
+            monitor_index:            TARGET_MONITOR_INDEX,
+            fullscreen_restore_state: Some(FullscreenRestoreState::LeaveFullscreen),
+            settle_state:             None,
+        }
+    }
+
+    fn advance(
+        target: &mut TargetPosition,
+        window: &mut Window,
+        current_monitor: &CurrentMonitor,
+        native_fullscreen: NativeFullscreenState,
+    ) {
+        restore_window(
+            Entity::from_bits(1),
+            &RestorePreparation::startup(WindowKey::Primary),
+            target,
+            window,
+            &ObservedScaleInputs::default(),
+            Platform::MacOs,
+            true,
+            Some(current_monitor),
+            native_fullscreen,
+        );
+    }
+
+    #[test]
+    fn macos_borderless_retarget_moves_windowed_to_target_before_fullscreen() {
+        let fallback = current_monitor(FALLBACK_MONITOR_INDEX, 2.0);
+        let target_monitor = current_monitor(TARGET_MONITOR_INDEX, 1.0);
+        let mut target = borderless_target();
+        let mut window = Window {
+            mode: WindowMode::BorderlessFullscreen(MonitorSelection::Index(FALLBACK_MONITOR_INDEX)),
+            ..default()
+        };
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Fullscreen,
+        );
+        assert_eq!(window.mode, WindowMode::Windowed);
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::MoveWindowedToTarget)
+        );
+
+        advance(
+            &mut target,
+            &mut window,
+            &target_monitor,
+            NativeFullscreenState::Fullscreen,
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::MoveWindowedToTarget)
+        );
+        assert_eq!(window.position, WindowPosition::Automatic);
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::MoveWindowedToTarget)
+        );
+        assert_eq!(
+            window.position,
+            WindowPosition::Centered(MonitorSelection::Index(TARGET_MONITOR_INDEX))
+        );
+
+        advance(
+            &mut target,
+            &mut window,
+            &target_monitor,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::ApplyMode)
+        );
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            window.mode,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Index(TARGET_MONITOR_INDEX))
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::ActivateWindow)
+        );
+        assert!(target.settle_state.is_none());
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::WaitForTarget)
+        );
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Fullscreen,
+        );
+        assert!(target.settle_state.is_none());
+
+        advance(
+            &mut target,
+            &mut window,
+            &target_monitor,
+            NativeFullscreenState::Fullscreen,
+        );
+        assert!(target.fullscreen_restore_state.is_none());
+        assert!(target.settle_state.is_some());
+    }
 }
