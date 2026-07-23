@@ -24,6 +24,8 @@ use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
 use crate::constants::SCALE_FACTOR_EPSILON;
 use crate::constants::SETTLE_STABILITY_SECS;
 use crate::constants::SETTLE_TIMEOUT_SECS;
+use crate::macos_tabbing_fix;
+use crate::macos_tabbing_fix::NativeFullscreenObservations;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::MonitorTopologyRevision;
 use crate::monitors::Monitors;
@@ -378,7 +380,7 @@ fn advance_fullscreen_restore(
         FullscreenRestoreState::ApplyMode => RestoreStatus::Complete,
         FullscreenRestoreState::ActivateWindow => {
             #[cfg(target_os = "macos")]
-            crate::macos_tabbing_fix::activate_fullscreen_window(entity);
+            macos_tabbing_fix::activate_fullscreen_window(entity);
             debug!("[restore_windows] macOS fullscreen: activated window after mode request");
             target_position.fullscreen_restore_state = Some(FullscreenRestoreState::WaitForTarget);
             RestoreStatus::Waiting
@@ -418,7 +420,7 @@ pub(crate) fn restore_windows(
     >,
     _: NonSendMarker,
     #[cfg(target_os = "macos")] mut fullscreen_observations: NonSendMut<
-        crate::macos_tabbing_fix::NativeFullscreenObservations,
+        NativeFullscreenObservations,
     >,
     platform: Res<Platform>,
     scale_inputs: Res<ObservedScaleInputs>,
