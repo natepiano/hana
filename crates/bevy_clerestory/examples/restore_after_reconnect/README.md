@@ -8,11 +8,11 @@ This example opens four visible windows on one selected monitor:
   or prepares a window entity and sends `RestoreWindow` to Clerestory.
 - The unregistered control window is never recreated by Clerestory.
 
-The physical check disconnects and reconnects the same monitor twice without
-restarting the application. The second cycle verifies that moving, resizing,
-or changing an automatic fallback window does not change its registered target.
-It then explicitly cancels that automatic recovery. The application also
-cancels its application-controlled recovery.
+The physical check performs several disconnect/reconnect cycles without
+restarting the application. A final cancellation cycle moves, resizes, and
+changes the mode of an automatic fallback window, verifies that those changes
+did not replace its registered target, and then cancels its automatic return.
+The application separately cancels its application-controlled recovery.
 
 `WindowKey` is the stable application name for a window. This document calls it
 the canonical key because a newly created entity can keep the same application
@@ -65,6 +65,59 @@ lifecycle, topology, recovery acceptance, application requests, and recovery
 results. The trace fields and required evidence are listed below.
 
 ## Run commands
+
+### Self-running verification
+
+The normal test entry point is one controller command from the workspace root:
+
+```sh
+python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
+  --hardware-profile crates/bevy_clerestory/tests/config/hardware.local.json
+```
+
+The controller builds each required example variant once, chooses unused local
+HTTP ports, discovers the current monitor layout, and runs the cases available
+on this machine. It launches the recorded example executables directly. It does
+not move another application, click the pointer, synthesize global input, or
+kill processes by name.
+
+Before opening test windows, the same command runs three preflight gates:
+reconnect-example tests, library and controller tests, and format/lint checks.
+Use `--skip-preflight` only for a focused local rerun after those gates have
+already passed.
+
+Every run gets its own directory under `target/clerestory-tests/`. The directory
+contains a progress journal, heartbeat, child-process logs, HTTP snapshots,
+ordered reconnect records, and matching JSON and Markdown results. The JSON
+record keeps interaction, evidence source, availability, and outcome as
+separate fields, so an unavailable hardware case cannot be reported as a pass.
+
+Use `--dry-run` to list all automated and operator cases without building an
+app or changing a display. Omit `--hardware-profile` on a machine without
+controllable display hardware; startup/restore and zero-window cases still run,
+while physical reconnect cases are reported as unavailable.
+
+Operator cases use a separate command:
+
+```sh
+python3 crates/bevy_clerestory/tests/scripts/run_suite.py --assisted
+```
+
+On macOS, the controller opens the green-button case, asks for exactly one
+click, observes native fullscreen through the app, relaunches the same owned
+process, and grades the restored fullscreen state. It never clicks for the
+operator and always closes the process it started.
+
+On the configured Mac, the physical partition runs six cases in four probe
+processes: same-Dell return, built-in cross-DPI fallback, three repeated cycles,
+rapid off/on, borderless return, and the exclusive automatic-unarmed branch.
+The controller waits for the operating-system inventory and authenticated probe
+records after each power action. The shortcut completing is never treated as
+proof that the monitor disconnected. Its later cancellation cycle drives move,
+resize, mode, and cancellation through authenticated example-local commands;
+it does not focus a window or generate a keypress.
+
+### Manual example launch
 
 Run this command from the workspace root. Choose the external monitor's index
 from the monitor inventory printed at startup, then set
@@ -130,9 +183,11 @@ Mode expectations:
   after any startup mode, and no mode change replaces the registered monitor
   target.
 
-## Managed automatic controls
+## Manual managed automatic controls
 
-Cycle 2 uses two fixed keys. They are disabled whenever
+These keys are available for manual exploration. The self-running controller
+uses the equivalent authenticated commands and never generates keyboard input.
+They are disabled whenever
 `CLERESTORY_PROBE_EXIT_AFTER_FRAME` is set:
 
 - Focus the window titled `Clerestory Reconnect Consumer - Managed Automatic`
@@ -276,6 +331,27 @@ Recovery records are:
 Both `recovery-restored` and `recovery-mismatch` are handled outcomes. A
 mismatch must be retained with its expected and actual values for platform
 analysis; it must not be silently discarded.
+
+## Authenticated test endpoint
+
+The self-running controller gives each probe process a random capability, run
+identifier, boot nonce, isolated persistence file, and local HTTP port. These
+three JSON-RPC methods exist only in this example:
+
+- `clerestory/probe_snapshot` returns the current monitor inventory, topology
+  revision, windows, recovery counters, native fullscreen evidence, command
+  receipts, and the latest record cursor.
+- `clerestory/probe_records` returns ordered records after a supplied sequence
+  cursor. Rapid transitions remain observable even when the current snapshot
+  has already advanced.
+- `clerestory/probe_command` applies a key-addressed move, resize, mode,
+  cancellation, replacement, or close intent and returns an idempotent receipt.
+  The keyboard controls and HTTP controls use the same typed intent path.
+
+All requests must include the process capability. The server binds to loopback,
+and the capability is never written to the report. `clerestory/probe_shutdown`
+lets the controller stop the exact process it owns. None of these methods is a
+Clerestory library API or enabled by the library's `monitor-probe` feature.
 
 ## Automated verification
 

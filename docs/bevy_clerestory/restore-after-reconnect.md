@@ -2640,6 +2640,263 @@ and revalidated affected earlier rows.
   in its final workspace gate. No user decision or phase-order change was
   needed.
 
+### Phase 14.5 — Make Clerestory verification self-running  · status: complete
+
+#### Work Order
+
+**Goal:** Replace agent-driven test orchestration with one script that runs all
+available automated restore and reconnect checks, waits for observable results,
+produces a durable report, and involves a person only for a physical action or
+visual judgment that software cannot perform.
+
+**Spec:**
+
+- Keep `run_test.py` as a thin standalone entry point for one `restore_window`
+  test. Add importable restore/reconnect case engines and one shared
+  `AppSession` owner for the exact child process or process group, port pair,
+  environment, per-case persistence path, logs, readiness, and shutdown. Add a
+  suite controller that performs the work currently described in
+  `.claude/commands/clerestory_test.md`: platform detection, prebuild,
+  discovery, requirement filtering, test ordering, workaround pairs, progress,
+  cleanup, and final reporting. The command document becomes a short entry
+  point that invokes the controller; it must not contain the test state machine.
+  Prebuild each required feature variant once and launch its recorded executable
+  directly rather than putting `cargo run` between the controller and the app.
+- Keep independent machine-readable facts instead of one overloaded case
+  class:
+  - interaction is `automated`, `operator-action`, or `operator-judgment`;
+  - evidence is application state, synthetic topology, or physical panel;
+  - availability is available, unavailable, or unsupported with a reason and
+    named missing capability;
+  - outcome is not-run, passed, failed, timed-out, interrupted, aborted, or
+    harness-error.
+  A versioned `CaseResult` also records applicability, assertion totals,
+  workaround subruns, process outcome, elapsed time, and artifact paths.
+  `run_test.py` and the reconnect engine return this record instead of relying
+  on console spelling or exit status; the suite alone aggregates and renders it.
+  An unavailable or unsupported case is never counted as passed.
+- Run automated cases as a separate unattended partition. `--automated` must
+  never pause for input. A separate `--assisted` run may pause for the two
+  operator classes, print one exact action or question, and poll for the state
+  change when the action is objectively detectable. Both modes write the same
+  result schema.
+- Do not move or focus Zed, a terminal, or the user's pointer to select a launch
+  monitor. Give the test examples a test-only launch-monitor selector and wait
+  until the app reports that it is on the selected monitor when the active
+  backend has launch-output authority. The initial handshake reports the actual
+  backend and capabilities for launch-output control, window positioning,
+  monitor notifications, verified identity, and fullscreen evidence. Evaluate
+  requirements after that handshake; keep X11, XWayland, and Wayland discovery
+  independent and never correlate them by index. Retire editor and terminal
+  movement from the unattended path. Do not use AppleScript input, synthetic
+  pointer input, a global quit shortcut, or process-name-wide `pkill`/`taskkill`;
+  the controller owns and stops only its process group or Windows Job Object.
+- Reserve the base/render HTTP ports as one process-scoped pair rather than
+  assuming the default BRP port is free. Pass both to the example, retry the
+  entire launch after a bind collision, and require the app to return the
+  controller's run identifier and boot nonce before accepting readiness. Treat
+  a render endpoint as optional only when the app reports it inapplicable.
+  Serialize display-changing tests with one per-user lock keyed by display
+  session/backend, held through final monitor restoration. Put each case's RON
+  persistence file inside its artifact directory so tests cannot overwrite a
+  developer's normal state or another run.
+- Expose the reconnect probe's current test state through Bevy's HTTP remote
+  interface. The response must use structured fields rather than parsed Rust
+  debug strings and include:
+  - readiness and selected startup mode;
+  - current monitor inventory, verified identity, entity, index, scale, and
+    topology revision;
+  - each canonical window key, entity, recovery policy, accepted generation,
+    pending/available/result counts, current monitor, mode, and placement;
+  - replacement counts, cancellation, native fullscreen completion, mismatch,
+    and terminal failure.
+  Also expose the structured ordered record stream with run identifier, boot
+  nonce, monotonic sequence, cycle identifier, timestamp, typed kind, and typed
+  fields. Support cursor reads so a rapid disconnect/reconnect cannot disappear
+  between snapshot polls. Keep the ordered stdout trace as redundant evidence,
+  not as an input the controller must parse.
+- Expose example-local test controls for key-addressed move, resize, desired
+  mode, cancellation, application-controlled replacement, and owned-window
+  close requests. Define typed application intents consumed by one effect
+  system; keyboard and authenticated HTTP paths only emit those same intents.
+  Give every HTTP command an identifier, retain its receipt, make desired-state
+  commands idempotent, and reject invalid transitions. This makes the managed
+  cancellation cycle fully automated without focus or generated keyboard input
+  while still proving geometry/mode changes leave its accepted generation
+  unchanged before cancellation.
+- Convert the autonomous part of
+  `crates/bevy_clerestory/tests/macos_monitor_reconnect.md` into executable case
+  definitions. On the configured Mac, run and grade all six available cases:
+  same-Dell return, Dell-to-built-in cross-DPI fallback, three repeated cycles,
+  rapid off/on, borderless return, and exclusive automatic-unarmed behavior.
+  Preserve the complete 14-case inventory in the runbook and report the other
+  cases under their operator/hardware requirements. Reclassify the separate
+  macOS green-button restore test as `operator-action`: ask for one native green-
+  button click and grade the resulting native fullscreen transition
+  automatically. A programmatic fullscreen request remains a different test.
+- Model monitor power as host configuration, not hard-coded macOS behavior. A
+  local hardware profile is passed explicitly and never auto-discovered. It
+  supplies structured executable/argument arrays for off, on, and inventory;
+  optional working directories; environment allowlists and redacted key names;
+  timeouts, output limits, accepted exit codes; a unique target-monitor matcher;
+  and a minimum device delay. Execute with no shell expansion. The macOS profile
+  may use the existing `dell monitor off` and `dell monitor on` Shortcuts.
+  Windows and Linux use the same case state machine when equivalent controllable
+  hardware is configured; without it, physical reconnect cases are operator-
+  action, unavailable, or unsupported rather than silently replaced by a
+  different test.
+- Before a power or operator action, bind the case to exactly one initial
+  operating-system inventory entry and the probe's verified identity, and
+  record a snapshot/record cursor barrier. Zero or multiple profile matches are
+  not actionable. A physical pass requires a later target-specific removal edge
+  and return of the same verified identity in both the operating-system
+  inventory and the probe record stream. Command completion is recorded
+  separately and is never physical evidence by itself. Record cleanup success
+  independently so it cannot overwrite the original case result.
+- Keep synthetic topology changes separate from physical unplug evidence.
+  `xrandr --off`, a Wayland compositor output command, Windows display-disable
+  APIs, or a virtual display can provide valuable automated lifecycle coverage,
+  but the report must label it `synthetic`. It cannot satisfy a physical panel-
+  identity row in Phases 15–17.
+- Replace fixed delays as proof with action-relative, bounded polling. Capture a
+  pre-action revision, record cursor, and exact per-window counters; every
+  predicate requires a post-baseline edge or counter delta followed by a bounded
+  quiet period. Do not require exactly one OS notification. Use separate
+  monotonic deadlines for process startup, device action, inventory change,
+  topology installation, recovery, and native fullscreen. Poll aggregate app
+  state more frequently than expensive external inventory, use bounded backoff,
+  and keep heartbeat timing independent. Every wait records its expected
+  predicate, timeout, elapsed time, first/final observations, and last value.
+- Make fullscreen grading machine-readable where the platform permits it. The
+  probe should report the native window's fullscreen/decorated state and its
+  frame relative to the target display. On macOS, the borderless return is not
+  complete merely because Bevy's `WindowMode` changed; native fullscreen
+  completion and full target-display coverage are required before the power-off
+  baseline and after return. Retain screenshots as evidence and use operator
+  judgment only in assisted mode when native evidence is unavailable or
+  contradictory; unattended mode records the case as unavailable instead of
+  pausing.
+- Preserve cases that inherently exercise real user or window-manager input.
+  The Windows interactive DPI drag, X11 keyboard snap, Wayland manual crossing,
+  cable/port swaps, lid close/open, and unavailable duplicate-panel setups stay
+  assisted unless a platform-specific method reproduces the same OS path
+  without moving the user's real pointer or synthesizing global input.
+- Write one artifact directory per run containing the source revision,
+  platform/backend and hardware inventory, selected cases, progress events,
+  commands with secrets removed, child-process stdout/stderr, ordered probe
+  trace, HTTP snapshots, optional screenshots, per-case timing, and both JSON
+  and readable Markdown results. Create the manifest before preflight, append an
+  event journal durably as actions and observations occur, and atomically update
+  partial JSON/Markdown after each case. Write a monitor-restore-required marker
+  before every off action and clear it only after the on action and final
+  inventory confirmation; a later run services a surviving marker before doing
+  new work. Exit zero only when every selected applicable case passes; failures,
+  unsupported behavior, unavailable requirements, and cleanup results remain
+  distinguishable.
+- Update a heartbeat file throughout long builds, physical waits, and assisted
+  pauses. On failure, preserve artifacts, stop only owned processes, run the
+  configured monitor-on action in a `finally` path, confirm the final display
+  inventory when possible, and return a nonzero exit without requiring an agent
+  to perform cleanup.
+- Add an automated zero-window case: close every owned window, prove the child
+  and base HTTP endpoint remain live with zero windows and retained recovery
+  state, then reconstruct or observe the applicable windows and shut down
+  through the owned base endpoint. Keep it distinct from the hardware-dependent
+  zero-display scenario.
+- Unit-test the controller through narrow real/fake boundaries for owned
+  process, clock, app client, monitor inventory, and power control. Cover
+  success, timeout without real sleeping, process crash, port collision and
+  wrong session identity, duplicate restore, idempotent command replay,
+  mismatch, unavailable/unsupported hardware, interrupted assisted wait,
+  incremental report recovery, exact process-group cleanup, cleanup failure
+  without loss of the original failure, and the monitor-on marker/safety path
+  without changing a real display.
+
+**Files:**
+
+- `.claude/commands/clerestory_test.md` — thin human/agent entry point for the
+  self-running controller; no orchestration logic.
+- `crates/bevy_clerestory/tests/scripts/run_suite.py` — new cross-platform suite
+  controller, case selection, progress, cleanup, and reports.
+- `crates/bevy_clerestory/tests/scripts/run_test.py` — existing single-test
+  engine; port selection and owned-process changes shared with the controller.
+- `crates/bevy_clerestory/tests/scripts/run_reconnect.py` — reconnect case state
+  machine and operating-system/power-control boundary, or an equivalently
+  isolated module under `tests/scripts/`.
+- `crates/bevy_clerestory/tests/config/macos.json`,
+  `crates/bevy_clerestory/tests/config/windows.json`, and
+  `crates/bevy_clerestory/tests/config/linux.json` — executable case metadata and
+  assisted/unavailable classifications.
+- `crates/bevy_clerestory/tests/config/hardware.example.json` — documented local
+  power/inventory command schema. Keep the machine-specific profile untracked.
+- `crates/bevy_clerestory/tests/macos_monitor_reconnect.md` — complete physical
+  inventory and direct invocation/reference instructions for the automated
+  subset.
+- `crates/bevy_clerestory/examples/restore_window/main.rs` and its supporting
+  modules — test-only launch-monitor and HTTP-port selection without editor
+  movement.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/main.rs`,
+  `setup.rs`, `recovery_trace.rs`, `window_trace.rs`, and `constants.rs` — HTTP
+  state, test controls, and native completion evidence.
+- `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — direct
+  controller use, evidence schema, and remaining assisted limitations.
+
+**Constraints from prior phases:** Do not change the public recovery API to
+serve the test controller. Mutation routes live only in the
+`restore_after_reconnect` example target, bind to loopback, and require a random
+per-run capability on authenticated POST requests; enabling `monitor-probe` in
+library code must not expose them. Never record the capability in artifacts.
+Preserve verified `MonitorId` as the only
+same-process continuity proof and retain entity/index changes as observations.
+Wayland still has no general window-position authority, so its automated
+criteria must not claim placement support. Existing platform matrices remain
+evidence; a shared harness correction identifies and reruns affected cases
+rather than rewriting old results. The user's desktop is shared state: no
+unattended case may move unrelated applications or inject global input.
+
+**Acceptance gate:** From the crate root, one documented command runs all
+available automated `restore_window` and reconnect cases on the current
+platform without an agent, prints live case progress, writes JSON and Markdown
+reports, performs safety cleanup, and exits with a reliable status. On the
+configured macOS hardware it executes and passes the six autonomous reconnect
+cases from the runbook and leaves the Dell on. A dry run lists automated,
+operator-action, operator-judgment, unsupported, and unavailable cases plus
+their evidence kind before changing any display. An assisted run can pause for
+one human action and resume by observing the resulting state. Structured
+results account for every selected case, ordered HTTP records prove transitions,
+the real zero-window case passes, and fake-provider tests cover failure and
+cleanup paths.
+Clerestory Build/Test/Lint gates remain green, and the Windows and Linux phases
+consume this controller rather than recreating agent instructions.
+
+### Phase 14.5 Review
+
+- One strengthen-posture cycle used four independent lenses: correctness and
+  completeness, architecture and simplicity, cross-platform failure behavior,
+  and type/test safety.
+- The reviewers agreed that current snapshots alone cannot prove rapid or
+  repeated transitions. The phase now requires cursor-based ordered HTTP
+  records, action-relative baselines, exact counter deltas, and a quiet period.
+- The reviewers agreed that interaction, availability, evidence source, and
+  outcome are independent facts. The phase now requires one versioned structured
+  result and forbids aggregation from console text or exit status alone.
+- Process/session ownership, isolated persistence, authenticated example-only
+  controls, explicit argv hardware commands, incremental safety records, and
+  the real zero-window case were folded into the work order.
+- Every finding converged to one in-intent correctness refinement. No unresolved
+  user decision or premise challenge remained after the cycle.
+- The controller implementation is complete and its non-display gates are green:
+  27 reconnect-example tests, 194 library tests, 16 controller tests, nightly
+  formatting, and Clippy.
+- The first complete physical run exposed two controller grading defects. The
+  controller now follows the verified monitor identity when macOS changes its
+  list index, preserves completed case results after a later case fails, and
+  scopes exclusive-fullscreen fallback checks to the surviving primary window.
+- A final retry passed all six physical reconnect rows: same-Dell return,
+  rapid off/on, borderless return, exclusive-unarmed, Dell-to-built-in
+  cross-DPI return, and three repeated cycles with cancellation. The Dell was
+  confirmed on after cleanup and no probe process remained.
+
 ### Phase 15 — Record the Windows physical matrix  · status: todo
 
 #### Work Order
@@ -2649,7 +2906,7 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 
 **Spec:**
 
-- Execute the shared script on Windows and record the same core identity,
+- Execute the Phase 14.5 controller on Windows and record the same core identity,
   dock/port, duplicate, reorder, zero-display, reconnect-order, rapid-hotplug,
   mode, and cross-DPI scenarios as Phase 14. Use the finalized startup/mode
   controls from Phase 14 rather than creating a Windows-only harness.
@@ -2709,8 +2966,9 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — attempt fixes only
   if observed.
 
-**Constraints from prior phases:** Phase 13 supplies the stable baseline and
-Phase 14 established the report schema; platform evidence remains independent.
+**Constraints from prior phases:** Phase 13 supplies the stable baseline,
+Phase 14 established the report schema, and Phase 14.5 owns orchestration,
+polling, cleanup, and report generation; platform evidence remains independent.
 `MonitorId` is process-local and never comparable across application runs.
 macOS cascade ordering is not assumed on Windows. Phase 14 and automated startup
 evidence do not substitute for a fresh Windows row on the tested source.
@@ -2736,9 +2994,9 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 
 **Spec:**
 
-- Execute the shared script in an X11 session and record the core matrix. Use
-  the finalized startup/mode controls from Phase 14 rather than creating an
-  X11-only harness.
+- Execute the Phase 14.5 controller in an X11 session and record the core
+  matrix. Use the finalized startup/mode controls from Phase 14 rather than
+  creating an X11-only harness.
 - Use the shared per-window metadata panel and trace to record each window's
   key, recovery policy, original target, current monitor, mode, and placement.
   For rapid hotplug, record the operator's action timing separately from the
@@ -2798,8 +3056,9 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 - `crates/bevy_clerestory/src/restore/restore_attempt.rs` — runtime ordering
   fixes only if observed.
 
-**Constraints from prior phases:** Phase 13 supplies the stable baseline and
-the shared report distinguishes physical proof from automated assertions.
+**Constraints from prior phases:** Phase 13 supplies the stable baseline,
+Phase 14.5 owns the shared controller, and its report distinguishes physical
+proof from automated assertions.
 `MonitorId` is process-local and never comparable across application runs.
 macOS cascade ordering is not assumed on X11. Earlier platform rows and
 automated startup evidence do not substitute for a fresh X11 row on the tested
@@ -2825,9 +3084,9 @@ placement or unsupported exclusive fullscreen.
 
 **Spec:**
 
-- Execute the shared script in the available Wayland compositor(s) and record
-  the core identity/lifetime/reconnect matrix using the finalized startup/mode
-  controls from Phase 14.
+- Execute the Phase 14.5 controller in the available Wayland compositor(s) and
+  record the core identity/lifetime/reconnect matrix using the finalized
+  startup/mode controls from Phase 14.
 - Use the shared per-window metadata panel and trace to record each window's
   key, recovery policy, original target, current monitor, mode, and placement.
   For rapid hotplug, record the operator's action timing separately from the
@@ -2889,7 +3148,8 @@ placement or unsupported exclusive fullscreen.
 - `crates/bevy_clerestory/src/recovery/fallback_and_return.rs` — capability
   gate fixes only if observed.
 
-**Constraints from prior phases:** Phase 13 supplies the stable baseline.
+**Constraints from prior phases:** Phase 13 supplies the stable baseline and
+Phase 14.5 supplies the shared controller, cleanup, and result schema.
 Wayland's lack of client-controlled windowed positioning is a fixed contract,
 not a test failure to work around. `MonitorId` remains process-local and never
 comparable across application runs. macOS cascade ordering is not assumed on
@@ -2917,7 +3177,8 @@ development line for independent downstream adoption.
 
 **Spec:**
 
-- Require green Phase 13 automated gates and completed Phase 14–17 evidence
+- Require green Phase 13 automated gates, the Phase 14.5 self-running
+  controller gate, and completed Phase 14–17 evidence
   rows. Every physical row must name its tested source revision, and any row
   affected by a later correction must have been repeated or explicitly
   revalidated on the corrected revision. Unresolved platform failures block
