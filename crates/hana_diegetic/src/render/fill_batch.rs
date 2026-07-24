@@ -1708,6 +1708,7 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use bevy::asset::Asset;
     use bevy::asset::AssetEvent;
@@ -1715,12 +1716,15 @@ mod tests {
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::change_detection::Tick;
     use bevy::ecs::message::Messages;
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::image::Image;
+    use bevy::picking::hover::PickingInteraction;
     use bevy::prelude::AlphaMode;
     use bevy::render::render_resource::Face;
     use bevy::render::render_resource::FragmentState;
     use bevy::shader::Shader;
     use bevy::shader::ShaderDefVal;
+    use bevy::window::PrimaryWindow;
     use bevy_kana::ToF32;
 
     use super::*;
@@ -1728,11 +1732,17 @@ mod tests {
     use crate::AlignY;
     use crate::Button;
     use crate::Mm;
+    use crate::Padding;
+    use crate::PanelElementId;
     use crate::PanelWidget;
+    use crate::PanelWidgetReader;
+    use crate::Px;
     use crate::Slider;
     use crate::SliderDirection;
     use crate::SliderRange;
     use crate::SliderState;
+    use crate::Tooltip;
+    use crate::Tooltips;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
     use crate::layout::DrawZIndex;
@@ -1852,6 +1862,234 @@ mod tests {
                     .expect("panel should build"),
             )
             .id()
+    }
+
+    fn spawn_sdf_screen_panel(
+        app: &mut App,
+        tree: LayoutTree,
+        material: StandardMaterial,
+        window: Entity,
+        camera_order: isize,
+        render_layers: RenderLayers,
+    ) -> Entity {
+        let material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(material);
+        app.world_mut()
+            .spawn(
+                DiegeticPanel::screen()
+                    .size(Px(320.0), Px(180.0))
+                    .window_entity(window)
+                    .camera_order(camera_order)
+                    .render_layers(render_layers)
+                    .material(material)
+                    .with_tree(tree)
+                    .build()
+                    .expect("screen panel should build"),
+            )
+            .id()
+    }
+
+    fn tooltip_surface_tree() -> LayoutTree {
+        let mut tooltip = Tooltip::new(
+            El::column()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .padding(Padding::all(2.0))
+                .background(Color::srgb(0.2, 0.8, 0.4)),
+        )
+        .show_after(Duration::ZERO)
+        .hide_after(Duration::ZERO)
+        .placement_policy(crate::TooltipPlacementPolicy::Fixed);
+        tooltip.text(("Retained tooltip", TextStyle::new(4.0)));
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .size(40.0, 20.0)
+                .background(WIDGET_FILL_COLOR)
+                .button("tooltip-target", Button::new())
+                .tooltip(tooltip),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn ready_tooltip_reveal_routes_its_final_transform_in_the_same_frame() {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let panel = spawn_sdf_panel(
+            &mut app,
+            tooltip_surface_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("tooltip controller should reify");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..6 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited),
+        );
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(controller)
+            .expect("tooltip should complete layout");
+        assert!(computed.result().is_some(), "tooltip layout should succeed");
+        assert!(
+            computed
+                .result()
+                .is_some_and(|result| !result.commands.is_empty()),
+            "tooltip layout should contain render commands: {:?}",
+            computed.result().map(|result| &result.commands),
+        );
+        let tooltip_surfaces = app
+            .world()
+            .resource::<ResolvedSdfSurfaceRegistry>()
+            .surfaces()
+            .filter(|surface| surface.panel_entity() == controller)
+            .count();
+        let tooltip_panel = app
+            .world()
+            .get::<DiegeticPanel>(controller)
+            .expect("tooltip should retain its panel role");
+        assert!(
+            tooltip_surfaces > 0,
+            "the tooltip should publish SDF surfaces; size: {}x{}; tree: {:?}; result: {:?}",
+            tooltip_panel.width(),
+            tooltip_panel.height(),
+            tooltip_panel.tree(),
+            computed.result(),
+        );
+        let retained_panels = sdf_records(&app)
+            .iter()
+            .map(|record| record.record_key.panel)
+            .collect::<Vec<_>>();
+        assert!(
+            sdf_records(&app)
+                .iter()
+                .any(|record| record.record_key.panel == controller),
+            "the first reveal should route the tooltip surface; retained panels: {retained_panels:?}",
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::None);
+        app.update();
+        assert!(
+            sdf_records(&app)
+                .iter()
+                .all(|record| record.record_key.panel != controller),
+            "hiding should retire the tooltip's retained record",
+        );
+
+        let Some(mut panel_transform) = app.world_mut().get_mut::<Transform>(panel) else {
+            return;
+        };
+        panel_transform.translation = Vec3::new(0.4, -0.2, 0.3);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        let record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("a ready tooltip should route again in the reveal frame");
+        let global = app
+            .world()
+            .get::<GlobalTransform>(controller)
+            .expect("revealed tooltip should have a propagated transform");
+        assert_eq!(
+            record.transform,
+            global.to_matrix() * record.local_transform.to_matrix(),
+            "the retained record must contain the reveal frame's final transform",
+        );
+    }
+
+    #[test]
+    fn secondary_window_tooltip_reveal_routes_its_final_transform() {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins((WidgetsPlugin, crate::screen_space::ScreenSpacePlugin));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        let secondary_window = app
+            .world_mut()
+            .spawn(Window {
+                resolution: UVec2::new(960, 540).into(),
+                ..Default::default()
+            })
+            .id();
+        let render_layers = RenderLayers::layer(6);
+        let panel = spawn_sdf_screen_panel(
+            &mut app,
+            tooltip_surface_tree(),
+            StandardMaterial::default(),
+            secondary_window,
+            37,
+            render_layers.clone(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("screen tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("screen tooltip controller should reify");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..6 {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited),
+        );
+        assert_eq!(
+            app.world().get::<RenderLayers>(controller),
+            Some(&render_layers),
+            "the tooltip should inherit the secondary-window panel's layers",
+        );
+        let record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("the secondary-window tooltip should publish a retained record");
+        let global = app
+            .world()
+            .get::<GlobalTransform>(controller)
+            .expect("revealed screen tooltip should have a propagated transform");
+        assert_eq!(
+            record.transform,
+            global.to_matrix() * record.local_transform.to_matrix(),
+            "the retained screen record must contain the final propagated transform",
+        );
     }
 
     fn single_surface_tree(color: Color) -> LayoutTree {

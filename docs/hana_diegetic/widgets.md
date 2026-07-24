@@ -1489,7 +1489,7 @@ What exists now:
 - Phase 10.75 can start and finish its show timer without adding a motion-delay state: it reveals only `Ready`, while ordinary solvable target motion stays `Ready` in the same frame.
 - Phase 11 panel-role reset must continue through the shared materialized cleanup so preexisting controller transform and visibility state are restored before a rebuild.
 
-### Phase 10.75 — Tooltip eligibility, visibility, and events  · status: todo
+### Phase 10.75 — Tooltip eligibility, visibility, and events  · status: done (`9abc4681`)
 
 #### Work Order
 
@@ -1516,6 +1516,25 @@ What exists now:
 **Constraints from prior phases:** Phase 10.5 supplies hidden materialization, checked attachment, persistent placement, the settled picking policy, a private presentation-camera input, readiness, and hidden cleanup on the same controller. Phase 7.5's `WidgetSystems::FocusCommandsApplied` includes both built-in and application-owned semantic-input effects. Phase 6.5 supplies final per-face pointer hits and their originating camera. Camera selection and input application precede preparation, which precedes materialization, placement, and readiness. Visible finalization runs before Phase 10.5 hidden cleanup and before target relations disappear. Deterministic pointer integration feeds synthetic `PointerHits` and raw `PointerInput` through Bevy's real dispatcher; it never moves the operating-system pointer or directly triggers the resulting target events.
 
 **Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests: synthetic `PointerHits` plus raw `PointerInput` drive hover eligibility without operating-system pointer movement; current-frame application/traversal focus is visible after `WidgetSystems::FocusCommandsApplied`; show wait cancels; zero and nonzero hide delays work; hide grace cancels on renewed eligibility; a finished zero-delay show remains hidden until Phase 10.5 reports ready and never flashes at a fallback transform; pointer interaction records its camera, keyboard traversal reuses it, another-camera interaction replaces it, and initial keyboard-only focus chooses the highest-order compatible camera; pre-batch reveal creates current retained records and post-propagation `TooltipShown` observes the final `GlobalTransform`; final world and secondary-window screen `ResolvedSdfBatchRecord::transform` values prove the complete retained route; later hide/show preserves the controller, panel, layout, and placement; `Suppress` immediately hides a visible tooltip; shown/hidden events target the tooltip exactly once and ignore canceled waits or redundant state; associated and standalone tooltips share the path; visible declaration removal, controller despawn, target despawn, component-only panel-role removal, and full panel despawn each emit one hidden event while relevant data remains queryable, with no duplicate during later cleanup. Extend and smoke-test `examples/widgets.rs` while preserving existing diagnostics and input paths and expanding the measured readout instead of clipping it.
+
+#### Retrospective
+
+**What worked:**
+- One private phase enum owns every wait and visible edge. A finished show wait remains hidden until the materialized panel is ready, while hide/show keeps the same controller, panel, layout, attachment, and placement.
+- The deterministic pointer test sends synthetic backend hits and raw pointer input through Bevy's dispatcher. Separate retained-render tests prove final transforms for a world tooltip and for a tooltip inherited from a secondary-window screen panel without moving the operating-system pointer.
+- Pointer hits remember their exact camera. Visible keyboard focus reuses that per-window interaction camera or selects the highest-order compatible active camera when no prior interaction camera exists.
+
+**What deviated from the plan:**
+- Reveal is explicitly ordered before retained panel geometry and material-table readiness, while `TooltipShown` is emitted after transform propagation. The two-stage implementation uses one short-lived private pending marker only to cross those schedule boundaries; it is not a second visibility authority.
+- Lifecycle finalization uses the registered `TooltipHidden` event key and `DeferredWorld::trigger_raw`. `DeferredWorld::trigger` queues the observer, which is too late once component removal or despawn has already erased the tooltip data that the event contract promises observers can query.
+
+**Surprises:**
+- A completed preparation request must remain present through temporary eligibility loss; canceling the show wait must not discard work that has already entered the deferred materialization pipeline.
+- `TooltipDisabledPolicy::Suppress` must bypass an authored hide grace. Treating suppression as ordinary eligibility loss would leave a disabled tooltip visible until `hide_after` expired.
+
+**Implications for remaining phases:**
+- Phase 11 replacement must update the private phase in place. An active timer already owns its captured deadline, while a future wait reads the replacement duration.
+- Cross-space replacement and teardown must continue through the same immediate visible finalizer before Phase 10.5 removes panel, target, attachment, or transform data.
 
 ### Phase 11 — Tooltip replacement and retargeting  · status: todo
 

@@ -88,6 +88,7 @@ use image_batch::ImageBatchPlugin;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::material_asset_for_frame;
+pub(crate) use material_table::MaterialTableAppendReady;
 use material_table::MaterialTablePlugin;
 pub(crate) use panel_geometry::CapturedCameraRay;
 pub(crate) use panel_geometry::PanelGeometryPlugin;

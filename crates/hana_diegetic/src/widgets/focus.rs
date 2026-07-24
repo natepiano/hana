@@ -91,9 +91,10 @@ enum FocusIndicator {
 
 #[derive(Clone, Copy)]
 struct WindowFocusScope {
-    active_panel: Entity,
-    indicator:    FocusIndicator,
-    widget:       Option<Entity>,
+    active_panel:       Entity,
+    indicator:          FocusIndicator,
+    widget:             Option<Entity>,
+    interaction_camera: Option<Entity>,
 }
 
 #[derive(Default, Resource)]
@@ -108,6 +109,19 @@ impl WidgetFocusAuthority {
 
     pub(crate) fn focused_widget(&self, window: Entity) -> Option<Entity> {
         self.scopes.get(&window).and_then(|scope| scope.widget)
+    }
+
+    pub(crate) fn tooltip_focus_context(
+        &self,
+        widget: Entity,
+    ) -> Option<(Entity, Entity, Option<Entity>)> {
+        self.scopes
+            .iter()
+            .filter_map(|(&window, scope)| {
+                (scope.widget == Some(widget) && scope.indicator == FocusIndicator::Visible)
+                    .then_some((window, scope.active_panel, scope.interaction_camera))
+            })
+            .min_by_key(|(window, _, _)| window.to_bits())
     }
 
     fn focuses(&self, widget: Entity) -> bool {
@@ -145,13 +159,19 @@ pub(super) fn request_widget_focus(
     let Ok(widget_of) = widgets.get(request.widget) else {
         return;
     };
+    let interaction_camera = authority
+        .scopes
+        .get(&request.window)
+        .filter(|scope| scope.active_panel == widget_of.panel())
+        .and_then(|scope| scope.interaction_camera);
     transition_focus(
         &mut authority,
         request.window,
         Some(WindowFocusScope {
             active_panel: widget_of.panel(),
-            indicator:    FocusIndicator::Visible,
-            widget:       Some(request.widget),
+            indicator: FocusIndicator::Visible,
+            widget: Some(request.widget),
+            interaction_camera,
         }),
         WidgetFocusChangeCause::Application,
         &mut commands,
@@ -168,9 +188,10 @@ pub(super) fn clear_widget_focus(
         .scopes
         .get(&request.window)
         .map(|scope| WindowFocusScope {
-            active_panel: scope.active_panel,
-            indicator:    FocusIndicator::Hidden,
-            widget:       None,
+            active_panel:       scope.active_panel,
+            indicator:          FocusIndicator::Hidden,
+            widget:             None,
+            interaction_camera: scope.interaction_camera,
         });
     transition_focus(
         &mut authority,
@@ -207,9 +228,10 @@ pub(super) fn focus_from_pointer_press(
         &mut authority,
         window,
         Some(WindowFocusScope {
-            active_panel: widget_of.panel(),
-            indicator:    FocusIndicator::Hidden,
-            widget:       Some(widget),
+            active_panel:       widget_of.panel(),
+            indicator:          FocusIndicator::Hidden,
+            widget:             Some(widget),
+            interaction_camera: Some(press.hit.camera),
         }),
         WidgetFocusChangeCause::Pointer,
         &mut commands,
@@ -314,13 +336,18 @@ pub(super) fn traverse_focus(
         return;
     };
     let target = ordered[target_index].1;
+    let interaction_camera = authority
+        .scopes
+        .get(&window)
+        .and_then(|scope| scope.interaction_camera);
     transition_focus(
         authority,
         window,
         Some(WindowFocusScope {
             active_panel: panel,
-            indicator:    FocusIndicator::Visible,
-            widget:       Some(target),
+            indicator: FocusIndicator::Visible,
+            widget: Some(target),
+            interaction_camera,
         }),
         WidgetFocusChangeCause::Traversal,
         commands,
@@ -386,6 +413,10 @@ fn clear_removed_widget_focus(
                 active_panel,
                 indicator: FocusIndicator::Hidden,
                 widget: None,
+                interaction_camera: authority
+                    .scopes
+                    .get(&window)
+                    .and_then(|scope| scope.interaction_camera),
             }),
             cause,
             commands,

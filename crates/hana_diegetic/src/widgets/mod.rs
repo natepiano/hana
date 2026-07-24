@@ -106,7 +106,9 @@ pub use tooltip::Tooltip;
 pub use tooltip::TooltipCommandsExt;
 pub(crate) use tooltip::TooltipControllerIndex;
 pub use tooltip::TooltipDisabledPolicy;
+pub use tooltip::TooltipHidden;
 pub use tooltip::TooltipPlacementPolicy;
+pub use tooltip::TooltipShown;
 pub use tooltip::TooltipTarget;
 pub use tooltip::TooltipTargetEntity;
 pub use tooltip::TooltipTargetSpace;
@@ -151,6 +153,10 @@ pub(crate) enum TooltipSystems {
     ReifyControllers,
     /// Applies controller creation and relationship commands.
     ControllerCommandsApplied,
+    /// Resolves current hover/focus eligibility and advances visibility timers.
+    Eligibility,
+    /// Applies presentation-camera and preparation commands.
+    EligibilityCommandsApplied,
     /// Materializes requested tooltip controllers as hidden panels.
     Materialize,
     /// Applies tooltip panel insertion and required-component commands.
@@ -161,6 +167,10 @@ pub(crate) enum TooltipSystems {
     AttachmentCommandsApplied,
     /// Publishes post-propagation tooltip readiness.
     Readiness,
+    /// Reveals ready tooltip panels before retained batches are built.
+    Reveal,
+    /// Emits post-propagation tooltip visibility events.
+    VisibilityEvents,
 }
 
 /// Installs headless panel widget identity and reification.

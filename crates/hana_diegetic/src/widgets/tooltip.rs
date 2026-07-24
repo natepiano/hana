@@ -9,10 +9,18 @@ use bevy::camera::RenderTarget;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::RenderLayers;
 use bevy::color::Color;
+use bevy::ecs::change_detection::MaybeLocation;
+use bevy::ecs::event::EntityTrigger;
+use bevy::ecs::event::EventKey;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::system::SystemParam;
+use bevy::ecs::world::DeferredWorld;
 use bevy::image::Image;
 use bevy::mesh::Mesh3d;
+use bevy::picking::events::Move as PointerMove;
+use bevy::picking::events::Over;
+use bevy::picking::events::Press;
+use bevy::picking::hover::PickingInteraction;
 use bevy::platform::collections::HashMap as BevyHashMap;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
@@ -28,6 +36,7 @@ use hana_valence::ResolveDiagnostics;
 use hana_valence::ResolvedAnchorGeometry;
 
 use super::TooltipFor;
+use super::Tooltips;
 use crate::PanelSystems;
 use crate::layout::Anchor;
 use crate::layout::ChildLayoutState;
@@ -74,12 +83,26 @@ enum TooltipPlacementSystems {
 
 impl Plugin for TooltipPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(remove_mesh_anchor_geometry)
+        let hidden_event = app.world_mut().register_event_key::<TooltipHidden>();
+        app.insert_resource(TooltipHiddenEventKey(hidden_event))
+            .add_observer(remove_mesh_anchor_geometry)
+            .add_observer(remember_tooltip_camera_from_over)
+            .add_observer(remember_tooltip_camera_from_move)
+            .add_observer(remember_tooltip_camera_from_press)
+            .add_observer(remove_tooltip_pointer_camera)
+            .add_observer(finalize_removed_tooltip)
+            .add_observer(finalize_despawned_tooltip)
+            .add_observer(finalize_tooltip_panel_role)
             .configure_sets(
                 Update,
                 (
-                    super::TooltipSystems::Materialize
+                    super::TooltipSystems::Eligibility
+                        .after(super::WidgetSystems::FocusCommandsApplied)
                         .after(super::TooltipSystems::ControllerCommandsApplied),
+                    super::TooltipSystems::EligibilityCommandsApplied
+                        .after(super::TooltipSystems::Eligibility),
+                    super::TooltipSystems::Materialize
+                        .after(super::TooltipSystems::EligibilityCommandsApplied),
                     super::TooltipSystems::MaterializationCommandsApplied
                         .after(super::TooltipSystems::Materialize),
                     super::TooltipSystems::Attach
@@ -100,6 +123,8 @@ impl Plugin for TooltipPlugin {
             .add_systems(
                 Update,
                 (
+                    advance_tooltip_visibility.in_set(super::TooltipSystems::Eligibility),
+                    ApplyDeferred.in_set(super::TooltipSystems::EligibilityCommandsApplied),
                     apply_tooltip_width_constraints.before(PanelSystems::ComputeLayout),
                     materialize_requested_tooltips.in_set(super::TooltipSystems::Materialize),
                     ApplyDeferred.in_set(super::TooltipSystems::MaterializationCommandsApplied),
@@ -127,6 +152,9 @@ impl Plugin for TooltipPlugin {
             .configure_sets(
                 PostUpdate,
                 (
+                    super::TooltipSystems::Reveal
+                        .before(crate::render::PanelChildSystems::Build)
+                        .before(crate::render::MaterialTableAppendReady),
                     TooltipPlacementSystems::WorldDecide
                         .after(crate::panel::refresh_world_anchor_globals),
                     TooltipPlacementSystems::WorldCommandsApplied
@@ -134,11 +162,15 @@ impl Plugin for TooltipPlugin {
                         .before(crate::panel::write_panel_anchor_offsets)
                         .before(hana_valence::AnchorSystems::Resolve),
                     super::TooltipSystems::Readiness.after(TransformSystems::Propagate),
+                    super::TooltipSystems::VisibilityEvents
+                        .after(super::TooltipSystems::Readiness)
+                        .after(TransformSystems::Propagate),
                 ),
             )
             .add_systems(
                 PostUpdate,
                 (
+                    reveal_ready_tooltips.in_set(super::TooltipSystems::Reveal),
                     resolve_world_tooltip_placements
                         .in_set(TooltipPlacementSystems::WorldDecide)
                         .run_if(tooltip_readiness_inputs_changed),
@@ -146,6 +178,7 @@ impl Plugin for TooltipPlugin {
                     finalize_tooltip_readiness
                         .in_set(super::TooltipSystems::Readiness)
                         .run_if(tooltip_readiness_inputs_changed),
+                    emit_tooltip_shown.in_set(super::TooltipSystems::VisibilityEvents),
                 ),
             );
     }
@@ -171,6 +204,7 @@ pub enum TooltipPlacementPolicy {
 
 /// Deferred visual and behavior declaration for a tooltip.
 #[derive(Component, Debug)]
+#[require(TooltipPhase)]
 pub struct Tooltip {
     blueprint:        Arc<LayoutTree>,
     authoring:        TooltipAuthoring,
@@ -181,6 +215,161 @@ pub struct Tooltip {
     target_anchor:    Anchor,
     offset:           PanelAnchorOffset,
     placement_policy: TooltipPlacementPolicy,
+}
+
+/// Reports that a tooltip became visible.
+#[derive(Clone, Copy, Debug, EntityEvent)]
+pub struct TooltipShown {
+    /// Tooltip controller that became visible.
+    #[event_target]
+    pub entity: Entity,
+}
+
+/// Reports that a tooltip became hidden.
+#[derive(Clone, Copy, Debug, EntityEvent)]
+pub struct TooltipHidden {
+    /// Tooltip controller that became hidden.
+    #[event_target]
+    pub entity: Entity,
+}
+
+/// Sole authority for one tooltip controller's visibility lifecycle.
+///
+/// A wait owns the timer duration captured when that transition began. The
+/// panel remains materialized while hidden; only `Visible` and
+/// `WaitingToHide` represent an on-screen tooltip.
+#[derive(Component, Default)]
+enum TooltipPhase {
+    #[default]
+    Hidden,
+    WaitingToShow(Timer),
+    Visible,
+    WaitingToHide(Timer),
+}
+
+impl TooltipPhase {
+    const fn is_visible(&self) -> bool { matches!(self, Self::Visible | Self::WaitingToHide(_)) }
+}
+
+#[derive(Clone, Copy, Component)]
+struct TooltipPointerCamera {
+    camera: Entity,
+}
+
+#[derive(Clone, Copy, Component)]
+struct TooltipShownPending;
+
+#[derive(Resource)]
+struct TooltipHiddenEventKey(EventKey);
+
+fn remember_tooltip_camera(
+    target: Entity,
+    camera: Entity,
+    tooltips: &Query<(), With<Tooltips>>,
+    commands: &mut Commands<'_, '_>,
+) {
+    if tooltips.contains(target) {
+        commands
+            .entity(target)
+            .insert(TooltipPointerCamera { camera });
+    }
+}
+
+fn remember_tooltip_camera_from_over(
+    event: On<Pointer<Over>>,
+    tooltips: Query<(), With<Tooltips>>,
+    mut commands: Commands,
+) {
+    remember_tooltip_camera(
+        event.event_target(),
+        event.event().hit.camera,
+        &tooltips,
+        &mut commands,
+    );
+}
+
+fn remember_tooltip_camera_from_move(
+    event: On<Pointer<PointerMove>>,
+    tooltips: Query<(), With<Tooltips>>,
+    mut commands: Commands,
+) {
+    remember_tooltip_camera(
+        event.event_target(),
+        event.event().hit.camera,
+        &tooltips,
+        &mut commands,
+    );
+}
+
+fn remember_tooltip_camera_from_press(
+    event: On<Pointer<Press>>,
+    tooltips: Query<(), With<Tooltips>>,
+    mut commands: Commands,
+) {
+    remember_tooltip_camera(
+        event.event_target(),
+        event.event().hit.camera,
+        &tooltips,
+        &mut commands,
+    );
+}
+
+fn remove_tooltip_pointer_camera(event: On<Remove, Tooltips>, mut commands: Commands) {
+    commands
+        .entity(event.entity)
+        .try_remove::<TooltipPointerCamera>();
+}
+
+fn finalize_visible_tooltip_now(entity: Entity, world: &mut DeferredWorld<'_>) {
+    let was_visible = world
+        .get_mut::<TooltipPhase>(entity)
+        .is_some_and(|mut phase| {
+            if !phase.is_visible() {
+                return false;
+            }
+            *phase = TooltipPhase::Hidden;
+            true
+        });
+    if !was_visible {
+        return;
+    }
+    if let Some(mut visibility) = world.get_mut::<Visibility>(entity) {
+        *visibility = Visibility::Hidden;
+    }
+    let Some(event_key) = world
+        .get_resource::<TooltipHiddenEventKey>()
+        .map(|key| key.0)
+    else {
+        return;
+    };
+    let mut event = TooltipHidden { entity };
+    let mut trigger = EntityTrigger;
+    // SAFETY: `hidden_event` was registered for `TooltipHidden` in this same
+    // world, and `trigger` is that event type's matching trigger.
+    unsafe {
+        world.trigger_raw(event_key, &mut event, &mut trigger, MaybeLocation::caller());
+    }
+}
+
+fn finalize_removed_tooltip(trigger: On<Remove, Tooltip>, mut world: DeferredWorld<'_>) {
+    finalize_visible_tooltip_now(trigger.entity, &mut world);
+}
+
+fn finalize_despawned_tooltip(trigger: On<Despawn, Tooltip>, mut world: DeferredWorld<'_>) {
+    finalize_visible_tooltip_now(trigger.entity, &mut world);
+}
+
+fn finalize_tooltip_panel_role(trigger: On<Remove, DiegeticPanel>, mut world: DeferredWorld<'_>) {
+    if world.get::<Tooltip>(trigger.entity).is_some() {
+        finalize_visible_tooltip_now(trigger.entity, &mut world);
+    }
+    let targeted_tooltips = world
+        .get::<Tooltips>(trigger.entity)
+        .map(|tooltips| tooltips.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for tooltip in targeted_tooltips {
+        finalize_visible_tooltip_now(tooltip, &mut world);
+    }
 }
 
 #[derive(Debug)]
@@ -382,6 +571,356 @@ pub(crate) struct PrepareTooltip;
 
 #[derive(Clone, Copy, Component)]
 pub(super) struct AuthoredTooltipTargetSpace(PanelSpace);
+
+fn advance_one_tooltip_phase(
+    phase: &mut TooltipPhase,
+    tooltip: &Tooltip,
+    eligible: bool,
+    suppressed: bool,
+    delta: Duration,
+) -> bool {
+    let mut next = None;
+    let mut emit_hidden = false;
+    match phase {
+        TooltipPhase::Hidden if eligible => {
+            let mut timer = Timer::new(tooltip.show_after, TimerMode::Once);
+            timer.tick(delta);
+            next = Some(TooltipPhase::WaitingToShow(timer));
+        },
+        TooltipPhase::Hidden => {},
+        TooltipPhase::WaitingToShow(timer) if eligible => {
+            timer.tick(delta);
+        },
+        TooltipPhase::WaitingToShow(_) => {
+            next = Some(TooltipPhase::Hidden);
+        },
+        TooltipPhase::Visible if eligible => {},
+        TooltipPhase::Visible => {
+            if suppressed || tooltip.hide_after.is_zero() {
+                next = Some(TooltipPhase::Hidden);
+                emit_hidden = true;
+            } else {
+                let mut timer = Timer::new(tooltip.hide_after, TimerMode::Once);
+                timer.tick(delta);
+                if timer.is_finished() {
+                    next = Some(TooltipPhase::Hidden);
+                    emit_hidden = true;
+                } else {
+                    next = Some(TooltipPhase::WaitingToHide(timer));
+                }
+            }
+        },
+        TooltipPhase::WaitingToHide(_) if eligible => {
+            next = Some(TooltipPhase::Visible);
+        },
+        TooltipPhase::WaitingToHide(timer) => {
+            timer.tick(delta);
+            if suppressed || timer.is_finished() {
+                next = Some(TooltipPhase::Hidden);
+                emit_hidden = true;
+            }
+        },
+    }
+    if let Some(next) = next {
+        *phase = next;
+    }
+    emit_hidden
+}
+
+fn advance_tooltip_visibility(
+    time: Option<Res<Time>>,
+    mut controllers: Query<(
+        Entity,
+        &Tooltip,
+        &TooltipFor,
+        Option<&AuthoredTooltipTargetSpace>,
+        Option<&MaterializedTooltip>,
+        Option<&TooltipPresentationCamera>,
+        Has<PrepareTooltip>,
+        &mut TooltipPhase,
+        Option<&mut Visibility>,
+    )>,
+    targets: Query<(
+        Option<&PickingInteraction>,
+        Has<super::WidgetFocusVisible>,
+        Has<super::WidgetDisabled>,
+        Option<&TooltipPointerCamera>,
+    )>,
+    panels: Query<&DiegeticPanel>,
+    widgets: Query<&super::WidgetOf, With<super::PanelWidget>>,
+    render_layers: Query<&RenderLayers>,
+    cameras: Query<(
+        Entity,
+        &Camera,
+        &GlobalTransform,
+        Option<&RenderTarget>,
+        Option<&RenderLayers>,
+    )>,
+    windows: Query<(), With<Window>>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    focus_authority: Res<super::WidgetFocusAuthority>,
+    mut commands: Commands,
+) {
+    let delta = time.as_deref().map_or(Duration::ZERO, Time::delta);
+    for (
+        entity,
+        tooltip,
+        tooltip_for,
+        authored_space,
+        materialized,
+        presentation_camera,
+        preparing,
+        mut phase,
+        mut visibility,
+    ) in &mut controllers
+    {
+        let target = tooltip_for.target();
+        let Ok((interaction, focus_visible, disabled, pointer_camera)) = targets.get(target) else {
+            continue;
+        };
+        let hovered = matches!(
+            interaction,
+            Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
+        );
+        let suppressed = disabled && tooltip.disabled_policy == TooltipDisabledPolicy::Suppress;
+        let eligible = (hovered || focus_visible) && !suppressed;
+
+        let emit_hidden =
+            advance_one_tooltip_phase(&mut phase, tooltip, eligible, suppressed, delta);
+        if emit_hidden {
+            if let Some(visibility) = visibility.as_deref_mut() {
+                *visibility = Visibility::Hidden;
+            }
+            commands.trigger(TooltipHidden { entity });
+        }
+
+        if !eligible {
+            continue;
+        }
+        let Some((space, target_layers)) = tooltip_target_presentation(
+            target,
+            authored_space,
+            materialized,
+            &panels,
+            &widgets,
+            &render_layers,
+        ) else {
+            continue;
+        };
+        let camera = if space == PanelSpace::World
+            && tooltip.placement_policy == TooltipPlacementPolicy::KeepVisible
+        {
+            select_tooltip_presentation_camera(
+                target,
+                hovered.then_some(pointer_camera).flatten(),
+                focus_visible,
+                &target_layers,
+                &focus_authority,
+                &cameras,
+                &windows,
+                &primary_window,
+            )
+        } else {
+            None
+        };
+        let needs_camera = space == PanelSpace::World
+            && tooltip.placement_policy == TooltipPlacementPolicy::KeepVisible;
+        if needs_camera {
+            let Some(camera) = camera else {
+                if presentation_camera.is_some() {
+                    commands
+                        .entity(entity)
+                        .remove::<TooltipPresentationCamera>();
+                }
+                continue;
+            };
+            if presentation_camera.is_none_or(|current| current.camera != camera) {
+                commands
+                    .entity(entity)
+                    .insert(TooltipPresentationCamera { camera });
+            }
+        }
+        if materialized.is_none() && !preparing {
+            commands.entity(entity).insert(PrepareTooltip);
+        }
+    }
+}
+
+fn tooltip_target_presentation(
+    target: Entity,
+    authored_space: Option<&AuthoredTooltipTargetSpace>,
+    materialized: Option<&MaterializedTooltip>,
+    panels: &Query<&DiegeticPanel>,
+    widgets: &Query<&super::WidgetOf, With<super::PanelWidget>>,
+    render_layers: &Query<&RenderLayers>,
+) -> Option<(PanelSpace, RenderLayers)> {
+    if let Some(materialized) = materialized {
+        return Some((materialized.space, materialized.render_layers.clone()));
+    }
+    let presentation_entity = if let Ok(panel) = panels.get(target) {
+        return Some((
+            PanelSpace::from(panel.coordinate_space()),
+            render_layers
+                .get(target)
+                .cloned()
+                .unwrap_or_else(|_| RenderLayers::layer(0)),
+        ));
+    } else if let Ok(widget_of) = widgets.get(target) {
+        widget_of.panel()
+    } else {
+        return authored_space.map(|space| {
+            (
+                space.0,
+                render_layers
+                    .get(target)
+                    .cloned()
+                    .unwrap_or_else(|_| RenderLayers::layer(0)),
+            )
+        });
+    };
+    let panel = panels.get(presentation_entity).ok()?;
+    Some((
+        PanelSpace::from(panel.coordinate_space()),
+        render_layers
+            .get(presentation_entity)
+            .cloned()
+            .unwrap_or_else(|_| RenderLayers::layer(0)),
+    ))
+}
+
+fn select_tooltip_presentation_camera(
+    target: Entity,
+    pointer_camera: Option<&TooltipPointerCamera>,
+    focus_visible: bool,
+    target_layers: &RenderLayers,
+    focus_authority: &super::WidgetFocusAuthority,
+    cameras: &Query<(
+        Entity,
+        &Camera,
+        &GlobalTransform,
+        Option<&RenderTarget>,
+        Option<&RenderLayers>,
+    )>,
+    windows: &Query<(), With<Window>>,
+    primary_window: &Query<Entity, With<PrimaryWindow>>,
+) -> Option<Entity> {
+    if let Some(camera) = pointer_camera.map(|camera| camera.camera)
+        && compatible_presentation_camera(
+            camera,
+            None,
+            target_layers,
+            cameras,
+            windows,
+            primary_window,
+        )
+    {
+        return Some(camera);
+    }
+    let (window, _, preferred) = focus_visible
+        .then(|| focus_authority.tooltip_focus_context(target))
+        .flatten()?;
+    if let Some(camera) = preferred
+        && compatible_presentation_camera(
+            camera,
+            Some(window),
+            target_layers,
+            cameras,
+            windows,
+            primary_window,
+        )
+    {
+        return Some(camera);
+    }
+    cameras
+        .iter()
+        .filter(|(entity, ..)| {
+            compatible_presentation_camera(
+                *entity,
+                Some(window),
+                target_layers,
+                cameras,
+                windows,
+                primary_window,
+            )
+        })
+        .max_by(|(left_entity, left, ..), (right_entity, right, ..)| {
+            left.order
+                .cmp(&right.order)
+                .then_with(|| right_entity.to_bits().cmp(&left_entity.to_bits()))
+        })
+        .map(|(entity, ..)| entity)
+}
+
+fn compatible_presentation_camera(
+    entity: Entity,
+    required_window: Option<Entity>,
+    target_layers: &RenderLayers,
+    cameras: &Query<(
+        Entity,
+        &Camera,
+        &GlobalTransform,
+        Option<&RenderTarget>,
+        Option<&RenderLayers>,
+    )>,
+    windows: &Query<(), With<Window>>,
+    primary_window: &Query<Entity, With<PrimaryWindow>>,
+) -> bool {
+    let Ok((_, camera, global_transform, render_target, camera_layers)) = cameras.get(entity)
+    else {
+        return false;
+    };
+    if !camera.is_active || !global_transform.affine().is_finite() {
+        return false;
+    }
+    let primary = primary_window.single().ok();
+    let Some(NormalizedRenderTarget::Window(window)) =
+        render_target.and_then(|target| target.normalize(primary))
+    else {
+        return false;
+    };
+    let window = window.entity();
+    if windows.get(window).is_err() || required_window.is_some_and(|required| required != window) {
+        return false;
+    }
+    camera_layers
+        .cloned()
+        .unwrap_or_else(|| RenderLayers::layer(0))
+        .intersects(target_layers)
+}
+
+fn reveal_ready_tooltips(
+    mut controllers: Query<(
+        Entity,
+        &mut TooltipPhase,
+        &TooltipReadiness,
+        &mut Visibility,
+    )>,
+    mut commands: Commands,
+) {
+    for (entity, mut phase, readiness, mut visibility) in &mut controllers {
+        let TooltipPhase::WaitingToShow(timer) = &*phase else {
+            continue;
+        };
+        if !timer.is_finished() || *readiness != TooltipReadiness::Ready {
+            continue;
+        }
+        *phase = TooltipPhase::Visible;
+        *visibility = Visibility::Inherited;
+        commands.entity(entity).insert(TooltipShownPending);
+    }
+}
+
+fn emit_tooltip_shown(
+    controllers: Query<(Entity, &TooltipPhase), With<TooltipShownPending>>,
+    mut commands: Commands,
+) {
+    for (entity, phase) in &controllers {
+        commands.entity(entity).remove::<TooltipShownPending>();
+        if phase.is_visible() {
+            commands.trigger(TooltipShown { entity });
+        }
+    }
+}
 
 #[derive(Clone, Component)]
 pub(crate) struct MaterializedTooltip {
@@ -2914,6 +3453,7 @@ pub(crate) fn remove_materialized_state(
         TooltipWidthConstraint,
         TooltipWidthConstraintRequest,
         TooltipPresentationCamera,
+        TooltipShownPending,
         ScreenTooltipAttachmentCorrection,
         PrepareTooltip,
     )>();
@@ -2976,6 +3516,17 @@ mod tests {
     use bevy::camera::Viewport;
     use bevy::ecs::error;
     use bevy::ecs::system::RunSystemOnce;
+    use bevy::picking::InteractionPlugin;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::backend::PointerHits;
+    use bevy::picking::pointer::Location;
+    use bevy::picking::pointer::PointerAction;
+    use bevy::picking::pointer::PointerId;
+    use bevy::picking::pointer::PointerInput;
+    use bevy::picking::pointer::PointerLocation;
+    use bevy::picking::pointer::PointerMap;
+    use bevy::picking::pointer::update_pointer_map;
+    use bevy::time::TimeUpdateStrategy;
     use bevy::transform::TransformPlugin;
     use hana_valence::AnchoredTo;
     use hana_valence::ResolvedAnchorOffset;
@@ -3019,6 +3570,12 @@ mod tests {
 
     #[derive(Default, Resource)]
     struct TooltipCleanupCount(usize);
+
+    #[derive(Default, Resource)]
+    struct TooltipVisibilityLog {
+        shown:  Vec<Entity>,
+        hidden: Vec<Entity>,
+    }
 
     impl TooltipTarget for ApplicationWorldTarget {
         type Space = World;
@@ -3080,6 +3637,72 @@ mod tests {
         app.world_mut()
             .entity_mut(controller)
             .insert(PrepareTooltip);
+    }
+
+    fn record_tooltip_shown(event: On<TooltipShown>, mut world: DeferredWorld<'_>) {
+        assert!(
+            world.get::<Tooltip>(event.entity).is_some()
+                && world.get::<TooltipFor>(event.entity).is_some()
+                && world.get::<GlobalTransform>(event.entity).is_some(),
+            "shown observers should see complete tooltip data",
+        );
+        let mut log = world.resource_mut::<TooltipVisibilityLog>();
+        log.shown.push(event.entity);
+    }
+
+    fn record_tooltip_hidden(event: On<TooltipHidden>, mut world: DeferredWorld<'_>) {
+        assert!(
+            world.get::<Tooltip>(event.entity).is_some()
+                && world.get::<TooltipFor>(event.entity).is_some()
+                && world.get::<GlobalTransform>(event.entity).is_some(),
+            "hidden observers should see complete tooltip data",
+        );
+        let mut log = world.resource_mut::<TooltipVisibilityLog>();
+        log.hidden.push(event.entity);
+    }
+
+    fn visibility_app(step: Duration) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(TimeUpdateStrategy::ManualDuration(step))
+            .init_resource::<super::super::WidgetFocusAuthority>()
+            .init_resource::<TooltipVisibilityLog>()
+            .add_observer(record_tooltip_shown)
+            .add_observer(record_tooltip_hidden)
+            .add_systems(Update, advance_tooltip_visibility)
+            .add_systems(
+                PostUpdate,
+                (reveal_ready_tooltips, ApplyDeferred, emit_tooltip_shown).chain(),
+            );
+        app
+    }
+
+    fn visibility_controller(app: &mut App, tooltip: Tooltip) -> (Entity, Entity) {
+        let target = app.world_mut().spawn(PickingInteraction::None).id();
+        let controller = app
+            .world_mut()
+            .spawn((
+                tooltip,
+                TooltipFor::new(target),
+                AuthoredTooltipTargetSpace(PanelSpace::Screen),
+                TooltipReadiness::Ready,
+                Visibility::Hidden,
+                Transform::default(),
+                GlobalTransform::default(),
+            ))
+            .id();
+        (target, controller)
+    }
+
+    fn set_interaction(app: &mut App, target: Entity, interaction: PickingInteraction) {
+        app.world_mut().entity_mut(target).insert(interaction);
+    }
+
+    fn add_synthetic_pointer(app: &mut App, pointer: PointerId, location: Location) {
+        app.world_mut()
+            .spawn((pointer, PointerLocation::new(location)));
+        let result = app.world_mut().run_system_cached(update_pointer_map);
+        assert!(result.is_ok());
     }
 
     fn seeded_perspective_camera() -> Camera { seeded_perspective_camera_for(TEST_VIEWPORT) }
@@ -3527,6 +4150,501 @@ mod tests {
         assert_eq!(
             tooltip.placement_policy,
             TooltipPlacementPolicy::KeepVisible
+        );
+    }
+
+    #[test]
+    fn show_wait_cancels_and_hide_grace_can_be_canceled() {
+        let step = Duration::from_millis(100);
+        let mut app = visibility_app(step);
+        let tooltip = Tooltip::new(El::new())
+            .show_after(Duration::from_millis(300))
+            .hide_after(Duration::from_millis(200));
+        let (target, controller) = visibility_controller(&mut app, tooltip);
+
+        set_interaction(&mut app, target, PickingInteraction::Hovered);
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::WaitingToShow(_))
+        ));
+        set_interaction(&mut app, target, PickingInteraction::None);
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Hidden)
+        ));
+        assert!(
+            app.world()
+                .resource::<TooltipVisibilityLog>()
+                .shown
+                .is_empty()
+        );
+
+        set_interaction(&mut app, target, PickingInteraction::Hovered);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Visible)
+        ));
+        assert_eq!(
+            app.world().resource::<TooltipVisibilityLog>().shown,
+            [controller]
+        );
+
+        set_interaction(&mut app, target, PickingInteraction::None);
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::WaitingToHide(_))
+        ));
+        set_interaction(&mut app, target, PickingInteraction::Hovered);
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Visible)
+        ));
+        assert!(
+            app.world()
+                .resource::<TooltipVisibilityLog>()
+                .hidden
+                .is_empty()
+        );
+
+        set_interaction(&mut app, target, PickingInteraction::None);
+        app.update();
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Hidden)
+        ));
+        assert_eq!(
+            app.world().resource::<TooltipVisibilityLog>().hidden,
+            [controller]
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Hidden)
+        );
+    }
+
+    #[test]
+    fn zero_show_waits_for_readiness_and_suppress_hides_immediately() {
+        let mut app = visibility_app(Duration::from_millis(16));
+        let tooltip = Tooltip::new(El::new())
+            .show_after(Duration::ZERO)
+            .hide_after(Duration::from_secs(10));
+        let (target, controller) = visibility_controller(&mut app, tooltip);
+        app.world_mut()
+            .entity_mut(controller)
+            .insert(TooltipReadiness::Pending);
+
+        set_interaction(&mut app, target, PickingInteraction::Hovered);
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::WaitingToShow(timer)) if timer.is_finished()
+        ));
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Hidden)
+        );
+        assert!(
+            app.world()
+                .resource::<TooltipVisibilityLog>()
+                .shown
+                .is_empty()
+        );
+
+        app.world_mut()
+            .entity_mut(controller)
+            .insert(TooltipReadiness::Ready);
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Visible)
+        ));
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited)
+        );
+
+        app.world_mut()
+            .entity_mut(target)
+            .insert(super::super::WidgetDisabled::test_marker());
+        app.update();
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Hidden)
+        ));
+        let log = app.world().resource::<TooltipVisibilityLog>();
+        assert_eq!(log.shown, [controller]);
+        assert_eq!(log.hidden, [controller]);
+    }
+
+    #[test]
+    fn hiding_and_showing_reuses_the_materialized_controller() {
+        let mut app = visibility_app(Duration::ZERO);
+        let tooltip = Tooltip::new(El::new())
+            .show_after(Duration::ZERO)
+            .hide_after(Duration::ZERO);
+        let (target, controller) = visibility_controller(&mut app, tooltip);
+        let panel = DiegeticPanel::world()
+            .size(Mm(1.0), Mm(1.0))
+            .with_tree(LayoutBuilder::new(1.0, 1.0).build())
+            .build();
+        assert!(panel.is_ok());
+        let Ok(panel) = panel else {
+            return;
+        };
+        app.world_mut().entity_mut(controller).insert((
+            panel,
+            MaterializedTooltip {
+                target,
+                space: PanelSpace::World,
+                layout_unit: Unit::Millimeters,
+                window: None,
+                camera_order: None,
+                render_layers: RenderLayers::layer(0),
+                blueprint: Arc::new(LayoutBuilder::new(1.0, 1.0).build()),
+                authored_attachment: PanelAttachment::new(Anchor::Center, Anchor::Center),
+                placement_policy: TooltipPlacementPolicy::Fixed,
+                previous_transform: None,
+                previous_global: None,
+                previous_visibility: None,
+            },
+        ));
+        let panel_revision = app
+            .world()
+            .get::<DiegeticPanel>(controller)
+            .map(DiegeticPanel::tree_revision);
+
+        set_interaction(&mut app, target, PickingInteraction::Hovered);
+        app.update();
+        set_interaction(&mut app, target, PickingInteraction::None);
+        app.update();
+        set_interaction(&mut app, target, PickingInteraction::Hovered);
+        app.update();
+
+        assert!(app.world().get_entity(controller).is_ok());
+        assert_eq!(
+            app.world()
+                .get::<DiegeticPanel>(controller)
+                .map(DiegeticPanel::tree_revision),
+            panel_revision
+        );
+        assert!(app.world().get::<MaterializedTooltip>(controller).is_some());
+        let log = app.world().resource::<TooltipVisibilityLog>();
+        assert_eq!(log.shown, [controller, controller]);
+        assert_eq!(log.hidden, [controller]);
+    }
+
+    #[test]
+    fn visible_lifecycle_finalizer_emits_once_while_data_is_queryable() {
+        for operation in 0..2 {
+            let mut app = test_app();
+            app.init_resource::<TooltipVisibilityLog>()
+                .add_observer(record_tooltip_hidden);
+            let target = app.world_mut().spawn_empty().id();
+            let controller = app
+                .world_mut()
+                .spawn((
+                    Tooltip::new(El::new()),
+                    TooltipFor::new(target),
+                    TooltipPhase::Visible,
+                    Visibility::Inherited,
+                    Transform::default(),
+                    GlobalTransform::default(),
+                ))
+                .id();
+
+            match operation {
+                0 => {
+                    app.world_mut().despawn(controller);
+                },
+                _ => {
+                    app.world_mut().despawn(target);
+                },
+            }
+
+            let log = app.world().resource::<TooltipVisibilityLog>();
+            assert_eq!(log.hidden, [controller]);
+        }
+    }
+
+    #[test]
+    fn visible_associated_declaration_removal_emits_before_controller_cleanup() {
+        let mut app = test_app();
+        app.init_resource::<TooltipVisibilityLog>()
+            .add_observer(record_tooltip_hidden);
+        let panel = spawn_panel(&mut app, tooltip_tree(Some(Tooltip::new(El::new()))));
+        app.update();
+        let widget = widget(&mut app, panel);
+        let controller = controller(&app, widget);
+        app.world_mut().entity_mut(controller).insert((
+            TooltipPhase::Visible,
+            Visibility::Inherited,
+            Transform::default(),
+            GlobalTransform::default(),
+        ));
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(TooltipPointerCamera { camera: panel });
+
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, tooltip_tree(None));
+        assert!(result.is_ok());
+        app.update();
+
+        let log = app.world().resource::<TooltipVisibilityLog>();
+        assert_eq!(log.hidden, [controller]);
+        assert!(app.world().get_entity(controller).is_err());
+        assert!(app.world().get::<TooltipPointerCamera>(widget).is_none());
+    }
+
+    #[test]
+    fn target_panel_role_removal_finalizes_a_visible_standalone_tooltip() {
+        let mut app = test_app();
+        app.init_resource::<TooltipVisibilityLog>()
+            .add_observer(record_tooltip_hidden);
+        let target = spawn_panel(&mut app, LayoutBuilder::new(10.0, 10.0).build());
+        let controller = app
+            .world_mut()
+            .spawn((
+                Tooltip::new(El::new()),
+                TooltipFor::new(target),
+                TooltipPhase::Visible,
+                Visibility::Inherited,
+                Transform::default(),
+                GlobalTransform::default(),
+            ))
+            .id();
+
+        app.world_mut().entity_mut(target).remove::<DiegeticPanel>();
+        app.world_mut().flush();
+
+        let log = app.world().resource::<TooltipVisibilityLog>();
+        assert_eq!(log.hidden, [controller]);
+    }
+
+    #[test]
+    fn synthetic_backend_hit_and_raw_pointer_input_start_tooltip_eligibility() {
+        let pointer = PointerId::Touch(91);
+        let mut app = materialization_app();
+        app.add_plugins(InteractionPlugin)
+            .add_message::<PointerInput>()
+            .add_message::<PointerHits>()
+            .init_resource::<PointerMap>()
+            .init_resource::<TooltipVisibilityLog>()
+            .add_observer(record_tooltip_shown)
+            .add_observer(record_tooltip_hidden);
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let camera = spawn_presentation_camera(&mut app, window, RenderLayers::layer(0));
+        let normalized_target = RenderTarget::Window(WindowRef::Entity(window))
+            .normalize(Some(window))
+            .expect("test window target normalizes");
+        let location = Location {
+            target:   normalized_target,
+            position: TEST_VIEWPORT * 0.5,
+        };
+        add_synthetic_pointer(&mut app, pointer, location.clone());
+
+        let tooltip = Tooltip::new(El::new())
+            .show_after(Duration::ZERO)
+            .placement_policy(TooltipPlacementPolicy::Fixed);
+        let panel = spawn_panel(&mut app, tooltip_tree(Some(tooltip)));
+        app.update();
+        let widget = widget(&mut app, panel);
+        let controller = controller(&app, widget);
+
+        app.world_mut().write_message(PointerHits::new(
+            pointer,
+            vec![(widget, HitData::new(camera, 0.0, None, None))],
+            0.0,
+        ));
+        app.world_mut().write_message(PointerInput::new(
+            pointer,
+            location,
+            PointerAction::Move { delta: Vec2::ZERO },
+        ));
+        app.update();
+
+        assert_eq!(
+            app.world().get::<PickingInteraction>(widget),
+            Some(&PickingInteraction::Hovered)
+        );
+        assert_eq!(
+            app.world()
+                .get::<TooltipPointerCamera>(widget)
+                .map(|remembered| remembered.camera),
+            Some(camera)
+        );
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::WaitingToShow(_) | TooltipPhase::Visible)
+        ));
+        assert!(
+            app.world().get::<PrepareTooltip>(controller).is_some()
+                || app.world().get::<MaterializedTooltip>(controller).is_some()
+        );
+
+        for _ in 0..MATERIALIZATION_UPDATES {
+            app.world_mut().write_message(PointerHits::new(
+                pointer,
+                vec![(widget, HitData::new(camera, 0.0, None, None))],
+                0.0,
+            ));
+            app.update();
+        }
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Visible)
+        ));
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited)
+        );
+        let log = app.world().resource::<TooltipVisibilityLog>();
+        assert_eq!(log.shown, [controller]);
+    }
+
+    #[test]
+    fn standalone_tooltip_uses_the_same_visibility_path() {
+        let mut app = materialization_app();
+        app.init_resource::<TooltipVisibilityLog>()
+            .add_observer(record_tooltip_shown)
+            .add_observer(record_tooltip_hidden);
+        let target = mesh_target(&mut app, Vec3A::splat(1.0));
+        let controller = standalone_world_tooltip(
+            &mut app,
+            target,
+            fixed_size_tooltip(Vec2::new(30.0, 10.0))
+                .show_after(Duration::ZERO)
+                .hide_after(Duration::ZERO)
+                .placement_policy(TooltipPlacementPolicy::Fixed),
+        );
+        app.update();
+
+        app.world_mut()
+            .entity_mut(target)
+            .insert(PickingInteraction::Hovered);
+        update_materialization(&mut app);
+
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Visible)
+        ));
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited)
+        );
+        assert_eq!(
+            app.world().resource::<TooltipVisibilityLog>().shown,
+            [controller]
+        );
+
+        app.world_mut()
+            .entity_mut(target)
+            .insert(PickingInteraction::None);
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(controller),
+            Some(TooltipPhase::Hidden)
+        ));
+        assert_eq!(
+            app.world().resource::<TooltipVisibilityLog>().hidden,
+            [controller]
+        );
+    }
+
+    #[test]
+    fn keyboard_focus_selects_and_then_reuses_the_interaction_camera() {
+        let mut app = materialization_app();
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        let lower = spawn_presentation_camera(&mut app, window, RenderLayers::layer(0));
+        let higher = spawn_presentation_camera(&mut app, window, RenderLayers::layer(0));
+        let Some(mut lower_camera) = app.world_mut().get_mut::<Camera>(lower) else {
+            return;
+        };
+        lower_camera.order = 1;
+        let Some(mut higher_camera) = app.world_mut().get_mut::<Camera>(higher) else {
+            return;
+        };
+        higher_camera.order = 5;
+        let tooltip = Tooltip::new(El::new()).show_after(Duration::ZERO);
+        let panel = spawn_panel(&mut app, tooltip_tree(Some(tooltip)));
+        app.update();
+        let widget = widget(&mut app, panel);
+        let controller = controller(&app, widget);
+
+        app.world_mut()
+            .trigger(crate::RequestWidgetFocus { window, widget });
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<TooltipPresentationCamera>(controller)
+                .map(|camera| camera.camera),
+            Some(higher),
+            "initial keyboard-only focus chooses the highest-order compatible camera",
+        );
+
+        let location = Location {
+            target:   RenderTarget::Window(WindowRef::Entity(window))
+                .normalize(Some(window))
+                .expect("test window target normalizes"),
+            position: TEST_VIEWPORT * 0.5,
+        };
+        app.world_mut().trigger(Pointer::new(
+            PointerId::Mouse,
+            location.clone(),
+            Press {
+                button: PointerButton::Primary,
+                hit:    HitData::new(lower, 0.0, None, None),
+                count:  1,
+            },
+            widget,
+        ));
+        app.world_mut()
+            .trigger(crate::RequestWidgetFocus { window, widget });
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<TooltipPresentationCamera>(controller)
+                .map(|camera| camera.camera),
+            Some(lower),
+            "visible keyboard focus reuses the camera from the preceding interaction",
+        );
+
+        app.world_mut().trigger(Pointer::new(
+            PointerId::Mouse,
+            location,
+            Press {
+                button: PointerButton::Primary,
+                hit:    HitData::new(higher, 0.0, None, None),
+                count:  1,
+            },
+            widget,
+        ));
+        app.world_mut()
+            .trigger(crate::RequestWidgetFocus { window, widget });
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<TooltipPresentationCamera>(controller)
+                .map(|camera| camera.camera),
+            Some(higher),
+            "a later interaction replaces the remembered camera",
         );
     }
 

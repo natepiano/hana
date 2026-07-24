@@ -22,6 +22,11 @@ pub enum WidgetInteractivity {
 #[reflect(Component)]
 pub struct WidgetDisabled(());
 
+#[cfg(test)]
+impl WidgetDisabled {
+    pub(crate) const fn test_marker() -> Self { Self(()) }
+}
+
 /// Writes widget interactivity into the owning panel's authored layout tree.
 #[derive(SystemParam)]
 pub struct PanelWidgetWriter<'w, 's> {

@@ -88,6 +88,9 @@ use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Tooltip;
 use hana_diegetic::TooltipCommandsExt;
+use hana_diegetic::TooltipFor;
+use hana_diegetic::TooltipHidden;
+use hana_diegetic::TooltipShown;
 use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
 use hana_diegetic::WidgetInputPlugin;
@@ -159,6 +162,9 @@ const SCREEN_TARGET_LABEL: &str = "Target widget";
 const STATE_STATUS_ID: &str = "state-status";
 const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal lvl=normal";
 const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off lvl=pressed,off";
+const TOOLTIP_STATUS_ID: &str = "tooltip-status";
+const TOOLTIP_STATUS_IDLE: &str = "Tooltip: none";
+const TOOLTIP_STATUS_MEASURE: &str = "Tooltip: hidden secondary-button";
 const SLIDER_ADJUST_STEPS: f32 = 1.0;
 const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
 const SLIDER_BORDER_DISABLED: Color = Color::srgba(0.34, 0.32, 0.40, 0.60);
@@ -194,7 +200,7 @@ const STATUS_LINE_GAP: Px = Px(4.0);
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = Px(7.0);
 const WORLD_READOUT_MAX_WIDTH: Px = Px(500.0);
-const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.15;
+const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.18;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum ToggleMode {
@@ -395,6 +401,8 @@ fn main() {
         .add_observer(report_slider_grabbed)
         .add_observer(report_slider_released)
         .add_observer(report_slider_canceled)
+        .add_observer(report_tooltip_shown)
+        .add_observer(report_tooltip_hidden)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
             Update,
@@ -649,6 +657,70 @@ fn report_slider_canceled(event: On<SliderCanceled>, mut drag: ResMut<LevelSlide
         "widgets: {} canceled by {:?} ({cause})",
         event.id, event.pointer_id
     );
+}
+
+fn report_tooltip_shown(
+    event: On<TooltipShown>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    targets: Query<&TooltipFor>,
+    widgets: Query<&PanelWidget>,
+    mut panel_text: PanelText,
+) {
+    report_tooltip_visibility(
+        event.entity,
+        "shown",
+        &readouts,
+        &targets,
+        &widgets,
+        &mut panel_text,
+    );
+}
+
+fn report_tooltip_hidden(
+    event: On<TooltipHidden>,
+    readouts: Query<Entity, With<WidgetInteractionReadout>>,
+    targets: Query<&TooltipFor>,
+    widgets: Query<&PanelWidget>,
+    mut panel_text: PanelText,
+) {
+    report_tooltip_visibility(
+        event.entity,
+        "hidden",
+        &readouts,
+        &targets,
+        &widgets,
+        &mut panel_text,
+    );
+}
+
+fn report_tooltip_visibility(
+    tooltip: Entity,
+    visibility: &str,
+    readouts: &Query<Entity, With<WidgetInteractionReadout>>,
+    targets: &Query<&TooltipFor>,
+    widgets: &Query<&PanelWidget>,
+    panel_text: &mut PanelText,
+) {
+    let target = targets.get(tooltip).map_or_else(
+        |_| "unavailable".to_owned(),
+        |target| {
+            widgets.get(target.target()).map_or_else(
+                |_| format!("{:?}", target.target()),
+                |widget| widget.id().to_string(),
+            )
+        },
+    );
+    info!("widgets: tooltip {tooltip:?} {visibility} for {target}");
+    let Ok(readout) = readouts.single() else {
+        return;
+    };
+    if !panel_text.set_text(
+        readout,
+        &PanelElementId::named(TOOLTIP_STATUS_ID),
+        format!("Tooltip: {visibility} {target}"),
+    ) {
+        warn!("widgets: tooltip status has not been reified");
+    }
 }
 
 fn request_initial_widget_focus(
@@ -1073,6 +1145,14 @@ fn interaction_status_tree() -> LayoutTree {
         )
         .id(SLIDER_STATUS_ID)
         .measure_as(SLIDER_STATUS_MEASURE),
+    );
+    builder.text(
+        Text::new(
+            TOOLTIP_STATUS_IDLE,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        )
+        .id(TOOLTIP_STATUS_ID)
+        .measure_as(TOOLTIP_STATUS_MEASURE),
     );
     builder.build()
 }
