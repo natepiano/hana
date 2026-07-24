@@ -26,6 +26,8 @@
 //!     .build();
 //! ```
 
+use std::marker::PhantomData;
+
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
@@ -61,6 +63,7 @@ use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::widgets::Button;
 use crate::widgets::Slider;
+use crate::widgets::Tooltip;
 use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetSpec;
@@ -71,10 +74,26 @@ use crate::widgets::WidgetSpec;
 /// when added to the tree.
 #[must_use]
 #[derive(Clone, Debug)]
-pub struct El<L = Row> {
+pub struct El<L = Row, Role = LayoutOnly> {
     common:       CommonEl,
     child_layout: L,
+    role:         PhantomData<fn() -> Role>,
 }
+
+/// Marker for an ordinary visual layout element.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LayoutOnly;
+
+/// Marker for an element that declares a panel widget.
+#[derive(Clone, Copy, Debug)]
+pub struct WidgetElement;
+
+/// Public marker trait for element roles accepted by ordinary panel layout.
+pub trait ElementRole: private::RoleSealed {}
+
+impl ElementRole for LayoutOnly {}
+
+impl ElementRole for WidgetElement {}
 
 /// Text sizing and wrapping policy for a layout text leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -137,14 +156,15 @@ impl TextSizing {
 /// Text leaf declaration for [`LayoutBuilder::text`].
 #[must_use]
 #[derive(Clone, Debug)]
-pub struct Text {
+pub struct Text<Role = LayoutOnly> {
     layout:  CommonEl,
     content: String,
     style:   TextStyle,
     sizing:  TextSizing,
+    role:    PhantomData<fn() -> Role>,
 }
 
-impl Text {
+impl Text<LayoutOnly> {
     /// Creates a text declaration with visible text and style.
     pub fn new(text: impl Into<String>, style: TextStyle) -> Self {
         Self {
@@ -152,9 +172,12 @@ impl Text {
             content: text.into(),
             style,
             sizing: TextSizing::default(),
+            role: PhantomData,
         }
     }
+}
 
+impl<Role> Text<Role> {
     /// Assigns a panel-local id so this run can be addressed at runtime.
     pub fn id(mut self, id: impl Into<PanelElementId>) -> Self {
         self.layout.id = Some(id.into());
@@ -173,9 +196,10 @@ impl Text {
     }
 
     /// Sets the element layout declaration for this text leaf.
-    pub fn layout<L>(mut self, layout: El<L>) -> Self
+    pub fn layout<L, NextRole>(mut self, layout: El<L, NextRole>) -> Text<NextRole>
     where
         L: ChildLayoutState,
+        NextRole: ElementRole,
     {
         let current_id = self.layout.id.take();
         let El { common, .. } = layout;
@@ -183,7 +207,13 @@ impl Text {
         if self.layout.id.is_none() {
             self.layout.id = current_id;
         }
-        self
+        Text {
+            layout:  self.layout,
+            content: self.content,
+            style:   self.style,
+            sizing:  self.sizing,
+            role:    PhantomData,
+        }
     }
 
     /// Sets the complete sizing policy for this text leaf.
@@ -216,6 +246,7 @@ impl Text {
             content,
             style,
             sizing,
+            role: _,
         } = self;
         text_leaf_element(
             layout,
@@ -293,6 +324,7 @@ struct CommonEl {
     interactivity:   Cascade<WidgetInteractivity>,
     editable:        Option<ImePanelField>,
     widget:          Option<WidgetSpec>,
+    tooltip:         Option<Tooltip>,
     visual_slot:     Option<VisualSlotId>,
     draw:            Option<PanelDraw>,
     z_index:         DrawZIndex,
@@ -322,6 +354,7 @@ impl Default for CommonEl {
             interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
+            tooltip:         None,
             visual_slot:     None,
             draw:            None,
             z_index:         DrawZIndex::default(),
@@ -351,6 +384,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         interactivity: common.interactivity,
         editable: common.editable,
         widget: common.widget,
+        tooltip: common.tooltip,
         visual_slot: common.visual_slot,
         draw: common.draw,
         z_index: common.z_index,
@@ -362,7 +396,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
     }
 }
 
-impl<L> Default for El<L>
+impl<L> Default for El<L, LayoutOnly>
 where
     L: Default,
 {
@@ -370,17 +404,20 @@ where
         Self {
             common:       CommonEl::default(),
             child_layout: L::default(),
+            role:         PhantomData,
         }
     }
 }
 
-impl El<Row> {
+impl El<Row, LayoutOnly> {
     /// Creates a new row element declaration with default settings.
     pub fn new() -> Self { Self::row() }
 
     /// Creates a left-to-right row element declaration.
     pub fn row() -> Self { Self::default() }
+}
 
+impl<Role: ElementRole> El<Row, Role> {
     /// Sets the gap between adjacent row children.
     pub fn gap(mut self, gap: impl Into<Dimension>) -> Self {
         self.child_layout.gap = gap.into();
@@ -394,10 +431,12 @@ impl El<Row> {
     }
 }
 
-impl El<Column> {
+impl El<Column, LayoutOnly> {
     /// Creates a top-to-bottom column element declaration.
     pub fn column() -> Self { Self::default() }
+}
 
+impl<Role: ElementRole> El<Column, Role> {
     /// Sets the gap between adjacent column children.
     pub fn gap(mut self, gap: impl Into<Dimension>) -> Self {
         self.child_layout.gap = gap.into();
@@ -411,12 +450,12 @@ impl El<Column> {
     }
 }
 
-impl El<Overlay> {
+impl El<Overlay, LayoutOnly> {
     /// Creates an overlay element declaration.
     pub fn overlay() -> Self { Self::default() }
 }
 
-impl<L> El<L> {
+impl<L, Role> El<L, Role> {
     /// Sets the width sizing rule.
     ///
     /// Can be overridden by a subsequent `.size()` call (last wins).
@@ -580,34 +619,8 @@ impl<L> El<L> {
         self
     }
 
-    /// Marks this element as a button with panel-local semantic identity `id`.
-    ///
-    /// The id and button declaration are assigned together so a widget cannot
-    /// be authored without its identity. A [`Button::on_click`] callback on
-    /// the declaration stays a cloneable template here; the builder never
-    /// touches a `World`, and reify registers the callback when the widget
-    /// entity exists. The element also receives the private root visual slot
-    /// that the button's state presentation builders patch at runtime.
-    pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> Self {
-        self.common.id = Some(id.into());
-        self.common.widget = Some(WidgetSpec::Button(button));
-        self.visual_slot(VisualSlotId::BUTTON_ROOT)
-    }
-
-    /// Marks this element as a slider with panel-local semantic identity `id`.
-    ///
-    /// The id and slider declaration are assigned together so a widget cannot
-    /// be authored without its identity. The element also receives the private
-    /// root visual slot whose solved content box slider pointer projection
-    /// reads.
-    pub fn slider(mut self, id: impl Into<PanelElementId>, slider: Slider) -> Self {
-        self.common.id = Some(id.into());
-        self.common.widget = Some(WidgetSpec::Slider(slider));
-        self.visual_slot(VisualSlotId::SLIDER_ROOT)
-    }
-
     /// Marks this ordinary element as the thumb of its nearest enclosing
-    /// [`Self::slider`].
+    /// [`El::slider`].
     ///
     /// The element stays ordinary layout — it creates no ECS child and exposes
     /// no anatomy component. Value presentation reads its solved border box to
@@ -627,17 +640,54 @@ impl<L> El<L> {
 
     /// Attaches a stable private visual-slot id to this element's retained
     /// render records.
-    ///
-    /// Crate widget authoring assigns slot ids to ordinary primitives inside
-    /// a widget subtree; widget state then patches those retained records
-    /// through crate-private overrides without regenerating the tree.
-    /// [`Self::button`] authors [`VisualSlotId::BUTTON_ROOT`] through this
-    /// hook.
     pub(crate) const fn visual_slot(mut self, slot: VisualSlotId) -> Self {
         self.common.visual_slot = Some(slot);
         self
     }
+}
 
+impl<L> El<L, LayoutOnly> {
+    /// Marks this element as a button with panel-local semantic identity `id`.
+    pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> El<L, WidgetElement> {
+        self.common.id = Some(id.into());
+        self.common.widget = Some(WidgetSpec::Button(button));
+        self.common.visual_slot = Some(VisualSlotId::BUTTON_ROOT);
+        El {
+            common:       self.common,
+            child_layout: self.child_layout,
+            role:         PhantomData,
+        }
+    }
+
+    /// Marks this element as a slider with panel-local semantic identity `id`.
+    ///
+    /// The id and slider declaration are assigned together so a widget cannot
+    /// be authored without its identity. The element also receives the private
+    /// root visual slot whose solved content box slider pointer projection
+    /// reads.
+    pub fn slider(mut self, id: impl Into<PanelElementId>, slider: Slider) -> El<L, WidgetElement> {
+        self.common.id = Some(id.into());
+        self.common.widget = Some(WidgetSpec::Slider(slider));
+        self.common.visual_slot = Some(VisualSlotId::SLIDER_ROOT);
+        El {
+            common:       self.common,
+            child_layout: self.child_layout,
+            role:         PhantomData,
+        }
+    }
+}
+
+impl<L> El<L, WidgetElement> {
+    /// Attaches a tooltip declaration to this widget element.
+    ///
+    /// A later call replaces the earlier declaration.
+    pub fn tooltip(mut self, tooltip: Tooltip) -> Self {
+        self.common.tooltip = Some(tooltip);
+        self
+    }
+}
+
+impl<L, Role> El<L, Role> {
     /// Sets paint-only draw primitives owned by this element.
     ///
     /// `PanelDraw` does not affect layout measurement. It is stored for later
@@ -697,10 +747,12 @@ impl<L> El<L> {
     fn into_element(self, content: ElementContent) -> Element
     where
         L: ChildLayoutState,
+        Role: ElementRole,
     {
         let Self {
             common,
             child_layout,
+            role: _,
         } = self;
         let child_layout = if matches!(
             content,
@@ -727,6 +779,7 @@ impl<L> El<L> {
             interactivity: common.interactivity,
             editable: common.editable,
             widget: common.widget,
+            tooltip: common.tooltip,
             visual_slot: common.visual_slot,
             draw: common.draw,
             z_index: common.z_index,
@@ -743,13 +796,21 @@ mod private {
     use super::AlignX;
     use super::AlignY;
     use super::Column;
+    use super::LayoutOnly;
     use super::Overlay;
     use super::Row;
+    use super::WidgetElement;
     use crate::layout::child_layout::ChildLayout;
 
     pub trait Sealed {
         fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout;
     }
+
+    pub trait RoleSealed {}
+
+    impl RoleSealed for LayoutOnly {}
+
+    impl RoleSealed for WidgetElement {}
 
     impl Sealed for Row {
         fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout {
@@ -872,9 +933,10 @@ impl LayoutBuilder {
     /// remove the need for higher-level code to decide how layout units map to
     /// world space.
     #[must_use]
-    pub fn with_root<L>(el: El<L>) -> Self
+    pub fn with_root<L, Role>(el: El<L, Role>) -> Self
     where
         L: ChildLayoutState,
+        Role: ElementRole,
     {
         let mut tree = LayoutTree::new();
         let root = tree.add(el.into_element(ElementContent::Empty));
@@ -903,9 +965,10 @@ impl LayoutBuilder {
     /// In other words, `.with(...)` always creates another node in the tree.
     /// It does not modify the existing root element; choose that root up front
     /// with [`Self::new`] or [`Self::with_root`].
-    pub fn with<L>(&mut self, el: El<L>, children: impl FnOnce(&mut Self)) -> &mut Self
+    pub fn with<L, Role>(&mut self, el: El<L, Role>, children: impl FnOnce(&mut Self)) -> &mut Self
     where
         L: ChildLayoutState,
+        Role: ElementRole,
     {
         let parent = self.current_parent();
         let index = self
@@ -932,7 +995,10 @@ impl LayoutBuilder {
     ///
     /// The run is given a builder-minted [`PanelElementId::Auto`] id unless the
     /// declaration supplies [`Text::id`].
-    pub fn text(&mut self, text: impl Into<Text>) -> &mut Self {
+    pub fn text<Role>(&mut self, text: impl Into<Text<Role>>) -> &mut Self
+    where
+        Role: ElementRole,
+    {
         let parent = self.current_parent();
         let mut text = text.into();
         let id = text
@@ -961,9 +1027,15 @@ impl LayoutBuilder {
     ///
     /// The `tint` color is multiplied against the texture sample
     /// ([`Color::WHITE`] = no tint).
-    pub fn image<L>(&mut self, el: El<L>, handle: Handle<Image>, tint: Color) -> &mut Self
+    pub fn image<L, Role>(
+        &mut self,
+        el: El<L, Role>,
+        handle: Handle<Image>,
+        tint: Color,
+    ) -> &mut Self
     where
         L: ChildLayoutState,
+        Role: ElementRole,
     {
         let parent = self.current_parent();
         self.tree.add_child(
@@ -979,4 +1051,47 @@ impl LayoutBuilder {
 
     /// Returns the current parent index.
     fn current_parent(&self) -> usize { self.parent_stack.last().copied().unwrap_or(0) }
+}
+
+impl LayoutTree {
+    pub(crate) fn tooltip_add_container<L>(&mut self, parent: usize, el: El<L, LayoutOnly>) -> usize
+    where
+        L: ChildLayoutState,
+    {
+        self.add_child(parent, el.into_element(ElementContent::Empty))
+    }
+
+    pub(crate) fn tooltip_add_text(
+        &mut self,
+        parent: usize,
+        text: impl Into<Text<LayoutOnly>>,
+        next_auto_id: &mut u32,
+    ) {
+        let mut text = text.into();
+        let id = text
+            .layout
+            .id
+            .clone()
+            .unwrap_or_else(|| PanelElementId::auto(*next_auto_id));
+        if text.layout.id.is_none() {
+            *next_auto_id += 1;
+        }
+        text.layout.id = Some(id);
+        self.add_child(parent, text.into_element());
+    }
+
+    pub(crate) fn tooltip_add_image<L>(
+        &mut self,
+        parent: usize,
+        el: El<L, LayoutOnly>,
+        handle: Handle<Image>,
+        tint: Color,
+    ) where
+        L: ChildLayoutState,
+    {
+        self.add_child(
+            parent,
+            el.into_element(ElementContent::Image { handle, tint }),
+        );
+    }
 }

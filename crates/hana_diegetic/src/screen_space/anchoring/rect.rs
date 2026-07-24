@@ -1,5 +1,6 @@
 //! Per-frame screen-space panel rectangles used during attachment resolution.
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -15,6 +16,56 @@ use crate::panel::DiegeticPanel;
 use crate::panel::PanelScreenBounds;
 use crate::panel::ResolvedScreenPanelPosition;
 use crate::widgets::WidgetAnchorRect;
+
+/// Placement and presentation data for a general screen-space anchor target.
+#[derive(Clone, Component, Debug)]
+pub struct ScreenAnchorTarget {
+    bounds:        PanelScreenBounds,
+    window:        Entity,
+    camera_order:  isize,
+    render_layers: RenderLayers,
+    layout_unit:   Unit,
+}
+
+impl ScreenAnchorTarget {
+    /// Creates general screen-space anchor data.
+    #[must_use]
+    pub const fn new(
+        bounds: PanelScreenBounds,
+        window: Entity,
+        camera_order: isize,
+        render_layers: RenderLayers,
+        layout_unit: Unit,
+    ) -> Self {
+        Self {
+            bounds,
+            window,
+            camera_order,
+            render_layers,
+            layout_unit,
+        }
+    }
+
+    /// Current target rectangle in logical pixels.
+    #[must_use]
+    pub const fn bounds(&self) -> PanelScreenBounds { self.bounds }
+
+    /// Window containing the target rectangle.
+    #[must_use]
+    pub const fn window(&self) -> Entity { self.window }
+
+    /// Camera order used to present attachments.
+    #[must_use]
+    pub const fn camera_order(&self) -> isize { self.camera_order }
+
+    /// Render layers used to present attachments.
+    #[must_use]
+    pub const fn render_layers(&self) -> &RenderLayers { &self.render_layers }
+
+    /// Pixel-unit context for authored offsets and attached panels.
+    #[must_use]
+    pub const fn layout_unit(&self) -> Unit { self.layout_unit }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ScreenPanelRect {

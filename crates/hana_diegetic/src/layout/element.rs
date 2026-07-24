@@ -136,6 +136,8 @@ pub(super) struct Element {
     pub(super) editable:        Option<ImePanelField>,
     /// Optional authored widget contract.
     pub(super) widget:          Option<WidgetSpec>,
+    /// Optional tooltip declaration associated with this widget.
+    pub(super) tooltip:         Option<crate::widgets::Tooltip>,
     /// Optional stable visual-slot id for widget-owned retained records.
     pub(super) visual_slot:     Option<VisualSlotId>,
     /// Optional paint-only draw data.
@@ -214,6 +216,7 @@ impl Default for Element {
             interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
+            tooltip:         None,
             visual_slot:     None,
             draw:            None,
             z_index:         DrawZIndex::default(),
@@ -887,6 +890,21 @@ impl LayoutTree {
             .collect()
     }
 
+    pub(crate) fn computed_tooltip_records(&self) -> Vec<crate::widgets::ComputedTooltipRecord> {
+        self.elements
+            .iter()
+            .filter_map(|element| {
+                let widget_id = element.id.as_ref()?;
+                element.widget.as_ref()?;
+                let tooltip = element.tooltip.as_ref()?;
+                Some(crate::widgets::ComputedTooltipRecord::new(
+                    widget_id.clone(),
+                    tooltip.clone(),
+                ))
+            })
+            .collect()
+    }
+
     /// Returns the first text string owned by `index` or one of its descendants.
     #[must_use]
     pub(crate) fn field_display_text(&self, index: usize) -> Option<&str> {
@@ -1044,6 +1062,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         interactivity,
         editable,
         widget,
+        tooltip,
         visual_slot,
         draw,
         z_index,
@@ -1070,6 +1089,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         interactivity: n_interactivity,
         editable: n_editable,
         widget: n_widget,
+        tooltip: n_tooltip,
         visual_slot: n_visual_slot,
         draw: n_draw,
         z_index: n_z_index,
@@ -1105,6 +1125,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     let mut change = border_change.combine(child_layout_change);
     if id != n_id
         || widget != n_widget
+        || tooltip != n_tooltip
         || visual_slot != n_visual_slot
         || interactivity != n_interactivity
         || background != n_background
@@ -1387,7 +1408,7 @@ mod tests {
         assert_eq!(tree.text_element_id(1), Some(&id));
     }
 
-    fn root_tree<L: ChildLayoutState>(root: El<L>) -> LayoutTree {
+    fn root_tree<L: ChildLayoutState, Role: crate::ElementRole>(root: El<L, Role>) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text(("child", TextStyle::new(10.0)));
         builder.build()

@@ -64,10 +64,12 @@ use crate::render::AntiAlias;
 use crate::render::DrawOrder;
 use crate::render::HairlineFade;
 use crate::widgets;
+use crate::widgets::ComputedTooltipRecord;
 use crate::widgets::ComputedWidgetRecord;
 use crate::widgets::PanelPicking;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
+use crate::widgets::TooltipControllerIndex;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetOf;
 
@@ -186,6 +188,7 @@ impl From<TreeRevision> for u64 {
     PanelPrecomposeCache,
     PanelSpace,
     PanelWidgetIndex,
+    TooltipControllerIndex,
     ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
     Transform,
@@ -1759,6 +1762,8 @@ pub struct ComputedDiegeticPanel {
     field_id_conflicts: Vec<crate::PanelElementId>,
     #[reflect(ignore)]
     widget_records:     Vec<ComputedWidgetRecord>,
+    #[reflect(ignore)]
+    tooltip_records:    Vec<ComputedTooltipRecord>,
     content_width:      f32,
     content_height:     f32,
     #[cfg(test)]
@@ -1816,6 +1821,8 @@ impl ComputedDiegeticPanel {
 
     pub(crate) fn widget_records(&self) -> &[ComputedWidgetRecord] { &self.widget_records }
 
+    pub(crate) fn tooltip_records(&self) -> &[ComputedTooltipRecord] { &self.tooltip_records }
+
     #[cfg(test)]
     pub(crate) const fn layout_solves(&self) -> usize { self.layout_solves }
 
@@ -1830,6 +1837,7 @@ impl ComputedDiegeticPanel {
         result.regenerate_commands(tree);
         self.draw_order = DrawOrder::from_commands(&result.commands);
         self.widget_records = tree.computed_widget_records(result);
+        self.tooltip_records = tree.computed_tooltip_records();
         true
     }
 
@@ -1840,6 +1848,7 @@ impl ComputedDiegeticPanel {
         self.field_records.clear();
         self.field_id_conflicts.clear();
         self.widget_records.clear();
+        self.tooltip_records.clear();
     }
 
     pub(super) fn set_result_with_fields(
@@ -1848,12 +1857,14 @@ impl ComputedDiegeticPanel {
         field_records: Vec<PanelFieldRecord>,
         field_id_conflicts: Vec<crate::PanelElementId>,
         widget_records: Vec<ComputedWidgetRecord>,
+        tooltip_records: Vec<ComputedTooltipRecord>,
     ) {
         self.draw_order = DrawOrder::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;
         self.widget_records = widget_records;
+        self.tooltip_records = tooltip_records;
         #[cfg(test)]
         {
             self.layout_solves += 1;

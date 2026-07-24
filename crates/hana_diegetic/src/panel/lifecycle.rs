@@ -64,6 +64,8 @@ use crate::widgets::ScreenWidgetAnchoredHere;
 use crate::widgets::ScreenWidgetAnchoredTo;
 use crate::widgets::SliderCaptures;
 use crate::widgets::SliderDrag;
+use crate::widgets::TooltipControllerIndex;
+use crate::widgets::TooltipFor;
 use crate::widgets::WidgetFocusAuthority;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetOf;
@@ -220,16 +222,22 @@ impl WidgetCaptureTeardown<'_, '_> {
     }
 }
 
+#[derive(SystemParam)]
+pub(super) struct PanelOwnedTeardown<'w, 's> {
+    owned_entities:  Query<'w, 's, (Entity, &'static PanelOwned)>,
+    parents:         Query<'w, 's, &'static ChildOf>,
+    tooltip_targets: Query<'w, 's, &'static TooltipFor>,
+}
+
 pub(super) fn teardown_panel_role(
     trigger: On<Remove, DiegeticPanel>,
     panels: Query<(Entity, &DiegeticPanel)>,
-    owned_entities: Query<(Entity, &PanelOwned)>,
+    panel_owned: PanelOwnedTeardown,
     world_widget_demands: Query<&AnchoredHere, With<PanelWidget>>,
     screen_widget_demands: Query<&ScreenWidgetAnchoredHere, With<PanelWidget>>,
     authored_attachments: Query<&PanelAttachmentAuthored>,
     world_attachments: Query<&AnchoredTo>,
     screen_attachments: Query<&ScreenWidgetAnchoredTo>,
-    parents: Query<&ChildOf>,
     cameras: Query<(Entity, &ScreenSpaceCamera)>,
     lights: Query<(Entity, &ScreenSpaceLight)>,
     primary: Query<Entity, With<PrimaryWindow>>,
@@ -262,7 +270,7 @@ pub(super) fn teardown_panel_role(
 
     finalize_widget_anchor_state(
         entity,
-        &owned_entities,
+        &panel_owned.owned_entities,
         &world_widget_demands,
         &screen_widget_demands,
         &authored_attachments,
@@ -275,8 +283,13 @@ pub(super) fn teardown_panel_role(
         .trigger()
         .new_archetype
         .map_or(PanelRemoval::Entity, |_| PanelRemoval::RoleOnly);
-    for owned_entity in panel_owned_despawn_roots(entity, panel_removal, &owned_entities, &parents)
-    {
+    for owned_entity in panel_owned_despawn_roots(
+        entity,
+        panel_removal,
+        &panel_owned.owned_entities,
+        &panel_owned.parents,
+        &panel_owned.tooltip_targets,
+    ) {
         commands.entity(owned_entity).despawn();
     }
     commands.queue(move |world: &mut World| teardown_owned_shared_state(world, entity));
@@ -292,6 +305,7 @@ pub(super) fn teardown_panel_role(
         LastPanelDimensions,
         PanelPrecomposeCache,
         PanelWidgetIndex,
+        TooltipControllerIndex,
         ResolvedScreenPanelPosition,
         ScaledLayoutTreeCache,
         PanelSpace,
@@ -416,6 +430,7 @@ fn panel_owned_despawn_roots(
     panel_removal: PanelRemoval,
     owned_entities: &Query<(Entity, &PanelOwned)>,
     parents: &Query<&ChildOf>,
+    tooltip_targets: &Query<&TooltipFor>,
 ) -> Vec<Entity> {
     let owned = owned_entities
         .iter()
@@ -431,6 +446,14 @@ fn panel_owned_despawn_roots(
                 || !has_ancestor(*entity, panel, parents)
         })
         .filter(|entity| !has_owned_ancestor(*entity, &owned, parents))
+        .filter(|entity| {
+            let Ok(tooltip_for) = tooltip_targets.get(*entity) else {
+                return true;
+            };
+            let target = tooltip_for.target();
+            !(owned.contains(&target)
+                || matches!(panel_removal, PanelRemoval::Entity) && target == panel)
+        })
         .collect()
 }
 
@@ -853,8 +876,10 @@ mod tests {
 
     use super::PanelCascadeOwnership;
     use super::PanelComponentOwnership;
+    use super::PanelRemoval;
     use super::PanelRenderLayersOwnership;
     use super::PreservedResolved;
+    use super::panel_owned_despawn_roots;
     use super::write_owned_cascade;
     use super::write_owned_render_layers;
     use crate::ArrangedPanel;
@@ -876,6 +901,7 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::Px;
     use crate::TextStyle;
+    use crate::Tooltip;
     use crate::Unit;
     use crate::WidgetOf;
     use crate::cascade::Cascade;
@@ -904,11 +930,122 @@ mod tests {
     use crate::widgets::ScreenWidgetAnchorProxy;
     use crate::widgets::ScreenWidgetAnchoredHere;
     use crate::widgets::ScreenWidgetAnchoredTo;
+    use crate::widgets::TooltipFor;
     use crate::widgets::WidgetInteractivity;
     use crate::widgets::WidgetsPlugin;
 
     #[derive(Component)]
     struct ApplicationState;
+
+    struct TooltipTeardownFixture {
+        panel:              Entity,
+        widget:             Entity,
+        widget_controller:  Entity,
+        panel_controller:   Entity,
+        general_controller: Entity,
+        general_target:     Entity,
+    }
+
+    fn tooltip_teardown_fixture() -> (World, TooltipTeardownFixture) {
+        let mut world = World::new();
+        let panel = world.spawn_empty().id();
+        let general_target = world.spawn_empty().id();
+        let widget = world.spawn((PanelOwned::from(panel), ChildOf(panel))).id();
+        let widget_controller = world
+            .spawn((
+                Tooltip::new(El::new()),
+                TooltipFor::new(widget),
+                PanelOwned::from(panel),
+            ))
+            .id();
+        let panel_controller = world
+            .spawn((
+                Tooltip::new(El::new()),
+                TooltipFor::new(panel),
+                PanelOwned::from(panel),
+            ))
+            .id();
+        let general_controller = world
+            .spawn((
+                Tooltip::new(El::new()),
+                TooltipFor::new(general_target),
+                PanelOwned::from(panel),
+            ))
+            .id();
+        (
+            world,
+            TooltipTeardownFixture {
+                panel,
+                widget,
+                widget_controller,
+                panel_controller,
+                general_controller,
+                general_target,
+            },
+        )
+    }
+
+    fn tooltip_teardown_roots(
+        world: &mut World,
+        panel: Entity,
+        panel_removal: PanelRemoval,
+    ) -> Vec<Entity> {
+        world
+            .run_system_once(
+                move |owned_entities: Query<(Entity, &PanelOwned)>,
+                      parents: Query<&ChildOf>,
+                      tooltip_targets: Query<&TooltipFor>| {
+                    panel_owned_despawn_roots(
+                        panel,
+                        panel_removal,
+                        &owned_entities,
+                        &parents,
+                        &tooltip_targets,
+                    )
+                },
+            )
+            .expect("root selection system should run")
+    }
+
+    #[test]
+    fn role_removal_assigns_each_tooltip_controller_one_cleanup_owner() {
+        let (mut world, fixture) = tooltip_teardown_fixture();
+        let roots = tooltip_teardown_roots(&mut world, fixture.panel, PanelRemoval::RoleOnly);
+
+        assert_eq!(roots.len(), 3);
+        assert!(roots.contains(&fixture.widget));
+        assert!(roots.contains(&fixture.panel_controller));
+        assert!(roots.contains(&fixture.general_controller));
+        assert!(!roots.contains(&fixture.widget_controller));
+
+        for root in roots {
+            world.despawn(root);
+        }
+
+        assert!(world.get_entity(fixture.panel).is_ok());
+        assert!(world.get_entity(fixture.widget).is_err());
+        assert!(world.get_entity(fixture.widget_controller).is_err());
+        assert!(world.get_entity(fixture.panel_controller).is_err());
+        assert!(world.get_entity(fixture.general_controller).is_err());
+        assert!(world.get_entity(fixture.general_target).is_ok());
+    }
+
+    #[test]
+    fn entity_despawn_assigns_each_tooltip_controller_one_cleanup_owner() {
+        let (mut world, fixture) = tooltip_teardown_fixture();
+        let roots = tooltip_teardown_roots(&mut world, fixture.panel, PanelRemoval::Entity);
+
+        assert_eq!(roots, vec![fixture.general_controller]);
+        world.despawn(fixture.general_controller);
+        world.despawn(fixture.panel);
+
+        assert!(world.get_entity(fixture.panel).is_err());
+        assert!(world.get_entity(fixture.widget).is_err());
+        assert!(world.get_entity(fixture.widget_controller).is_err());
+        assert!(world.get_entity(fixture.panel_controller).is_err());
+        assert!(world.get_entity(fixture.general_controller).is_err());
+        assert!(world.get_entity(fixture.general_target).is_ok());
+    }
 
     struct OwnershipFixture {
         panel:                   Entity,

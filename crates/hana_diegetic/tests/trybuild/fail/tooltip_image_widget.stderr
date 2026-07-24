@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/trybuild/fail/tooltip_image_widget.rs:11:9
+   |
+10 |     tooltip.image(
+   |             ----- arguments to this method are incorrect
+11 |         El::new().button("nested", Button::new()),
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `El<_>`, found `El<Row, WidgetElement>`
+   |
+   = note: expected struct `El<_, LayoutOnly>`
+              found struct `El<hana_diegetic::Row, WidgetElement>`
+note: method defined here
+  --> src/widgets/tooltip.rs
+   |
+   |     pub fn image<L>(
+   |            ^^^^^

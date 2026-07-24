@@ -56,6 +56,8 @@ use hana_diegetic::FitMax;
 use hana_diegetic::FocusPreviousWidget;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
+use hana_diegetic::MeshAnchorCommandsExt;
+use hana_diegetic::MeshFace;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorOffset;
 use hana_diegetic::PanelAttachment;
@@ -84,6 +86,8 @@ use hana_diegetic::SliderState;
 use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
+use hana_diegetic::Tooltip;
+use hana_diegetic::TooltipCommandsExt;
 use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
 use hana_diegetic::WidgetInputPlugin;
@@ -106,7 +110,7 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 7] = [
+const DESCRIPTION_LINES: [&str; 8] = [
     "Buttons restyle on hover, press, and focus; interaction changes log in the terminal.",
     "D disables the secondary button and level slider, which then show their disabled surfaces.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
@@ -114,6 +118,7 @@ const DESCRIPTION_LINES: [&str; 7] = [
     "Hold [ or ] to step the level slider; the app applies each proposed value.",
     "The world status panel follows the level slider below the cube controls.",
     "The screen status panel follows the separate top-right screen widget.",
+    "Widget declarations own tooltip controllers; the cube also publishes a checked mesh-face target.",
 ];
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
 const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
@@ -765,6 +770,8 @@ fn spawn_widget_lab(
     mut materials: ResMut<Assets<StandardMaterial>>,
     cube: Single<Entity, With<FairyDustCube>>,
 ) {
+    let cube_target = commands.mesh_anchor_target(*cube, MeshFace::PositiveZ);
+    commands.spawn_tooltip(cube_target, cube_tooltip());
     let slider = match slider_declaration() {
         Ok(slider) => slider,
         Err(error) => {
@@ -957,7 +964,8 @@ fn widget_tree(slider: Slider) -> LayoutTree {
             .background(SLIDER_FILL)
             .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_BORDER))
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
-            .slider(SLIDER_ID, slider),
+            .slider(SLIDER_ID, slider)
+            .tooltip(slider_tooltip()),
         |builder| {
             // Bottom layer: the value label, centered and fixed. A grow overlay
             // layer fills the slider content so the label stays centered
@@ -1099,22 +1107,59 @@ fn add_button(
     width: Px,
     button: Button,
 ) {
-    builder.with(
-        El::new()
-            .size(width, BUTTON_HEIGHT)
-            .padding(Padding::all(CONTROL_PADDING))
-            .alignment(AlignX::Center, AlignY::Center)
-            .background(BUTTON_FILL)
-            .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
-            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
-            .button(id, button),
-        |builder| {
-            builder.text((
-                label,
-                TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
-            ));
-        },
+    let element = El::new()
+        .size(width, BUTTON_HEIGHT)
+        .padding(Padding::all(CONTROL_PADDING))
+        .alignment(AlignX::Center, AlignY::Center)
+        .background(BUTTON_FILL)
+        .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
+        .corner_radius(CornerRadius::all(CONTROL_RADIUS))
+        .button(id, button);
+    let element = if id == PRIMARY_BUTTON_ID {
+        element.tooltip(button_tooltip())
+    } else {
+        element
+    };
+    builder.with(element, |builder| {
+        builder.text((
+            label,
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+        ));
+    });
+}
+
+fn button_tooltip() -> Tooltip {
+    authored_tooltip("Primary button", "Pointer click or semantic activation")
+}
+
+fn slider_tooltip() -> Tooltip {
+    authored_tooltip("Level slider", "Drag, use brackets, or focus and activate")
+}
+
+fn cube_tooltip() -> Tooltip {
+    authored_tooltip("Widget cube", "Standalone PositiveZ mesh-face target")
+}
+
+fn authored_tooltip(title: &'static str, body: &'static str) -> Tooltip {
+    let mut tooltip = Tooltip::new(
+        El::column()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(STATUS_PADDING))
+            .gap(STATUS_LINE_GAP)
+            .background(STATUS_BACKGROUND)
+            .border(Border::all(STATUS_BORDER_WIDTH, STATUS_BORDER))
+            .corner_radius(CornerRadius::all(STATUS_RADIUS)),
     );
+    tooltip.text((
+        title,
+        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+    ));
+    tooltip.text((
+        body,
+        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+    ));
+    tooltip
 }
 
 fn report_interaction_changes(

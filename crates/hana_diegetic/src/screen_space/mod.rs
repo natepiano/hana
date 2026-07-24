@@ -4,6 +4,7 @@ mod anchoring;
 mod constants;
 
 use anchoring::AnchorResolveDiagnostics;
+pub use anchoring::ScreenAnchorTarget;
 pub(crate) use anchoring::screen_in_plane_angle;
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;

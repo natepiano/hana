@@ -10,6 +10,7 @@ mod window;
 use bevy::prelude::*;
 pub(crate) use candidate::AnchorResolveSkip;
 use hana_valence::AnchorPose;
+pub use rect::ScreenAnchorTarget;
 pub(crate) use resolve::AnchorResolveDiagnostics;
 
 use super::CandidateQueries;

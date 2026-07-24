@@ -18,6 +18,9 @@ use super::ScreenWidgetAnchoredHere;
 use super::SliderCancelCause;
 use super::SliderCaptures;
 use super::SliderState;
+use super::Tooltip;
+use super::TooltipControllerIndex;
+use super::TooltipFor;
 use super::WidgetFocusable;
 use super::WidgetKind;
 use super::WidgetOf;
@@ -39,6 +42,60 @@ use crate::panel::DiegeticPanel;
 use crate::panel::PanelComponentOwnership;
 use crate::panel::PanelOwned;
 use crate::panel::PanelSpace;
+
+/// Reuses or creates associated tooltip controllers after widget reification.
+pub(super) fn reify_tooltip_controllers(
+    mut panels: Query<
+        (Entity, &ComputedDiegeticPanel, &mut TooltipControllerIndex),
+        Changed<ComputedDiegeticPanel>,
+    >,
+    widget_reader: super::PanelWidgetReader,
+    controllers: Query<(&Tooltip, &TooltipFor, Option<&PanelOwned>)>,
+    live_entities: Query<()>,
+    mut commands: Commands,
+) {
+    for (panel, computed, mut controller_index) in &mut panels {
+        let mut next_index = HashMap::with_capacity(computed.tooltip_records().len());
+        for record in computed.tooltip_records() {
+            let Some(widget) = widget_reader.entity(panel, record.widget_id()) else {
+                continue;
+            };
+            let existing = controller_index
+                .entity(record.widget_id())
+                .filter(|entity| controllers.contains(*entity));
+            let controller = existing.unwrap_or_else(|| {
+                commands
+                    .spawn((
+                        record.tooltip().clone(),
+                        TooltipFor::new(widget),
+                        PanelOwned::from(panel),
+                    ))
+                    .id()
+            });
+            if let Ok((tooltip, tooltip_for, ownership)) = controllers.get(controller) {
+                let mut controller_commands = commands.entity(controller);
+                if tooltip != record.tooltip() {
+                    controller_commands.insert(record.tooltip().clone());
+                }
+                if tooltip_for.target() != widget {
+                    controller_commands.insert(TooltipFor::new(widget));
+                }
+                if ownership.is_none_or(|ownership| ownership.owner() != panel) {
+                    controller_commands.insert(PanelOwned::from(panel));
+                }
+            }
+            next_index.insert(record.widget_id().clone(), controller);
+        }
+
+        let retained = next_index.values().copied().collect::<Vec<_>>();
+        for controller in controller_index.entities() {
+            if !retained.contains(&controller) && live_entities.contains(controller) {
+                commands.entity(controller).despawn();
+            }
+        }
+        controller_index.replace(next_index);
+    }
+}
 
 #[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
 pub(super) struct WidgetPreorder(usize);

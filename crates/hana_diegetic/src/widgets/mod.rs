@@ -8,6 +8,7 @@ mod picking;
 mod reify;
 mod relationship;
 mod slider;
+mod tooltip;
 mod visual;
 
 use bevy::ecs::schedule::ApplyDeferred;
@@ -74,6 +75,8 @@ pub use relationship::PanelWidgets;
 pub(crate) use relationship::ScreenWidgetAnchorProxy;
 pub(crate) use relationship::ScreenWidgetAnchoredHere;
 pub(crate) use relationship::ScreenWidgetAnchoredTo;
+pub use relationship::TooltipFor;
+pub use relationship::Tooltips;
 pub use relationship::WidgetOf;
 pub use slider::RequestSliderAdjustment;
 pub use slider::Slider;
@@ -92,6 +95,20 @@ pub use slider::SliderState;
 pub use slider::SliderStep;
 pub(crate) use slider::finalize_panel_sliders;
 pub use slider::slider_self_update;
+pub(crate) use tooltip::ComputedTooltipRecord;
+pub use tooltip::MeshAnchorCommandsExt;
+pub(crate) use tooltip::MeshAnchorTarget;
+pub(crate) use tooltip::MeshAnchorWarnings;
+pub use tooltip::MeshFace;
+pub use tooltip::ScreenAnchorCommandsExt;
+pub use tooltip::Tooltip;
+pub use tooltip::TooltipCommandsExt;
+pub(crate) use tooltip::TooltipControllerIndex;
+pub use tooltip::TooltipDisabledPolicy;
+pub use tooltip::TooltipPlacementPolicy;
+pub use tooltip::TooltipTarget;
+pub use tooltip::TooltipTargetEntity;
+pub use tooltip::TooltipTargetSpace;
 pub(crate) use visual::ComputedVisualSlot;
 pub(crate) use visual::VisualOverrideIndex;
 pub(crate) use visual::VisualSlotId;
@@ -125,8 +142,48 @@ pub(crate) enum WidgetSystems {
     PresentationCommandsApplied,
 }
 
+/// Named scheduling points for tooltip controller work.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum TooltipSystems {
+    /// Creates and synchronizes associated tooltip controllers.
+    ReifyControllers,
+    /// Applies controller creation and relationship commands.
+    ControllerCommandsApplied,
+}
+
 /// Installs headless panel widget identity and reification.
 pub(crate) struct WidgetsPlugin;
+
+fn add_widget_observers(app: &mut App) {
+    app.add_observer(focus::request_widget_focus)
+        .add_observer(focus::clear_widget_focus)
+        .add_observer(focus::focus_from_pointer_press)
+        .add_observer(button::press_from_pointer)
+        .add_observer(button::click_from_pointer)
+        .add_observer(button::release_from_pointer)
+        .add_observer(button::cancel_from_pointer)
+        .add_observer(button::cancel_from_drag_end)
+        .add_observer(button::cancel_from_pointer_removal)
+        .add_observer(button::cancel_from_disabled)
+        .add_observer(button::cancel_from_widget_removal)
+        .add_observer(button::cancel_before_widget_despawn)
+        .add_observer(button::handle_semantic_intent)
+        .add_observer(button::dispatch_click_callback)
+        .add_observer(tooltip::remove_mesh_anchor_geometry);
+}
+
+fn add_mesh_anchor_systems(app: &mut App) {
+    app.add_systems(
+        PostUpdate,
+        (
+            reify::update_world_anchor_geometry,
+            tooltip::update_mesh_anchor_geometry,
+            tooltip::warn_pending_mesh_anchor_geometry,
+        )
+            .chain()
+            .in_set(AnchorSystems::FillGeometry),
+    );
+}
 
 impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
@@ -135,6 +192,7 @@ impl Plugin for WidgetsPlugin {
             .init_resource::<capture::WidgetCaptures>()
             .init_resource::<ButtonCaptures>()
             .init_resource::<VisualOverrideIndex>()
+            .init_resource::<MeshAnchorWarnings>()
             .add_message::<WindowFocused>()
             .add_message::<FocusNextWidget>()
             .add_message::<FocusPreviousWidget>()
@@ -154,6 +212,10 @@ impl Plugin for WidgetsPlugin {
                         .after(PanelSystems::ResolveWorldFit)
                         .after(ScreenSpaceSystems::ResolveDimensions),
                     WidgetSystems::ReifyCommandsApplied.after(WidgetSystems::Reify),
+                    TooltipSystems::ReifyControllers.after(WidgetSystems::ReifyCommandsApplied),
+                    TooltipSystems::ControllerCommandsApplied
+                        .after(TooltipSystems::ReifyControllers)
+                        .before(PanelSystems::ResolvePanelAttachments),
                     WidgetSystems::ResolveInteractivity
                         .after(WidgetSystems::ReifyCommandsApplied)
                         .before(WidgetSystems::InteractivityCommandsApplied),
@@ -177,20 +239,6 @@ impl Plugin for WidgetsPlugin {
                     .run_if(resource_exists::<RayMap>.and_then(resource_exists::<Assets<Mesh>>))
                     .in_set(PickingSystems::Backend),
             )
-            .add_observer(focus::request_widget_focus)
-            .add_observer(focus::clear_widget_focus)
-            .add_observer(focus::focus_from_pointer_press)
-            .add_observer(button::press_from_pointer)
-            .add_observer(button::click_from_pointer)
-            .add_observer(button::release_from_pointer)
-            .add_observer(button::cancel_from_pointer)
-            .add_observer(button::cancel_from_drag_end)
-            .add_observer(button::cancel_from_pointer_removal)
-            .add_observer(button::cancel_from_disabled)
-            .add_observer(button::cancel_from_widget_removal)
-            .add_observer(button::cancel_before_widget_despawn)
-            .add_observer(button::handle_semantic_intent)
-            .add_observer(button::dispatch_click_callback)
             .add_systems(
                 PreUpdate,
                 capture::reconcile_pointer_input
@@ -207,6 +255,8 @@ impl Plugin for WidgetsPlugin {
                 (
                     reify::reify_widgets.in_set(WidgetSystems::Reify),
                     ApplyDeferred.in_set(WidgetSystems::ReifyCommandsApplied),
+                    reify::reify_tooltip_controllers.in_set(TooltipSystems::ReifyControllers),
+                    ApplyDeferred.in_set(TooltipSystems::ControllerCommandsApplied),
                     interactivity::resolve_interactivity
                         .in_set(WidgetSystems::ResolveInteractivity),
                     ApplyDeferred.in_set(WidgetSystems::InteractivityCommandsApplied),
@@ -225,10 +275,8 @@ impl Plugin for WidgetsPlugin {
                     visual::dispatch_visual_overrides
                         .after(WidgetSystems::PresentationCommandsApplied),
                 ),
-            )
-            .add_systems(
-                PostUpdate,
-                reify::update_world_anchor_geometry.in_set(AnchorSystems::FillGeometry),
             );
+        add_widget_observers(app);
+        add_mesh_anchor_systems(app);
     }
 }

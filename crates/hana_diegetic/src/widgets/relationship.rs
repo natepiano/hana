@@ -2,6 +2,41 @@ use std::ops::Deref;
 
 use bevy::prelude::*;
 
+/// Relationship source on each tooltip controller, pointing at its target.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[reflect(Component, PartialEq, Debug, FromWorld, Clone)]
+#[relationship(relationship_target = Tooltips)]
+pub struct TooltipFor(#[entities] Entity);
+
+impl TooltipFor {
+    pub(crate) const fn new(target: Entity) -> Self { Self(target) }
+
+    /// Returns the entity described by this tooltip.
+    #[must_use]
+    pub const fn target(&self) -> Entity { self.0 }
+}
+
+impl FromWorld for TooltipFor {
+    fn from_world(_: &mut World) -> Self { Self(Entity::PLACEHOLDER) }
+}
+
+/// Reverse membership for tooltip controllers describing one target.
+#[derive(Component, Default, Debug, PartialEq, Eq, Reflect)]
+#[reflect(Component, FromWorld, Default)]
+#[relationship_target(relationship = TooltipFor, linked_spawn)]
+pub struct Tooltips(Vec<Entity>);
+
+impl Tooltips {
+    /// Iterates over the target's tooltip controller entities.
+    pub fn iter(&self) -> impl Iterator<Item = Entity> + '_ { self.0.iter().copied() }
+}
+
+impl Deref for Tooltips {
+    type Target = [Entity];
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
 /// Relationship source on each widget, pointing at its owning panel.
 ///
 /// Bevy maintains the matching [`PanelWidgets`] set as widget entities spawn

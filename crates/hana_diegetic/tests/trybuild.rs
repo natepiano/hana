@@ -7,3 +7,10 @@ fn typestate_helper_signatures_compile() {
     test_cases.pass("tests/trybuild/pass/typestate_helpers.rs");
     test_cases.compile_fail("tests/trybuild/fail/overlay_*.rs");
 }
+
+#[test]
+fn tooltip_typestate_signatures_compile() {
+    let test_cases = trybuild::TestCases::new();
+    test_cases.pass("tests/trybuild/pass/tooltip_typestate.rs");
+    test_cases.compile_fail("tests/trybuild/fail/tooltip_*.rs");
+}
