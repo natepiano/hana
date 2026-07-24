@@ -18,12 +18,11 @@ closing the MacBook lid, moving cables, or controlling another monitor.
 
 Use this prompt from the workspace root:
 
-> Follow `crates/bevy_clerestory/tests/macos_monitor_reconnect.md`. Run the
-> autonomous Dell reconnect cases, preserve their logs and screenshots, return
-> the Dell to the on state even after a failure, and report the cases that still
-> require an operator. Before starting, state how many physical cases and probe
-> runs will be automated. Report progress after every preflight gate and every
-> physical case. Do not continue to another implementation-plan phase.
+> Run `.claude/commands/clerestory_test.md` with the tracked local Dell hardware
+> profile. Let the controller run the autonomous partition, preserve its
+> artifacts, and return the Dell to the on state. Report the controller's result
+> and the cases that still require an operator. Do not recreate the test steps
+> as agent commands.
 
 Add `and record the results in the example README` only when the run should
 update release evidence.
@@ -64,6 +63,9 @@ the probe is running:
   active.
 - Automatic application-controlled restore on the first return and its
   built-in cancellation on the second loss.
+- Authenticated move, resize, borderless, windowed, and cancellation commands
+  for the managed automatic fallback. These commands affect only the probe
+  window and do not focus it or generate input.
 
 The shortcuts do not cover these physical cases:
 
@@ -75,8 +77,6 @@ The shortcuts do not cover these physical cases:
 - Removing every display at once.
 - Returning the Samsung before the Dell. The Samsung is not controlled by
   these shortcuts.
-- Focusing, moving, resizing, or pressing `B`, `W`, or `Shift+C` in the managed
-  automatic window. Those cycle-2 controls still require an operator.
 
 Repeated power cycling exercises repeated monitor loss and return. It does not
 replace evidence specifically about changing a dock or cable path.
@@ -100,13 +100,14 @@ unavailable with the exact missing hardware or operator action.
 | 9 | Zero displays | Conditional | A safe way to keep and observe the process while the lid is closed and both externals are absent. |
 | 10 | Non-target-first return | Operator-assisted | Disconnect and reconnect the Samsung independently. |
 | 11 | Rapid Dell off/on | Autonomous | None after calibration. |
-| 12 | Borderless return | Mostly autonomous | Screenshot inspection; operator confirmation if presentation is ambiguous. |
+| 12 | Borderless return | Autonomous when native evidence agrees | Operator judgment only if native fullscreen evidence is unavailable or contradictory. |
 | 13 | Exclusive automatic-unarmed branch | Autonomous | None after calibration. |
 | 14 | Dell/built-in cross-DPI return | Autonomous | MacBook display active as fallback. |
 
-The two-cycle managed-window cancellation check is shared by the applicable
-windowed cases. Its power changes are autonomous, but its focus, move, resize,
-`B`, `W`, and `Shift+C` actions are operator-assisted.
+The managed-window cancellation check is part of the autonomous windowed
+probe. The controller uses authenticated commands to move, resize, change mode,
+and cancel recovery. The equivalent `B`, `W`, and `Shift+C` keys remain useful
+for manual exploration but are not part of the automated result.
 
 ## Safety rules
 
@@ -143,14 +144,18 @@ dell monitor off
 dell monitor on
 ```
 
-Run automated checks through the delegation verification script, not direct
-Cargo test commands:
+Run the preflight and every available automated case through the controller:
 
 ```sh
-bash ~/.claude/scripts/delegate/verify.sh example-test bevy_clerestory restore_after_reconnect
-bash ~/.claude/scripts/delegate/verify.sh test bevy_clerestory
-bash ~/.claude/scripts/delegate/verify.sh lint bevy_clerestory
+python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
+  --hardware-profile crates/bevy_clerestory/tests/config/hardware.local.json
 ```
+
+The controller prints the three preflight results, owns every child process,
+runs the six physical cases, restores monitor power in its cleanup path, and
+writes one JSON and one Markdown report. The remaining commands below explain
+the individual states for diagnosis; they are not additional steps in a normal
+automated run.
 
 Before launching a physical run, execute the on shortcut once and confirm the
 Dell is listed by macOS:
@@ -278,11 +283,13 @@ as coalesced unless the trace shows it.
    observation, not the return criterion.
 4. Turn the Dell on and wait for native fullscreen completion and one restore
    result for the managed automatic key.
-5. Capture and inspect the returned Dell. It must be covered by the borderless
-   window without a title bar or menu bar.
+5. Confirm the native AppKit fullscreen bit and full-display coverage are both
+   true on the returned Dell.
 
-The Bevy `Window` mode alone is not visual proof that AppKit completed
-fullscreen presentation. If the screenshot is inconclusive, ask the operator.
+The Bevy `Window` mode alone is not proof that AppKit completed fullscreen
+presentation. In an unattended run, missing or contradictory native evidence
+makes the case unavailable. An assisted run may ask the operator for visual
+judgment.
 
 ### Exclusive automatic-unarmed branch
 

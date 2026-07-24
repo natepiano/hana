@@ -293,5 +293,13 @@
       "success_criteria_without": "Bug confirmed: Window bounces or resizes incorrectly during drag",
       "success_criteria_with": "Fix confirmed: Window drags smoothly between monitors"
     }
+  ],
+  "probe_cases": [
+    {
+      "id": "zero_owned_windows",
+      "description": "The process and HTTP probe remain alive after every owned window closes",
+      "interaction": "automated",
+      "evidence": "application"
+    }
   ]
 }
