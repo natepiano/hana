@@ -26,7 +26,7 @@ Design the preset/theme layer from real button, slider, tooltip, and later widge
 - how focus, hover, press, disabled, selected, drag, and validation states compose;
 - whether materials stay limited to `Handle<StandardMaterial>` or gain a public custom/extended-material contract;
 - whether a slider preset includes a variable-length fill and, if so, what retained geometry operation resizes it;
-- whether tooltips need any default presentation beyond their application-authored `TooltipTemplate` tree.
+- whether tooltips need any reusable default presentation beyond their application-authored `Tooltip` tree; Hana-specific title/shortcut/body content and live keymap resolution remain an application-owned manager unless repeated use proves a crate-level abstraction.
 
 ## Constraints inherited from widgets v1
 
@@ -37,4 +37,3 @@ Any later convenience layer should build on the direct widget APIs rather than r
 - runtime state presentation must reuse retained visual slots and avoid relayout when geometry is unchanged;
 - preset/theme code must not become a second authority for click, drag, focus, disabled, tooltip, or application-owned value state;
 - applications must remain free to build custom widget layout and presentation from the same state and events.
-
