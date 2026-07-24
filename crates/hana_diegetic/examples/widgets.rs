@@ -11,6 +11,7 @@
 //!   Home / End - Focus the first/last widget through Hana's adapter
 //!   Enter or Space / Escape - Activate/cancel through Hana's adapter
 //!   P - Focus the previous widget through an app-owned Bevy Kana action
+//!   T - Replace the primary button tooltip with a fresh controller
 //!   [ / ] (held) - Step the level slider through app-owned Bevy Kana actions
 //!   Pointer drag on the level slider - Grab, drag, and release move the value
 //!     through the same `SliderChangeRequested` proposals the app applies.
@@ -113,7 +114,7 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 8] = [
+const DESCRIPTION_LINES: [&str; 9] = [
     "Buttons restyle on hover, press, and focus; interaction changes log in the terminal.",
     "D disables the secondary button and level slider, which then show their disabled surfaces.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
@@ -122,6 +123,7 @@ const DESCRIPTION_LINES: [&str; 8] = [
     "The world status panel follows the level slider below the cube controls.",
     "The screen status panel follows the separate top-right screen widget.",
     "Widget declarations own tooltip controllers; the cube also publishes a checked mesh-face target.",
+    "T replaces the primary tooltip with a new controller and fresh show timer.",
 ];
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
 const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
@@ -291,6 +293,32 @@ impl From<PickingInteraction> for InteractionPriority {
 #[derive(Default, Resource)]
 struct PrimaryClicks(usize);
 
+#[derive(Resource)]
+struct SliderTooltipBlueprint(Tooltip);
+
+#[derive(Clone, Copy, Default, Resource)]
+enum PrimaryTooltipContent {
+    #[default]
+    Original,
+    Replacement,
+}
+
+impl PrimaryTooltipContent {
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Original => Self::Replacement,
+            Self::Replacement => Self::Original,
+        }
+    }
+
+    fn tooltip(self) -> Tooltip {
+        match self {
+            Self::Original => button_tooltip(),
+            Self::Replacement => replacement_button_tooltip(),
+        }
+    }
+}
+
 #[derive(Component)]
 struct WidgetLabPanel;
 
@@ -391,6 +419,8 @@ fn main() {
         .init_resource::<ToggleMode>()
         .init_resource::<LevelSliderDrag>()
         .init_resource::<PrimaryClicks>()
+        .init_resource::<PrimaryTooltipContent>()
+        .insert_resource(SliderTooltipBlueprint(slider_tooltip()))
         .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
         .add_observer(report_button_pressed)
         .add_observer(report_button_released)
@@ -415,6 +445,7 @@ fn main() {
             ),
         )
         .with_shortcut(KeyCode::KeyD, toggle_disabled_widgets)
+        .with_shortcut(KeyCode::KeyT, replace_primary_tooltip)
         .run();
 }
 
@@ -841,6 +872,7 @@ fn spawn_widget_lab(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     cube: Single<Entity, With<FairyDustCube>>,
+    slider_tooltip: Res<SliderTooltipBlueprint>,
 ) {
     let cube_target = commands.mesh_anchor_target(*cube, MeshFace::PositiveZ);
     commands.spawn_tooltip(cube_target, cube_tooltip());
@@ -865,7 +897,11 @@ fn spawn_widget_lab(
         })
         .material(material.clone())
         .text_material(material.clone())
-        .with_tree(widget_tree(slider))
+        .with_tree(widget_tree(
+            slider,
+            button_tooltip(),
+            slider_tooltip.0.clone(),
+        ))
         .build();
     let readout = DiegeticPanel::world()
         .size(FitMax(WORLD_READOUT_MAX_WIDTH.into()), Fit)
@@ -960,6 +996,7 @@ fn screen_widget_tree() -> LayoutTree {
         SCREEN_TARGET_LABEL,
         SCREEN_CONTROL_WIDTH,
         Button::new(),
+        None,
     );
     builder.build()
 }
@@ -998,7 +1035,7 @@ fn slider_declaration() -> Result<Slider, SliderConfigError> {
         .disabled_border_color(SLIDER_BORDER_DISABLED))
 }
 
-fn widget_tree(slider: Slider) -> LayoutTree {
+fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
         El::column()
             .width(Sizing::FIT)
@@ -1019,6 +1056,7 @@ fn widget_tree(slider: Slider) -> LayoutTree {
         "Primary button",
         CONTROL_WIDTH,
         state_styled(Button::new().on_click(count_primary_click)),
+        Some(primary_tooltip),
     );
     add_button(
         &mut builder,
@@ -1028,6 +1066,7 @@ fn widget_tree(slider: Slider) -> LayoutTree {
         state_styled(Button::new())
             .disabled_background(BUTTON_FILL_DISABLED)
             .disabled_border_color(BUTTON_BORDER_DISABLED),
+        None,
     );
     builder.with(
         El::overlay()
@@ -1037,7 +1076,7 @@ fn widget_tree(slider: Slider) -> LayoutTree {
             .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_BORDER))
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
             .slider(SLIDER_ID, slider)
-            .tooltip(slider_tooltip()),
+            .tooltip(slider_tooltip),
         |builder| {
             // Bottom layer: the value label, centered and fixed. A grow overlay
             // layer fills the slider content so the label stays centered
@@ -1186,6 +1225,7 @@ fn add_button(
     label: &'static str,
     width: Px,
     button: Button,
+    tooltip: Option<Tooltip>,
 ) {
     let element = El::new()
         .size(width, BUTTON_HEIGHT)
@@ -1195,10 +1235,9 @@ fn add_button(
         .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
         .corner_radius(CornerRadius::all(CONTROL_RADIUS))
         .button(id, button);
-    let element = if id == PRIMARY_BUTTON_ID {
-        element.tooltip(button_tooltip())
-    } else {
-        element
+    let element = match tooltip {
+        Some(tooltip) => element.tooltip(tooltip),
+        None => element,
     };
     builder.with(element, |builder| {
         builder.text((
@@ -1210,6 +1249,13 @@ fn add_button(
 
 fn button_tooltip() -> Tooltip {
     authored_tooltip("Primary button", "Pointer click or semantic activation")
+}
+
+fn replacement_button_tooltip() -> Tooltip {
+    authored_tooltip(
+        "Primary button — replaced",
+        "This tooltip has a new entity and fresh show timer",
+    )
 }
 
 fn slider_tooltip() -> Tooltip {
@@ -1383,5 +1429,35 @@ fn toggle_disabled_widgets(
         );
     } else {
         warn!("widgets: failed to update secondary button or level slider interactivity");
+    }
+}
+
+fn replace_primary_tooltip(
+    panel: Single<Entity, With<WidgetLabPanel>>,
+    mut primary_tooltip_content: ResMut<PrimaryTooltipContent>,
+    slider_tooltip: Res<SliderTooltipBlueprint>,
+    mut commands: Commands,
+) {
+    let replacement_content = primary_tooltip_content.toggled();
+    let slider = match slider_declaration() {
+        Ok(slider) => slider,
+        Err(error) => {
+            warn!("widgets: failed to recreate slider declaration: {error}");
+            return;
+        },
+    };
+    match commands.set_tree(
+        *panel,
+        widget_tree(
+            slider,
+            replacement_content.tooltip(),
+            slider_tooltip.0.clone(),
+        ),
+    ) {
+        Ok(()) => {
+            *primary_tooltip_content = replacement_content;
+            info!("widgets: queued a fresh primary-button tooltip controller");
+        },
+        Err(error) => warn!("widgets: failed to replace primary-button tooltip: {error}"),
     }
 }

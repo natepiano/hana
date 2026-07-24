@@ -1891,7 +1891,7 @@ mod tests {
             .id()
     }
 
-    fn tooltip_surface_tree() -> LayoutTree {
+    fn tooltip_surface_tree(label: &'static str) -> LayoutTree {
         let mut tooltip = Tooltip::new(
             El::column()
                 .width(Sizing::FIT)
@@ -1902,7 +1902,7 @@ mod tests {
         .show_after(Duration::ZERO)
         .hide_after(Duration::ZERO)
         .placement_policy(crate::TooltipPlacementPolicy::Fixed);
-        tooltip.text(("Retained tooltip", TextStyle::new(4.0)));
+        tooltip.text((label, TextStyle::new(4.0)));
         let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
         builder.with(
             El::new()
@@ -1915,40 +1915,7 @@ mod tests {
         builder.build()
     }
 
-    #[test]
-    fn ready_tooltip_reveal_routes_its_final_transform_in_the_same_frame() {
-        let mut app = sdf_pipeline_app();
-        app.add_plugins(WidgetsPlugin);
-        let panel = spawn_sdf_panel(
-            &mut app,
-            tooltip_surface_tree(),
-            StandardMaterial::default(),
-        );
-        settle_sdf_pipeline(&mut app);
-        let widget = app
-            .world_mut()
-            .run_system_once(move |reader: PanelWidgetReader| {
-                reader.entity(panel, &PanelElementId::named("tooltip-target"))
-            })
-            .ok()
-            .flatten()
-            .expect("tooltip target widget should reify");
-        let controller = app
-            .world()
-            .get::<Tooltips>(widget)
-            .and_then(|tooltips| tooltips.iter().next())
-            .expect("tooltip controller should reify");
-
-        app.world_mut()
-            .entity_mut(widget)
-            .insert(PickingInteraction::Hovered);
-        for _ in 0..6 {
-            app.update();
-        }
-        assert_eq!(
-            app.world().get::<Visibility>(controller),
-            Some(&Visibility::Inherited),
-        );
+    fn assert_tooltip_surface_is_retained(app: &App, controller: Entity) {
         let computed = app
             .world()
             .get::<ComputedDiegeticPanel>(controller)
@@ -1979,16 +1946,69 @@ mod tests {
             tooltip_panel.tree(),
             computed.result(),
         );
-        let retained_panels = sdf_records(&app)
+        let retained_panels = sdf_records(app)
             .iter()
             .map(|record| record.record_key.panel)
             .collect::<Vec<_>>();
         assert!(
-            sdf_records(&app)
+            sdf_records(app)
                 .iter()
                 .any(|record| record.record_key.panel == controller),
-            "the first reveal should route the tooltip surface; retained panels: {retained_panels:?}",
+            "the reveal should route the tooltip surface; retained panels: {retained_panels:?}",
         );
+    }
+
+    fn assert_tooltip_retained_transform(app: &App, controller: Entity) {
+        let record = sdf_records(app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("a ready tooltip should have a retained record");
+        let global = app
+            .world()
+            .get::<GlobalTransform>(controller)
+            .expect("revealed tooltip should have a propagated transform");
+        assert_eq!(
+            record.transform,
+            global.to_matrix() * record.local_transform.to_matrix(),
+            "the retained record must contain the reveal frame's final transform",
+        );
+    }
+
+    #[test]
+    fn ready_tooltip_reveal_routes_its_final_transform_in_the_same_frame() {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let panel = spawn_sdf_panel(
+            &mut app,
+            tooltip_surface_tree("Retained tooltip"),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("tooltip controller should reify");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..6 {
+            app.update();
+        }
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited),
+        );
+        assert_tooltip_surface_is_retained(&app, controller);
 
         app.world_mut()
             .entity_mut(widget)
@@ -2009,20 +2029,30 @@ mod tests {
             .entity_mut(widget)
             .insert(PickingInteraction::Hovered);
         app.update();
+        assert_tooltip_retained_transform(&app, controller);
 
-        let record = sdf_records(&app)
-            .into_iter()
-            .find(|record| record.record_key.panel == controller)
-            .expect("a ready tooltip should route again in the reveal frame");
-        let global = app
-            .world()
-            .get::<GlobalTransform>(controller)
-            .expect("revealed tooltip should have a propagated transform");
-        assert_eq!(
-            record.transform,
-            global.to_matrix() * record.local_transform.to_matrix(),
-            "the retained record must contain the reveal frame's final transform",
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, tooltip_surface_tree("Replacement tooltip"))
+                .is_ok()
         );
+        for _ in 0..6 {
+            app.update();
+        }
+        let replacement_controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("replacement tooltip controller should reify");
+        assert_ne!(replacement_controller, controller);
+        assert!(app.world().get_entity(controller).is_err());
+        assert_eq!(
+            app.world().get::<Visibility>(replacement_controller),
+            Some(&Visibility::Inherited),
+        );
+        assert_tooltip_surface_is_retained(&app, replacement_controller);
+        assert_tooltip_retained_transform(&app, replacement_controller);
     }
 
     #[test]
@@ -2040,7 +2070,7 @@ mod tests {
         let render_layers = RenderLayers::layer(6);
         let panel = spawn_sdf_screen_panel(
             &mut app,
-            tooltip_surface_tree(),
+            tooltip_surface_tree("Retained tooltip"),
             StandardMaterial::default(),
             secondary_window,
             37,

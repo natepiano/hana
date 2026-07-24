@@ -656,7 +656,7 @@ pub(super) fn on_panel_attachment_removed(
 ) {
     commands
         .entity(removed.entity)
-        .remove::<ScreenWidgetAnchoredTo>();
+        .try_remove::<ScreenWidgetAnchoredTo>();
     lifecycle::remove_owned_component::<ValenceAnchoredTo>(
         &mut commands,
         removed.entity,
@@ -941,6 +941,7 @@ mod tests {
     use std::any::TypeId;
     use std::sync::Arc;
 
+    use bevy::ecs::error;
     use bevy::ecs::reflect::ReflectComponent;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::ecs::world::CommandQueue;
@@ -1020,6 +1021,26 @@ mod tests {
             PanelAttachmentAuthored::new(target, source_anchor, target_anchor),
             offset,
         )
+    }
+
+    #[test]
+    fn attachment_cleanup_tolerates_source_despawn_in_the_same_flush() {
+        let mut app = App::new();
+        app.set_error_handler(error::panic)
+            .add_observer(super::on_panel_attachment_removed);
+        let target = app.world_mut().spawn_empty().id();
+        let source = app
+            .world_mut()
+            .spawn((
+                PanelAttachmentAuthored::new(target, Anchor::Center, Anchor::Center),
+                ScreenWidgetAnchoredTo::new(target),
+            ))
+            .id();
+
+        app.world_mut().commands().entity(source).despawn();
+        app.update();
+
+        assert!(app.world().get_entity(source).is_err());
     }
 
     #[test]

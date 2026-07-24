@@ -43,7 +43,7 @@ use crate::panel::PanelComponentOwnership;
 use crate::panel::PanelOwned;
 use crate::panel::PanelSpace;
 
-/// Reuses or creates associated tooltip controllers after widget reification.
+/// Reuses equal associated tooltip controllers and replaces changed declarations.
 pub(super) fn reify_tooltip_controllers(
     mut panels: Query<
         (Entity, &ComputedDiegeticPanel, &mut TooltipControllerIndex),
@@ -60,10 +60,14 @@ pub(super) fn reify_tooltip_controllers(
             let Some(widget) = widget_reader.entity(panel, record.widget_id()) else {
                 continue;
             };
-            let existing = controller_index
+            let reusable = controller_index
                 .entity(record.widget_id())
-                .filter(|entity| controllers.contains(*entity));
-            let controller = existing.unwrap_or_else(|| {
+                .filter(|entity| {
+                    controllers
+                        .get(*entity)
+                        .is_ok_and(|(tooltip, _, _)| tooltip == record.tooltip())
+                });
+            let controller = reusable.unwrap_or_else(|| {
                 commands
                     .spawn((
                         record.tooltip().clone(),
@@ -73,10 +77,8 @@ pub(super) fn reify_tooltip_controllers(
                     .id()
             });
             if let Ok((tooltip, tooltip_for, ownership)) = controllers.get(controller) {
+                debug_assert_eq!(tooltip, record.tooltip());
                 let mut controller_commands = commands.entity(controller);
-                if tooltip != record.tooltip() {
-                    controller_commands.insert(record.tooltip().clone());
-                }
                 if tooltip_for.target() != widget {
                     controller_commands.insert(TooltipFor::new(widget));
                 }

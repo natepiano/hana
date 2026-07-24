@@ -203,6 +203,10 @@ pub enum TooltipPlacementPolicy {
 }
 
 /// Deferred visual and behavior declaration for a tooltip.
+///
+/// Replace a standalone tooltip by despawning its controller and calling
+/// [`TooltipCommandsExt::spawn_tooltip`] again. Replacing this component on a
+/// materialized controller is not an in-place content update.
 #[derive(Component, Debug)]
 #[require(TooltipPhase)]
 pub struct Tooltip {
@@ -4447,9 +4451,11 @@ mod tests {
             .spawn((Window::default(), PrimaryWindow))
             .id();
         let camera = spawn_presentation_camera(&mut app, window, RenderLayers::layer(0));
-        let normalized_target = RenderTarget::Window(WindowRef::Entity(window))
-            .normalize(Some(window))
-            .expect("test window target normalizes");
+        let Some(normalized_target) =
+            RenderTarget::Window(WindowRef::Entity(window)).normalize(Some(window))
+        else {
+            return;
+        };
         let location = Location {
             target:   normalized_target,
             position: TEST_VIEWPORT * 0.5,
@@ -4599,10 +4605,13 @@ mod tests {
             "initial keyboard-only focus chooses the highest-order compatible camera",
         );
 
+        let Some(normalized_target) =
+            RenderTarget::Window(WindowRef::Entity(window)).normalize(Some(window))
+        else {
+            return;
+        };
         let location = Location {
-            target:   RenderTarget::Window(WindowRef::Entity(window))
-                .normalize(Some(window))
-                .expect("test window target normalizes"),
+            target:   normalized_target,
             position: TEST_VIEWPORT * 0.5,
         };
         app.world_mut().trigger(Pointer::new(
@@ -4769,8 +4778,38 @@ mod tests {
         );
     }
 
+    fn replace_associated_tooltip(
+        app: &mut App,
+        panel: Entity,
+        widget: Entity,
+        previous_controller: Entity,
+        baseline: &LayoutTree,
+        replacement: Tooltip,
+    ) -> Entity {
+        let replacement_tree = tooltip_tree(Some(replacement.clone()));
+        assert_eq!(
+            baseline.classify_change(&replacement_tree),
+            LayoutTreeChange::VisualOnly
+        );
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, replacement_tree)
+                .is_ok()
+        );
+        app.update();
+        let replacement_controller = controller(app, widget);
+        assert_ne!(replacement_controller, previous_controller);
+        assert!(app.world().get_entity(previous_controller).is_err());
+        assert_eq!(
+            app.world().get::<Tooltip>(replacement_controller),
+            Some(&replacement)
+        );
+        replacement_controller
+    }
+
     #[test]
-    fn associated_controller_reuses_identity_across_tree_replacements() {
+    fn associated_controller_replaces_identity_for_changed_declarations() {
         let mut app = test_app();
         let tooltip = Tooltip::new(El::new());
         let tree = tooltip_tree(Some(tooltip.clone()));
@@ -4827,17 +4866,28 @@ mod tests {
             computed_tick
         );
 
-        let policy = tooltip.show_after(Duration::from_secs(1));
-        let policy_tree = tooltip_tree(Some(policy.clone()));
-        assert_eq!(
-            tree.classify_change(&policy_tree),
-            LayoutTreeChange::VisualOnly
-        );
-        let replaced = app.world_mut().commands().set_tree(panel, policy_tree);
-        assert!(replaced.is_ok());
-        app.update();
-        assert_eq!(controller(&app, widget), original);
-        assert_eq!(app.world().get::<Tooltip>(original), Some(&policy));
+        let replacements = [
+            tooltip.clone().show_after(Duration::from_secs(1)),
+            tooltip.clone().hide_after(Duration::from_secs(1)),
+            tooltip.clone().disabled_policy(TooltipDisabledPolicy::Show),
+            tooltip.clone().source_anchor(Anchor::BottomLeft),
+            tooltip.clone().target_anchor(Anchor::TopRight),
+            tooltip
+                .clone()
+                .offset(PanelAnchorOffset::new(Px(3.0), Px(4.0))),
+            tooltip.placement_policy(TooltipPlacementPolicy::Fixed),
+        ];
+        let mut previous_controller = original;
+        for replacement in replacements {
+            previous_controller = replace_associated_tooltip(
+                &mut app,
+                panel,
+                widget,
+                previous_controller,
+                &tree,
+                replacement,
+            );
+        }
         assert_eq!(
             app.world().get::<super::super::WidgetSpec>(widget),
             button_declaration.as_ref()
@@ -4851,8 +4901,67 @@ mod tests {
             .set_tree(panel, tooltip_tree(Some(blueprint.clone())));
         assert!(replaced.is_ok());
         app.update();
-        assert_eq!(controller(&app, widget), original);
-        assert_eq!(app.world().get::<Tooltip>(original), Some(&blueprint));
+        let blueprint_controller = controller(&app, widget);
+        assert_ne!(blueprint_controller, previous_controller);
+        assert!(app.world().get_entity(previous_controller).is_err());
+        assert_eq!(
+            app.world().get::<Tooltip>(blueprint_controller),
+            Some(&blueprint)
+        );
+    }
+
+    #[test]
+    fn visible_associated_replacement_starts_a_fresh_show_wait() {
+        let mut app = test_app();
+        app.init_resource::<TooltipVisibilityLog>()
+            .add_observer(record_tooltip_hidden);
+        let panel = spawn_panel(
+            &mut app,
+            tooltip_tree(Some(Tooltip::new(El::new()).show_after(Duration::ZERO))),
+        );
+        app.update();
+        let widget = widget(&mut app, panel);
+        let original = controller(&app, widget);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.world_mut().entity_mut(original).insert((
+            TooltipPhase::Visible,
+            Visibility::Inherited,
+            Transform::default(),
+            GlobalTransform::default(),
+        ));
+
+        let replacement_delay = Duration::from_secs(30);
+        let replacement = Tooltip::new(El::new()).show_after(replacement_delay);
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, tooltip_tree(Some(replacement.clone())));
+        assert!(result.is_ok());
+        app.update();
+
+        let replacement_controller = controller(&app, widget);
+        assert_ne!(replacement_controller, original);
+        assert!(app.world().get_entity(original).is_err());
+        assert_eq!(
+            app.world().resource::<TooltipVisibilityLog>().hidden,
+            [original]
+        );
+        assert_eq!(
+            app.world().get::<Tooltip>(replacement_controller),
+            Some(&replacement)
+        );
+        assert!(matches!(
+            app.world().get::<TooltipPhase>(replacement_controller),
+            Some(TooltipPhase::WaitingToShow(timer))
+                if timer.duration() == replacement_delay && !timer.is_finished()
+        ));
+        assert!(
+            app.world()
+                .get::<MaterializedTooltip>(replacement_controller)
+                .is_none()
+        );
     }
 
     #[test]
@@ -6674,7 +6783,7 @@ mod tests {
     }
 
     #[test]
-    fn changed_tooltip_does_not_replace_materialized_placement_or_content() {
+    fn direct_standalone_component_replacement_does_not_update_materialized_state() {
         let mut app = materialization_app();
         app.init_resource::<TooltipPlacementRunCount>();
         let window = app

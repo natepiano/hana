@@ -1,6 +1,6 @@
 # Headless Widgets
 
-> **Status: IMPLEMENTATION PLAN — phased; ready for delegation.** Adds headless widgets (buttons, sliders, tooltips, focus, interactivity) to `hana_diegetic`: widgets own semantic behavior and typed events, visuals stay ordinary layout primitives, widgets reify as panel child entities targeted by Bevy picking, and anchoring comes from `hana_valence`. Phase 12 remains the required demonstration-design stop after the implementation work orders.
+> **Status: IMPLEMENTATION PLAN — phased; Phase 12 discussion checkpoint next.** Adds headless widgets (buttons, sliders, tooltips, focus, interactivity) to `hana_diegetic`: widgets own semantic behavior and typed events, visuals stay ordinary layout primitives, widgets reify as panel child entities targeted by Bevy picking, and anchoring comes from `hana_valence`. Phase 12 remains the required demonstration-design stop after the implementation work orders.
 
 ## Delegation Context
 
@@ -414,7 +414,7 @@ this plan before implementing widgets.
 - Phase 4.5 now retires the world bridge, shared geometry, and screen proxy independently; its synchronization runs after both widget reify and screen observer-command fences.
 - Phase 4.5's file list now covers the typed attachment boundary, guarded conversions and migrated callers as well as screen scheduling, placement, rects, world target metrics, widget registration, lifecycle, and anchoring documentation.
 - Phases 5, 6, 8, and 10.75 now finalize focus, capture, and visible tooltips before anchor cleanup and owned-entity despawn; missing registration/export files were added across later Work Orders.
-- Phase 10 now stores tooltip anchors and offset on `Tooltip`, fixes their defaults, and treats placement-only edits independently from blueprint replacement. Phase 10.5 implements the settled keep-visible fallback; Phase 12 still treats the cumulative dual-space widget lab as its baseline.
+- Phase 10 stores tooltip anchors and offset on `Tooltip`, fixes their defaults, and makes placement-only edits distinguishable from blueprint replacement. Phase 11 later supersedes in-place editing: either non-identical associated declaration now creates a fresh controller. Phase 10.5 implements the settled keep-visible fallback; Phase 12 still treats the cumulative dual-space widget lab as its baseline.
 
 ### Phase 4.5 — Screen-placer widget targets  · status: done (`33229542`)
 
@@ -529,7 +529,7 @@ this plan before implementing widgets.
 
 - Delegation Context and later Work Orders now name the synchronized `PanelSpace` mirror, typed handle reacquisition, and the actual combined world/screen anchor cleanup point.
 - Phase 10.5 now stages lazy materialization through panel insertion, handle acquisition, checked attachment, coordinate-specific placement readiness, and final transform propagation.
-- Phase 10.5 now inherits a screen target's window, camera order, and render layers; Phase 11 rematerializes the same tooltip controller when retargeting changes coordinate space or layout unit.
+- Phase 10.5 now inherits a screen target's window, camera order, and render layers; a later associated-tooltip replacement retires the old controller and starts a fresh controller from the replacement declaration.
 - Phase 5's pointer-focus and semantic-routing decisions and Phase 5.5's adapter decisions are now settled in their respective work orders; Phase 10 decisions remain deferred to that phase gate.
 
 ### Phase 5 — Focus subsystem and semantic routing  · status: done (`6c59c602`)
@@ -629,7 +629,7 @@ Automatic pointer focus is available when the picked camera resolves to a window
 - Phase 7.5 adds `WidgetSystems::FocusCommandsApplied` after semantic input so same-frame marker changes are visible to presentation and tooltip eligibility.
 - Phases 6, 8, 10, and 10.5 now extend both lifecycle paths established by Phase 5: ordinary component-role removal and early full-entity despawn before linked-child cleanup. Tooltip target despawn has the same early-finalization requirement.
 - Phase 10 replaces the former non-widget tooltip validation proposal with compile-time `El` widget typestate, so `.tooltip(...)` is unavailable until `.button(...)` or `.slider(...)` has been called.
-- Tooltip work is split without changing behavior: Phase 10.5 owns hidden materialization/readiness, Phase 10.75 owns timing/visibility/events, and Phase 11 owns replacement/retargeting.
+- Tooltip work is split without changing behavior: Phase 10.5 owns hidden materialization/readiness, Phase 10.75 owns timing/visibility/events, and Phase 11 owns replacing an associated tooltip by retiring its old controller and creating a fresh one.
 
 ### Phase 5.5 — Enhanced-input adapter  · status: done (`4b6e8866`)
 
@@ -897,7 +897,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 - Every later pointer consumer receives the final per-face hit stream; callbacks, visual state, sliders, and tooltips must not recreate face filtering.
 - Phase 7 remains a consumer of `ButtonClicked` and does not need access to private capture or picking state.
 - The canonical example must preserve the world panel's front-interactive/back-panel-only policy and Fairy Dust's pass-through screen overlays.
-- Later panel resets and tooltip materialization use the shipped `PanelPicking` ownership/teardown path rather than maintaining a second cleanup mechanism.
+- Tooltip materialization and controller retirement use the shipped `PanelPicking` ownership/teardown path rather than maintaining a second cleanup mechanism.
 
 #### Phase 6.5 Review
 
@@ -905,7 +905,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 - Phase 7 now requires exactly one plugin-installed global callback observer, while Phase 7.25 separately owns retained visual slots, batch re-keying, empty-batch retirement, and `Pickable::IGNORE` on replacement batches.
 - The Phase 7.5 public-preset question is resolved: widgets v1 uses direct state-presentation builders, while presets and themes move to [`widgets-deferred.md`](widgets-deferred.md).
 - Phase 8.25 isolates shared private pointer-capture occupancy, Phase 8.5 extends the existing renderer boundary with flat ray projection, and Phase 8.75 adds slider dragging.
-- Phase 10.5 now carries an explicit owner decision for materialized-tooltip picking; Phase 11 reuses Phase 6.5 ownership during ordered panel reset instead of maintaining a second picking cleanup path.
+- Phase 10.5 now carries an explicit owner decision for materialized-tooltip picking; Phase 11 retires the old controller through Phase 6.5's existing ownership-aware cleanup before a fresh controller materializes.
 - Phase 12 preserves the canonical world panel's front `Interactive`/back `PanelOnly` policy and Fairy Dust's `PASS_THROUGH` overlays.
 - Same-command-flush application observers that deliberately compete with Hana's absent-only initial `PanelPicking` install remain application responsibility; the plan rejects discard hooks or another ownership mechanism for that edge case.
 
@@ -1120,7 +1120,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 - The former combined Phase 8.5 is split: Phase 8.5 owns captured-camera and raw-value projection, while Phase 8.75 owns grab/drag/release/cancel behavior and preserves application authority.
 - Phase 8.5 tests explicit synthetic geometry; Phase 8.75 records the live slider-root content box for headless projection, and Phase 9 adds the thumb slot and thumb bounds to that same visual-slot path.
 - Phase 9 now reads only accepted `SliderState` values and uses the same solved slot geometry for pointer endpoints and thumb presentation.
-- Existing Phase 10 and 10.5 pending decisions remain at their pre-dispatch gates; Phase 11 and Phase 12 received only mechanical cleanup below.
+- The earlier Phase 10 and 10.5 decisions were resolved at their pre-dispatch gates. Phase 11 now has the owner-set replacement rule: a non-identical associated declaration creates a fresh controller.
 
 ### Phase 8.25 — Shared private pointer-capture authority  · status: done (`8b210f16`)
 
@@ -1276,7 +1276,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 - Phase 9 now makes the shipped thumb border-box reader production-available, filters its presentation walk to live sliders, and defers the undefined oversized-thumb drawing rule for an owner decision.
 - Phase 10 now names the computed-panel storage and cached-geometry path required for associated tooltip records; `Fit × Fit` inferred construction and missing-target lifecycle are settled, while its standalone-target decision is narrowed to the general anchoring provider and checked-command return value.
 - Phase 10.5's existing picking-policy decision now also requires semantic non-interactivity, not only pointer pass-through; the materialization/visibility split is accepted as Phases 10.5 and 10.75.
-- Phase 11 now preserves application-owned picking replacements during reset and defers the active-timer replacement rule for an owner decision.
+- Phase 11 no longer resets a controller in place: it retires the old controller through ordinary ownership-aware cleanup and gives the replacement fresh timers.
 - The remaining phases are still necessary; no phase was removed or reordered automatically.
 
 ### Phase 9 — Direct slider state and thumb presentation  · status: done (`57b45df6`)
@@ -1326,8 +1326,8 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 
 - Phase 10 now avoids creating an invalid relationship: its checked queued command creates no controller when the target is already absent, while later target despawn uses linked-spawn cleanup.
 - Phase 10.75 now reveals before retained batching, emits `TooltipShown` after transform propagation, and proves final world and screen retained-record transforms.
-- Phase 11 now repeats the final retained-transform proof after placement changes and retargeting; Phase 12 carries that proof into its later demonstration plan.
-- All remaining phases are still required. The 2026-07-23 owner review settled public naming, `Fit × Fit` construction, anchor/offset ownership, associated-authoring typestate, stale-target lifecycle, application-content boundaries, and interaction-camera reuse; five narrower tooltip decisions remain in their affected phases.
+- Phase 11 now repeats the final retained-transform proof after a replacement creates and reveals its fresh controller; Phase 12 carries that proof into its later demonstration plan.
+- All remaining phases are still required. The owner review settled public naming, `Fit × Fit` construction, anchor/offset ownership, associated-authoring typestate, stale-target lifecycle, application-content boundaries, interaction-camera reuse, and recreation for non-identical replacement.
 
 ### Phase 10 — Tooltip authoring, relationship, and controller reify  · status: done (`bb418855`)
 
@@ -1356,7 +1356,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
   No public `TooltipTrigger`, `TooltipTiming`, or fixed visible-duration setting exists; hover-or-focus behavior is assumed in Phase 10.75.
 
 - **Inferred panel construction:** the public name is `Tooltip`; the `Arc`-backed blueprint and deferred creation are implementation details. On first materialization, build `Fit × Fit`, use the authored tree unchanged, and add no separate tooltip size fields. A panel or widget target supplies its coordinate space and layout unit; a screen target also supplies its window, camera order, and render layers. These are placement/presentation facts, not automatic copies of the target's fill, border, or text styling. Phase 10.5 installs the separately settled picking policy.
-- **Placement ownership and diffing:** anchors, offset, and the settled keep-visible policy live on `Tooltip`. Equality includes blueprint pointer identity and every timing, disabled, and placement value. Anchor, offset, or placement-policy replacement updates placement without rebuilding the blueprint or respawning the controller.
+- **Placement ownership and diffing:** anchors, offset, and the settled keep-visible policy live on `Tooltip`. Equality includes blueprint pointer identity and every timing, disabled, and placement value, so Phase 11 can distinguish an identical clone from any replacement. Phase 11 supersedes the original in-place update behavior and creates a fresh controller for an anchor, offset, or placement-policy change.
 - **Application-authored content:** `hana_diegetic` accepts arbitrary visual layout authored through `Tooltip` and does not know Hana's theme, commands, or keymap. An application such as Hana may own a small semantic tooltip declaration and manager that resolves the current shortcut, authors the title-left/shortcut-right/body content through the same tooltip context, applies application styling, and produces or replaces a normal `Tooltip`. That convenience layer is not a Phase 10 core API requirement.
 
 - **General standalone targets:** public `TooltipTarget` is a trait over typed entity handles, not over `Mesh3d` or another individual ECS component. `PanelEntity<Space>` and `WidgetEntity<Space>` implement it directly. Public `TooltipTargetEntity<Space>` is the general handle returned by checked target-authoring commands, and an application may implement the trait for its own private handle when that handle's constructor establishes the required ECS data. Raw `Entity` does not implement the trait. The trait selects world versus screen at compile time; live ECS data still supplies current geometry and presentation context, because a handle cannot prevent later component removal. Missing live data keeps the controller hidden and emits the bounded diagnostic rather than materializing at a fallback transform.
@@ -1365,8 +1365,8 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 
 - **Tooltip equality and deferred creation:** equality compares panel-blueprint pointer identity plus policy values. Associated authoring carries the same value through `ComputedTooltipRecord`, cloning only the `Arc`; standalone authoring inserts it through the checked command. An identical clone is unchanged, a policy-only replacement is distinguishable from a blueprint replacement, and no phase spawns panel/render components merely because a `Tooltip` exists.
 - **Controller reify and fence:** add `TooltipSystems::ReifyControllers` after `WidgetSystems::ReifyCommandsApplied`. It uses `PanelWidgetReader` to create/reuse associated controllers and synchronizes `Tooltip` plus `TooltipFor(widget)` independently. Follow it with `TooltipSystems::ControllerCommandsApplied`, an explicit `ApplyDeferred` fence consumed by Phase 10.5. Ordering after the widget fence alone is insufficient for systems that need newly created tooltip controllers and relationships.
-- **Panel-role ownership:** when a target is a widget or panel, resolve its owning panel role (`WidgetOf::panel()` for a widget, or the target itself for a panel) and synchronize the existing private `PanelOwned` record independently of `TooltipFor`. A target supplied only through the general anchoring provider has no invented panel owner; its entity relationship owns controller lifetime. `linked_spawn` still handles target-entity despawn, while `PanelOwned` lets Phase 3's central lifecycle clean up controllers when only an actual target panel's `DiegeticPanel` role is removed and the target entity survives. Phase 11 owns transferring or removing this record when an existing controller is retargeted.
-- **Identity and cleanup:** same panel/widget id reuses the controller across unrelated, policy-only, and identical-tree refreshes; `Tooltip` fields update independently. Associated declaration removal despawns that controller, and target despawn does the same through `linked_spawn`. Controller indexes follow source revision even when an identical `set_tree` does not change `ComputedDiegeticPanel`; never clear an index unless the same command path also updates/reifies it. Extend both Phase 5 lifecycle paths: component-only panel-role removal cleans controller indexes/ownership from ordinary `On<Remove, DiegeticPanel>`, while full panel despawn performs any required controller finalization from the earlier `On<Despawn, DiegeticPanel>` path before linked widget/tooltip cleanup is queued. Both paths clean each controller exactly once even when `PanelOwned` and linked target cleanup overlap.
+- **Panel-role ownership:** when a target is a widget or panel, resolve its owning panel role (`WidgetOf::panel()` for a widget, or the target itself for a panel) and synchronize the existing private `PanelOwned` record independently of `TooltipFor`. A target supplied only through the general anchoring provider has no invented panel owner; its entity relationship owns controller lifetime. `linked_spawn` still handles target-entity despawn, while `PanelOwned` lets Phase 3's central lifecycle clean up controllers when only an actual target panel's `DiegeticPanel` role is removed and the target entity survives.
+- **Identity and cleanup:** same panel/widget id reuses the controller across unrelated and identical-tree refreshes. Phase 11 supersedes policy-only reuse: any non-identical associated `Tooltip` retires the controller and creates a fresh one. Associated declaration removal despawns the current controller, and target despawn does the same through `linked_spawn`. Controller indexes follow source revision even when an identical `set_tree` does not change `ComputedDiegeticPanel`; never clear an index unless the same command path also updates/reifies it. Extend both Phase 5 lifecycle paths: component-only panel-role removal cleans controller indexes/ownership from ordinary `On<Remove, DiegeticPanel>`, while full panel despawn performs any required controller finalization from the earlier `On<Despawn, DiegeticPanel>` path before linked widget/tooltip cleanup is queued. Both paths clean each controller exactly once even when `PanelOwned` and linked target cleanup overlap.
 
 **Files:**
 - `src/widgets/tooltip.rs` — `Tooltip`, placement/timing values, checked standalone command, and lightweight controller state
@@ -1383,7 +1383,7 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 
 **Constraints from prior phases:** Phase 1 preserves widget/text indexes when an identical `set_tree` advances the source revision without changing computed output; tooltip controller indexes must follow the same rule because no computed change is guaranteed to retrigger reify. Phase 2 provides `PanelWidgetReader` and `WidgetSystems::ReifyCommandsApplied`. Phase 3 provides `PanelOwned`; Phase 5 proved panel teardown has two timing paths, ordinary `On<Remove, DiegeticPanel>` for component-only role removal and earlier `On<Despawn, DiegeticPanel>` finalization before linked-child cleanup on full despawn. This phase extends both where controller bookkeeping needs live targets rather than relying only on linked target-entity despawn. Controller existence alone creates no world or screen demand from Phases 4/4.5.
 
-**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests plus compile-fail coverage: signatures and diagnostics use `LayoutOnly`/`WidgetElement`, never boolean typestates; `.tooltip(...)` is unavailable on `El<_, LayoutOnly>` and available after `.button(...)` or `.slider(...)`; `Tooltip::new`, `Tooltip::with`, and `Tooltip::image` accept `El<_, LayoutOnly>` and reject `El<_, WidgetElement>` at any nesting depth without a runtime error; text, images, nested rows/columns/overlays, and application styling author the expected immutable tooltip tree; tests establish copy-on-write `Arc<LayoutTree>` storage, initial clone identity, and independent authoring after either clone changes; associated tooltip authoring does not alter `Button`/`Slider` equality; one lightweight controller and exact reverse relationship exist after `TooltipSystems::ControllerCommandsApplied` with no `DiegeticPanel`, placement relation, render data, or geometry demand; unrelated and policy-only tree replacements reuse that controller; an exact identical `set_tree` replacement preserves the same associated controller and every controller lookup/index without relying on a computed-panel change; a blueprint replacement updates the same controller; the checked standalone command accepts typed panel, widget, mesh-face, and application-owned general handles, while raw `Entity` and a mismatched space do not compile; a one-call `MeshFace::PositiveZ` target derives the correct nine local face anchors from the current `Aabb` without manual geometry; component-state tests cover demand, missing and removed `Mesh3d`/`Aabb`, recovery, actual `Aabb` changes, selected-face changes, and transforms without local-geometry regeneration. The application owns keeping `Aabb` correct when it changes the mesh; this gate does not require Hana to follow mesh asset revisions or wait for a later bounds tick. A target missing when the queued operation applies creates no controller or invalid-relationship warning; later target despawn cleans up exactly once; omitted builders produce 500 ms show, zero hide delay, `Suppress`, `TopCenter → BottomCenter`, and an eight-pixel gap; component-only target-panel role removal and full target-panel despawn each clean associated/standalone controllers and indexes exactly once through the appropriate lifecycle path. Extend and smoke-test the public path in `examples/widgets.rs` with the central mesh cube as the general target while preserving all existing diagnostic and input paths and expanding the measured readout instead of clipping it.
+**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests plus compile-fail coverage: signatures and diagnostics use `LayoutOnly`/`WidgetElement`, never boolean typestates; `.tooltip(...)` is unavailable on `El<_, LayoutOnly>` and available after `.button(...)` or `.slider(...)`; `Tooltip::new`, `Tooltip::with`, and `Tooltip::image` accept `El<_, LayoutOnly>` and reject `El<_, WidgetElement>` at any nesting depth without a runtime error; text, images, nested rows/columns/overlays, and application styling author the expected immutable tooltip tree; tests establish copy-on-write `Arc<LayoutTree>` storage, initial clone identity, and independent authoring after either clone changes; associated tooltip authoring does not alter `Button`/`Slider` equality; one lightweight controller and exact reverse relationship exist after `TooltipSystems::ControllerCommandsApplied` with no `DiegeticPanel`, placement relation, render data, or geometry demand; unrelated and exact-identical tree replacements reuse that controller. Phase 11 supersedes this phase's original policy/blueprint in-place refresh behavior with fresh-controller replacement. The checked standalone command accepts typed panel, widget, mesh-face, and application-owned general handles, while raw `Entity` and a mismatched space do not compile; a one-call `MeshFace::PositiveZ` target derives the correct nine local face anchors from the current `Aabb` without manual geometry; component-state tests cover demand, missing and removed `Mesh3d`/`Aabb`, recovery, actual `Aabb` changes, selected-face changes, and transforms without local-geometry regeneration. The application owns keeping `Aabb` correct when it changes the mesh; this gate does not require Hana to follow mesh asset revisions or wait for a later bounds tick. A target missing when the queued operation applies creates no controller or invalid-relationship warning; later target despawn cleans up exactly once; omitted builders produce 500 ms show, zero hide delay, `Suppress`, `TopCenter → BottomCenter`, and an eight-pixel gap; component-only target-panel role removal and full target-panel despawn each clean associated/standalone controllers and indexes exactly once through the appropriate lifecycle path. Extend and smoke-test the public path in `examples/widgets.rs` with the central mesh cube as the general target while preserving all existing diagnostic and input paths and expanding the measured readout instead of clipping it.
 
 #### Retrospective
 
@@ -1403,15 +1403,15 @@ A single Shift, Control, Alt, or Super press is a valid primary shortcut. A time
 **Implications for remaining phases:**
 - Phase 10.5 starts from a controller containing `Tooltip` and `TooltipFor` plus optional `PanelOwned`; it must add materialization and demand to that same entity only after preparation is requested.
 - A mesh-face target normally has no derived geometry before Phase 10.5 creates attachment demand, and readiness must consume the application-maintained current `Aabb` contract.
-- Later replacement work must preserve the shared blueprint pointer for policy-only changes and the root-resuming clone behavior for any authored copy-on-write update.
+- An identical clone retains its shared blueprint pointer. A later non-identical associated declaration deliberately replaces the entire controller, so no timer or materialized state carries into the new tooltip.
 
 #### Phase 10 Review
 
 - Phase 10.5 now names the general-screen resolver inputs, private presentation-camera input, immutable blueprint handoff, and application-owned mesh-bounds contract that its implementation must consume.
 - Phase 10.75 now selects or refreshes the presentation camera before requesting preparation, so world keep-visible placement never races camera choice.
-- Phase 11 now retains an applied-tooltip snapshot and classifies blueprint replacement by `Arc<LayoutTree>` identity instead of inferring the previous value from `Changed<Tooltip>`.
+- Phase 11 compares the incoming associated declaration with the indexed controller's current `Tooltip`; an identical clone keeps the controller, while any non-identical value retires it and creates a fresh controller.
 - The owner resolved the arbitrary-world layout unit: panel and widget targets inherit their panel unit, while a general world target reads the existing global `PanelDefaults::layout_unit` construction default. Tooltip materialization must not hard-code its own unit.
-- Public retarget authority remains a product decision in Phase 11. Associated controllers are layout-owned, while standalone controllers currently have no public retarget operation.
+- Tooltip retargeting is not part of the API. Application code replaces a standalone tooltip by despawning its controller and calling `spawn_tooltip` for the new target; associated tooltip targets remain owned by their widget declarations.
 - The suggested split of Phase 10.5 was not applied: materialization, preferred placement, keep-visible fallback, and readiness together establish the single hidden-ready contract that Phase 10.75 consumes.
 
 ### Phase 10.5 — Hidden tooltip materialization and readiness  · status: done
@@ -1444,7 +1444,7 @@ What exists now:
 - Every materialized tooltip carries Hana-owned `PanelPicking::PASS_THROUGH` on both faces with no public per-tooltip override in v1, retaining target hover and never blocking lower hits.
 - `Tooltip` itself is the visual layout authoring context. Its root and child/image insertion methods accept only `El<_, LayoutOnly>`, so `El<_, WidgetElement>` returned by `.button(...)` or `.slider(...)` cannot enter a tooltip tree at compile time. No runtime widget suppression or content error is needed.
 - Title, shortcut, body, text, images, fills, borders, rows, columns, and overlays remain ordinary tooltip-authored visual content. Interactive floating content belongs to a later popover-style design.
-- Phase 11 replacement/reset preserves pointer transparency and can only receive another visual-only `Tooltip` blueprint.
+- A Phase 11 replacement controller materializes with the same pointer-transparent policy and can receive only a visual-only `Tooltip` blueprint.
 
 **Spec:**
 - **Picking policy:** every materialized tooltip installs Hana-owned `PanelPicking::PASS_THROUGH` on both faces and preserves it across hide/show, so it cannot steal hover from its target or block lower hits. V1 exposes no public picking override. Phase 10's named element-role boundary guarantees that the blueprint contains no widget declaration, so no tooltip widget can reify, enter focus traversal, activate, or capture a pointer.
@@ -1487,7 +1487,7 @@ What exists now:
 
 **Implications for remaining phases:**
 - Phase 10.75 can start and finish its show timer without adding a motion-delay state: it reveals only `Ready`, while ordinary solvable target motion stays `Ready` in the same frame.
-- Phase 11 panel-role reset must continue through the shared materialized cleanup so preexisting controller transform and visibility state are restored before a rebuild.
+- Phase 11 must retire the old controller through shared materialized cleanup before creating the replacement, so none of its transform or visibility state transfers.
 
 ### Phase 10.75 — Tooltip eligibility, visibility, and events  · status: done (`9abc4681`)
 
@@ -1533,49 +1533,54 @@ What exists now:
 - `TooltipDisabledPolicy::Suppress` must bypass an authored hide grace. Treating suppression as ordinary eligibility loss would leave a disabled tooltip visible until `hide_after` expired.
 
 **Implications for remaining phases:**
-- Phase 11 replacement must update the private phase in place. An active timer already owns its captured deadline, while a future wait reads the replacement duration.
-- Cross-space replacement and teardown must continue through the same immediate visible finalizer before Phase 10.5 removes panel, target, attachment, or transform data.
+- Phase 11 replacement creates a new controller and therefore always starts with fresh private phase and timer state.
+- Retiring the old controller must continue through the same immediate visible finalizer before Phase 10.5 removes panel, target, attachment, or transform data.
 
-### Phase 11 — Tooltip replacement and retargeting  · status: todo
+### Phase 11 — Tooltip replacement by recreation  · status: done (`2730d667`)
 
 #### Work Order
 
-**Goal:** A materialized tooltip updates its application-authored `Tooltip` or target without replacing its controller entity.
-
-**Pending decision: Which tooltip controllers application code may retarget**
-
-Actual problem:
-An associated tooltip controller is owned by the widget declaration in a panel's layout tree, so an external retarget could conflict with the next layout reify. A standalone controller returned by `spawn_tooltip` has no such layout owner, but it currently has no public retarget operation.
-
-What exists now:
-- `TooltipCommandsExt::spawn_tooltip` returns the stable controller `Entity`.
-- Associated reify privately synchronizes `TooltipFor` from the panel tree; `TooltipFor::new` is not public.
-
-What should change:
-- Add a checked queued retarget operation for standalone controllers only, distinguished by a private standalone-controller marker. Associated tooltips are retargeted by changing their owning layout declaration; an attempted standalone retarget on an associated controller warns and leaves it unchanged.
-
-Recommendation:
-Expose `TooltipCommandsExt::retarget_tooltip(controller, typed_target)` only for standalone controllers. This gives application-created tooltips a clear path without creating two authorities for an associated tooltip's target.
-
-**Settled active-timer replacement rule:** follow Zed's timer-snapshot behavior. When a tooltip enters `WaitingToShow`, it captures that transition's `show_after`; when it enters `WaitingToHide`, it captures that transition's `hide_after`. Replacing either duration while its wait is active neither restarts nor recomputes that wait and does not complete it early when the new duration is shorter. The replacement applies the next time the corresponding wait begins. Changing `disabled_policy` to `Suppress` is the exception because it removes eligibility: cancel either wait immediately, and if the tooltip is visible, hide it immediately and emit the normal single `TooltipHidden` event. Changing from `Suppress` to `Show` while the target is eligible begins a fresh show wait using the replacement's current `show_after`.
+**Goal:** Replacing an associated tooltip declaration retires its old controller and creates a new controller entity with fresh materialization and timer state.
 
 **Spec:**
-- **Applied snapshot and tooltip diff handling:** retain a private snapshot of the last successfully applied `Tooltip`, including its blueprint `Arc<LayoutTree>` identity, and update it only after the requested operation completes. `Changed<Tooltip>` schedules classification but is not itself evidence of which field changed. An identical value does nothing. A timing-only replacement leaves any active wait's captured deadline unchanged and supplies the duration for future waits without rebuilding panel components. A disabled-policy replacement applies the settled immediate `Suppress` behavior above. A placement-only replacement queues one checked attachment update after target acquisition and the attachment fence, preserving the materialized panel and blueprint. A new blueprint is detected by retained `Arc` identity; it first transitions hidden, emitting `TooltipHidden` if visible, then runs one private panel reset path and rebuilds hidden on the same controller entity.
-- **Complete reset:** blueprint replacement reuses the settled `DiegeticPanel` role-removal teardown instead of hand-maintaining a second cleanup list. It removes every materialized layout, render, widget, text, placement, retained-sibling, index, and Hana-owned `PanelPicking` component, including `PanelWidgetIndex`. An explicit deferred-command fence completes that role removal before the replacement blueprint is installed. The replacement builder's settled initial `PanelPicking` then uses Phase 6.5's existing absent-only ownership path, so no stale picking policy, render record, index, or placement survives. Reveal resumes only after fresh layout and placement readiness.
-- **Retargeting:** a same-space, same-layout-unit target change synchronizes `TooltipFor`, `PanelOwned`, inherited presentation context, and the checked placement target in place. A coordinate-space or layout-unit change first hides and detaches, waits for the attachment command fence, resets materialized panel state, and rematerializes on the same controller with the new target context. Conversion is never attempted while attached, and the materialized placement target always matches `TooltipFor`.
+- **Associated replacement:** compare the computed associated declaration with the current indexed controller's `Tooltip`. An identical clone is a no-op and preserves the existing controller. Any non-identical replacement—including content, timing, disabled-policy, anchor, offset, or placement-policy changes—first retires the old controller through its normal despawn path, then creates and indexes a new lightweight controller for the same widget target. The new controller receives the replacement `Tooltip`, a fresh `TooltipFor`, and fresh `PanelOwned` state where the widget's real panel role requires it.
+- **Fresh lifecycle:** if the old tooltip is visible, its existing finalizer emits exactly one `TooltipHidden` while its final relationship and transform data remain queryable. Normal controller despawn removes its materialized panel, layout, render records, widgets, text, placement, retained siblings, indexes, and Hana-owned picking state. The new controller begins lightweight and hidden, creates no anchor demand until eligible, and starts a fresh show wait using the replacement's current `show_after`. No old timer, readiness, placement, or visibility state transfers.
+- **Index ordering:** associated reify updates the `(panel, widget id)` controller index to the new entity in the same ordered command path that retires the old one. An identical `set_tree` revision still preserves the indexed controller even when no computed-panel change retriggers reify. Declaration removal retires the controller without replacement.
+- **Standalone replacement:** no public retarget or in-place replacement operation is added. Application code that wants a different standalone tooltip despawns the old controller and calls `TooltipCommandsExt::spawn_tooltip` with the desired typed target and new `Tooltip`, receiving the new controller entity explicitly. This intentionally gives the new tooltip fresh identity and timers.
 - **Application-authored presentation:** every tooltip continues to display the visual tree authored through `Tooltip`; this phase adds no default layout, preset, style, variant, or theme API. A calling application may build a semantic title/shortcut/body helper and manager on top, resolving its own keymap and theme into that tree. A reusable preset/theme design belongs to [`widgets-deferred.md`](widgets-deferred.md) after button, slider, and tooltip APIs have been used together.
 
 **Files:**
-- `src/widgets/tooltip.rs` — `Tooltip` diff classification, replacement, retargeting, and rematerialization
-- `src/widgets/mod.rs` — replacement/retarget ordering after the tooltip command fences
-- `src/panel/diegetic_panel.rs`, `src/panel/lifecycle.rs` — reusable complete panel-role reset
-- `src/panel/coordinate_space.rs`, `src/panel/anchoring.rs` — inherited target context and checked replacement attachment
-- `src/render/fill_batch.rs` — retained-transform proof after placement replacement and retargeting
-- `crates/hana_diegetic/examples/widgets.rs` — canonical replacement and retargeting exercise with application-authored tooltip trees
+- `src/widgets/reify.rs` — detect non-identical associated declarations, retire the old controller, and install the replacement controller in the index
+- `src/widgets/tooltip.rs` — reuse ordinary visible finalization and controller cleanup; prove fresh replacement state
+- `src/widgets/mod.rs` — replacement ordering through the existing controller command fence
+- `crates/hana_diegetic/examples/widgets.rs` — canonical associated replacement exercise with application-authored tooltip trees
 
-**Constraints from prior phases:** Phase 10 supplies stable controller identity, the immutable copy-on-write `Arc<LayoutTree>` whose identity distinguishes blueprint replacement, application-authored `Tooltip` diff inputs, semantic relationships, panel-role ownership, current-`Aabb` mesh providers, and the settled placement builders/defaults. Phase 10.5 supplies hidden materialization, readiness, persistent panel/layout/placement state, hidden cleanup, and the settled tooltip picking policy; Phase 10.75 supplies the sole visibility state machine, duplicate-safe visible finalizer, and final retained-record proof. Hidden GPU rows may retire and rebuild through normal renderer paths. Phase 3 supplies the complete panel-role teardown contract; Phases 4/4.5 supply typed same-space attachment, demand, and detach-before-convert behavior; Phase 6.5 supplies absent-only `PanelPicking` installation and ownership-aware teardown. Replacement and retargeting must call the existing lifecycle, attachment, picking, and renderer paths rather than creating parallel authorities. Retargeting to a mesh provider consumes its current application-maintained `Aabb` and adds no asset-version tracking.
+**Constraints from prior phases:** Phase 10 supplies the indexed associated controller, immutable copy-on-write `Arc<LayoutTree>` identity used by `Tooltip` equality, semantic relationships, panel-role ownership, and the checked standalone spawn/despawn lifecycle. Phase 10.5 supplies lazy materialization and complete controller cleanup; Phase 10.75 supplies the sole visibility state machine, duplicate-safe visible finalizer, and final retained-record proof. Replacement must retire the old controller through those existing paths rather than resetting its components in place. Phase 1's identical-`set_tree` revision rule still applies: the controller index must advance with source revision without replacing an identical tooltip or relying on a computed-panel change.
 
-**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests: a private applied-tooltip snapshot is updated only after a completed operation and uses retained blueprint `Arc` identity to distinguish replacement from policy changes; a new application-authored blueprint completes role-removal teardown before installing the replacement, resets every old panel/widget/text/render/placement component plus unchanged Hana-owned picking state, rebuilds hidden on the same controller, and receives a fresh Hana-owned copy of the settled tooltip `PanelPicking` only when no application-owned replacement survives; an application-mutated picking component survives per Phase 6.5's ownership ledger and suppresses absent-only reseeding; an identical clone does nothing; an active show or hide wait keeps its captured deadline when its duration is replaced, the replacement duration governs the next wait, `Suppress` cancels either wait immediately, visible-to-`Suppress` emits one immediate hidden transition, and `Suppress`-to-`Show` begins a fresh current-duration wait when eligible, all without rebuilding; placement-only changes do not rebuild, update the checked attachment after its fence, and refresh the final retained transform without leaving the old record; same-space/same-unit retargeting updates ownership, inherited context, attachment, and final retained transform in place; cross-space or different-unit retargeting emits one hidden event if visible, detaches, rematerializes the same controller without attempting an attached conversion, and produces a retained transform in the new coordinate space with no stale old-space record; reveal waits for fresh layout and placement; repeated equal replacement or retargeting is a no-op. Extend and smoke-test the public path in `examples/widgets.rs` with application-authored tooltip trees while preserving all existing diagnostic and input paths and expanding the measured readout instead of clipping it.
+**Acceptance gate:** `cargo nextest run -p hana_diegetic --lib` green with new tests: an identical associated tooltip clone preserves the existing controller and index; replacing content, timing, disabled policy, anchors, offset, or placement policy retires the old controller and installs a different controller entity; a visible old controller emits exactly one `TooltipHidden` before its relationship and transform disappear; its complete ordinary despawn path leaves no old panel, widget, text, render, placement, retained-sibling, index, picking, readiness, visibility, or timer state; the replacement starts lightweight and hidden, creates demand only after eligibility, waits for its fresh layout and placement, uses its own full `show_after`, and emits `TooltipShown` with its final retained transform; an identical `set_tree` revision preserves the controller and every lookup/index without relying on a computed-panel change; declaration removal retires the controller without replacement. Extend and smoke-test the public path in `examples/widgets.rs` with an application-authored associated tooltip replacement while preserving all existing diagnostic and input paths and expanding the measured readout instead of clipping it.
+
+#### Retrospective
+
+**What worked:**
+- Associated reify now compares the incoming `Tooltip` with the indexed controller. An identical clone keeps the entity; any changed blueprint or policy creates a fresh lightweight controller and lets the existing ownership path retire the old one.
+- Deterministic tests cover every equality field, exact-clone reuse, one hidden event from a visible old controller, and a replacement that begins its full fresh show wait. The canonical example's `T` shortcut exercises the same public `set_tree` path without operating-system pointer automation.
+
+**What deviated from the plan:**
+- No new replacement API or reset machinery was needed. Existing reify indexing, linked relationships, panel ownership, and controller cleanup already supplied the required retirement ordering.
+- The example retains the unchanged slider tooltip blueprint across tree reconstruction. This keeps its controller stable while `T` replaces only the primary tooltip.
+
+**Surprises:**
+- Live replacement exposed a deferred cleanup race: removing `PanelAttachmentAuthored` during controller despawn queued a second ordinary removal against an entity that was already gone. The observer now uses Bevy's `try_remove`, and a panic-on-command-error regression test covers same-flush source despawn.
+- Scoped clippy exposed three overlong or fallible test-only paths. They were factored or expressed without `expect`; no lint allowance was added.
+
+**Implications for remaining phases:**
+- Phase 12 can treat recreation, fresh timers, and the canonical keyboard exercise as completed behavior. Its discussion remains limited to designing the cumulative demonstration and deterministic integration gate.
+- Application code that wants an unchanged associated tooltip to survive a whole-tree reconstruction must clone the same `Tooltip` blueprint; authoring another visually equivalent tree intentionally requests replacement.
+
+#### Phase 11 Review
+
+- Phase 12 remains the required stop-and-discuss checkpoint. It now starts from the live `T` replacement path and must preserve the existing slider tooltip rather than treating whole-tree reconstruction as permission to replace unrelated declarations.
+- No later phase needs retargeting, in-place controller reset, or an active-timer replacement rule.
 
 ### Phase 12 — Demonstration checkpoint (stop and discuss)  · status: todo
 
@@ -1586,7 +1591,7 @@ Expose `TooltipCommandsExt::retarget_tooltip(controller, typed_target)` only for
 **Spec:**
 - Stop after Phase 11 and use `crates/hana_diegetic/examples/widgets.rs` as the cumulative dual-space Fairy Dust baseline: Phase 4's world readout still follows the bottom slider through typed world handles, Phase 4.5 adds a distinct typed screen-widget attachment exercise, Phase 5.5 leaves both Hana's built-in per-window controls and an app-owned Bevy Kana action visibly exercised, Phase 6 leaves visible `Pointer`, `Focus`, and `Button` rows proving pointer and semantic activation separately, Phase 7 adds the persistent `Callback` row and primary-button callback count, and Phase 6.5 leaves the world Widget Lab front `Interactive`/back `PanelOnly` while Fairy Dust screen overlays remain `PASS_THROUGH`. Design together how that lab is extended or supplemented; do not reopen which example owns the cumulative widget path, remove either input integration proof, replace those diagnostic rows, change those established picking policies, or clip them when adding later output.
 - Phase 9 leaves the level slider's centered label, moving authored thumb, direct state surfaces, and visible `Slider`/`State` readout in that same baseline; later demonstration work preserves those paths.
-- The discussion must design how a subsequent implementation phase will prove the pieces work together in real diegetic UI: buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and existing IME/text input coexisting on one panel. The written plan must name both the live demonstration and deterministic integration gate, including the tooltip's final retained transform after first reveal and retargeting; this discussion phase does not claim the runtime proof itself.
+- The discussion must design how a subsequent implementation phase will prove the pieces work together in real diegetic UI: buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and existing IME/text input coexisting on one panel. The written plan must name both the live demonstration and deterministic integration gate, including the tooltip's final retained transform after first reveal and after an associated replacement creates a fresh controller; this discussion phase does not claim the runtime proof itself.
 
 **Files:** `crates/hana_diegetic/examples/widgets.rs` is the read-only baseline until the discussion lands; no implementation files are selected yet.
 
@@ -1643,7 +1648,7 @@ Expose `TooltipCommandsExt::retarget_tooltip(controller, typed_target)` only for
 - **Relationship status:** accepted — 2026-07-15
 - **Authoring decision:** the public value is `Tooltip`, matching `Button` and `Slider`; “template” describes only its internal `Arc`-backed blueprint and deferred lifecycle. `El<L, Role = LayoutOnly>` uses named zero-sized `LayoutOnly` and `WidgetElement` roles rather than a boolean typestate. `.button(...)`/`.slider(...)` return `WidgetElement`, and `.tooltip(tooltip)` exists only in that role, eliminating a tooltip-specific target error. `Tooltip` itself authors the visual tree: its root and child/image insertion accept only `LayoutOnly`, so controls cannot enter its blueprint and no public `TooltipPanel`, separate visual-tree type, content error, or completed-`LayoutTree` constructor is needed. Standalone authoring uses the checked command settled in Phase 10 rather than a raw relationship tuple.
 - **Authoring status:** revised and accepted — 2026-07-24
-- **Blueprint decision:** `Tooltip` stores the immutable concrete panel blueprint plus private timing, disabled, anchor, offset, and placement-policy values. Panel-blueprint pointer identity and policy values define equality; a policy-only change does not rebuild the panel. After first materialization, show/hide retains the same entity and panel; a new panel blueprint rebuilds hidden on that entity rather than respawning it.
+- **Blueprint and replacement decision:** `Tooltip` stores the immutable concrete panel blueprint plus private timing, disabled, anchor, offset, and placement-policy values. Panel-blueprint pointer identity and policy values define equality. Ordinary hide/show retains the same entity and materialized panel, but any non-identical associated declaration—including a policy-only change—retires that controller and creates a new entity with fresh materialization and timers. A standalone tooltip is replaced explicitly by despawning it and calling `spawn_tooltip` again; there is no retarget or in-place replacement API.
 - **Blueprint status:** revised and accepted — 2026-07-23
 - **Panel-construction decision:** materialize `Fit × Fit`. Panel/widget targets supply coordinate space and layout unit; screen targets also supply their window, camera order, and render layers. The tooltip tree owns its visible styling; inheritance does not copy the target's fill, border, or text appearance.
 - **Panel-construction status:** accepted — 2026-07-23
@@ -1661,8 +1666,8 @@ Expose `TooltipCommandsExt::retarget_tooltip(controller, typed_target)` only for
 - **Event status:** accepted — 2026-07-15
 - **Timing decision:** `Tooltip::new(...)` defaults `show_after` to 500 ms and `hide_after` to zero; the named builders override either duration independently.
 - **Timing status:** accepted — 2026-07-15
-- **Active-timer replacement decision:** match Zed's timer snapshot: a running show or hide wait keeps the duration captured when that wait began, while a replacement duration applies to the next wait. Replacing the disabled policy with `Suppress` instead cancels a pending wait immediately or immediately hides a visible tooltip; returning to `Show` while eligible starts a fresh show wait with the current duration.
-- **Active-timer replacement status:** accepted — 2026-07-24
+- **Active-timer replacement decision:** superseded by the fresh-controller replacement rule. A replacement never inherits an active wait; the new controller begins with its own current duration. Ordinary eligibility changes on an unchanged tooltip retain Phase 10.75's established timer behavior.
+- **Active-timer replacement status:** superseded — 2026-07-24
 - **Status:** revised; accepted portions recorded above — 2026-07-23
 
 ### PM1 — Phase 2 refresh after shared-cascade merge
