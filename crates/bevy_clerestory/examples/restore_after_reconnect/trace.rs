@@ -14,13 +14,14 @@ use bevy::log::tracing_subscriber::filter::FilterFn;
 use bevy::log::tracing_subscriber::layer::Context;
 use bevy::log::tracing_subscriber::registry::Registry;
 use bevy::prelude::*;
+use serde::Serialize;
 
 use super::constants::*;
 use crate::MonitorConnected;
 use crate::MonitorDisconnected;
 use crate::MonitorTopologyRevision;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct TraceRecord {
     pub(crate) sequence:              u64,
     pub(crate) timestamp_unix_micros: u128,

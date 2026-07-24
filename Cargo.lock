@@ -617,7 +617,6 @@ name = "bevy_clerestory"
 version = "0.2.0-dev"
 dependencies = [
  "bevy",
- "bevy_brp_extras",
  "bevy_diagnostic",
  "bevy_kana 0.2.0-dev",
  "bevy_remote",

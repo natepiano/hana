@@ -3,11 +3,12 @@ use std::collections::HashSet;
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+#[cfg(test)]
 use bevy::window::MonitorSelection;
 use bevy::window::OnMonitor;
 use bevy::window::PrimaryWindow;
-use bevy::window::WindowMode;
 use bevy::window::WindowResolution;
+#[cfg(test)]
 use bevy_clerestory::CancelWindowRecovery;
 use bevy_clerestory::CurrentMonitor;
 use bevy_clerestory::ManagedWindow;
@@ -23,6 +24,10 @@ use super::ProbeMonitorIndex;
 use super::ProbeStartupMode;
 use super::SmokeExitFrame;
 use super::constants::*;
+use super::control::ProbeCommand;
+use super::control::ProbeCommandIntent;
+use super::control::ProbeWindowSelector;
+use super::control::RequestedWindowMode;
 use super::trace::ProbeTrace;
 use super::window_panel::ProbeTarget;
 
@@ -139,20 +144,31 @@ pub(super) fn probe_window(title: &str, position: WindowPosition) -> Window {
 
 pub(super) fn control_automatic_window_mode(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut windows: Query<(&ManagedWindow, &mut Window), Without<PrimaryWindow>>,
+    windows: Query<(&ManagedWindow, &Window), Without<PrimaryWindow>>,
+    frame_count: Res<FrameCount>,
+    mut commands: Commands,
 ) {
-    let window_mode = match (
+    let requested_window_mode = match (
         keyboard.just_pressed(KeyCode::KeyB),
         keyboard.just_pressed(KeyCode::KeyW),
     ) {
-        (true, false) => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
-        (false, true) => WindowMode::Windowed,
+        (true, false) => RequestedWindowMode::Borderless,
+        (false, true) => RequestedWindowMode::Windowed,
         (true, true) | (false, false) => return,
     };
-    for (managed_window, mut window) in &mut windows {
-        if managed_window.name == AUTOMATIC_WINDOW_KEY && window.focused {
-            window.mode = window_mode;
-        }
+    if windows.iter().any(|(managed_window, window)| {
+        managed_window.name == AUTOMATIC_WINDOW_KEY && window.focused
+    }) {
+        commands.trigger(ProbeCommandIntent {
+            command_id: format!(
+                "{KEYBOARD_COMMAND_ID_PREFIX}-mode-{}-{requested_window_mode:?}",
+                frame_count.0
+            ),
+            command:    ProbeCommand::SetMode {
+                window: ProbeWindowSelector::Automatic,
+                mode:   requested_window_mode,
+            },
+        });
     }
 }
 
@@ -163,7 +179,6 @@ pub(super) fn cancel_automatic_window_recovery(
         (Without<PrimaryWindow>, Without<AutomaticRecoveryCancelled>),
     >,
     mut commands: Commands,
-    trace: Res<ProbeTrace>,
     frame_count: Res<FrameCount>,
 ) {
     let shift_pressed = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
@@ -174,20 +189,13 @@ pub(super) fn cancel_automatic_window_recovery(
         if managed_window.name != AUTOMATIC_WINDOW_KEY || !window.focused {
             continue;
         }
-        let window_key = WindowKey::Managed(AUTOMATIC_WINDOW_KEY.into());
-        commands.entity(entity).insert(AutomaticRecoveryCancelled);
-        commands.trigger(CancelWindowRecovery {
-            window: window_key.clone(),
+        commands.trigger(ProbeCommandIntent {
+            command_id: format!(
+                "{KEYBOARD_COMMAND_ID_PREFIX}-cancel-{}-{entity:?}",
+                frame_count.0
+            ),
+            command:    ProbeCommand::CancelRecovery,
         });
-        trace.record(
-            frame_count.0,
-            PRODUCER_AUTOMATIC_RECOVERY_CANCELLATION_REQUESTED,
-            KIND_RECOVERY_CANCELLATION_REQUESTED,
-            vec![
-                field(FIELD_WINDOW, entity),
-                field(FIELD_WINDOW_KEY, window_key),
-            ],
-        );
     }
 }
 
@@ -669,7 +677,9 @@ pub(super) mod tests {
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<FrameCount>()
             .init_resource::<CancellationRequests>()
+            .init_resource::<super::super::control::CommandReceipts>()
             .insert_resource(ProbeTrace::default())
+            .add_observer(super::super::control::apply_probe_command)
             .add_observer(
                 |event: On<CancelWindowRecovery>, mut requests: ResMut<CancellationRequests>| {
                     requests.0.push(event.window.clone());
@@ -1071,6 +1081,55 @@ pub(super) mod tests {
         keyboard.press(KeyCode::KeyC);
         app.update();
         assert_eq!(app.world().resource::<CancellationRequests>().0.len(), 1);
+    }
+
+    #[test]
+    fn repeated_command_id_returns_to_the_original_desired_state() {
+        use super::super::control::ProbeCommand;
+        use super::super::control::ProbeCommandIntent;
+        use super::super::control::ProbeWindowSelector;
+
+        let mut app = automatic_mode_app(None);
+        let automatic = app
+            .world_mut()
+            .spawn((
+                Window::default(),
+                ManagedWindow {
+                    name: AUTOMATIC_WINDOW_KEY.into(),
+                },
+            ))
+            .id();
+
+        app.world_mut().trigger(ProbeCommandIntent {
+            command_id: "same-command".into(),
+            command:    ProbeCommand::Resize {
+                window: ProbeWindowSelector::Automatic,
+                size:   [640, 480],
+            },
+        });
+        app.world_mut().trigger(ProbeCommandIntent {
+            command_id: "same-command".into(),
+            command:    ProbeCommand::Resize {
+                window: ProbeWindowSelector::Automatic,
+                size:   [1920, 1080],
+            },
+        });
+
+        assert_eq!(
+            app.world()
+                .get::<Window>(automatic)
+                .expect("automatic window")
+                .resolution
+                .physical_size(),
+            UVec2::new(640, 480),
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::super::control::CommandReceipts>()
+                .0
+                .len(),
+            1,
+        );
     }
 
     #[test]

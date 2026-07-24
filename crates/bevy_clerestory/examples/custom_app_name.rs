@@ -1,47 +1,35 @@
-//! Example demonstrating explicit path configuration with `WindowManagerPlugin`.
+//! Example demonstrating custom app name with `WindowManagerPlugin`.
 //!
-//! Run with: `cargo run --example custom_path`
+//! Run with: `cargo run --example custom_app_name`
 //!
-//! This shows how to manually construct a cross-platform config path using `dirs`,
-//! giving you full control over the app name and filename. Of course you can put it anywhere you
-//! want, we're just using `dirs` for convenience in this example.
+//! This shows how to specify a custom app name for the config directory
+//! while using the default config location and filename.
 //!
 //! Window state is saved to:
-//! - macOS: `~/Library/Application Support/my_custom_app/window_state.ron`
-//! - Linux: `~/.config/my_custom_app/window_state.ron`
-//! - Windows: `C:\Users\{user}\AppData\Roaming\my_custom_app\window_state.ron`
-
-mod constants;
+//! - macOS: `~/Library/Application Support/my_awesome_game/windows.ron`
+//! - Linux: `~/.config/my_awesome_game/windows.ron`
+//! - Windows: `C:\Users\{user}\AppData\Roaming\my_awesome_game\windows.ron`
+//!
+//! For full control over file placement, use `WindowManagerPlugin::with_path()` instead.
+//! See the `custom_path` example for details.
 
 use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
 use bevy_clerestory::CurrentMonitor;
 use bevy_clerestory::WindowManagerPlugin;
-use dirs::config_dir;
 
-use self::constants::APP_DIRECTORY_NAME;
-use self::constants::FONT_SIZE;
-use self::constants::MARGIN;
-use self::constants::MILLIHERTZ_PER_HERTZ;
-use self::constants::NOT_AVAILABLE_TEXT;
-use self::constants::PRIMARY_WINDOW_TITLE;
-use self::constants::STATE_FILE_NAME;
+const APP_NAME: &str = "my_awesome_game";
+const PRIMARY_WINDOW_TITLE: &str = "Custom App Name Example";
+const NOT_AVAILABLE_TEXT: &str = "N/A";
+const FONT_SIZE: f32 = 20.0;
+const MARGIN: Val = Val::Px(10.0);
+const MILLIHERTZ_PER_HERTZ: u32 = 1000;
 
 #[derive(Component)]
 struct InfoText;
 
-#[expect(
-    clippy::expect_used,
-    reason = "example code - panicking on missing config dir is acceptable"
-)]
 fn main() {
-    // Construct a cross-platform config path manually.
-    let config_path = config_dir()
-        .expect("Could not find config directory")
-        .join(APP_DIRECTORY_NAME)
-        .join(STATE_FILE_NAME);
-
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -50,7 +38,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(WindowManagerPlugin::with_path(config_path))
+        .add_plugins(WindowManagerPlugin::with_app_name(APP_NAME))
         .add_systems(Startup, setup)
         .add_systems(Update, update_info_text)
         .run();

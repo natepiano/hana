@@ -16,13 +16,6 @@ Usage:
     --test-id same_monitor_restore_mon0 \
     --env-file /tmp/claude/discovery.env
 
-  # With feature flags:
-  python3 tests/scripts/run_test.py \
-    --config tests/config/macos.json \
-    --test-id cross_high_to_low_W1 \
-    --feature-flags=--no-default-features \
-    --env-file /tmp/claude/discovery.env
-
 Exit codes: 0 = all pass, 1 = any fail, 2 = script error
 """
 
@@ -40,8 +33,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
-from io import TextIOWrapper
 from typing import Final
 from typing import NoReturn
 from typing import TypedDict
@@ -51,11 +44,19 @@ from urllib.error import URLError
 from urllib.request import Request
 from urllib.request import urlopen
 
+from clerestory_test.app_session import AppSession
+from clerestory_test.case_result import AssertionResult
+from clerestory_test.case_result import Availability
+from clerestory_test.case_result import CaseResult
+from clerestory_test.case_result import Evidence
+from clerestory_test.case_result import Interaction
+from clerestory_test.case_result import Outcome
+
 # =============================================================================
 # Constants
 # =============================================================================
 
-BRP_URL: Final = "http://127.0.0.1:15702/jsonrpc"
+DEFAULT_BRP_PORT: Final = 15702
 POLL_INTERVAL: Final = 0.05
 MAX_POLLS: Final = 200  # 10s timeout
 
@@ -64,7 +65,6 @@ COMP_PRIMARY: Final = "bevy_window::window::PrimaryWindow"
 COMP_MANAGED: Final = "bevy_clerestory::managed::ManagedWindow"
 COMP_CURRENT_MONITOR: Final = "bevy_clerestory::monitors::CurrentMonitor"
 COMP_LAUNCH_INFO: Final = "bevy_clerestory::restore::target_position::target::RestoreDiagnostics"
-COMP_MONITORS: Final = "bevy_clerestory::monitors::Monitors"
 COMP_MONITOR: Final = "bevy_window::monitor::Monitor"
 COMP_PERSISTENCE: Final = "bevy_clerestory::managed::ManagedWindowPersistence"
 RES_RESTORED: Final = "restore_window::events::WindowRestoredReceived"
@@ -125,7 +125,6 @@ class TestEntry(_TestEntryRequired, total=False):
     workaround_validation: WorkaroundValidation
     workaround_keys: list[str]
     windows: dict[str, WindowConfig]
-    click_fullscreen_button: bool
     persistence_validation: PersistenceValidation
     expected_log_warning: str
     backend: str
@@ -135,6 +134,7 @@ class TestEntry(_TestEntryRequired, total=False):
     success_criteria: str | dict[str, str]
     success_criteria_without: str
     success_criteria_with: str
+    wait_for_restore_event: bool
 
 
 class PlatformConfig(TypedDict):
@@ -165,13 +165,15 @@ class RonWindowValues(TypedDict, total=False):
 class Args(argparse.Namespace):
     prebuild: bool = False
     discover: bool = False
-    human_setup: bool = False
     config: str = ""
     test_id: str = ""
-    feature_flags: str = ""
     backend: str = "native"
     env_file: str = ""
-    no_shutdown: bool = False
+    executable: str = ""
+    base_port: int = DEFAULT_BRP_PORT
+    ron_path: str = ""
+    artifact_dir: str = ""
+    result_json: str = ""
 
 
 # =============================================================================
@@ -179,9 +181,21 @@ class Args(argparse.Namespace):
 # =============================================================================
 
 app_process: subprocess.Popen[bytes] | None = None
-stderr_handle: TextIOWrapper | None = None
+app_session: AppSession | None = None
 pass_count = 0
 fail_count = 0
+skip_count = 0
+assertion_results: list[AssertionResult] = []
+result_json_path: Path | None = None
+result_case_id = ""
+result_artifacts: list[str] = []
+result_started = 0.0
+configured_executable: Path | None = None
+configured_base_port = DEFAULT_BRP_PORT
+configured_artifact_directory: Path | None = None
+configured_persistence_path: Path | None = None
+configured_launch_monitor: int | None = None
+configured_launch_position: tuple[int, int] | None = None
 
 
 # =============================================================================
@@ -193,16 +207,24 @@ def pass_line(key: str, field: str, details: str) -> None:
     global pass_count
     print(f"PASS {key} {field} {details}")
     pass_count += 1
+    assertion_results.append(AssertionResult(f"{key}.{field}", True, details))
 
 
 def fail_line(key: str, field: str, details: str) -> None:
     global fail_count
     print(f"FAIL {key} {field} {details}")
     fail_count += 1
+    assertion_results.append(AssertionResult(f"{key}.{field}", False, details))
 
 
 def skip_line(key: str, field: str, details: str) -> None:
+    global skip_count
     print(f"SKIP {key} {field} {details}")
+    skip_count += 1
+
+
+def note_line(key: str, field: str, details: str) -> None:
+    print(f"NOTE {key} {field} {details}")
 
 
 def die(msg: str) -> NoReturn:
@@ -262,8 +284,8 @@ def json_dict(val: object) -> JsonDict:
 
 @final
 class BrpClient:
-    def __init__(self, url: str = BRP_URL) -> None:
-        self.url = url
+    def __init__(self, port: int = DEFAULT_BRP_PORT) -> None:
+        self.url = f"http://127.0.0.1:{port}/jsonrpc"
 
     def call(self, method: str, params: object = None) -> JsonDict:
         payload = {
@@ -305,7 +327,7 @@ class BrpClient:
 
     def shutdown(self) -> None:
         try:
-            _ = self.call("brp_extras/shutdown")
+            _ = self.call("clerestory/shutdown")
         except (URLError, OSError):
             pass
 
@@ -448,23 +470,13 @@ def _stderr_has_panic(path: str) -> bool:
         return False
 
 
-def kill_stale_apps() -> None:
-    if sys.platform == "win32":
-        _ = subprocess.run(["taskkill", "/F", "/IM", "restore_window.exe"], capture_output=True)
-    else:
-        _ = subprocess.run(["pkill", "-9", "-x", "restore_window"], capture_output=True)
-    time.sleep(0.5)
-
-
 def cleanup() -> None:
     global app_process
-    if app_process is not None:
-        try:
-            app_process.kill()
-            _ = app_process.wait(timeout=5)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            pass
-        app_process = None
+    global app_session
+    if app_session is not None:
+        _ = app_session.stop(timeout_seconds=0)
+    app_session = None
+    app_process = None
 
 
 _ = atexit.register(cleanup)
@@ -508,94 +520,71 @@ def wait_for_restore() -> str:
 
 
 def launch_app(
-    feature_flags: str = "",
     backend: str = "native",
-    capture_stderr: bool = False,
     wait_restore: bool = True,
     test_mode: bool = True,
 ) -> tuple[str | None, str]:
     """Launch the restore_window example. Returns (stderr_path, restore_result)."""
     global app_process
-    global stderr_handle
+    global app_session
 
-    kill_stale_apps()
-
-    cmd = ["cargo", "run", "--example", "restore_window"]
-    if feature_flags:
-        cmd.extend(feature_flags.split())
+    if configured_executable is None:
+        die("No prebuilt restore_window executable was provided")
 
     env = dict(os.environ)
     if test_mode:
         env["CLERESTORY_TEST_MODE"] = "1"
     if backend == "x11":
         env["WAYLAND_DISPLAY"] = ""
+    env["BRP_EXTRAS_PORT"] = str(configured_base_port)
+    env["CLERESTORY_TEST_RENDER_PORT"] = str(configured_base_port + 1)
+    if configured_persistence_path is not None:
+        env["CLERESTORY_TEST_PERSISTENCE_PATH"] = str(configured_persistence_path)
+    if configured_launch_monitor is not None:
+        env["CLERESTORY_TEST_LAUNCH_MONITOR"] = str(configured_launch_monitor)
+    if configured_launch_position is not None:
+        env["CLERESTORY_TEST_LAUNCH_POSITION"] = (
+            f"{configured_launch_position[0]},{configured_launch_position[1]}"
+        )
 
-    stderr_path: str | None = None
-    if capture_stderr:
-        default_tmpdir = "/private/tmp/claude-501" if sys.platform == "darwin" else "/tmp/claude"
-        tmpdir = os.environ.get("TMPDIR", default_tmpdir)
-        _ = os.makedirs(tmpdir, exist_ok=True)
-        fd, stderr_path = tempfile.mkstemp(prefix="brp_stderr_", dir=tmpdir)
-        stderr_handle = os.fdopen(fd, "w")
-        app_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=stderr_handle,
-            env=env,
-        )
-    else:
-        default_tmpdir = "/private/tmp/claude-501" if sys.platform == "darwin" else "/tmp/claude"
-        tmpdir = os.environ.get("TMPDIR", default_tmpdir)
-        _ = os.makedirs(tmpdir, exist_ok=True)
-        debug_fd, debug_stderr_path = tempfile.mkstemp(prefix="brp_debug_", dir=tmpdir)
-        debug_handle = os.fdopen(debug_fd, "w")
-        app_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=debug_handle,
-            env=env,
-        )
-        print(f"# App stderr: {debug_stderr_path}", flush=True)
-        stderr_path = debug_stderr_path
+    artifact_directory = configured_artifact_directory
+    if artifact_directory is None:
+        artifact_directory = Path(tempfile.mkdtemp(prefix="clerestory-test-"))
+    artifact_directory.mkdir(parents=True, exist_ok=True)
+    launch_number = sum(
+        1 for path in artifact_directory.glob("app-*.stderr.log") if path.is_file()
+    ) + 1
+    stdout_path = artifact_directory / f"app-{launch_number}.stdout.log"
+    stderr_path = artifact_directory / f"app-{launch_number}.stderr.log"
+    result_artifacts.extend([str(stdout_path), str(stderr_path)])
+    app_session = AppSession(
+        executable=configured_executable,
+        argv=[],
+        environment=env,
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+        working_directory=Path.cwd(),
+    )
+    app_session.start()
+    app_process = app_session.process
+    print(f"# App stdout: {stdout_path}", flush=True)
+    print(f"# App stderr: {stderr_path}", flush=True)
 
     brp.wait_ready()
     restore_result = ""
     if wait_restore:
         restore_result = wait_for_restore()
-    return stderr_path, restore_result
+    return str(stderr_path), restore_result
 
 
 def shutdown_app() -> None:
     """Graceful BRP shutdown + wait + force kill."""
     global app_process
-    global stderr_handle
-
-    brp.shutdown()
-
-    if app_process is not None:
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if app_process.poll() is not None:
-                break
-            time.sleep(0.25)
-
-        if app_process.poll() is None:
-            app_process.kill()
-            time.sleep(0.5)
-
-        try:
-            _ = app_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            pass
-
+    global app_session
+    if app_session is not None:
+        _ = app_session.stop(graceful_shutdown=brp.shutdown)
+    app_session = None
     app_process = None
-
-    if stderr_handle is not None:
-        try:
-            stderr_handle.close()
-        except OSError:
-            pass
-        stderr_handle = None
 
 
 # =============================================================================
@@ -839,7 +828,11 @@ def validate_launch_monitor(test: TestEntry, entity: JsonDict, backend: str) -> 
     and never fails.
     """
     if backend == "wayland":
-        skip_line("primary", "launch_monitor", "undetectable on Wayland (hidden surface, no outer_position)")
+        note_line(
+            "primary",
+            "launch_monitor",
+            "undetectable on Wayland (hidden surface, no outer_position)",
+        )
         return
 
     diagnostics = extract_from_entity(entity, COMP_LAUNCH_INFO)
@@ -860,7 +853,7 @@ def validate_launch_monitor(test: TestEntry, entity: JsonDict, backend: str) -> 
         if actual_launch == expected_launch:
             pass_line("primary", "launch_monitor", f"expected={expected_launch} actual={actual_launch} ({detail})")
         else:
-            skip_line(
+            note_line(
                 "primary",
                 "launch_monitor",
                 f"expected={expected_launch} actual={actual_launch} — WM-chosen spawn monitor, not asserted for non-cross-DPI test ({detail})",
@@ -1139,22 +1132,6 @@ def validate_persistence(test: TestEntry, ron_path: str) -> None:
 
 
 # =============================================================================
-# Click fullscreen button (macOS only)
-# =============================================================================
-
-
-def click_fullscreen_button() -> None:
-    _ = subprocess.run(
-        [
-            "osascript", "-e",
-            'tell application "System Events" to tell process "restore_window" to click button 2 of window 1',
-        ],
-        capture_output=True,
-    )
-    time.sleep(2)
-
-
-# =============================================================================
 # RON template write
 # =============================================================================
 
@@ -1221,12 +1198,14 @@ def setup_test(
     env_file: str,
     backend: str,
 ) -> tuple[TestEntry, str, dict[str, str]]:
-    """Shared setup for run_test and run_human_setup.
+    """Prepare one owned restore-window test run.
 
     Returns (test, resolved_backend, env_vars).
     """
-    kill_stale_apps()
+    global configured_launch_monitor
+    global configured_launch_position
     test = find_test(config, test_id)
+    configured_launch_monitor = test.get("launch_monitor")
     resolved_backend = resolve_backend(backend, test)
     env_vars = load_env_file(env_file) if env_file else {}
 
@@ -1234,6 +1213,13 @@ def setup_test(
     # so that RON template substitution and validation use X11 coordinates.
     if resolved_backend == "x11":
         _swap_x11_env_vars(env_vars)
+
+    configured_launch_position = None
+    if configured_launch_monitor is not None:
+        position_x = env_vars.get(f"MONITOR_{configured_launch_monitor}_POS_X")
+        position_y = env_vars.get(f"MONITOR_{configured_launch_monitor}_POS_Y")
+        if position_x is not None and position_y is not None:
+            configured_launch_position = (int(position_x) + 100, int(position_y) + 100)
 
     write_ron(test["ron_file"], ron_dir, ron_path, env_vars)
     return test, resolved_backend, env_vars
@@ -1292,25 +1278,23 @@ def run_discovery(
     env_vars: dict[str, str] = {}
 
     write_ron("discovery.ron", ron_dir, ron_path, env_vars)
-    _ = launch_app(feature_flags="", backend="native", wait_restore=False)
+    _ = launch_app(backend="native", wait_restore=False)
 
-    # Poll until Monitors resource is populated
-    monitors_json: JsonDict = {}
+    # Poll the example's structured snapshot until Clerestory has installed a topology.
+    monitor_list: list[JsonDict] = []
     for _ in range(MAX_POLLS):
         try:
-            result = brp.call("world.get_resources", {"resource": COMP_MONITORS})
-            value = json_dict(json_get(result, "result", "value"))
-            monitor_list_raw = json_list(value.get("list"))
-            if monitor_list_raw:
-                monitors_json = value
+            result = brp.call("clerestory/monitor_snapshot")
+            monitor_list_raw = json_list(json_get(result, "result", "monitors"))
+            monitor_list = [json_dict(monitor) for monitor in monitor_list_raw]
+            if monitor_list:
                 break
-        except (URLError, OSError, KeyError):
+        except (URLError, OSError, KeyError, RuntimeError):
             pass
         time.sleep(POLL_INTERVAL)
     else:
-        die("Monitors resource not populated within timeout")
+        die("Monitor snapshot not populated within timeout")
 
-    monitor_list = [json_dict(m) for m in json_list(monitors_json.get("list"))]
     num_monitors = len(monitor_list)
     env_vars["NUM_MONITORS"] = str(num_monitors)
 
@@ -1324,6 +1308,7 @@ def run_discovery(
         pos_y = json_str(pos[1]) if len(pos) > 1 else "0"
         size_w = json_str(size[0]) if len(size) > 0 else "0"
         size_h = json_str(size[1]) if len(size) > 1 else "0"
+        refresh_rate = json_str(mon.get("refresh_rate_millihertz"))
 
         scale_f = float(scale) if scale else 1.0
         logical_pos_x = str(round(float(pos_x) / scale_f)) if scale_f != 0 else pos_x
@@ -1336,6 +1321,10 @@ def run_discovery(
         env_vars[f"MONITOR_{i}_WIDTH"] = size_w
         env_vars[f"MONITOR_{i}_HEIGHT"] = size_h
         env_vars[f"MONITOR_{i}_SCALE"] = scale
+        env_vars[f"MONITOR_{i}_REFRESH_RATE_MILLIHERTZ"] = refresh_rate
+        name = mon.get("name")
+        if isinstance(name, str):
+            env_vars[f"MONITOR_{i}_NAME"] = name
 
         print(f"export MONITOR_{i}_POS_X={pos_x}")
         print(f"export MONITOR_{i}_POS_Y={pos_y}")
@@ -1344,6 +1333,9 @@ def run_discovery(
         print(f"export MONITOR_{i}_WIDTH={size_w}")
         print(f"export MONITOR_{i}_HEIGHT={size_h}")
         print(f"export MONITOR_{i}_SCALE={scale}")
+        print(f"export MONITOR_{i}_REFRESH_RATE_MILLIHERTZ={refresh_rate}")
+        if isinstance(name, str):
+            print(f"export MONITOR_{i}_NAME={name}")
 
     # Query video modes
     try:
@@ -1352,6 +1344,26 @@ def run_discovery(
             "filter": {},
         })
         monitor_entities = [json_dict(e) for e in json_list(monitor_query.get("result"))]
+
+        for entity in monitor_entities:
+            name = extract_from_entity(entity, COMP_MONITOR, "name")
+            position = json_list(extract_from_entity(entity, COMP_MONITOR, "physical_position"))
+            width = json_str(extract_from_entity(entity, COMP_MONITOR, "physical_width"))
+            height = json_str(extract_from_entity(entity, COMP_MONITOR, "physical_height"))
+            if len(position) < 2 or not isinstance(name, str):
+                continue
+            position_x = json_str(position[0])
+            position_y = json_str(position[1])
+            for monitor_index in range(num_monitors):
+                if (
+                    env_vars.get(f"MONITOR_{monitor_index}_POS_X") == position_x
+                    and env_vars.get(f"MONITOR_{monitor_index}_POS_Y") == position_y
+                    and env_vars.get(f"MONITOR_{monitor_index}_WIDTH") == width
+                    and env_vars.get(f"MONITOR_{monitor_index}_HEIGHT") == height
+                ):
+                    env_vars[f"MONITOR_{monitor_index}_NAME"] = name
+                    print(f"export MONITOR_{monitor_index}_NAME={name}")
+                    break
 
         for i in range(min(len(monitor_entities), num_monitors)):
             _extract_video_modes(monitor_entities[i], f"MONITOR_{i}_VIDEO_MODE_", env_vars)
@@ -1390,12 +1402,14 @@ def run_discovery(
     # Linux X11 discovery
     if backend == "x11-also":
         print("# X11 discovery...")
-        _ = launch_app(feature_flags="", backend="x11", wait_restore=False)
+        _ = launch_app(backend="x11", wait_restore=False)
 
         try:
-            x11_result = brp.call("world.get_resources", {"resource": COMP_MONITORS})
-            x11_value = json_dict(json_get(x11_result, "result", "value"))
-            x11_list = [json_dict(m) for m in json_list(x11_value.get("list"))]
+            x11_result = brp.call("clerestory/monitor_snapshot")
+            x11_list = [
+                json_dict(m)
+                for m in json_list(json_get(x11_result, "result", "monitors"))
+            ]
 
             for i in range(min(len(x11_list), num_monitors)):
                 x11_scale = json_str(x11_list[i].get("scale"))
@@ -1505,64 +1519,6 @@ def run_prebuild() -> None:
 
 
 # =============================================================================
-# Human setup mode
-# =============================================================================
-
-
-def run_human_setup(
-    config: PlatformConfig,
-    test_id: str,
-    ron_dir: str,
-    ron_path: str,
-    env_file: str,
-    feature_flags: str,
-    backend: str,
-) -> None:
-    """Write RON, launch app, print instructions, then exit (app stays running)."""
-    test, resolved_backend, _ = setup_test(config, test_id, ron_dir, ron_path, env_file, backend)
-
-    _ = launch_app(feature_flags, resolved_backend, test_mode=False)
-
-    # Print instructions
-    instructions = test.get("instructions", [])
-    if feature_flags and "--no-default-features" in feature_flags:
-        instructions = test.get("instructions_without_workaround", instructions)
-    elif test.get("workaround_validation"):
-        instructions = test.get("instructions_with_workaround", instructions)
-
-    print("HUMAN_TEST_READY")
-    print(f"TEST_ID={test_id}")
-    print(f"DESCRIPTION={test.get('description', '')}")
-
-    if instructions:
-        print("INSTRUCTIONS_START")
-        for line in instructions:
-            print(line)
-        print("INSTRUCTIONS_END")
-
-    # Print success criteria
-    criteria = test.get("success_criteria", "")
-    if feature_flags and "--no-default-features" in feature_flags:
-        criteria = test.get("success_criteria_without", criteria)
-    elif test.get("workaround_validation"):
-        criteria = test.get("success_criteria_with", criteria)
-
-    if isinstance(criteria, dict):
-        pass_msg = criteria.get("pass", "")
-        fail_msg = criteria.get("fail", "")
-        print(f"CRITERIA_PASS={pass_msg}")
-        print(f"CRITERIA_FAIL={fail_msg}")
-    elif criteria:
-        print(f"CRITERIA={criteria}")
-
-    # Do NOT shutdown — leave app running for human interaction.
-    # Clear global so atexit cleanup doesn't kill the app.
-    global app_process
-    app_process = None
-    sys.exit(0)
-
-
-# =============================================================================
 # Test mode
 # =============================================================================
 
@@ -1573,9 +1529,7 @@ def run_test(
     ron_dir: str,
     ron_path: str,
     env_file: str,
-    feature_flags: str,
     backend: str,
-    no_shutdown: bool = False,
 ) -> None:
     global app_process
     test, resolved_backend, env_vars = setup_test(config, test_id, ron_dir, ron_path, env_file, backend)
@@ -1603,7 +1557,6 @@ def run_test(
     ron_values = parse_ron_values(ron_content)
 
     # Determine test features
-    has_click_fullscreen = test.get("click_fullscreen_button", False)
     has_mutation = "mutation" in test
     has_persistence = "persistence_validation" in test
     expected_log = test.get("expected_log_warning", "")
@@ -1615,21 +1568,17 @@ def run_test(
         for wconfig in windows.values()
     )
 
-    capture_stderr = bool(expected_log)
-    use_test_mode = not no_shutdown
-    stderr_path, restore_result = launch_app(feature_flags, resolved_backend, capture_stderr, test_mode=use_test_mode)
+    stderr_path, restore_result = launch_app(
+        resolved_backend,
+        wait_restore=test.get("wait_for_restore_event", True),
+        test_mode=True,
+    )
     expect_mismatch = test.get("expect_mismatch", False)
     if restore_result == "mismatch":
         if expect_mismatch:
             pass_line("restore", "event", "WindowRestoreMismatch fired (expected)")
         else:
             fail_line("restore", "event", "WindowRestoreMismatch fired (restore state did not match)")
-
-    # Click fullscreen button flow (macOS)
-    if has_click_fullscreen:
-        click_fullscreen_button()
-        shutdown_app()
-        _ = launch_app(feature_flags, resolved_backend)
 
     # Exit code only test — check for panics in stderr
     if has_exit_code:
@@ -1641,8 +1590,6 @@ def run_test(
         else:
             pass_line("primary", "exit_code", "expected=no_panic actual=no_panic")
         if app_process is not None and app_process.poll() is not None:
-            app_process = None
-        elif no_shutdown:
             app_process = None
         else:
             shutdown_app()
@@ -1679,9 +1626,6 @@ def run_test(
             verify_mutations(ron_values, backend=resolved_backend, env_vars=env_vars)
 
     # Shutdown
-    if no_shutdown and not has_mutation and not has_persistence:
-        app_process = None
-        sys.exit(1 if fail_count > 0 else 0)
     shutdown_app()
 
     # Check expected log warning
@@ -1699,14 +1643,11 @@ def run_test(
 
     # Relaunch and validate restore (if mutation)
     if has_mutation:
-        _, relaunch_result = launch_app(feature_flags, resolved_backend, test_mode=use_test_mode)
+        _, relaunch_result = launch_app(resolved_backend, test_mode=True)
         if relaunch_result == "mismatch":
             fail_line("restore", "relaunch_event", "WindowRestoreMismatch fired on relaunch")
         validate_all_windows(windows, ron_values, prefix="relaunch ", backend=resolved_backend, env_vars=env_vars)
-        if no_shutdown:
-            app_process = None
-        else:
-            shutdown_app()
+        shutdown_app()
 
     sys.exit(1 if fail_count > 0 else 0)
 
@@ -1720,15 +1661,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="bevy_clerestory test runner v3")
     _ = parser.add_argument("--prebuild", action="store_true", help="Build both binary variants")
     _ = parser.add_argument("--discover", action="store_true", help="Discovery mode")
-    _ = parser.add_argument("--human-setup", action="store_true", help="Setup human test (write RON, launch app, print instructions)")
     _ = parser.add_argument("--config", default="", help="Platform config JSON file")
     _ = parser.add_argument("--test-id", default="", help="Test ID to run")
-    _ = parser.add_argument("--feature-flags", default="", help="Cargo feature flags override")
     _ = parser.add_argument("--backend", default="native", help="Backend: native, x11, x11-also")
     _ = parser.add_argument("--env-file", default="", help="Env file for MONITOR_* vars")
-    _ = parser.add_argument("--no-shutdown", action="store_true", help="Leave app running after test (skip shutdown)")
+    _ = parser.add_argument("--executable", default="", help="Prebuilt restore_window executable")
+    _ = parser.add_argument("--base-port", type=int, default=DEFAULT_BRP_PORT, help="Main BRP HTTP port")
+    _ = parser.add_argument("--ron-path", default="", help="Isolated persistence file for this case")
+    _ = parser.add_argument("--artifact-dir", default="", help="Directory for child-process logs")
+    _ = parser.add_argument("--result-json", default="", help="Write a structured CaseResult JSON file")
 
     args = cast(Args, parser.parse_args())
+    global brp
+    global configured_artifact_directory
+    global configured_base_port
+    global configured_executable
+    global configured_persistence_path
+    global result_case_id
+    global result_json_path
+    configured_base_port = args.base_port
+    brp = BrpClient(configured_base_port)
+    configured_executable = Path(args.executable).resolve() if args.executable else None
+    configured_artifact_directory = Path(args.artifact_dir).resolve() if args.artifact_dir else None
+    result_json_path = Path(args.result_json).resolve() if args.result_json else None
+    result_case_id = args.test_id
 
     if args.prebuild:
         run_prebuild()
@@ -1747,7 +1703,7 @@ def main() -> None:
     if not ron_dir:
         die("Config missing test_ron_dir")
 
-    raw_ron_path = config["example_ron_path"]
+    raw_ron_path = args.ron_path or config["example_ron_path"]
     if not raw_ron_path:
         die("Config missing example_ron_path")
 
@@ -1759,20 +1715,77 @@ def main() -> None:
     appdata = os.environ.get("APPDATA", "")
     if appdata:
         ron_path = ron_path.replace("%APPDATA%", appdata)
+    configured_persistence_path = Path(ron_path).resolve()
 
     if args.discover:
         if not args.env_file:
             die("Missing --env-file (required for --discover)")
         run_discovery(ron_dir, ron_path, args.env_file, args.backend)
-    elif args.human_setup:
-        if not args.test_id:
-            die("Missing --test-id (required for --human-setup)")
-        run_human_setup(config, args.test_id, ron_dir, ron_path, args.env_file, args.feature_flags, args.backend)
     else:
         if not args.test_id:
             die("Missing --test-id (required unless --discover or --prebuild)")
-        run_test(config, args.test_id, ron_dir, ron_path, args.env_file, args.feature_flags, args.backend, args.no_shutdown)
+        run_test(
+            config,
+            args.test_id,
+            ron_dir,
+            ron_path,
+            args.env_file,
+            args.backend,
+        )
+
+
+def write_case_result(exit_code: int, outcome_override: Outcome | None = None) -> None:
+    if result_json_path is None or not result_case_id:
+        return
+    availability = Availability.UNAVAILABLE if skip_count else Availability.AVAILABLE
+    if outcome_override is not None:
+        outcome = outcome_override
+    elif availability is not Availability.AVAILABLE:
+        outcome = Outcome.NOT_RUN
+    elif exit_code == 0 and fail_count == 0:
+        outcome = Outcome.PASSED
+    elif exit_code == 1 or fail_count:
+        outcome = Outcome.FAILED
+    else:
+        outcome = Outcome.HARNESS_ERROR
+    case_result = CaseResult(
+        case_id=result_case_id,
+        interaction=Interaction.AUTOMATED,
+        evidence=Evidence.APPLICATION,
+        availability=availability,
+        outcome=outcome,
+        availability_reason="test requirements were not available" if skip_count else None,
+        missing_capability="different-scales" if skip_count else None,
+        assertions=list(assertion_results),
+        process_exit_code=exit_code,
+        elapsed_seconds=time.monotonic() - result_started,
+        artifacts=list(result_artifacts),
+    )
+    result_json_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = result_json_path.with_suffix(result_json_path.suffix + ".tmp")
+    _ = temporary_path.write_text(json.dumps(case_result.to_dict(), indent=2, sort_keys=True) + "\n")
+    _ = temporary_path.replace(result_json_path)
+
+
+def entrypoint() -> int:
+    global result_started
+    result_started = time.monotonic()
+    try:
+        main()
+    except KeyboardInterrupt:
+        write_case_result(130, Outcome.INTERRUPTED)
+        return 130
+    except SystemExit as exit_request:
+        exit_code = exit_request.code if isinstance(exit_request.code, int) else 2
+        write_case_result(exit_code)
+        return exit_code
+    except BaseException:
+        traceback.print_exc()
+        write_case_result(2, Outcome.HARNESS_ERROR)
+        return 2
+    write_case_result(0)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(entrypoint())

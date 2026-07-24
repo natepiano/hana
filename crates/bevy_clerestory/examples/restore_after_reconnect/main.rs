@@ -1,8 +1,10 @@
 //! End-to-end monitor reconnect consumer with a shared causal trace.
 
 mod constants;
+mod control;
 mod lifecycle;
 mod recovery_trace;
+mod remote;
 mod setup;
 mod trace;
 mod window_panel;
@@ -31,10 +33,16 @@ use bevy_clerestory::MonitorDisconnected;
 use bevy_clerestory::MonitorTopologyRevision;
 use bevy_clerestory::WindowManagerPlugin;
 use constants::DEFAULT_EXTERNAL_MONITOR_INDEX;
+use constants::DEFAULT_PROBE_PORT;
 use constants::EXIT_AFTER_FRAME_ENVIRONMENT_VARIABLE;
 use constants::MONITOR_INDEX_ENVIRONMENT_VARIABLE;
 use constants::PERSISTENCE_FILE_PREFIX;
 use constants::PRIMARY_WINDOW_TITLE;
+use constants::PROBE_BOOT_NONCE_ENVIRONMENT_VARIABLE;
+use constants::PROBE_CAPABILITY_ENVIRONMENT_VARIABLE;
+use constants::PROBE_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE;
+use constants::PROBE_PORT_ENVIRONMENT_VARIABLE;
+use constants::PROBE_RUN_ID_ENVIRONMENT_VARIABLE;
 use constants::PROBE_WINDOW_HEIGHT;
 use constants::PROBE_WINDOW_WIDTH;
 use constants::STARTUP_MODE_BORDERLESS;
@@ -48,6 +56,7 @@ struct HotplugProbePlugin;
 impl Plugin for HotplugProbePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<setup::AcceptedWindowKeys>()
+            .init_resource::<control::CommandReceipts>()
             .init_resource::<recovery_trace::ApplicationRecoveryCycles>()
             .init_resource::<recovery_trace::PreUnplugReadiness>()
             .init_resource::<window_panel::ProbePanelMaterial>()
@@ -80,6 +89,7 @@ impl Plugin for HotplugProbePlugin {
             .add_observer(recovery_trace::on_window_restored)
             .add_observer(recovery_trace::on_window_restore_mismatch)
             .add_observer(recovery_trace::prepare_application_window_restore)
+            .add_observer(control::apply_probe_command)
             .add_systems(
                 Startup,
                 (
@@ -214,12 +224,42 @@ fn selected_startup_mode() -> std::io::Result<ProbeStartupMode> {
     parse_startup_mode(optional_environment_value(STARTUP_MODE_ENVIRONMENT_VARIABLE)?.as_deref())
 }
 
-fn persistence_path() -> PathBuf {
-    std::env::temp_dir().join(format!("{PERSISTENCE_FILE_PREFIX}-{}.ron", id()))
+fn persistence_path() -> std::io::Result<PathBuf> {
+    Ok(
+        optional_environment_value(PROBE_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE)?.map_or_else(
+            || std::env::temp_dir().join(format!("{PERSISTENCE_FILE_PREFIX}-{}.ron", id())),
+            PathBuf::from,
+        ),
+    )
+}
+
+fn probe_port() -> std::io::Result<u16> {
+    optional_environment_value(PROBE_PORT_ENVIRONMENT_VARIABLE)?.map_or(
+        Ok(DEFAULT_PROBE_PORT),
+        |value| {
+            value.parse().map_err(|error| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("invalid {PROBE_PORT_ENVIRONMENT_VARIABLE}: {error}"),
+                )
+            })
+        },
+    )
+}
+
+fn probe_session() -> std::io::Result<remote::ProbeSession> {
+    let process_id = id();
+    let run_id = optional_environment_value(PROBE_RUN_ID_ENVIRONMENT_VARIABLE)?
+        .unwrap_or_else(|| format!("manual-{process_id}"));
+    let boot_nonce = optional_environment_value(PROBE_BOOT_NONCE_ENVIRONMENT_VARIABLE)?
+        .unwrap_or_else(|| format!("boot-{process_id}"));
+    let capability = optional_environment_value(PROBE_CAPABILITY_ENVIRONMENT_VARIABLE)?
+        .unwrap_or_else(|| format!("local-{process_id}"));
+    Ok(remote::ProbeSession::new(run_id, boot_nonce, capability))
 }
 
 fn fresh_persistence_path() -> std::io::Result<PathBuf> {
-    let path = persistence_path();
+    let path = persistence_path()?;
     match remove_file(&path) {
         Ok(()) => {},
         Err(error) if error.kind() == ErrorKind::NotFound => {},
@@ -246,10 +286,13 @@ fn main() -> std::io::Result<()> {
     let startup_mode = selected_startup_mode()?;
     let smoke_exit_frame = smoke_exit_frame()?;
     let persistence_path = fresh_persistence_path()?;
+    let probe_port = probe_port()?;
+    let probe_session = probe_session()?;
     let mut app = App::new();
     app.insert_resource(ProbeTrace::default())
         .insert_resource(ProbeMonitorIndex(monitor_index))
         .insert_resource(startup_mode)
+        .insert_resource(probe_session)
         .add_plugins(HotplugProbePlugin)
         .add_plugins(
             DefaultPlugins
@@ -268,6 +311,8 @@ fn main() -> std::io::Result<()> {
                     ..default()
                 }),
         )
+        .add_plugins(remote::plugin())
+        .add_plugins(remote::http_plugin(probe_port))
         .add_plugins(hana_diegetic::DiegeticUiPlugin)
         .add_plugins(WindowManagerPlugin::with_path(persistence_path));
     if let Some(frame) = smoke_exit_frame {

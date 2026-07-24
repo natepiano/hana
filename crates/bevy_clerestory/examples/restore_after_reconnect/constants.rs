@@ -83,13 +83,27 @@ pub(super) const PHASE_REMOVE: &str = "remove";
 
 // probe configuration
 pub(super) const DEFAULT_EXTERNAL_MONITOR_INDEX: usize = 1;
+pub(super) const DEFAULT_PROBE_PORT: u16 = 15702;
 pub(super) const EXIT_AFTER_FRAME_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_EXIT_AFTER_FRAME";
 pub(super) const MONITOR_INDEX_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_MONITOR_INDEX";
+pub(super) const PROBE_BOOT_NONCE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_BOOT_NONCE";
+pub(super) const PROBE_CAPABILITY_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_CAPABILITY";
+pub(super) const PROBE_PORT_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_PORT";
+pub(super) const PROBE_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE: &str =
+    "CLERESTORY_PROBE_PERSISTENCE_PATH";
+pub(super) const PROBE_RUN_ID_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_RUN_ID";
 pub(super) const MONITOR_PROBE_TARGET: &str = "bevy_clerestory::monitor_probe";
+pub(super) const KEYBOARD_COMMAND_ID_PREFIX: &str = "keyboard";
 pub(super) const PERSISTENCE_FILE_PREFIX: &str = "bevy-clerestory-hotplug-probe";
 pub(super) const RECOVERY_PROBE_TARGET: &str = "bevy_clerestory::recovery_probe";
 pub(super) const SECOND_RECOVERY_CYCLE: usize = 2;
 pub(super) const STARTUP_MODE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_PROBE_STARTUP_MODE";
+
+// remote methods
+pub(super) const PROBE_COMMAND_METHOD: &str = "clerestory/probe_command";
+pub(super) const PROBE_RECORDS_METHOD: &str = "clerestory/probe_records";
+pub(super) const PROBE_SHUTDOWN_METHOD: &str = "clerestory/probe_shutdown";
+pub(super) const PROBE_SNAPSHOT_METHOD: &str = "clerestory/probe_snapshot";
 
 // producers
 pub(super) const PRODUCER_MONITOR_CONNECTED: &str = "observer::MonitorConnected";

@@ -582,5 +582,13 @@
       ],
       "success_criteria": "Monitor 1 detected and saved correctly when window is fully on Monitor 1"
     }
+  ],
+  "probe_cases": [
+    {
+      "id": "zero_owned_windows",
+      "description": "The process and HTTP probe remain alive after every owned window closes",
+      "interaction": "automated",
+      "evidence": "application"
+    }
   ]
 }
