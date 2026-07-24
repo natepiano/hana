@@ -2910,6 +2910,73 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
   dock/port, duplicate, reorder, zero-display, reconnect-order, rapid-hotplug,
   mode, and cross-DPI scenarios as Phase 14. Use the finalized startup/mode
   controls from Phase 14 rather than creating a Windows-only harness.
+- When Windows runs in VMware and the Dell's power control remains on the Mac,
+  run the controller and probe inside the Windows guest. The guest owns the
+  application process and must observe its own display removal and return;
+  SSH to the Mac is only the power-control path. Configure one ignored local
+  hardware profile with these separate actions, using the existing Shortcut
+  names rather than a combined power-cycle command:
+
+  ```json
+  {
+    "name": "Windows VMware guest with remote macOS Dell power",
+    "target_matcher": "DELL S3425DW",
+    "inventory_name_field": "_name",
+    "probe_monitor_matcher": {
+      "physical_size": [3440, 1440],
+      "refresh_rate_millihertz": 120000
+    },
+    "minimum_off_seconds": 1,
+    "minimum_on_seconds": 5,
+    "power_off": {
+      "executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      "arguments": [
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "natemccoy@192.168.4.38",
+        "/usr/bin/shortcuts run \"dell monitor off\""
+      ],
+      "timeout_seconds": 20,
+      "accepted_exit_codes": [0]
+    },
+    "power_on": {
+      "executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      "arguments": [
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "natemccoy@192.168.4.38",
+        "/usr/bin/shortcuts run \"dell monitor on\""
+      ],
+      "timeout_seconds": 20,
+      "accepted_exit_codes": [0]
+    },
+    "inventory": {
+      "executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+      "arguments": [
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "natemccoy@192.168.4.38",
+        "/usr/sbin/system_profiler SPDisplaysDataType -json"
+      ],
+      "timeout_seconds": 35,
+      "accepted_exit_codes": [0],
+      "output_limit_bytes": 4000000
+    }
+  }
+  ```
+
+  Save it as `crates/bevy_clerestory/tests/config/hardware.windows-vm.local.json`
+  on the Windows checkout, use its path with `run_suite.py --hardware-profile`,
+  and do not commit it. Before a run, establish SSH key authentication and a
+  known-host entry from Windows; `BatchMode=yes` makes a missing key, password,
+  or host-confirmation prompt fail rather than hang the controller. The
+  controller executes each listed argument directly; the final argument is the
+  quoted command interpreted by the remote macOS SSH session.
+- Before accepting any physical Windows row, make one controlled run prove both
+  sides of the connection: the remote Mac inventory must lose and regain the
+  Dell, and the Windows probe must report its selected target monitor's removal
+  and return. A VMware virtual display that stays present while the Mac Dell is
+  power-cycled is useful only as synthetic coverage; mark the physical Windows
+  row unavailable rather than treating the Mac inventory alone as Windows
+  evidence. Keep the Dell on after that calibration; all later off/on actions
+  go through the controller and its cleanup path.
 - Use the shared per-window metadata panel and trace to record each window's
   key, recovery policy, original target, current monitor, mode, and placement.
   For rapid hotplug, record the operator's action timing separately from the
