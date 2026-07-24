@@ -34,6 +34,9 @@ pub use anchoring::PanelAttachment;
 pub(crate) use anchoring::PanelAttachmentAuthored;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
 pub(crate) use anchoring::WidgetOwnerLayout;
+pub(crate) use anchoring::refresh_world_anchor_globals;
+pub(crate) use anchoring::world_attachment_is_ready;
+pub(crate) use anchoring::write_panel_anchor_offsets;
 pub use arrangement::ArrangedPanel;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;
@@ -66,6 +69,7 @@ pub use coordinate_space::CoordinateSpace;
 pub use coordinate_space::PanelSpace;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
+pub(crate) use coordinate_space::constrain_fit_width;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
@@ -276,6 +280,11 @@ impl Plugin for HeadlessLayoutPlugin {
                         .after(AnchorSystems::FillGeometry)
                         .before(AnchorSystems::AnimatePose),
                     anchoring::write_panel_anchor_offsets.before(AnchorSystems::Resolve),
+                    anchoring::refresh_world_anchor_globals
+                        .after(AnchorSystems::AnimatePose)
+                        .before(anchoring::write_panel_anchor_offsets)
+                        .before(AnchorSystems::Resolve)
+                        .run_if(anchoring::world_anchor_transform_inputs_changed),
                     hana_valence::drive_arrangement_hinges::<hana_valence::QuadTiling>
                         .in_set(AnchorSystems::AnimatePose)
                         .after(PanelSystems::AnimateAnchorPose),

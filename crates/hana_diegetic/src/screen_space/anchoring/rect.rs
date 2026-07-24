@@ -68,7 +68,7 @@ impl ScreenAnchorTarget {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct ScreenPanelRect {
+pub(crate) struct ScreenPanelRect {
     pub(super) anchor_position: Vec2,
     pub(super) anchor:          Anchor,
     size:                       Vec2,
@@ -97,13 +97,13 @@ impl ScreenPanelRect {
 
     pub(super) const fn bounds(self) -> Option<PanelScreenBounds> { self.bounds }
 
-    pub(super) const fn layout_unit(self) -> Unit { self.layout_unit }
+    pub(crate) const fn layout_unit(self) -> Unit { self.layout_unit }
 
-    pub(super) const fn layout_scale(self) -> Vec2 { self.layout_scale }
+    pub(crate) const fn layout_scale(self) -> Vec2 { self.layout_scale }
 
-    pub(super) const fn angle(self) -> f32 { self.angle }
+    pub(crate) const fn angle(self) -> f32 { self.angle }
 
-    pub(super) fn from_widget(
+    pub(crate) fn from_widget(
         owner: Self,
         widget: WidgetAnchorRect,
         owner_transform: &Transform,
@@ -126,6 +126,70 @@ impl ScreenPanelRect {
         })
     }
 
+    pub(crate) fn from_screen_target(target: &ScreenAnchorTarget) -> Self {
+        Self {
+            anchor_position: target.bounds().point(Anchor::Center),
+            anchor:          Anchor::Center,
+            size:            target.bounds().size(),
+            angle:           0.0,
+            bounds:          Some(target.bounds()),
+            layout_scale:    Vec2::ONE,
+            layout_unit:     target.layout_unit(),
+        }
+    }
+
+    pub(crate) fn oriented_anchor_point(self, anchor: Anchor) -> Option<Vec2> {
+        let bounds = self.bounds?;
+        let resolved_anchor_offset = bounds.anchor_offset(anchor);
+        let panel_offset = bounds.anchor_offset(self.anchor);
+        let authored_anchor_offset =
+            (resolved_anchor_offset - panel_offset) * self.layout_scale.signum();
+        Some(
+            self.anchor_position
+                + projection::rotate_screen_offset(authored_anchor_offset, self.angle),
+        )
+    }
+
+    pub(crate) fn projected_bounds(self) -> Option<PanelScreenBounds> {
+        let mut minimum = Vec2::splat(f32::INFINITY);
+        let mut maximum = Vec2::splat(f32::NEG_INFINITY);
+        for anchor in [
+            Anchor::TopLeft,
+            Anchor::TopRight,
+            Anchor::BottomRight,
+            Anchor::BottomLeft,
+        ] {
+            let point = self.oriented_anchor_point(anchor)?;
+            minimum = minimum.min(point);
+            maximum = maximum.max(point);
+        }
+        PanelScreenBounds::new(minimum, maximum - minimum).ok()
+    }
+
+    pub(crate) fn placed_bounds(
+        self,
+        source_anchor: Anchor,
+        source_anchor_position: Vec2,
+    ) -> Option<PanelScreenBounds> {
+        let bounds = self.bounds?;
+        let source_offset = bounds.anchor_offset(source_anchor);
+        let mut minimum = Vec2::splat(f32::INFINITY);
+        let mut maximum = Vec2::splat(f32::NEG_INFINITY);
+        for anchor in [
+            Anchor::TopLeft,
+            Anchor::TopRight,
+            Anchor::BottomRight,
+            Anchor::BottomLeft,
+        ] {
+            let corner_offset = bounds.anchor_offset(anchor) - source_offset;
+            let point = source_anchor_position
+                + projection::rotate_screen_offset(corner_offset, self.angle);
+            minimum = minimum.min(point);
+            maximum = maximum.max(point);
+        }
+        PanelScreenBounds::new(minimum, maximum - minimum).ok()
+    }
+
     pub(super) fn with_anchor_position_and_angle(
         self,
         anchor_position: Vec2,
@@ -142,8 +206,30 @@ impl ScreenPanelRect {
     }
 }
 
+pub(crate) fn screen_panel_rect(
+    panel: &DiegeticPanel,
+    resolved_position: Option<&ResolvedScreenPanelPosition>,
+    transform: Option<&Transform>,
+    window_size: Vec2,
+) -> Option<ScreenPanelRect> {
+    let resolved_rotation =
+        resolved_position.and_then(|resolved_position| resolved_position.rotation);
+    let angle = resolved_rotation.unwrap_or_else(|| {
+        transform.map_or(0.0, |transform| screen_in_plane_angle(transform.rotation))
+    });
+    let rect = ScreenPanelRect::from_panel(panel, window_size, angle)?;
+    Some(
+        resolved_position
+            .and_then(|resolved_position| resolved_position.anchor_position)
+            .map_or(rect, |anchor_position| {
+                rect.with_anchor_position_and_angle(anchor_position, None)
+            }),
+    )
+}
+
 pub(super) fn screen_panel_rects(
     panels: &Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
+    screen_targets: &Query<(Entity, &ScreenAnchorTarget)>,
     resolved_positions: &Query<&mut ResolvedScreenPanelPosition>,
     transforms: &Query<&Transform>,
     primary: &Query<Entity, With<PrimaryWindow>>,
@@ -169,6 +255,9 @@ pub(super) fn screen_panel_rects(
         if let Some(rect) = ScreenPanelRect::from_panel(panel, window_size, angle) {
             rects.insert(entity, rect);
         }
+    }
+    for (entity, target) in screen_targets {
+        rects.insert(entity, ScreenPanelRect::from_screen_target(target));
     }
     rects
 }

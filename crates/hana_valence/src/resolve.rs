@@ -2,6 +2,7 @@
 
 use std::hash::Hash;
 
+use bevy_ecs::change_detection::DetectChangesMut;
 use bevy_ecs::entity::Entities;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::hierarchy::ChildOf;
@@ -255,7 +256,7 @@ fn place_anchor(
     let Ok(mut transform) = transforms.get_mut(source) else {
         return Err(ResolveSkip::MissingSourceTransform);
     };
-    *transform = placement.local_transform;
+    transform.set_if_neq(placement.local_transform);
     resolved_globals.insert(source, placement.global_transform);
     Ok(())
 }

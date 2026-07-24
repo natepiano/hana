@@ -18,6 +18,14 @@ use crate::screen_space::CandidateQueries;
 
 pub(crate) type AnchorResolveDiagnostics = AttachmentResolveDiagnostics<AnchorResolveSkip>;
 
+pub(crate) fn attachment_is_ready(
+    source: Entity,
+    position: &ResolvedScreenPanelPosition,
+    diagnostics: &AnchorResolveDiagnostics,
+) -> bool {
+    position.anchor_position.is_some() && diagnostics.current().all(|entry| entry.source != source)
+}
+
 /// Resolves screen-space panel attachments for this frame.
 pub(super) fn resolve_screen_space_panel_attachments(
     windows: Query<(Entity, &Window)>,
@@ -42,6 +50,7 @@ pub(super) fn resolve_screen_space_panel_attachments(
     );
     let mut rects = rect::screen_panel_rects(
         &candidate_queries.panels,
+        &candidate_queries.screen_targets,
         &resolved_positions,
         &candidate_queries.transforms,
         &candidate_queries.primary,

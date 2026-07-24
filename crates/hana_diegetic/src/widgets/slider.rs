@@ -2895,6 +2895,10 @@ mod tests {
         camera
     }
 
+    fn seeded_camera_transform() -> Transform {
+        Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y)
+    }
+
     fn capture_app() -> App {
         let mut app = test_app();
         app.init_resource::<RecordedLifecycle>()
@@ -2925,9 +2929,8 @@ mod tests {
             .world_mut()
             .spawn((
                 seeded_camera(),
-                GlobalTransform::from(
-                    Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-                ),
+                seeded_camera_transform(),
+                GlobalTransform::from(seeded_camera_transform()),
                 RenderTarget::Window(WindowRef::Primary),
             ))
             .id();
@@ -2963,9 +2966,8 @@ mod tests {
             .world_mut()
             .spawn((
                 seeded_camera(),
-                GlobalTransform::from(
-                    Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-                ),
+                seeded_camera_transform(),
+                GlobalTransform::from(seeded_camera_transform()),
                 RenderTarget::Window(WindowRef::Primary),
             ))
             .id();
@@ -3597,9 +3599,8 @@ mod tests {
             .world_mut()
             .spawn((
                 seeded_camera(),
-                GlobalTransform::from(
-                    Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-                ),
+                seeded_camera_transform(),
+                GlobalTransform::from(seeded_camera_transform()),
                 RenderTarget::Window(WindowRef::Primary),
             ))
             .id();
@@ -4735,9 +4736,8 @@ mod tests {
             .world_mut()
             .spawn((
                 seeded_camera(),
-                GlobalTransform::from(
-                    Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-                ),
+                seeded_camera_transform(),
+                GlobalTransform::from(seeded_camera_transform()),
                 RenderTarget::Window(WindowRef::Primary),
             ))
             .id();

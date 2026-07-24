@@ -13,6 +13,7 @@
 //! reified widgets in the same coordinate space.
 
 use bevy::prelude::*;
+use bevy::transform::helper::TransformHelper;
 use hana_valence::AnchorId;
 use hana_valence::AnchoredTo as ValenceAnchoredTo;
 use hana_valence::ResolvedAnchorOffset;
@@ -27,6 +28,7 @@ use super::lifecycle::PanelComponentOwnership;
 use crate::layout::Anchor;
 use crate::layout::Dimension;
 use crate::layout::Unit;
+use crate::widgets::MaterializedTooltip;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::ScreenWidgetAnchoredTo;
@@ -454,6 +456,58 @@ impl PanelAttachmentAuthored {
     }
 }
 
+pub(crate) fn world_attachment_is_ready(
+    source: Entity,
+    target: Entity,
+    relation: &ValenceAnchoredTo,
+    diagnostics: &hana_valence::ResolveDiagnostics,
+) -> bool {
+    relation.target() == target && diagnostics.current().all(|entry| entry.source != source)
+}
+
+/// Refreshes the stored world transforms consumed by the anchor resolver.
+///
+/// Bevy's ordinary transform propagation runs after
+/// [`AnchorSystems::Resolve`](hana_valence::AnchorSystems::Resolve).
+/// Without this pre-resolve refresh, a target whose local [`Transform`] changed
+/// earlier in the frame still presents its previous-frame [`GlobalTransform`]
+/// to Valence, making every dependent trail by one frame. Computing the current
+/// value from the target's local hierarchy between animation and resolution
+/// lets the resolver place dependents from the same-frame target pose. Only
+/// roots without [`ValenceAnchoredTo`] are refreshed here; Valence computes
+/// attached dependents in graph order during its following resolve pass. The
+/// equality gate preserves quiet change ticks when the pose is unchanged.
+pub(crate) fn refresh_world_anchor_globals(
+    transforms: TransformHelper,
+    mut participants: Query<
+        (Entity, &mut GlobalTransform),
+        (
+            Or<(With<hana_valence::ResolvedAnchorGeometry>, With<Camera>)>,
+            With<Transform>,
+            Without<ValenceAnchoredTo>,
+        ),
+    >,
+) {
+    for (entity, mut global_transform) in &mut participants {
+        let Ok(current) = transforms.compute_global_transform(entity) else {
+            continue;
+        };
+        global_transform.set_if_neq(current);
+    }
+}
+
+pub(super) fn world_anchor_transform_inputs_changed(
+    changed_transforms: Query<(), Changed<Transform>>,
+    changed_parents: Query<(), Changed<ChildOf>>,
+    mut removed_transforms: RemovedComponents<Transform>,
+    mut removed_parents: RemovedComponents<ChildOf>,
+) -> bool {
+    changed_transforms.iter().next().is_some()
+        || changed_parents.iter().next().is_some()
+        || removed_transforms.read().next().is_some()
+        || removed_parents.read().next().is_some()
+}
+
 /// Offset from a target panel or reified widget anchor point.
 ///
 /// Coordinates are authored in target-local layout space: positive x moves
@@ -699,7 +753,7 @@ impl AnchorTargetMetrics {
 }
 
 /// Resolves diegetic world-panel offsets into valence resolver-frame offsets.
-pub(super) fn write_panel_anchor_offsets(
+pub(crate) fn write_panel_anchor_offsets(
     mut commands: Commands,
     attachments: Query<(
         Entity,
@@ -708,11 +762,14 @@ pub(super) fn write_panel_anchor_offsets(
         &DiegeticPanel,
         Ref<ValenceAnchoredTo>,
         Option<&PanelComponentOwnership<ValenceAnchoredTo>>,
+        Option<&MaterializedTooltip>,
     )>,
     panel_targets: Query<(&DiegeticPanel, &GlobalTransform)>,
     widget_targets: Query<&WidgetOf, With<PanelWidget>>,
+    general_targets: Query<(), With<hana_valence::ResolvedAnchorGeometry>>,
 ) {
-    for (entity, authored, offset, source_panel, relation, ownership) in &attachments {
+    for (entity, authored, offset, source_panel, relation, ownership, materialized) in &attachments
+    {
         if !ownership.is_some_and(|ownership| ownership.owns(entity, relation.last_changed())) {
             lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
                 &mut commands,
@@ -732,9 +789,14 @@ pub(super) fn write_panel_anchor_offsets(
             );
             continue;
         }
-        let Some(offset) =
-            lowered_world_offset(authored.target(), *offset, &panel_targets, &widget_targets)
-        else {
+        let Some(offset) = lowered_world_offset(
+            authored.target(),
+            *offset,
+            materialized,
+            &panel_targets,
+            &widget_targets,
+            &general_targets,
+        ) else {
             lifecycle::remove_owned_component::<ResolvedAnchorOffset>(
                 &mut commands,
                 entity,
@@ -754,10 +816,28 @@ pub(super) fn write_panel_anchor_offsets(
 fn lowered_world_offset(
     target: Entity,
     offset: PanelAnchorOffset,
+    materialized: Option<&MaterializedTooltip>,
     panel_targets: &Query<(&DiegeticPanel, &GlobalTransform)>,
     widget_targets: &Query<&WidgetOf, With<PanelWidget>>,
+    general_targets: &Query<(), With<hana_valence::ResolvedAnchorGeometry>>,
 ) -> Option<Vec3> {
-    let metrics = anchor_target_metrics(target, panel_targets, widget_targets)?;
+    let Some(metrics) = anchor_target_metrics(target, panel_targets, widget_targets) else {
+        let materialized = materialized.filter(|materialized| {
+            materialized.space() == PanelSpace::World && materialized.target() == target
+        })?;
+        general_targets.get(target).ok()?;
+        return Some(Vec3::new(
+            offset
+                .x()
+                .to_meters(materialized.layout_unit().meters_per_unit()),
+            -offset
+                .y()
+                .to_meters(materialized.layout_unit().meters_per_unit()),
+            offset
+                .z()
+                .to_meters(materialized.layout_unit().meters_per_unit()),
+        ));
+    };
     let offset = offset.to_layout_units(metrics.layout_unit());
     if !offset.is_finite() {
         return None;

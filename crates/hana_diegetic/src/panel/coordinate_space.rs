@@ -163,6 +163,30 @@ impl From<&CoordinateSpace> for PanelSpace {
     }
 }
 
+pub(crate) fn constrain_fit_width(
+    panel: &mut DiegeticPanel,
+    blueprint: &crate::layout::LayoutTree,
+    max_width: f32,
+) {
+    let unit = panel.layout_unit();
+    let min = Dimension {
+        value: 0.0,
+        unit:  Some(unit),
+    };
+    let max = Dimension {
+        value: max_width,
+        unit:  Some(unit),
+    };
+    match &mut panel.coordinate_space {
+        CoordinateSpace::World { width, .. } | CoordinateSpace::Screen { width, .. } => {
+            *width = Sizing::Fit { min, max };
+        },
+    }
+    let mut tree = blueprint.clone();
+    crate::layout::set_root_fit_width(&mut tree, min, max);
+    panel.replace_tree_full_rebuild(tree);
+}
+
 /// Synchronizes the [`PanelSpace`] mirror after a panel insert or replacement.
 ///
 /// In-place conversions re-insert `PanelSpace` at their apply points; this

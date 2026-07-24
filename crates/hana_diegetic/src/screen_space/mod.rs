@@ -3,9 +3,13 @@
 mod anchoring;
 mod constants;
 
-use anchoring::AnchorResolveDiagnostics;
+pub(crate) use anchoring::AnchorResolveDiagnostics;
 pub use anchoring::ScreenAnchorTarget;
+pub(crate) use anchoring::ScreenPanelRect;
+pub(crate) use anchoring::attachment_is_ready as screen_attachment_is_ready;
+pub(crate) use anchoring::resolve_screen_space_panel_attachments;
 pub(crate) use anchoring::screen_in_plane_angle;
+pub(crate) use anchoring::screen_panel_rect;
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;
 use bevy::camera::ClearColorConfig;
@@ -113,7 +117,7 @@ pub(crate) enum ScreenSpaceSystems {
 }
 
 #[derive(SystemParam)]
-struct CandidateQueries<'w, 's> {
+pub(crate) struct CandidateQueries<'w, 's> {
     panels: Query<'w, 's, (Entity, &'static DiegeticPanel), With<ResolvedScreenPanelPosition>>,
     widgets: Query<
         'w,
@@ -153,6 +157,7 @@ struct CandidateQueries<'w, 's> {
         (With<PanelWidget>, With<ScreenWidgetAnchorProxy>),
     >,
     geometry:         Query<'w, 's, (), With<ResolvedAnchorGeometry>>,
+    screen_targets:   Query<'w, 's, (Entity, &'static ScreenAnchorTarget)>,
     transforms:       Query<'w, 's, &'static Transform>,
     entities:         Query<'w, 's, ()>,
     primary:          Query<'w, 's, Entity, With<PrimaryWindow>>,
@@ -350,18 +355,19 @@ fn position_screen_space_panels(
             .anchor_position
             .unwrap_or(configured_anchor_position);
 
-        transform.translation.x = anchor_position.x - half_width;
-        transform.translation.y = half_height - anchor_position.y;
+        let mut next_transform = *transform;
+        next_transform.translation.x = anchor_position.x - half_width;
+        next_transform.translation.y = half_height - anchor_position.y;
         match resolved_position.depth {
             Some(depth) => {
                 if resolved_position.authored_depth.is_none() {
-                    resolved_position.authored_depth = Some(transform.translation.z);
+                    resolved_position.authored_depth = Some(next_transform.translation.z);
                 }
-                transform.translation.z = depth;
+                next_transform.translation.z = depth;
             },
             None => {
                 if let Some(authored_depth) = resolved_position.authored_depth {
-                    transform.translation.z = authored_depth;
+                    next_transform.translation.z = authored_depth;
                     resolved_position.authored_depth = None;
                 }
             },
@@ -370,17 +376,18 @@ fn position_screen_space_panels(
             Some(angle) => {
                 if resolved_position.authored_rotation.is_none() {
                     resolved_position.authored_rotation =
-                        Some(anchoring::screen_in_plane_angle(transform.rotation));
+                        Some(anchoring::screen_in_plane_angle(next_transform.rotation));
                 }
-                transform.rotation = Quat::from_rotation_z(angle);
+                next_transform.rotation = Quat::from_rotation_z(angle);
             },
             None => {
                 if let Some(authored_rotation) = resolved_position.authored_rotation {
-                    transform.rotation = Quat::from_rotation_z(authored_rotation);
+                    next_transform.rotation = Quat::from_rotation_z(authored_rotation);
                     resolved_position.authored_rotation = None;
                 }
             },
         }
+        transform.set_if_neq(next_transform);
     }
 }
 
@@ -881,6 +888,61 @@ mod tests {
 
         let log = app.world().resource::<DimensionEventLog>();
         assert_eq!(log.0.len(), 1);
+    }
+
+    #[test]
+    fn stable_screen_position_does_not_rewrite_transform() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(monospace_measurer())
+            .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800_u32, 600_u32).into(),
+                ..Default::default()
+            },
+            PrimaryWindow,
+        ));
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .screen_position(200.0, 150.0)
+            .layout(|_| {})
+            .build()
+            .expect("screen panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+        let positioned_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<Transform>()
+            .expect("screen panel should have a transform")
+            .last_changed();
+
+        app.update();
+        let quiet_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<Transform>()
+            .expect("screen panel should retain its transform")
+            .last_changed();
+        assert_eq!(quiet_tick, positioned_tick);
+
+        let moved = app
+            .world_mut()
+            .get_mut::<DiegeticPanel>(panel)
+            .is_some_and(|mut panel| panel.set_screen_position(Vec2::new(240.0, 175.0)));
+        assert!(moved);
+        app.update();
+
+        let moved_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<Transform>()
+            .expect("screen panel should retain its transform")
+            .last_changed();
+        assert_ne!(moved_tick, quiet_tick);
     }
 
     #[test]

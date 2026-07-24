@@ -96,6 +96,7 @@ pub use slider::SliderStep;
 pub(crate) use slider::finalize_panel_sliders;
 pub use slider::slider_self_update;
 pub(crate) use tooltip::ComputedTooltipRecord;
+pub(crate) use tooltip::MaterializedTooltip;
 pub use tooltip::MeshAnchorCommandsExt;
 pub(crate) use tooltip::MeshAnchorTarget;
 pub(crate) use tooltip::MeshAnchorWarnings;
@@ -109,6 +110,7 @@ pub use tooltip::TooltipPlacementPolicy;
 pub use tooltip::TooltipTarget;
 pub use tooltip::TooltipTargetEntity;
 pub use tooltip::TooltipTargetSpace;
+pub(crate) use tooltip::remove_materialized_state as remove_materialized_tooltip_state;
 pub(crate) use visual::ComputedVisualSlot;
 pub(crate) use visual::VisualOverrideIndex;
 pub(crate) use visual::VisualSlotId;
@@ -149,6 +151,16 @@ pub(crate) enum TooltipSystems {
     ReifyControllers,
     /// Applies controller creation and relationship commands.
     ControllerCommandsApplied,
+    /// Materializes requested tooltip controllers as hidden panels.
+    Materialize,
+    /// Applies tooltip panel insertion and required-component commands.
+    MaterializationCommandsApplied,
+    /// Acquires current target handles and queues same-space attachments.
+    Attach,
+    /// Applies tooltip attachment and demand commands.
+    AttachmentCommandsApplied,
+    /// Publishes post-propagation tooltip readiness.
+    Readiness,
 }
 
 /// Installs headless panel widget identity and reification.
@@ -168,8 +180,7 @@ fn add_widget_observers(app: &mut App) {
         .add_observer(button::cancel_from_widget_removal)
         .add_observer(button::cancel_before_widget_despawn)
         .add_observer(button::handle_semantic_intent)
-        .add_observer(button::dispatch_click_callback)
-        .add_observer(tooltip::remove_mesh_anchor_geometry);
+        .add_observer(button::dispatch_click_callback);
 }
 
 fn add_mesh_anchor_systems(app: &mut App) {
@@ -203,6 +214,7 @@ impl Plugin for WidgetsPlugin {
             .add_plugins((
                 cascade::cascade_plugin::<WidgetInteractivity>(),
                 slider::SliderPlugin,
+                tooltip::TooltipPlugin,
             ))
             .configure_sets(
                 Update,

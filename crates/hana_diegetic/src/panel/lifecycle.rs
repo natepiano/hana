@@ -55,6 +55,7 @@ use crate::screen_space::ScreenSpaceLight;
 use crate::widgets;
 use crate::widgets::ButtonCaptures;
 use crate::widgets::ButtonPress;
+use crate::widgets::MaterializedTooltip;
 use crate::widgets::PanelPicking;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
@@ -224,9 +225,10 @@ impl WidgetCaptureTeardown<'_, '_> {
 
 #[derive(SystemParam)]
 pub(super) struct PanelOwnedTeardown<'w, 's> {
-    owned_entities:  Query<'w, 's, (Entity, &'static PanelOwned)>,
-    parents:         Query<'w, 's, &'static ChildOf>,
-    tooltip_targets: Query<'w, 's, &'static TooltipFor>,
+    owned_entities:        Query<'w, 's, (Entity, &'static PanelOwned)>,
+    materialized_tooltips: Query<'w, 's, &'static MaterializedTooltip>,
+    parents:               Query<'w, 's, &'static ChildOf>,
+    tooltip_targets:       Query<'w, 's, &'static TooltipFor>,
 }
 
 pub(super) fn teardown_panel_role(
@@ -299,6 +301,9 @@ pub(super) fn teardown_panel_role(
     }
 
     let mut panel_entity = commands.entity(entity);
+    if let Ok(materialized) = panel_owned.materialized_tooltips.get(entity) {
+        widgets::remove_materialized_tooltip_state(&mut panel_entity, materialized);
+    }
     panel_entity.remove::<(
         ComputedDiegeticPanel,
         DiegeticPanelChangeClassification,

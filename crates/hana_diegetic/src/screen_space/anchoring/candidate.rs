@@ -16,6 +16,7 @@ use crate::panel::PanelAttachmentAuthored;
 use crate::panel::PanelSpace;
 use crate::panel::WidgetOwnerLayout;
 use crate::screen_space::CandidateQueries;
+use crate::screen_space::ScreenAnchorTarget;
 use crate::widgets::ScreenWidgetAnchorProxy;
 use crate::widgets::ScreenWidgetAnchoredHere;
 use crate::widgets::WidgetAnchorRect;
@@ -98,11 +99,15 @@ fn validate_candidate(
     };
     let source_window = resolve_source_window(*source_window, queries, window_sizes)?;
 
-    match (queries.panels.get(target), queries.widgets.get(target)) {
-        (Ok((_, target_panel)), _) => {
+    match (
+        queries.panels.get(target),
+        queries.widgets.get(target),
+        queries.screen_targets.get(target),
+    ) {
+        (Ok((_, target_panel)), _, _) => {
             validate_panel_target(target_panel, target, source_window, queries, window_sizes)
         },
-        (Err(_), Ok((widget_of, anchor_rect, demand, proxy))) => validate_widget_target(
+        (Err(_), Ok((widget_of, anchor_rect, demand, proxy)), _) => validate_widget_target(
             source,
             target,
             (widget_of, anchor_rect, demand, proxy),
@@ -110,8 +115,28 @@ fn validate_candidate(
             queries,
             window_sizes,
         ),
-        (Err(_), Err(_)) => Err(AnchorResolveSkip::TargetWithoutPanel),
+        (Err(_), Err(_), Ok((_, screen_target))) => {
+            validate_screen_target(screen_target, source_window, window_sizes)
+        },
+        (Err(_), Err(_), Err(_)) => Err(AnchorResolveSkip::TargetWithoutPanel),
     }
+}
+
+fn validate_screen_target(
+    target: &ScreenAnchorTarget,
+    source_window: Entity,
+    window_sizes: &HashMap<Entity, Vec2>,
+) -> Result<(), AnchorResolveSkip> {
+    let Some(size) = window_sizes.get(&target.window()) else {
+        return Err(AnchorResolveSkip::TargetWindowMissing);
+    };
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return Err(AnchorResolveSkip::TargetWindowZeroSized);
+    }
+    if source_window != target.window() {
+        return Err(AnchorResolveSkip::CrossWindow);
+    }
+    Ok(())
 }
 
 fn validate_panel_target(

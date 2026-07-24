@@ -11,14 +11,17 @@ use bevy::prelude::*;
 pub(crate) use candidate::AnchorResolveSkip;
 use hana_valence::AnchorPose;
 pub use rect::ScreenAnchorTarget;
+pub(crate) use rect::ScreenPanelRect;
+pub(crate) use rect::screen_panel_rect;
 pub(crate) use resolve::AnchorResolveDiagnostics;
+pub(crate) use resolve::attachment_is_ready;
 
 use super::CandidateQueries;
 use crate::panel::PanelAnchorOffset;
 use crate::panel::PanelAttachmentAuthored;
 use crate::panel::ResolvedScreenPanelPosition;
 
-pub(super) fn resolve_screen_space_panel_attachments(
+pub(crate) fn resolve_screen_space_panel_attachments(
     windows: Query<(Entity, &Window)>,
     attachments: Query<(Entity, &PanelAttachmentAuthored, &PanelAnchorOffset)>,
     anchor_poses: Query<(Entity, &AnchorPose)>,

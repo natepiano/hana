@@ -15,7 +15,6 @@ use crate::layout::Anchor;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelAnchorOffset;
 use crate::panel::PanelAttachmentAuthored;
-use crate::panel::PanelScreenBounds;
 use crate::panel::ResolvedScreenPanelPosition;
 use crate::widgets::PanelWidget;
 use crate::widgets::ScreenWidgetAnchorProxy;
@@ -209,9 +208,6 @@ impl ScreenAttachmentPlacer<'_> {
         let Some(attachment) = self.attachments.get(&source).copied() else {
             return Err(AnchorResolveSkip::SourceWithoutPanel);
         };
-        let Some(target_bounds) = target_rect.bounds() else {
-            return Err(AnchorResolveSkip::TargetGeometryMissing);
-        };
         let Some(source_bounds) = source_rect.bounds() else {
             return Err(AnchorResolveSkip::SourceGeometryMissing);
         };
@@ -221,10 +217,12 @@ impl ScreenAttachmentPlacer<'_> {
         let pose_angle = anchor_pose.map(|pose| screen_in_plane_angle(pose.rotation));
         let offset = attachment.offset.to_layout_units(target_rect.layout_unit());
         let target_local_offset = offset.truncate() * target_rect.layout_scale();
-        let target_point =
-            oriented_anchor_point(target_rect, target_bounds, attachment.target_anchor)
-                + rotate_screen_offset(target_local_offset, target_rect.angle())
-                + Vec2::new(pose_translation.x, -pose_translation.y);
+        let Some(target_point) = target_rect.oriented_anchor_point(attachment.target_anchor) else {
+            return Err(AnchorResolveSkip::TargetGeometryMissing);
+        };
+        let target_point = target_point
+            + rotate_screen_offset(target_local_offset, target_rect.angle())
+            + Vec2::new(pose_translation.x, -pose_translation.y);
         let source_offset = source_bounds.anchor_offset(attachment.source_anchor);
         let panel_offset = source_bounds.anchor_offset(source_rect.anchor);
         let angle = pose_angle.unwrap_or_else(|| source_rect.angle());
@@ -312,14 +310,6 @@ impl ScreenAttachmentPlacer<'_> {
         self.desired_placements
             .insert(source, DesiredScreenPlacement::default());
     }
-}
-
-fn oriented_anchor_point(rect: ScreenPanelRect, bounds: PanelScreenBounds, anchor: Anchor) -> Vec2 {
-    let resolved_anchor_offset = bounds.anchor_offset(anchor);
-    let panel_offset = bounds.anchor_offset(rect.anchor);
-    let authored_anchor_offset =
-        (resolved_anchor_offset - panel_offset) * rect.layout_scale().signum();
-    rect.anchor_position + rotate_screen_offset(authored_anchor_offset, rect.angle())
 }
 
 pub(super) const fn screen_attachment_resolve_reasons()
