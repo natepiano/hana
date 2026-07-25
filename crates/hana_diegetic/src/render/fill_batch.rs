@@ -27,17 +27,12 @@ use bevy::pbr::StandardMaterial;
 use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
-use bevy::render::Render;
-use bevy::render::RenderApp;
-use bevy::render::erased_render_asset::prepare_erased_assets;
-use bevy::render::render_asset::prepare_assets;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_resource::RenderPipelineDescriptor;
 use bevy::render::render_resource::ShaderSize;
 use bevy::render::render_resource::ShaderType;
 use bevy::render::render_resource::SpecializedMeshPipelineError;
-use bevy::render::storage::GpuShaderBuffer;
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 use bevy::transform::TransformSystems;
@@ -66,6 +61,7 @@ use super::draw_order::DrawOrderIndex;
 use super::draw_order::DrawZIndexRank;
 use super::material;
 use super::material_table;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
 use super::material_table::FrameMaterialTableBuilder;
 use super::material_table::GpuMaterialSlotId;
@@ -454,7 +450,7 @@ impl ResolvedSdfBatchRecord {
     }
 
     /// Keeps this record allocated while preventing the SDF shader from drawing it.
-    fn mark_hidden(&mut self) { self.paint_mask = SdfPaintMask::empty(); }
+    const fn mark_hidden(&mut self) { self.paint_mask = SdfPaintMask::empty(); }
 }
 
 impl MemberRecord for ResolvedSdfBatchRecord {
@@ -1197,9 +1193,6 @@ impl SdfRunCompatibility {
 /// Render plugin for the SDF fill batch material type.
 pub(super) struct FillBatchPlugin;
 
-/// Scheduling barrier between SDF record-buffer and material preparation.
-fn sdf_record_buffers_ready_for_material_preparation() {}
-
 impl Plugin for FillBatchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SdfBatchStore>()
@@ -1221,6 +1214,7 @@ impl Plugin for FillBatchPlugin {
                 PostUpdate,
                 reconcile_sdf_batch_entities
                     .after(update_sdf_batch_world_transforms)
+                    .in_set(BatchAssetWrites)
                     .before(VisibilitySystems::CalculateBounds)
                     .in_set(BatchResourcesReady),
             )
@@ -1246,23 +1240,6 @@ impl Plugin for FillBatchPlugin {
                     .after(VisibilitySystems::CheckVisibility)
                     .in_set(BatchResourcesReady),
             );
-    }
-
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        // Growing a batch creates new `ShaderBuffer` handles and modifies the
-        // existing material to bind them in the same extracted frame. Bevy
-        // otherwise prepares those assets without an ordering edge. If the
-        // material runs first, it retries for a later frame after removing its
-        // previous prepared value, making every surface in the batch disappear.
-        render_app.add_systems(
-            Render,
-            sdf_record_buffers_ready_for_material_preparation
-                .after(prepare_assets::<GpuShaderBuffer>)
-                .before(prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>),
-        );
     }
 }
 
@@ -1745,16 +1722,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use bevy::app::SubApp;
     use bevy::asset::Asset;
     use bevy::asset::AssetEvent;
     use bevy::asset::AssetPlugin;
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::change_detection::Tick;
     use bevy::ecs::message::Messages;
-    use bevy::ecs::schedule::NodeId;
-    use bevy::ecs::schedule::Schedules;
-    use bevy::ecs::schedule::SystemSet;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::image::Image;
     use bevy::picking::hover::PickingInteraction;
@@ -3475,67 +3448,6 @@ mod tests {
         assert!(
             run_order.registered_batch_entity,
             "register_sdf_batch_materials should see the batch entity spawned by reconcile_sdf_batch_entities"
-        );
-    }
-
-    #[test]
-    fn sdf_material_preparation_waits_for_record_buffers() {
-        let mut app = App::new();
-        app.add_plugins(AssetPlugin::default());
-        app.insert_sub_app(RenderApp, SubApp::new());
-        app.add_plugins(FillBatchPlugin);
-        app.finish();
-
-        let render_app = app
-            .get_sub_app_mut(RenderApp)
-            .expect("the fixture should include a render app");
-        let mut schedules = render_app
-            .world_mut()
-            .remove_resource::<Schedules>()
-            .expect("the render app should own schedules");
-        let result = {
-            let world = render_app.world_mut();
-            let schedule = schedules
-                .get_mut(Render)
-                .expect("the Render schedule should exist");
-            schedule
-                .initialize(world)
-                .expect("the Render schedule should initialize");
-            let graph = schedule.graph();
-            let buffer_set = graph
-                .system_sets
-                .get_key(prepare_assets::<GpuShaderBuffer>.into_system_set().intern())
-                .expect("GpuShaderBuffer preparation should exist");
-            let material_set = graph
-                .system_sets
-                .get_key(
-                    prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>
-                        .into_system_set()
-                        .intern(),
-                )
-                .expect("SDF material preparation should exist");
-            let barrier = schedule
-                .systems()
-                .expect("the Render schedule should be initialized")
-                .find_map(|(system_key, system)| {
-                    system
-                        .name()
-                        .contains("sdf_record_buffers_ready_for_material_preparation")
-                        .then_some(system_key)
-                })
-                .expect("the SDF preparation barrier should exist");
-            graph
-                .dependency()
-                .contains_edge(NodeId::Set(buffer_set), NodeId::System(barrier))
-                && graph
-                    .dependency()
-                    .contains_edge(NodeId::System(barrier), NodeId::Set(material_set))
-        };
-        render_app.world_mut().insert_resource(schedules);
-
-        assert!(
-            result,
-            "SDF material preparation must run after its record buffers are GPU-ready"
         );
     }
 
@@ -5493,10 +5405,9 @@ mod tests {
             app.world().resource::<ImageBatchStore>().batches().count(),
             1,
         );
-        // `commit_image_batch_buffers` mutates the `ShaderBuffer` in
-        // `PostUpdate`, where `Assets::<ShaderBuffer>::asset_events` may
-        // already have run; the `AssetEvent::Modified` message then lands
-        // during the next `app.update()`.
+        // This fixture leaves `commit_image_batch_buffers` after
+        // `AssetEventSystems`; the next update publishes the buffer's
+        // `AssetEvent::Modified` message.
         app.update();
         assert_eq!(
             image_record_buffer_uploads(&mut app, &record_buffer),
@@ -5517,8 +5428,6 @@ mod tests {
         );
         app.update();
         assert_eq!(image_records(&app), records_after);
-        // Same flush as above: any `AssetEvent::Modified` from the previous
-        // update's `PostUpdate` commit is written by this extra update.
         app.update();
         assert_eq!(
             image_record_buffer_uploads(&mut app, &record_buffer),

@@ -17,6 +17,7 @@ pub(crate) use self::primitive::PanelShapeRenderKey;
 use self::relationship::PanelShapes;
 use super::PanelChildSystems;
 use super::material_table;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
 use crate::widgets::VisualOverrideIndex;
 
@@ -30,7 +31,7 @@ impl Plugin for PanelShapePlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    reconcile_panel_line_batches,
+                    reconcile_panel_line_batches.in_set(BatchAssetWrites),
                     material_table::register_path_batch_materials::<DiegeticPanelShapeBatch>,
                     update_panel_line_batch_bounds,
                     commit_panel_line_batch_buffers,

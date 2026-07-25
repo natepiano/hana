@@ -45,6 +45,7 @@ use super::draw_order::DrawOrderIndex;
 use super::draw_order::DrawZIndexRank;
 use super::image_material;
 use super::image_material::ImageExtendedMaterial;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
 use super::precompose;
 use crate::cascade::Resolved;
@@ -481,6 +482,7 @@ impl Plugin for ImageBatchPlugin {
                 PostUpdate,
                 reconcile_image_batch_entities
                     .after(batch_store::update_batch_world_transforms::<ImageMemberFamily>)
+                    .in_set(BatchAssetWrites)
                     .before(VisibilitySystems::CalculateBounds)
                     .in_set(BatchResourcesReady),
             )

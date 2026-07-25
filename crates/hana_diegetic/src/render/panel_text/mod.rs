@@ -30,6 +30,7 @@ pub use self::relationship::TextRunOf;
 use self::shaping::shape_panel_text_children;
 use super::PanelChildSystems;
 use super::material_table;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
 use super::material_table::MaterialTableAppendReady;
 use super::precompose;
@@ -123,6 +124,7 @@ impl Plugin for TextRenderPlugin {
                 update_panel_text_batches
                     .after(shape_panel_text_children)
                     .after(MaterialTableAppendReady)
+                    .in_set(BatchAssetWrites)
                     .before(TransformSystems::Propagate)
                     .before(BatchResourcesReady),
                 material_table::register_path_batch_materials::<DiegeticTextBatch>

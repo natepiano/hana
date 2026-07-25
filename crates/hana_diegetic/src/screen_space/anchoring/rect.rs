@@ -97,13 +97,13 @@ impl ScreenPanelRect {
 
     pub(super) const fn bounds(self) -> Option<PanelScreenBounds> { self.bounds }
 
-    pub(crate) const fn layout_unit(self) -> Unit { self.layout_unit }
+    pub const fn layout_unit(self) -> Unit { self.layout_unit }
 
-    pub(crate) const fn layout_scale(self) -> Vec2 { self.layout_scale }
+    pub const fn layout_scale(self) -> Vec2 { self.layout_scale }
 
-    pub(crate) const fn angle(self) -> f32 { self.angle }
+    pub const fn angle(self) -> f32 { self.angle }
 
-    pub(crate) fn from_widget(
+    pub fn from_widget(
         owner: Self,
         widget: WidgetAnchorRect,
         owner_transform: &Transform,
@@ -126,7 +126,7 @@ impl ScreenPanelRect {
         })
     }
 
-    pub(crate) fn from_screen_target(target: &ScreenAnchorTarget) -> Self {
+    pub fn from_screen_target(target: &ScreenAnchorTarget) -> Self {
         Self {
             anchor_position: target.bounds().point(Anchor::Center),
             anchor:          Anchor::Center,
@@ -138,7 +138,7 @@ impl ScreenPanelRect {
         }
     }
 
-    pub(crate) fn oriented_anchor_point(self, anchor: Anchor) -> Option<Vec2> {
+    pub fn oriented_anchor_point(self, anchor: Anchor) -> Option<Vec2> {
         let bounds = self.bounds?;
         let resolved_anchor_offset = bounds.anchor_offset(anchor);
         let panel_offset = bounds.anchor_offset(self.anchor);
@@ -150,7 +150,7 @@ impl ScreenPanelRect {
         )
     }
 
-    pub(crate) fn projected_bounds(self) -> Option<PanelScreenBounds> {
+    pub fn projected_bounds(self) -> Option<PanelScreenBounds> {
         let mut minimum = Vec2::splat(f32::INFINITY);
         let mut maximum = Vec2::splat(f32::NEG_INFINITY);
         for anchor in [
@@ -166,7 +166,7 @@ impl ScreenPanelRect {
         PanelScreenBounds::new(minimum, maximum - minimum).ok()
     }
 
-    pub(crate) fn placed_bounds(
+    pub fn placed_bounds(
         self,
         source_anchor: Anchor,
         source_anchor_position: Vec2,

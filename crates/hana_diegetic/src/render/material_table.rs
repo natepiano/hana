@@ -12,7 +12,9 @@ use std::hash::Hash;
 use std::time::Duration;
 use std::time::Instant;
 
+use bevy::asset::AssetEventSystems;
 use bevy::color::Color;
+use bevy::pbr::MeshMaterial3d;
 use bevy::pbr::StandardMaterial;
 use bevy::pbr::StandardMaterialUniform;
 use bevy::prelude::*;
@@ -21,6 +23,7 @@ use bevy::render::ExtractSchedule;
 use bevy::render::Render;
 use bevy::render::RenderApp;
 use bevy::render::RenderSystems;
+use bevy::render::erased_render_asset::prepare_erased_assets;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_asset::prepare_assets;
 use bevy::render::render_resource::AsBindGroupShaderType;
@@ -39,6 +42,7 @@ use super::SdfExtendedMaterial;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
 use super::fill_batch::SdfMaterialSourceKey;
+use super::image_material::ImageExtendedMaterial;
 use super::panel_shapes::PanelShapeRenderKey;
 use crate::panel::DiegeticPerfStats;
 use crate::text::RunStorageKey;
@@ -826,7 +830,7 @@ fn material_table_capacity(required_rows: u32, row_limit: u32) -> u32 {
         .min(row_limit.max(1))
 }
 
-fn should_prepare_larger_buffer(required_rows: u32, capacity: u32) -> bool {
+const fn should_prepare_larger_buffer(required_rows: u32, capacity: u32) -> bool {
     required_rows >= capacity
 }
 
@@ -1018,6 +1022,10 @@ impl BatchMaterialTableRegistry {
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BatchResourcesReady;
 
+/// Hana `PostUpdate` systems that create or replace retained batch assets.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct BatchAssetWrites;
+
 /// `PostUpdate` boundary after which the frame material table is frozen.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct MaterialTableUpdatedToCurrent;
@@ -1025,6 +1033,10 @@ pub(crate) struct MaterialTableUpdatedToCurrent;
 /// `PostUpdate` boundary that clears the single frame table before producers append.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct MaterialTableAppendReady;
+
+/// Hana render set containing `upload_extracted_material_table`.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct MaterialTableGpuUpload;
 
 /// Plugin that wires the frame material table into main-world and render-world schedules.
 pub(crate) struct MaterialTablePlugin;
@@ -1040,6 +1052,7 @@ impl Plugin for MaterialTablePlugin {
             .configure_sets(
                 PostUpdate,
                 (
+                    BatchAssetWrites.before(AssetEventSystems),
                     MaterialTableAppendReady.before(TransformSystems::Propagate),
                     BatchResourcesReady.after(TransformSystems::Propagate),
                     MaterialTableUpdatedToCurrent.after(BatchResourcesReady),
@@ -1079,19 +1092,29 @@ impl Plugin for MaterialTablePlugin {
                 .add_systems(
                     Render,
                     upload_extracted_material_table
-                        .after(prepare_assets::<GpuShaderBuffer>)
+                        .in_set(MaterialTableGpuUpload)
                         .in_set(RenderSystems::PrepareAssets),
                 );
         }
     }
 
     fn finish(&self, app: &mut App) {
-        let Some(max_bytes) = app.get_sub_app(RenderApp).and_then(|render_app| {
-            render_app
-                .world()
-                .get_resource::<RenderDevice>()
-                .map(|render_device| render_device.limits().max_storage_buffer_binding_size)
-        }) else {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        render_app.configure_sets(
+            Render,
+            MaterialTableGpuUpload
+                .after(prepare_assets::<GpuShaderBuffer>)
+                .before(prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>)
+                .before(prepare_erased_assets::<MeshMaterial3d<ImageExtendedMaterial>>)
+                .before(prepare_erased_assets::<MeshMaterial3d<PathExtendedMaterial>>),
+        );
+        let Some(max_bytes) = render_app
+            .world()
+            .get_resource::<RenderDevice>()
+            .map(|render_device| render_device.limits().max_storage_buffer_binding_size)
+        else {
             return;
         };
         set_material_table_row_limit_from_storage_buffer_bytes(app, max_bytes);
@@ -1557,12 +1580,15 @@ fn synthetic_color(index: usize) -> Color {
     reason = "tests should panic on unexpected fixture setup"
 )]
 mod tests {
+    use bevy::app::SubApp;
     use bevy::asset::AssetPlugin;
+    use bevy::camera::visibility::VisibilityPlugin;
     use bevy::ecs::schedule::NodeId;
     use bevy::ecs::schedule::Schedule;
     use bevy::ecs::schedule::Schedules;
     use bevy::ecs::schedule::SystemSet;
     use bevy::math::Affine2;
+    use bevy::pbr::MaterialPlugin;
     use bevy::render::render_resource::Face;
     use bevy::render::render_resource::ShaderType;
 
@@ -1574,6 +1600,7 @@ mod tests {
     use crate::render::RenderMode;
     use crate::render::batch_key::BatchAlphaMode;
     use crate::render::fill_batch::FillBatchPlugin;
+    use crate::render::image_batch::ImageBatchPlugin;
     use crate::render::panel_shapes::PanelShapePlugin;
     use crate::render::panel_text::TextRenderPlugin;
 
@@ -2267,14 +2294,16 @@ mod tests {
     }
 
     #[test]
-    fn batch_system_sets_resolve_before_material_table_update() {
+    fn batch_growth_systems_resolve_before_asset_events() {
         let mut app = App::new();
         app.add_plugins(AssetPlugin::default());
+        app.add_plugins(VisibilityPlugin);
         app.add_plugins((
             MaterialTablePlugin,
             TextRenderPlugin,
             PanelShapePlugin,
             FillBatchPlugin,
+            ImageBatchPlugin,
         ));
         let batch_system_names = with_initialized_post_update(&mut app, |schedule| {
             let update_text = schedule
@@ -2296,6 +2325,14 @@ mod tests {
                 .system_sets
                 .get_key(MaterialTableUpdatedToCurrent.intern())
                 .expect("MaterialTableUpdatedToCurrent set should exist");
+            let asset_event_set = graph
+                .system_sets
+                .get_key(AssetEventSystems.intern())
+                .expect("AssetEventSystems set should exist");
+            let asset_write_set = graph
+                .system_sets
+                .get_key(BatchAssetWrites.intern())
+                .expect("BatchAssetWrites set should exist");
             assert!(
                 graph
                     .dependency()
@@ -2306,6 +2343,33 @@ mod tests {
                     .dependency()
                     .contains_edge(NodeId::System(update_text), NodeId::Set(batch_set))
             );
+            assert!(
+                graph
+                    .dependency()
+                    .contains_edge(NodeId::Set(asset_write_set), NodeId::Set(asset_event_set)),
+                "BatchAssetWrites should run before Bevy AssetEventSystems"
+            );
+            let asset_write_systems = graph
+                .systems_in_set(BatchAssetWrites.intern())
+                .expect("BatchAssetWrites systems should resolve");
+            for required in [
+                "update_panel_text_batches",
+                "reconcile_panel_line_batches",
+                "reconcile_sdf_batch_entities",
+                "reconcile_image_batch_entities",
+            ] {
+                let system = schedule
+                    .systems()
+                    .expect("PostUpdate schedule should be initialized")
+                    .find_map(|(system_key, system)| {
+                        system.name().contains(required).then_some(system_key)
+                    })
+                    .unwrap_or_else(|| panic!("{required} should exist in PostUpdate"));
+                assert!(
+                    asset_write_systems.contains(&system),
+                    "{required} should be inside BatchAssetWrites"
+                );
+            }
             let batch_systems = graph
                 .systems_in_set(BatchResourcesReady.intern())
                 .expect("BatchResourcesReady systems should resolve");
@@ -2322,9 +2386,11 @@ mod tests {
             "register_sdf_batch_materials",
             "reconcile_panel_line_batches",
             "reconcile_sdf_batch_entities",
+            "reconcile_image_batch_entities",
             "commit_batch_buffers",
             "commit_panel_line_batch_buffers",
             "commit_sdf_batch_buffers",
+            "commit_image_batch_buffers",
         ] {
             assert!(
                 batch_system_names
@@ -2333,6 +2399,121 @@ mod tests {
                 "{required} should be inside BatchResourcesReady"
             );
         }
+    }
+
+    #[test]
+    fn retained_batch_material_preparation_waits_for_gpu_buffers() {
+        let mut app = App::new();
+        app.add_plugins(AssetPlugin::default());
+        app.insert_sub_app(RenderApp, SubApp::new());
+        app.add_plugins((
+            MaterialTablePlugin,
+            MaterialPlugin::<PathExtendedMaterial>::default(),
+            FillBatchPlugin,
+            ImageBatchPlugin,
+        ));
+        app.finish();
+
+        let render_app = app
+            .get_sub_app_mut(RenderApp)
+            .expect("the fixture should include a render app");
+        let mut schedules = render_app
+            .world_mut()
+            .remove_resource::<Schedules>()
+            .expect("the render app should own schedules");
+        let result = {
+            let world = render_app.world_mut();
+            let schedule = schedules
+                .get_mut(Render)
+                .expect("the Render schedule should exist");
+            schedule
+                .initialize(world)
+                .expect("the Render schedule should initialize");
+            let graph = schedule.graph();
+            let buffer_set = graph
+                .system_sets
+                .get_key(prepare_assets::<GpuShaderBuffer>.into_system_set().intern())
+                .expect("GpuShaderBuffer preparation should exist");
+            let upload_set = graph
+                .system_sets
+                .get_key(MaterialTableGpuUpload.intern())
+                .expect("MaterialTableGpuUpload set should exist");
+            let upload_system = schedule
+                .systems()
+                .expect("the Render schedule should be initialized")
+                .find_map(|(system_key, system)| {
+                    system
+                        .name()
+                        .contains("upload_extracted_material_table")
+                        .then_some(system_key)
+                })
+                .expect("upload_extracted_material_table should exist");
+            let material_sets = [
+                (
+                    "SDF",
+                    graph
+                        .system_sets
+                        .get_key(
+                            prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>
+                                .into_system_set()
+                                .intern(),
+                        )
+                        .expect("SDF material preparation should exist"),
+                ),
+                (
+                    "image",
+                    graph
+                        .system_sets
+                        .get_key(
+                            prepare_erased_assets::<MeshMaterial3d<ImageExtendedMaterial>>
+                                .into_system_set()
+                                .intern(),
+                        )
+                        .expect("image material preparation should exist"),
+                ),
+                (
+                    "path",
+                    graph
+                        .system_sets
+                        .get_key(
+                            prepare_erased_assets::<MeshMaterial3d<PathExtendedMaterial>>
+                                .into_system_set()
+                                .intern(),
+                        )
+                        .expect("path material preparation should exist"),
+                ),
+            ];
+            let upload_systems = graph
+                .systems_in_set(MaterialTableGpuUpload.intern())
+                .expect("MaterialTableGpuUpload systems should resolve");
+            let buffer_precedes_upload = graph
+                .dependency()
+                .contains_edge(NodeId::Set(buffer_set), NodeId::Set(upload_set));
+            let materials_follow_upload = material_sets.iter().all(|(_, material_set)| {
+                graph
+                    .dependency()
+                    .contains_edge(NodeId::Set(upload_set), NodeId::Set(*material_set))
+            });
+            (
+                upload_systems.contains(&upload_system),
+                buffer_precedes_upload,
+                materials_follow_upload,
+            )
+        };
+        render_app.world_mut().insert_resource(schedules);
+
+        assert!(
+            result.0,
+            "upload_extracted_material_table should be inside MaterialTableGpuUpload"
+        );
+        assert!(
+            result.1,
+            "Bevy GPU buffer preparation must precede MaterialTableGpuUpload"
+        );
+        assert!(
+            result.2,
+            "Bevy retained material preparation must follow MaterialTableGpuUpload"
+        );
     }
 
     #[test]

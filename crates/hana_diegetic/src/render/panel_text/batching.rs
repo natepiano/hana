@@ -1143,10 +1143,10 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
 
 /// Grows a batch past its capacity: new padded record buffers and a new inert
 /// mesh at the doubled capacities, the mesh swapped onto the entity and the
-/// material's buffer handles rewritten in place. The mesh draws the same
-/// frame; the rewritten material re-prepares against the new buffers —
-/// at worst one frame later (a missing render asset retries), during which
-/// the old buffers keep drawing the pre-growth content. No blink either way.
+/// material's buffer handles rewritten in place. `TextRenderPlugin` creates
+/// the replacement assets before `AssetEventSystems`, and `MaterialTablePlugin`
+/// orders GPU buffer preparation before `PathExtendedMaterial` preparation so
+/// the replacement mesh and buffers are available in the same extracted frame.
 fn grow_batch_assets(
     key: &PathBatchKey,
     backend: &mut GlyphCache,
