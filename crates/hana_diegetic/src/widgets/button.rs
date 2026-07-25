@@ -259,6 +259,10 @@ impl Button {
         self.states.get_or_insert_with(Default::default).as_mut()
     }
 
+    pub(crate) fn set_focused_border_color(&mut self, color: Color) {
+        self.states_mut().focused.border_color = Some(color);
+    }
+
     /// Whether any state layer authors a background color.
     pub(crate) fn has_state_background(&self) -> bool {
         self.states.as_deref().is_some_and(|states| {
@@ -1407,12 +1411,19 @@ mod tests {
     }
 
     fn button_over_field_tree() -> LayoutTree {
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        let mut builder =
+            LayoutBuilder::with_root(El::overlay().width(Sizing::GROW).height(Sizing::GROW));
         builder.with(
             El::new()
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
-                .editable_field(FIELD_ID, field_spec())
+                .editable_field(FIELD_ID, field_spec()),
+            |_| {},
+        );
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
                 .button(BUTTON_ID, Button::new()),
             |_| {},
         );
@@ -2672,8 +2683,10 @@ mod tests {
         let mut app = test_app();
         let widget = spawn_button(&mut app);
 
-        app.world_mut()
-            .trigger(SemanticWidgetIntent::Activate { entity: widget });
+        app.world_mut().trigger(SemanticWidgetIntent::Activate {
+            entity: widget,
+            window: Entity::PLACEHOLDER,
+        });
         app.world_mut().flush();
 
         assert_eq!(events(&app), [RecordedButtonEvent::Clicked(None)]);
@@ -2692,8 +2705,10 @@ mod tests {
         press(&mut app, widget, pointer_id);
         click(&mut app, widget, pointer_id);
         release(&mut app, widget, pointer_id);
-        app.world_mut()
-            .trigger(SemanticWidgetIntent::Activate { entity: widget });
+        app.world_mut().trigger(SemanticWidgetIntent::Activate {
+            entity: widget,
+            window: Entity::PLACEHOLDER,
+        });
         app.world_mut().flush();
 
         assert_eq!(
@@ -2788,8 +2803,10 @@ mod tests {
         app.update();
         assert!(app.world().get::<crate::WidgetDisabled>(widget).is_some());
 
-        app.world_mut()
-            .trigger(SemanticWidgetIntent::Activate { entity: widget });
+        app.world_mut().trigger(SemanticWidgetIntent::Activate {
+            entity: widget,
+            window: Entity::PLACEHOLDER,
+        });
         app.world_mut().flush();
 
         assert_eq!(events(&app), [RecordedButtonEvent::Clicked(None)]);

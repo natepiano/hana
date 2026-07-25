@@ -22,16 +22,22 @@ use bevy::pbr::MaterialExtension;
 use bevy::pbr::MaterialExtensionKey;
 use bevy::pbr::MaterialExtensionPipeline;
 use bevy::pbr::MaterialPlugin;
+use bevy::pbr::MeshMaterial3d;
 use bevy::pbr::StandardMaterial;
 use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
+use bevy::render::Render;
+use bevy::render::RenderApp;
+use bevy::render::erased_render_asset::prepare_erased_assets;
+use bevy::render::render_asset::prepare_assets;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_resource::RenderPipelineDescriptor;
 use bevy::render::render_resource::ShaderSize;
 use bevy::render::render_resource::ShaderType;
 use bevy::render::render_resource::SpecializedMeshPipelineError;
+use bevy::render::storage::GpuShaderBuffer;
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 use bevy::transform::TransformSystems;
@@ -172,7 +178,7 @@ pub(crate) struct SdfMaterialSourceKey {
 
 /// Append-time source material for one SDF material-table role.
 pub(crate) struct SdfMaterialSlotInput<'a> {
-    /// Source identity returned with the appended frame-local slot.
+    /// Source identity returned with the retained slot.
     pub key:            SdfMaterialSourceKey,
     /// Resolved `StandardMaterial` source; defaults are folded before this input exists.
     pub base_material:  &'a StandardMaterial,
@@ -446,6 +452,9 @@ impl ResolvedSdfBatchRecord {
     pub(crate) fn update_world_transform(&mut self, panel_transform: &GlobalTransform) {
         self.transform = panel_transform.to_matrix() * self.local_transform.to_matrix();
     }
+
+    /// Keeps this record allocated while preventing the SDF shader from drawing it.
+    fn mark_hidden(&mut self) { self.paint_mask = SdfPaintMask::empty(); }
 }
 
 impl MemberRecord for ResolvedSdfBatchRecord {
@@ -988,7 +997,7 @@ pub(crate) fn append_sdf_record_materials(
     asset_server: &AssetServer,
     default_material: &SdfMaterial,
 ) -> Option<SdfRecordMaterialSlots> {
-    let rollback_row_count = builder.row_count();
+    let assignment_checkpoint = builder.assignment_checkpoint();
     let fill = append_sdf_role(
         builder,
         surface,
@@ -999,6 +1008,10 @@ pub(crate) fn append_sdf_record_materials(
         asset_server,
         default_material,
     );
+    if matches!(fill, SdfRoleAppend::DroppedLimit | SdfRoleAppend::Held) {
+        builder.rollback_assignments_after(assignment_checkpoint);
+        return None;
+    }
     let border = append_sdf_role(
         builder,
         surface,
@@ -1010,13 +1023,9 @@ pub(crate) fn append_sdf_record_materials(
         default_material,
     );
     match (fill, border) {
-        (SdfRoleAppend::DroppedLimit, _) | (_, SdfRoleAppend::DroppedLimit) => {
-            builder.truncate_rows(rollback_row_count);
-            builder.record_dropped_limit();
-            None
-        },
-        (SdfRoleAppend::Held, _) | (_, SdfRoleAppend::Held) => {
-            builder.truncate_rows(rollback_row_count);
+        (SdfRoleAppend::DroppedLimit | SdfRoleAppend::Held, _)
+        | (_, SdfRoleAppend::DroppedLimit | SdfRoleAppend::Held) => {
+            builder.rollback_assignments_after(assignment_checkpoint);
             None
         },
         (SdfRoleAppend::NotAuthored, SdfRoleAppend::NotAuthored) => None,
@@ -1094,9 +1103,6 @@ fn append_sdf_role(
     };
     if !material.authorship.is_authored() {
         return SdfRoleAppend::NotAuthored;
-    }
-    if !builder.has_remaining_rows(1) {
-        return SdfRoleAppend::DroppedLimit;
     }
     let handle = material
         .base_material
@@ -1191,6 +1197,9 @@ impl SdfRunCompatibility {
 /// Render plugin for the SDF fill batch material type.
 pub(super) struct FillBatchPlugin;
 
+/// Scheduling barrier between SDF record-buffer and material preparation.
+fn sdf_record_buffers_ready_for_material_preparation() {}
+
 impl Plugin for FillBatchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SdfBatchStore>()
@@ -1238,6 +1247,23 @@ impl Plugin for FillBatchPlugin {
                     .in_set(BatchResourcesReady),
             );
     }
+
+    fn finish(&self, app: &mut App) {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        // Growing a batch creates new `ShaderBuffer` handles and modifies the
+        // existing material to bind them in the same extracted frame. Bevy
+        // otherwise prepares those assets without an ordering edge. If the
+        // material runs first, it retries for a later frame after removing its
+        // previous prepared value, making every surface in the batch disappear.
+        render_app.add_systems(
+            Render,
+            sdf_record_buffers_ready_for_material_preparation
+                .after(prepare_assets::<GpuShaderBuffer>)
+                .before(prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>),
+        );
+    }
 }
 
 fn route_sdf_batch_records(
@@ -1279,10 +1305,9 @@ fn route_sdf_batch_records(
             stale_panels.insert(stored_surface.panel_entity());
             continue;
         };
-        // Hidden panels keep reserving their frame-table rows. Their records
-        // leave the batch below, but later panels retain the same material
-        // slots when a tooltip toggles `Visibility`.
-        let visible = !matches!(panel_visibility, Some(Visibility::Hidden));
+        // Hidden panels keep their frame-table rows and SDF batch records so a
+        // `Visibility` change updates the existing GPU buffer allocation.
+        let panel_visibility = panel_visibility.copied().unwrap_or(Visibility::Inherited);
         let panel_lighting = resolved_lighting.map_or(*lighting_default, |resolved| resolved.0);
         let panel_sidedness = resolved_sidedness.map_or(*sidedness_default, |resolved| resolved.0);
         let panel_shadow_casting =
@@ -1297,16 +1322,17 @@ fn route_sdf_batch_records(
         ) {
             apply_sdf_visual_override(&mut resolved, slot_override);
         }
-        resolved_surfaces.push((resolved, panel_lighting, panel_sidedness, visible));
+        resolved_surfaces.push((resolved, panel_lighting, panel_sidedness, panel_visibility));
     }
     let mut appended = Vec::new();
+    let mut hidden_records = HashSet::new();
     let builder = build.builder_mut();
-    for (surface, panel_lighting, panel_sidedness, visible) in &resolved_surfaces {
+    for (surface, panel_lighting, panel_sidedness, panel_visibility) in &resolved_surfaces {
         let record_key = SdfRecordKey {
             panel:         surface.panel_entity,
             command_index: surface.command_index,
         };
-        if let Some(materials) = append_sdf_record_materials(
+        let materials = append_sdf_record_materials(
             builder,
             surface,
             *panel_lighting,
@@ -1314,15 +1340,21 @@ fn route_sdf_batch_records(
             &standard_materials,
             &asset_server,
             &sdf_material_default,
-        ) {
-            if *visible {
-                active_records.insert(record_key);
-                appended.push((materials, surface));
-            }
+        );
+        let Some(materials) = materials else {
+            continue;
+        };
+        if *panel_visibility == Visibility::Hidden {
+            hidden_records.insert(record_key);
         }
+        active_records.insert(record_key);
+        appended.push((materials, surface));
     }
 
-    for record in assign_contiguous_runs(appended) {
+    for mut record in assign_contiguous_runs(appended) {
+        if hidden_records.contains(&record.record_key) {
+            record.mark_hidden();
+        }
         store.upsert_record(record);
     }
     store.retain_records(&active_records);
@@ -1713,12 +1745,16 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use bevy::app::SubApp;
     use bevy::asset::Asset;
     use bevy::asset::AssetEvent;
     use bevy::asset::AssetPlugin;
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::change_detection::Tick;
     use bevy::ecs::message::Messages;
+    use bevy::ecs::schedule::NodeId;
+    use bevy::ecs::schedule::Schedules;
+    use bevy::ecs::schedule::SystemSet;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::image::Image;
     use bevy::picking::hover::PickingInteraction;
@@ -1801,6 +1837,7 @@ mod tests {
     const SDF_SETTLE_FRAMES: usize = 3;
     const SLOT_OVERRIDE_COLOR: Color = Color::srgb(0.1, 0.9, 0.2);
     const TEST_SLOT: VisualSlotId = VisualSlotId::new(1);
+    const TOOLTIP_REVEAL_SETTLE_FRAMES: usize = 6;
     const WIDGET_FILL_COLOR: Color = Color::srgb(0.8, 0.2, 0.1);
 
     fn zero_measurer() -> DiegeticTextMeasurer {
@@ -1918,6 +1955,17 @@ mod tests {
         builder.build()
     }
 
+    fn one_surface_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(10.0), Mm(10.0));
+        builder.with(
+            El::new()
+                .size(10.0, 10.0)
+                .background(Color::srgb(0.1, 0.2, 0.3)),
+            |_| {},
+        );
+        builder.build()
+    }
+
     fn assert_tooltip_surface_is_retained(app: &App, controller: Entity) {
         let computed = app
             .world()
@@ -1977,8 +2025,51 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ready_tooltip_reveal_routes_its_final_transform_in_the_same_frame() {
+    struct ShownTooltipFixture {
+        app:        App,
+        panel:      Entity,
+        widget:     Entity,
+        controller: Entity,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct SdfBatchGpuIdentity {
+        key:          SdfBatchKey,
+        entity:       Entity,
+        records:      Handle<ShaderBuffer>,
+        mesh_records: Handle<ShaderBuffer>,
+        mesh:         Handle<Mesh>,
+        capacity:     u32,
+    }
+
+    fn sdf_batch_gpu_identity_for_panel(app: &App, panel: Entity) -> SdfBatchGpuIdentity {
+        let store = app.world().resource::<SdfBatchStore>();
+        let (key, batch) = store
+            .batches()
+            .find(|(_, batch)| {
+                batch
+                    .records()
+                    .iter()
+                    .any(|record| record.record_key.panel == panel)
+            })
+            .expect("panel should belong to an SDF batch");
+        let gpu = batch
+            .gpu
+            .as_ref()
+            .expect("the settled SDF batch should own GPU assets");
+        SdfBatchGpuIdentity {
+            key:          key.clone(),
+            entity:       batch
+                .entity
+                .expect("the settled SDF batch should own an entity"),
+            records:      gpu.records.clone(),
+            mesh_records: gpu.mesh_records.clone(),
+            mesh:         gpu.mesh.clone(),
+            capacity:     gpu.capacity,
+        }
+    }
+
+    fn shown_tooltip_fixture() -> ShownTooltipFixture {
         let mut app = sdf_pipeline_app();
         app.add_plugins(WidgetsPlugin);
         let panel = spawn_sdf_panel(
@@ -2000,11 +2091,10 @@ mod tests {
             .get::<Tooltips>(widget)
             .and_then(|tooltips| tooltips.iter().next())
             .expect("tooltip controller should reify");
-
         app.world_mut()
             .entity_mut(widget)
             .insert(PickingInteraction::Hovered);
-        for _ in 0..6 {
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
             app.update();
         }
         assert_eq!(
@@ -2012,21 +2102,136 @@ mod tests {
             Some(&Visibility::Inherited),
         );
         assert_tooltip_surface_is_retained(&app, controller);
-        let visible_material_rows = app
+        ShownTooltipFixture {
+            app,
+            panel,
+            widget,
+            controller,
+        }
+    }
+
+    #[test]
+    fn first_tooltip_reveal_preserves_peer_rows_and_material_table_allocation() {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let panel = spawn_sdf_panel(
+            &mut app,
+            tooltip_surface_tree("First tooltip"),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("tooltip controller should reify");
+
+        let initial_capacity = app.world().resource::<MaterialTableBuffer>().capacity;
+        let initial_rows = app
             .world()
             .resource::<FrameMaterialTableBuild>()
             .table()
-            .row_count();
+            .live_row_count();
+        let rows_before_old_growth_boundary = initial_capacity
+            .saturating_mul(3)
+            .checked_div(4)
+            .unwrap_or(0)
+            .saturating_sub(1);
+        let filler_count = rows_before_old_growth_boundary.saturating_sub(initial_rows.to_u32());
+        for _ in 0..filler_count {
+            spawn_sdf_panel(&mut app, one_surface_tree(), StandardMaterial::default());
+        }
+        settle_sdf_pipeline(&mut app);
+
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        let table_handle = table_buffer
+            .handle
+            .clone()
+            .expect("the settled table should have an allocated buffer");
+        let table_capacity = table_buffer.capacity;
+        let table_allocations = table_buffer.allocations;
+        assert_eq!(table_capacity, initial_capacity);
+        let peer_materials = sdf_material_assignments_except(&app, controller);
+        assert!(
+            sdf_records(&app)
+                .iter()
+                .all(|record| record.record_key.panel != controller),
+            "tooltip render records should remain deferred until first reveal",
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
+            app.update();
+            assert_eq!(
+                sdf_material_assignments_except(&app, controller),
+                peer_materials,
+                "first materialization must not renumber an existing SDF material row",
+            );
+            assert_material_table_buffer_unchanged(
+                &app,
+                &table_handle,
+                table_capacity,
+                table_allocations,
+            );
+        }
+        assert_tooltip_surface_is_retained(&app, controller);
+    }
+
+    #[test]
+    fn tooltip_hide_show_preserves_material_rows_and_table_buffer() {
+        let ShownTooltipFixture {
+            mut app,
+            widget,
+            controller,
+            ..
+        } = shown_tooltip_fixture();
+        let visible_material_table = app.world().resource::<FrameMaterialTableBuild>().table();
+        let visible_material_rows = visible_material_table.row_count();
+        let visible_material_sources = visible_material_table.live_row_count();
+        let visible_tooltip_slots = authored_slot_ids(
+            &sdf_records(&app)
+                .into_iter()
+                .filter(|record| record.record_key.panel == controller)
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            !visible_tooltip_slots.is_empty(),
+            "a visible tooltip should reference authored material rows",
+        );
+        let visible_peer_materials = sdf_material_assignments_except(&app, controller);
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        let table_handle = table_buffer
+            .handle
+            .clone()
+            .expect("the material table should have an allocated buffer");
+        let table_capacity = table_buffer.capacity;
+        let table_allocations = table_buffer.allocations;
+        let batch_gpu_identity = sdf_batch_gpu_identity_for_panel(&app, controller);
+        clear_asset_events::<ShaderBuffer>(&mut app);
 
         app.world_mut()
             .entity_mut(widget)
             .insert(PickingInteraction::None);
         app.update();
-        assert!(
-            sdf_records(&app)
-                .iter()
-                .all(|record| record.record_key.panel != controller),
-            "hiding should retire the tooltip's retained record",
+        let hidden_record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("hiding should retain the tooltip's SDF record");
+        assert_eq!(hidden_record.paint_mask.bits(), 0);
+        assert_eq!(
+            sdf_batch_gpu_identity_for_panel(&app, controller),
+            batch_gpu_identity,
+            "hiding the tooltip must preserve its SDF batch allocation",
         );
         assert_eq!(
             app.world()
@@ -2036,10 +2241,82 @@ mod tests {
             visible_material_rows,
             "a hidden materialized tooltip should reserve its frame-table rows",
         );
+        assert_eq!(
+            app.world()
+                .resource::<FrameMaterialTableBuild>()
+                .table()
+                .live_row_count(),
+            visible_material_sources,
+            "hiding a materialized tooltip should keep its material sources live",
+        );
+        assert_eq!(
+            sdf_material_assignments_except(&app, controller),
+            visible_peer_materials,
+            "hiding a tooltip should not renumber another SDF record's material rows",
+        );
+        assert_material_table_buffer_unchanged(
+            &app,
+            &table_handle,
+            table_capacity,
+            table_allocations,
+        );
+        assert_eq!(modified_asset_events_for(&app, &table_handle), 0);
+        clear_asset_events::<ShaderBuffer>(&mut app);
 
-        let Some(mut panel_transform) = app.world_mut().get_mut::<Transform>(panel) else {
-            return;
-        };
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        let reshown_tooltip_slots = authored_slot_ids(
+            &sdf_records(&app)
+                .into_iter()
+                .filter(|record| record.record_key.panel == controller)
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            reshown_tooltip_slots, visible_tooltip_slots,
+            "showing the same tooltip again should restore the same material rows",
+        );
+        let reshown_record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("showing should retain the tooltip's SDF record");
+        assert_ne!(reshown_record.paint_mask.bits(), 0);
+        assert_eq!(
+            sdf_batch_gpu_identity_for_panel(&app, controller),
+            batch_gpu_identity,
+            "showing the tooltip must preserve its SDF batch allocation",
+        );
+        assert_eq!(
+            sdf_material_assignments_except(&app, controller),
+            visible_peer_materials,
+            "showing the tooltip again should not renumber another SDF record's material rows",
+        );
+        assert_material_table_buffer_unchanged(
+            &app,
+            &table_handle,
+            table_capacity,
+            table_allocations,
+        );
+        assert_eq!(modified_asset_events_for(&app, &table_handle), 0);
+    }
+
+    #[test]
+    fn ready_tooltip_reveal_routes_its_final_transform_in_the_same_frame() {
+        let ShownTooltipFixture {
+            mut app,
+            panel,
+            widget,
+            controller,
+        } = shown_tooltip_fixture();
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::None);
+        app.update();
+        let mut panel_transform = app
+            .world_mut()
+            .get_mut::<Transform>(panel)
+            .expect("the tooltip target panel should retain its transform");
         panel_transform.translation = Vec3::new(0.4, -0.2, 0.3);
         app.world_mut()
             .entity_mut(widget)
@@ -2053,7 +2330,7 @@ mod tests {
                 .set_tree(panel, tooltip_surface_tree("Replacement tooltip"))
                 .is_ok()
         );
-        for _ in 0..6 {
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
             app.update();
         }
         let replacement_controller = app
@@ -2110,7 +2387,7 @@ mod tests {
         app.world_mut()
             .entity_mut(widget)
             .insert(PickingInteraction::Hovered);
-        for _ in 0..6 {
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
             app.update();
         }
 
@@ -2433,6 +2710,39 @@ mod tests {
             .collect()
     }
 
+    fn sdf_material_assignments_except(
+        app: &App,
+        excluded_panel: Entity,
+    ) -> Vec<(SdfRecordKey, SdfPaintMaterial, SdfPaintMaterial)> {
+        let mut assignments: Vec<_> = sdf_records(app)
+            .into_iter()
+            .filter(|record| record.record_key.panel != excluded_panel)
+            .map(|record| {
+                (
+                    record.record_key,
+                    record.fill_material,
+                    record.border_material,
+                )
+            })
+            .collect();
+        assignments.sort_by_key(|(record_key, _, _)| {
+            (record_key.panel.to_bits(), record_key.command_index.get())
+        });
+        assignments
+    }
+
+    fn assert_material_table_buffer_unchanged(
+        app: &App,
+        expected_handle: &Handle<ShaderBuffer>,
+        expected_capacity: u32,
+        expected_allocations: u32,
+    ) {
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        assert_eq!(table_buffer.handle.as_ref(), Some(expected_handle));
+        assert_eq!(table_buffer.capacity, expected_capacity);
+        assert_eq!(table_buffer.allocations, expected_allocations);
+    }
+
     fn authored_slot_count(records: &[ResolvedSdfBatchRecord]) -> usize {
         authored_slot_ids(records).len()
     }
@@ -2490,6 +2800,17 @@ mod tests {
             .resource::<Messages<AssetEvent<A>>>()
             .iter_current_update_messages()
             .filter(|event| matches!(event, AssetEvent::Modified { .. }))
+            .count()
+    }
+
+    fn modified_asset_events_for<A: Asset>(app: &App, handle: &Handle<A>) -> usize {
+        let id = handle.id();
+        app.world()
+            .resource::<Messages<AssetEvent<A>>>()
+            .iter_current_update_messages()
+            .filter(
+                |event| matches!(event, AssetEvent::Modified { id: modified } if *modified == id),
+            )
             .count()
     }
 
@@ -3158,6 +3479,67 @@ mod tests {
     }
 
     #[test]
+    fn sdf_material_preparation_waits_for_record_buffers() {
+        let mut app = App::new();
+        app.add_plugins(AssetPlugin::default());
+        app.insert_sub_app(RenderApp, SubApp::new());
+        app.add_plugins(FillBatchPlugin);
+        app.finish();
+
+        let render_app = app
+            .get_sub_app_mut(RenderApp)
+            .expect("the fixture should include a render app");
+        let mut schedules = render_app
+            .world_mut()
+            .remove_resource::<Schedules>()
+            .expect("the render app should own schedules");
+        let result = {
+            let world = render_app.world_mut();
+            let schedule = schedules
+                .get_mut(Render)
+                .expect("the Render schedule should exist");
+            schedule
+                .initialize(world)
+                .expect("the Render schedule should initialize");
+            let graph = schedule.graph();
+            let buffer_set = graph
+                .system_sets
+                .get_key(prepare_assets::<GpuShaderBuffer>.into_system_set().intern())
+                .expect("GpuShaderBuffer preparation should exist");
+            let material_set = graph
+                .system_sets
+                .get_key(
+                    prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>
+                        .into_system_set()
+                        .intern(),
+                )
+                .expect("SDF material preparation should exist");
+            let barrier = schedule
+                .systems()
+                .expect("the Render schedule should be initialized")
+                .find_map(|(system_key, system)| {
+                    system
+                        .name()
+                        .contains("sdf_record_buffers_ready_for_material_preparation")
+                        .then_some(system_key)
+                })
+                .expect("the SDF preparation barrier should exist");
+            graph
+                .dependency()
+                .contains_edge(NodeId::Set(buffer_set), NodeId::System(barrier))
+                && graph
+                    .dependency()
+                    .contains_edge(NodeId::System(barrier), NodeId::Set(material_set))
+        };
+        render_app.world_mut().insert_resource(schedules);
+
+        assert!(
+            result,
+            "SDF material preparation must run after its record buffers are GPU-ready"
+        );
+    }
+
+    #[test]
     fn sdf_batch_entities_spawn_visible_for_production_route() {
         let mut app = sdf_pipeline_app();
         spawn_sdf_panel(
@@ -3199,7 +3581,7 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_sdf_frame_rewrites_only_the_material_table_buffer() {
+    fn unchanged_sdf_frame_modifies_no_main_world_render_assets() {
         let mut app = sdf_pipeline_app();
         spawn_sdf_panel(
             &mut app,
@@ -3218,7 +3600,7 @@ mod tests {
 
         assert_eq!(modified_asset_events::<SdfExtendedMaterial>(&app), 0);
         assert_eq!(modified_asset_events::<PathExtendedMaterial>(&app), 0);
-        assert_eq!(modified_asset_events::<ShaderBuffer>(&app), 1);
+        assert_eq!(modified_asset_events::<ShaderBuffer>(&app), 0);
     }
 
     #[test]
@@ -3893,7 +4275,7 @@ mod tests {
     }
 
     #[test]
-    fn visibility_and_layer_changes_rekey_sdf_batches_same_frame() {
+    fn layer_changes_rekey_and_visibility_masks_sdf_records_same_frame() {
         let mut app = sdf_pipeline_app();
         let panel = spawn_sdf_panel(
             &mut app,
@@ -3929,9 +4311,11 @@ mod tests {
         app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
         app.update();
 
-        assert!(sdf_records(&app).is_empty());
-        assert_eq!(app.world().resource::<SdfBatchStore>().batches().count(), 0);
-        assert_eq!(live_sdf_batch_count(&mut app), 0);
+        let hidden_records = sdf_records(&app);
+        assert_eq!(hidden_records.len(), 1);
+        assert_eq!(hidden_records[0].paint_mask.bits(), 0);
+        assert_eq!(app.world().resource::<SdfBatchStore>().batches().count(), 1);
+        assert_eq!(live_sdf_batch_count(&mut app), 1);
     }
 
     #[test]

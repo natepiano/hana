@@ -56,10 +56,3 @@ impl Deref for PanelShapes {
 
     fn deref(&self) -> &Self::Target { &self.0 }
 }
-
-/// Material-source identity for a panel-shape source entity.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) struct PanelShapeMaterialSourceKey {
-    /// Panel-shape source whose material is projected into a frame table row.
-    pub(super) shape: Entity,
-}

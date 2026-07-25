@@ -31,7 +31,6 @@ use super::path::PanelShapePath;
 use super::path::PanelShapePathContext;
 use super::primitive::PanelShapeRenderKey;
 use super::relationship::PanelShape;
-use super::relationship::PanelShapeMaterialSourceKey;
 use super::relationship::PanelShapeOf;
 use super::relationship::PanelShapeSource;
 use super::relationship::PanelShapes;
@@ -110,8 +109,8 @@ pub(super) struct DiegeticPanelShapeBatch;
 
 /// Append-time material input for one panel-line render record.
 struct PanelShapeMaterialSlotInput<'a> {
-    /// Source identity returned with the appended frame-local slot.
-    key:           PanelShapeMaterialSourceKey,
+    /// Source identity returned with the retained slot.
+    key:           PanelShapeRenderKey,
     /// Resolved primitive/element/panel/default material before color override.
     base_material: &'a StandardMaterial,
     /// Resolved primitive color used as the row's effective `base_color`.
@@ -125,7 +124,7 @@ struct PanelShapeMaterialSlotInput<'a> {
 }
 
 impl MaterialSlotInput for PanelShapeMaterialSlotInput<'_> {
-    type Key = PanelShapeMaterialSourceKey;
+    type Key = PanelShapeRenderKey;
 
     fn key(&self) -> Self::Key { self.key }
 
@@ -583,7 +582,6 @@ pub(super) struct PanelShapeMaterialAssets<'w> {
 struct ShapePrimitiveSource<'a> {
     element_index: usize,
     draw_depth:    DrawCommandDepth,
-    source_entity: Entity,
     line:          &'a ResolvedPanelShape,
     primitive:     &'a ResolvedPanelShapePrimitive,
 }
@@ -883,14 +881,13 @@ fn collect_line_primitives<'a>(
             continue;
         };
         for line in shapes {
-            let Some(&source_entity) = source_entities.get(&line.source_key()) else {
+            if !source_entities.contains_key(&line.source_key()) {
                 continue;
-            };
+            }
             for primitive in line.primitives() {
                 primitives.push(ShapePrimitiveSource {
                     element_index: command.element_idx,
                     draw_depth,
-                    source_entity,
                     line,
                     primitive,
                 });
@@ -1046,9 +1043,7 @@ fn build_panel_line_group(
     let lighting = context.panel_lighting;
     let sidedness = context.panel_sidedness;
     let input = PanelShapeMaterialSlotInput {
-        key: PanelShapeMaterialSourceKey {
-            shape: first.source_entity,
-        },
+        key,
         base_material: &base,
         fill_color,
         alpha_mode,
@@ -2493,14 +2488,12 @@ mod tests {
         let first_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(10),
             line: &first,
             primitive: &first.primitives()[0],
         };
         let second_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(11),
             line: &second,
             primitive: &second.primitives()[0],
         };
@@ -2818,35 +2811,30 @@ mod tests {
         let red_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(10),
             line: &red,
             primitive: &red.primitives()[0],
         };
         let red_same_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(10),
             line: &red_again,
             primitive: &red_again.primitives()[0],
         };
         let red_different_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(11),
             line: &red_again,
             primitive: &red_again.primitives()[0],
         };
         let blue_same_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(10),
             line: &blue,
             primitive: &blue.primitives()[0],
         };
         let blue_different_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
-            source_entity: Entity::from_bits(11),
             line: &blue,
             primitive: &blue.primitives()[0],
         };
@@ -2879,9 +2867,11 @@ mod tests {
         };
         render::apply_sidedness(&mut base, Sidedness::BothSides);
         let color = Color::srgb(0.2, 0.4, 0.6);
+        let line = test_line(0);
         let input = PanelShapeMaterialSlotInput {
-            key:           PanelShapeMaterialSourceKey {
-                shape: Entity::from_bits(10),
+            key:           PanelShapeRenderKey {
+                panel:  Entity::from_bits(10),
+                source: line.primitives()[0].source_key(),
             },
             base_material: &base,
             fill_color:    color,
@@ -2910,9 +2900,11 @@ mod tests {
         };
         render::apply_sidedness(&mut base, Sidedness::BackOnly);
         let color = Color::srgb(0.2, 0.4, 0.6);
+        let line = test_line(0);
         let input = PanelShapeMaterialSlotInput {
-            key:           PanelShapeMaterialSourceKey {
-                shape: Entity::from_bits(10),
+            key:           PanelShapeRenderKey {
+                panel:  Entity::from_bits(10),
+                source: line.primitives()[0].source_key(),
             },
             base_material: &base,
             fill_color:    color,

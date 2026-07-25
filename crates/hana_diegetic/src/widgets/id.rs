@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use super::Button;
 use super::Slider;
 use super::WidgetOf;
+use crate::ImePanelField;
 use crate::PanelBuildError;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
@@ -95,12 +96,14 @@ impl PanelWidgetIndex {
 #[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
 pub(crate) enum WidgetKind {
     Button,
+    EditableField,
     Slider,
 }
 
 #[derive(Clone, Component, Debug, PartialEq)]
 pub(crate) enum WidgetSpec {
     Button(Button),
+    EditableField(ImePanelField),
     Slider(Slider),
 }
 
@@ -108,7 +111,16 @@ impl WidgetSpec {
     pub(crate) const fn kind(&self) -> WidgetKind {
         match self {
             Self::Button(_) => WidgetKind::Button,
+            Self::EditableField(_) => WidgetKind::EditableField,
             Self::Slider(_) => WidgetKind::Slider,
+        }
+    }
+
+    pub(crate) fn set_focused_border_color(&mut self, color: Color) {
+        match self {
+            Self::Button(button) => button.set_focused_border_color(color),
+            Self::EditableField(field) => field.set_focused_border_color(color),
+            Self::Slider(slider) => slider.set_focused_border_color(color),
         }
     }
 }

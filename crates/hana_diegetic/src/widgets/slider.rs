@@ -312,6 +312,10 @@ impl Slider {
         self.states.get_or_insert_with(Default::default).as_mut()
     }
 
+    pub(crate) fn set_focused_border_color(&mut self, color: Color) {
+        self.states_mut().focused.border_color = Some(color);
+    }
+
     /// Whether any state layer authors a background color.
     pub(crate) fn has_state_background(&self) -> bool {
         self.states.as_deref().is_some_and(|states| {

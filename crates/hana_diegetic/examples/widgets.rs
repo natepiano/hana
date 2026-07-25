@@ -4,17 +4,20 @@
 //! Fairy Dust app.
 //!
 //! Current controls:
-//!   D - Toggle the secondary button and level slider between enabled and
-//!     disabled
+//!   D - Disable or re-enable the secondary button and level slider
 //!   H - Return to the camera home pose
-//!   Tab / Shift+Tab - Focus the next/previous widget through Hana's adapter
-//!   Home / End - Focus the first/last widget through Hana's adapter
-//!   Enter or Space / Escape - Activate/cancel through Hana's adapter
-//!   P - Focus the previous widget through an app-owned Bevy Kana action
-//!   T - Replace the primary button tooltip with a fresh controller
-//!   [ / ] (held) - Step the level slider through app-owned Bevy Kana actions
+//!   Tab / Shift+Tab - Move keyboard focus to the next/previous widget
+//!   Home / End - Move keyboard focus to the first/last widget
+//!   Enter or Space / Escape - Activate/cancel the focused widget
+//!   P - Move keyboard focus to the previous widget through an app-defined
+//!     shortcut
+//!   T - Switch the primary-button tooltip between two show delays
+//!   Left / Right Arrow - Step the focused slider; holding repeats after a
+//!     short pause
 //!   Pointer drag on the level slider - Grab, drag, and release move the value
 //!     through the same `SliderChangeRequested` proposals the app applies.
+
+use std::time::Duration;
 
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
@@ -25,6 +28,8 @@ use bevy_enhanced_input::prelude::Actions;
 use bevy_enhanced_input::prelude::Fire;
 use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::InputContextAppExt;
+use bevy_enhanced_input::prelude::Pulse;
+use bevy_enhanced_input::prelude::bindings;
 use bevy_kana::Keybindings;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
@@ -75,7 +80,6 @@ use hana_diegetic::PanelWidgetWriter;
 use hana_diegetic::Pt;
 use hana_diegetic::Px;
 use hana_diegetic::RequestSliderAdjustment;
-use hana_diegetic::RequestWidgetFocus;
 use hana_diegetic::Sizing;
 use hana_diegetic::Slider;
 use hana_diegetic::SliderAdjustment;
@@ -99,6 +103,7 @@ use hana_diegetic::TooltipPlacementPolicy;
 use hana_diegetic::TooltipShown;
 use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
+use hana_diegetic::WidgetFocused;
 use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
@@ -119,15 +124,13 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 8] = [
-    "D disables the secondary button and level slider, which then show their disabled surfaces.",
-    "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
+const DESCRIPTION_LINES: [&str; 6] = [
+    "D disables the secondary button and level slider.",
+    "Tab and Shift+Tab move keyboard focus to the next or previous widget.",
+    "Enter edits the focused text field; while editing, Tab and Shift+Tab stay with the editor.",
     "The primary button's on_click callback counts clicks in the status readout.",
-    "Hold [ or ] to step the level slider; the app applies each proposed value.",
-    "The world status panel follows the level slider below the cube controls.",
-    "The screen status panel follows the separate top-right screen widget.",
-    "Widget declarations own tooltip controllers; the cube also publishes a checked mesh-face target.",
-    "T replaces the primary tooltip with a new controller and fresh show timer.",
+    "Left and Right Arrow step the focused slider; holding repeats after a short pause.",
+    "T switches the primary-button tooltip between 500 ms and 1.5 s show delays; the tooltip displays its current delay.",
 ];
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
 const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
@@ -153,6 +156,10 @@ const PRIMARY_BUTTON_ID: &str = "primary-button";
 const POINTER_STATUS_ID: &str = "pointer-status";
 const POINTER_STATUS_IDLE: &str = "Pointer: none";
 const POINTER_STATUS_MEASURE: &str = "Pointer: Pressed secondary-button";
+const PRIMARY_TOOLTIP_DEFAULT_BODY: &str = "Show delay: 500 ms";
+const PRIMARY_TOOLTIP_DEFAULT_DELAY: Duration = Duration::from_millis(500);
+const PRIMARY_TOOLTIP_SLOW_BODY: &str = "Show delay: 1.5 seconds";
+const PRIMARY_TOOLTIP_SLOW_DELAY: Duration = Duration::from_millis(1_500);
 const SECONDARY_BUTTON_ID: &str = "secondary-button";
 const TOGGLE_CONTROL: &str = "D Toggle Disabled";
 const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
@@ -181,23 +188,28 @@ const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
 const SLIDER_FILL_DISABLED: Color = Color::srgba(0.10, 0.08, 0.14, 0.66);
 const SLIDER_FILL_HOVERED: Color = Color::srgba(0.20, 0.09, 0.40, 0.88);
 const SLIDER_FILL_PRESSED: Color = Color::srgba(0.34, 0.16, 0.60, 0.94);
-const SLIDER_HEIGHT: Px = Px(36.0);
+const SLIDER_HEIGHT: Px = Px(52.0);
 const SLIDER_ID: &str = "level-slider";
 const SLIDER_INITIAL_VALUE: f32 = 0.5;
 const SLIDER_LABEL_ID: &str = "slider-label";
-const SLIDER_LABEL_IDLE: &str = "Level slider — 50%";
-const SLIDER_LABEL_MEASURE: &str = "Level slider — 100%";
+const SLIDER_LABEL_IDLE: &str = "50%";
+const SLIDER_LABEL_MEASURE: &str = "100%";
 const SLIDER_RANGE_END: f32 = 1.0;
 const SLIDER_RANGE_START: f32 = 0.0;
+const SLIDER_REPEAT_INITIAL_DELAY_SECONDS: f32 = 0.4;
+const SLIDER_REPEAT_INTERVAL_SECONDS: f32 = 0.15;
 const SLIDER_STATUS_ID: &str = "slider-status";
 const SLIDER_STATUS_IDLE: &str = "Slider: 0.50 (50%)";
 const SLIDER_STATUS_MEASURE: &str = "Slider: 0.00 (100%)";
 const SLIDER_STEP: f32 = 0.05;
 const SLIDER_THUMB_BORDER: Color = Color::srgba(0.86, 0.80, 1.0, 0.96);
+const SLIDER_THUMB_DIAMETER: Px = Px(16.0);
 const SLIDER_THUMB_FILL: Color = Color::srgba(0.74, 0.60, 1.0, 0.96);
-const SLIDER_THUMB_HEIGHT: Px = Px(16.0);
 const SLIDER_THUMB_ID: &str = "slider-thumb";
-const SLIDER_THUMB_WIDTH: Px = Px(12.0);
+const SLIDER_THUMB_RADIUS: Px = Px(8.0);
+const SLIDER_TRACK_FILL: Color = Color::srgba(0.46, 0.38, 0.66, 0.92);
+const SLIDER_TRACK_HEIGHT: Px = Px(5.0);
+const SLIDER_TRACK_RADIUS: Px = Px(2.5);
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
 const STATUS_ANCHOR_OFFSET: Px = Px(24.0);
 const STATUS_BORDER: Color = Color::srgba(0.20, 0.80, 0.68, 0.86);
@@ -309,24 +321,32 @@ struct PrimaryClicks(usize);
 struct SliderTooltipBlueprint(Tooltip);
 
 #[derive(Clone, Copy, Default, Resource)]
-enum PrimaryTooltipContent {
+enum PrimaryTooltipTiming {
     #[default]
-    Original,
-    Replacement,
+    Default,
+    Slow,
 }
 
-impl PrimaryTooltipContent {
+impl PrimaryTooltipTiming {
     const fn toggled(self) -> Self {
         match self {
-            Self::Original => Self::Replacement,
-            Self::Replacement => Self::Original,
+            Self::Default => Self::Slow,
+            Self::Slow => Self::Default,
         }
     }
 
     fn tooltip(self) -> Tooltip {
+        let (body, delay) = match self {
+            Self::Default => (PRIMARY_TOOLTIP_DEFAULT_BODY, PRIMARY_TOOLTIP_DEFAULT_DELAY),
+            Self::Slow => (PRIMARY_TOOLTIP_SLOW_BODY, PRIMARY_TOOLTIP_SLOW_DELAY),
+        };
+        authored_tooltip("Primary button", body).show_after(delay)
+    }
+
+    const fn delay(self) -> Duration {
         match self {
-            Self::Original => button_tooltip(),
-            Self::Replacement => replacement_button_tooltip(),
+            Self::Default => PRIMARY_TOOLTIP_DEFAULT_DELAY,
+            Self::Slow => PRIMARY_TOOLTIP_SLOW_DELAY,
         }
     }
 }
@@ -339,9 +359,6 @@ struct WidgetInteractionReadout;
 
 #[derive(Component)]
 struct WidgetAnchorInstalled;
-
-#[derive(Component)]
-struct InitialWidgetFocusRequested;
 
 #[derive(Component)]
 struct ScreenWidgetLabPanel;
@@ -432,7 +449,7 @@ fn main() {
         .init_resource::<ToggleMode>()
         .init_resource::<LevelSliderDrag>()
         .init_resource::<PrimaryClicks>()
-        .init_resource::<PrimaryTooltipContent>()
+        .init_resource::<PrimaryTooltipTiming>()
         .insert_resource(SliderTooltipBlueprint(slider_tooltip()))
         .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
         .add_observer(report_button_pressed)
@@ -454,7 +471,6 @@ fn main() {
                 anchor_screen_interaction_readout,
                 report_interaction_changes,
                 report_presentation_states,
-                request_initial_widget_focus,
             ),
         )
         .with_shortcut(KeyCode::KeyD, toggle_disabled_widgets)
@@ -568,34 +584,59 @@ fn spawn_app_widget_input(mut commands: Commands) {
 fn spawn_app_widget_actions(spawner: &mut ActionSpawner<AppWidgetInputContext>) {
     let keybindings = Keybindings::new::<AppWidgetShift>(spawner, ActionSettings::default());
     keybindings.spawn_key::<AppFocusPrevious>(spawner, KeyCode::KeyP);
-    keybindings.spawn_key::<AppSliderDecrease>(spawner, KeyCode::BracketLeft);
-    keybindings.spawn_key::<AppSliderIncrease>(spawner, KeyCode::BracketRight);
+    let slider_repeat = || {
+        Pulse::new(SLIDER_REPEAT_INTERVAL_SECONDS)
+            .with_initial_delay(SLIDER_REPEAT_INITIAL_DELAY_SECONDS)
+    };
+    keybindings.spawn_binding::<AppSliderDecrease, _>(
+        spawner,
+        (slider_repeat(), bindings![KeyCode::ArrowLeft]),
+    );
+    keybindings.spawn_binding::<AppSliderIncrease, _>(
+        spawner,
+        (slider_repeat(), bindings![KeyCode::ArrowRight]),
+    );
 }
 
-/// Held app-owned continuous path: while `[` stays held, each `Fire` edge
-/// sends one step-down adjustment request.
+/// Sends one step-down request immediately, then follows [`Pulse`]'s keyboard
+/// repeat timing while Left Arrow remains held and the slider has focus.
 fn decrease_slider_from_held(
     _: On<Fire<AppSliderDecrease>>,
     panels: Query<Entity, With<WidgetLabPanel>>,
+    focused: Query<(), With<WidgetFocused>>,
     reader: PanelWidgetReader,
     mut commands: Commands,
 ) {
-    request_slider_steps(&panels, &reader, -SLIDER_ADJUST_STEPS, &mut commands);
+    request_slider_steps(
+        &panels,
+        &focused,
+        &reader,
+        -SLIDER_ADJUST_STEPS,
+        &mut commands,
+    );
 }
 
-/// Held app-owned continuous path: while `]` stays held, each `Fire` edge
-/// sends one step-up adjustment request.
+/// Sends one step-up request immediately, then follows [`Pulse`]'s keyboard
+/// repeat timing while Right Arrow remains held and the slider has focus.
 fn increase_slider_from_held(
     _: On<Fire<AppSliderIncrease>>,
     panels: Query<Entity, With<WidgetLabPanel>>,
+    focused: Query<(), With<WidgetFocused>>,
     reader: PanelWidgetReader,
     mut commands: Commands,
 ) {
-    request_slider_steps(&panels, &reader, SLIDER_ADJUST_STEPS, &mut commands);
+    request_slider_steps(
+        &panels,
+        &focused,
+        &reader,
+        SLIDER_ADJUST_STEPS,
+        &mut commands,
+    );
 }
 
 fn request_slider_steps(
     panels: &Query<Entity, With<WidgetLabPanel>>,
+    focused: &Query<(), With<WidgetFocused>>,
     reader: &PanelWidgetReader,
     steps: f32,
     commands: &mut Commands,
@@ -607,6 +648,9 @@ fn request_slider_steps(
         warn!("widgets: level slider has not been reified");
         return;
     };
+    if focused.get(widget).is_err() {
+        return;
+    }
     commands.trigger(RequestSliderAdjustment {
         entity:     widget,
         adjustment: SliderAdjustment::RelativeSteps(steps),
@@ -646,7 +690,7 @@ fn apply_slider_change(
         && !panel_text.set_text(
             panel,
             &PanelElementId::named(SLIDER_LABEL_ID),
-            format!("Level slider — {percent:.0}%"),
+            format!("{percent:.0}%"),
         )
     {
         warn!("widgets: slider label has not been reified");
@@ -767,23 +811,6 @@ fn report_tooltip_visibility(
     }
 }
 
-fn request_initial_widget_focus(
-    mut commands: Commands,
-    panel: Single<Entity, (With<WidgetLabPanel>, Without<InitialWidgetFocusRequested>)>,
-    window: Single<Entity, With<PrimaryWindow>>,
-    reader: PanelWidgetReader,
-) {
-    let id = PanelElementId::named(PRIMARY_BUTTON_ID);
-    let Some(widget) = reader.entity(*panel, &id) else {
-        return;
-    };
-    commands.trigger(RequestWidgetFocus {
-        window: *window,
-        widget,
-    });
-    commands.entity(*panel).insert(InitialWidgetFocusRequested);
-}
-
 fn report_widget_focus_changed(
     change: On<WidgetFocusChanged>,
     readouts: Query<Entity, With<WidgetInteractionReadout>>,
@@ -885,6 +912,7 @@ fn spawn_widget_lab(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
     cube: Single<Entity, With<FairyDustCube>>,
+    primary_tooltip_timing: Res<PrimaryTooltipTiming>,
     slider_tooltip: Res<SliderTooltipBlueprint>,
 ) {
     let cube_target = commands.mesh_anchor_target(*cube, MeshFace::PositiveZ);
@@ -912,7 +940,7 @@ fn spawn_widget_lab(
         .text_material(material.clone())
         .with_tree(widget_tree(
             slider,
-            button_tooltip(),
+            primary_tooltip_timing.tooltip(),
             slider_tooltip.0.clone(),
         ))
         .build();
@@ -1080,8 +1108,16 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
         state_styled(Button::new())
             .disabled_background(BUTTON_FILL_DISABLED)
             .disabled_border_color(BUTTON_BORDER_DISABLED),
-        None,
+        Some(authored_tooltip(
+            "Secondary button",
+            "Press D to toggle this control and the slider",
+        )),
     );
+    add_slider(&mut builder, slider, slider_tooltip);
+    builder.build()
+}
+
+fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Tooltip) {
     builder.with(
         El::overlay()
             .size(CONTROL_WIDTH, SLIDER_HEIGHT)
@@ -1092,14 +1128,13 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
             .slider(SLIDER_ID, slider)
             .tooltip(slider_tooltip),
         |builder| {
-            // Bottom layer: the value label, centered and fixed. A grow overlay
-            // layer fills the slider content so the label stays centered
-            // independently of the moving thumb.
+            // The value occupies the top of the control independently of the
+            // track and moving thumb.
             builder.with(
                 El::overlay()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .alignment(AlignX::Center, AlignY::Center),
+                    .alignment(AlignX::Center, AlignY::Top),
                 |builder| {
                     builder.text(
                         Text::new(
@@ -1111,23 +1146,49 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
                     );
                 },
             );
-            // Top layer: the moving thumb, an ordinary descendant marked with
-            // slider_thumb() and authored at the directed range start (left,
-            // vertically centered). Value presentation translates it along the
-            // active axis from that authored center; no relayout runs on value
-            // change. Drawing it above the label keeps it visible across travel.
+
+            // The track is inset by the thumb radius so its endpoints match the
+            // centers reached by `SliderDirection::LeftToRight`.
             builder.with(
                 El::overlay()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .alignment(AlignX::Left, AlignY::Center),
+                    .alignment(AlignX::Center, AlignY::Bottom),
+                |builder| {
+                    builder.with(
+                        El::overlay()
+                            .width(Sizing::GROW)
+                            .height(Sizing::fixed(SLIDER_THUMB_DIAMETER))
+                            .padding(Padding::xy(SLIDER_THUMB_RADIUS, Px(0.0)))
+                            .alignment(AlignX::Center, AlignY::Center),
+                        |builder| {
+                            builder.with(
+                                El::new()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::fixed(SLIDER_TRACK_HEIGHT))
+                                    .background(SLIDER_TRACK_FILL)
+                                    .corner_radius(CornerRadius::all(SLIDER_TRACK_RADIUS)),
+                                |_| {},
+                            );
+                        },
+                    );
+                },
+            );
+
+            // The thumb is authored at the left endpoint. Slider presentation
+            // translates this visual slot along the track without relayout.
+            builder.with(
+                El::overlay()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .alignment(AlignX::Left, AlignY::Bottom),
                 |builder| {
                     builder.with(
                         El::new()
-                            .size(SLIDER_THUMB_WIDTH, SLIDER_THUMB_HEIGHT)
+                            .size(SLIDER_THUMB_DIAMETER, SLIDER_THUMB_DIAMETER)
                             .background(SLIDER_THUMB_FILL)
                             .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_THUMB_BORDER))
-                            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
+                            .corner_radius(CornerRadius::all(SLIDER_THUMB_RADIUS))
                             .id(SLIDER_THUMB_ID)
                             .slider_thumb(),
                         |_| {},
@@ -1136,7 +1197,6 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
             );
         },
     );
-    builder.build()
 }
 
 fn add_editable_text(builder: &mut LayoutBuilder) {
@@ -1149,7 +1209,12 @@ fn add_editable_text(builder: &mut LayoutBuilder) {
             .background(BUTTON_FILL)
             .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
-            .editable_field(TEXT_FIELD_ID, field),
+            .editable_field(TEXT_FIELD_ID, field)
+            .focused_border_color(BUTTON_BORDER_FOCUSED)
+            .tooltip(authored_tooltip(
+                "Editable text",
+                "Press Enter or double-click to edit",
+            )),
         |builder| {
             builder.text((
                 TEXT_FIELD_INITIAL,
@@ -1281,19 +1346,8 @@ fn add_button(
     });
 }
 
-fn button_tooltip() -> Tooltip {
-    authored_tooltip("Primary button", "Pointer click or semantic activation")
-}
-
-fn replacement_button_tooltip() -> Tooltip {
-    authored_tooltip(
-        "Primary button — replaced",
-        "This tooltip has a new entity and fresh show timer",
-    )
-}
-
 fn slider_tooltip() -> Tooltip {
-    authored_tooltip("Level slider", "Drag, use brackets, or focus and activate")
+    authored_tooltip("Level slider", "Drag or use Left/Right Arrow while focused")
 }
 
 fn cube_tooltip() -> Tooltip {
@@ -1472,11 +1526,11 @@ fn toggle_disabled_widgets(
 
 fn replace_primary_tooltip(
     panel: Single<Entity, With<WidgetLabPanel>>,
-    mut primary_tooltip_content: ResMut<PrimaryTooltipContent>,
+    mut primary_tooltip_timing: ResMut<PrimaryTooltipTiming>,
     slider_tooltip: Res<SliderTooltipBlueprint>,
     mut commands: Commands,
 ) {
-    let replacement_content = primary_tooltip_content.toggled();
+    let next_timing = primary_tooltip_timing.toggled();
     let slider = match slider_declaration() {
         Ok(slider) => slider,
         Err(error) => {
@@ -1486,15 +1540,14 @@ fn replace_primary_tooltip(
     };
     match commands.set_tree(
         *panel,
-        widget_tree(
-            slider,
-            replacement_content.tooltip(),
-            slider_tooltip.0.clone(),
-        ),
+        widget_tree(slider, next_timing.tooltip(), slider_tooltip.0.clone()),
     ) {
         Ok(()) => {
-            *primary_tooltip_content = replacement_content;
-            info!("widgets: queued a fresh primary-button tooltip controller");
+            *primary_tooltip_timing = next_timing;
+            info!(
+                "widgets: queued a primary-button tooltip with a {:.1} s show delay",
+                next_timing.delay().as_secs_f32()
+            );
         },
         Err(error) => warn!("widgets: failed to replace primary-button tooltip: {error}"),
     }

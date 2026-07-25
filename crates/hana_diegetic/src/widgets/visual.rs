@@ -42,6 +42,9 @@ impl VisualSlotId {
     /// box for the active-axis extent and solved authored center, then writes
     /// the slot's panel-local translation.
     pub(crate) const SLIDER_THUMB: Self = Self(u32::MAX - 2);
+    /// Root-surface slot authored by [`El::editable_field`](crate::El::editable_field).
+    /// Visible keyboard focus presentation writes only this slot.
+    pub(crate) const EDITABLE_ROOT: Self = Self(u32::MAX - 3);
 
     /// Creates a slot id from a test-chosen stable value in renderer tests.
     #[cfg(test)]

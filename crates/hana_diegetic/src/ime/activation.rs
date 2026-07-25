@@ -1,9 +1,12 @@
 //! Panel picking activation for authored editable fields.
 
 use bevy::camera::NormalizedRenderTarget;
+use bevy::camera::RenderTarget;
+use bevy::camera::visibility::RenderLayers;
 use bevy::diagnostic::FrameCount;
 use bevy::ecs::entity::ContainsEntity;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 use super::ImeOpenSession;
 use super::ImeTarget;
@@ -11,6 +14,12 @@ use super::editor::PendingImePanelAnchor;
 use crate::ComputedDiegeticPanel;
 use crate::DiegeticPanel;
 use crate::render;
+use crate::widgets::PanelWidget;
+use crate::widgets::SemanticWidgetIntent;
+use crate::widgets::WidgetFocusAuthority;
+use crate::widgets::WidgetKind;
+use crate::widgets::WidgetOf;
+use crate::widgets::select_window_presentation_camera;
 
 pub(super) fn observe_panel_clicks(trigger: On<Add, DiegeticPanel>, mut commands: Commands) {
     commands
@@ -51,7 +60,7 @@ fn open_from_panel_click(
     pending_anchor.store(
         panel_entity,
         record.field_id.clone(),
-        click.hit.camera,
+        Some(click.hit.camera),
         window,
         record.bounds,
         record.presentation().clone(),
@@ -82,6 +91,102 @@ fn open_from_panel_click(
             "captured editable field activation on frame {}",
             frame_count.0
         );
+    }
+}
+
+pub(super) fn open_from_semantic_activation(
+    intent: On<SemanticWidgetIntent>,
+    widgets: Query<(&PanelWidget, &WidgetKind, &WidgetOf)>,
+    panels: Query<(
+        &DiegeticPanel,
+        &ComputedDiegeticPanel,
+        Option<&RenderLayers>,
+    )>,
+    cameras: Query<(
+        Entity,
+        &Camera,
+        &GlobalTransform,
+        Option<&RenderTarget>,
+        Option<&RenderLayers>,
+    )>,
+    windows: Query<(), With<Window>>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    focus_authority: Res<WidgetFocusAuthority>,
+    mut pending_anchor: ResMut<PendingImePanelAnchor>,
+    mut commands: Commands,
+) {
+    let SemanticWidgetIntent::Activate { entity, window } = *intent.event() else {
+        return;
+    };
+    let Ok((widget, kind, widget_of)) = widgets.get(entity) else {
+        return;
+    };
+    if *kind != WidgetKind::EditableField {
+        return;
+    }
+    let panel_entity = widget_of.panel();
+    let Ok((panel, computed, panel_layers)) = panels.get(panel_entity) else {
+        return;
+    };
+    let Some(record) = computed
+        .field_records()
+        .iter()
+        .find(|record| !record.duplicate_id && record.field_id == *widget.id())
+    else {
+        return;
+    };
+    let camera = if panel.coordinate_space().is_screen() {
+        None
+    } else {
+        let target_layers = panel_layers
+            .cloned()
+            .unwrap_or_else(|| RenderLayers::layer(0));
+        let preferred = focus_authority.interaction_camera(window, entity);
+        select_window_presentation_camera(
+            preferred,
+            window,
+            &target_layers,
+            &cameras,
+            &windows,
+            &primary_window,
+        )
+    };
+    if !panel.coordinate_space().is_screen() && camera.is_none() {
+        return;
+    }
+
+    pending_anchor.store(
+        panel_entity,
+        record.field_id.clone(),
+        camera,
+        window,
+        record.bounds,
+        record.presentation().clone(),
+    );
+    commands.trigger(ImeOpenSession {
+        window,
+        target: panel_field_target(panel, panel_entity, record.field_id.clone()),
+        initial_text: record.display_text.clone(),
+        field_spec: record.field_spec.clone(),
+        anchor: None,
+    });
+}
+
+const fn panel_field_target(
+    panel: &DiegeticPanel,
+    panel_entity: Entity,
+    field_id: crate::PanelElementId,
+) -> ImeTarget {
+    if panel.coordinate_space().is_screen() {
+        ImeTarget::ScreenPanelField {
+            panel: panel_entity,
+            field_id,
+        }
+    } else {
+        ImeTarget::WorldPanelField {
+            panel: panel_entity,
+            field_id,
+        }
     }
 }
 

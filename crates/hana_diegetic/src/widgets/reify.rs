@@ -300,7 +300,7 @@ fn spawn_widget(
     let callback = widget_callback(&authored).cloned();
     let slider_state = match &authored {
         WidgetSpec::Slider(slider) => Some(slider.initial_state()),
-        WidgetSpec::Button(_) => None,
+        WidgetSpec::Button(_) | WidgetSpec::EditableField(_) => None,
     };
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel).with_children(|children| {
@@ -381,6 +381,7 @@ fn update_widget(
                     commands,
                 );
             },
+            WidgetKind::EditableField => {},
             WidgetKind::Slider => {
                 slider::cancel_slider_drag(
                     entity,
@@ -425,7 +426,7 @@ fn update_widget(
             },
             Some(_) => {},
         },
-        WidgetSpec::Button(_) => {
+        WidgetSpec::Button(_) | WidgetSpec::EditableField(_) => {
             if existing_slider_state.is_some() {
                 widget.remove::<SliderState>();
             }
@@ -446,7 +447,7 @@ fn update_widget(
 const fn widget_callback(authored: &WidgetSpec) -> Option<&ButtonCallback> {
     match authored {
         WidgetSpec::Button(button) => button.callback(),
-        WidgetSpec::Slider(_) => None,
+        WidgetSpec::EditableField(_) | WidgetSpec::Slider(_) => None,
     }
 }
 

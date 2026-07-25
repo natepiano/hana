@@ -113,6 +113,7 @@ impl Plugin for ImePlugin {
                     .chain(),
             )
             .add_observer(activation::observe_panel_clicks)
+            .add_observer(activation::open_from_semantic_activation)
             .add_observer(editor::observe_panel_clicks)
             .add_observer(session::open_session)
             .add_observer(session::request_commit)

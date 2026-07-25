@@ -606,19 +606,6 @@ impl<L, Role> El<L, Role> {
         self
     }
 
-    /// Marks this element as an editable IME field.
-    ///
-    /// The `field_id` is panel-local semantic identity used for hit testing,
-    /// anchoring, and commit routing.
-    pub fn editable_field(
-        mut self,
-        field_id: impl Into<PanelElementId>,
-        field_spec: ImeEditableFieldSpec,
-    ) -> Self {
-        self.common.editable = Some(ImePanelField::new(field_id, field_spec));
-        self
-    }
-
     /// Marks this ordinary element as the thumb of its nearest enclosing
     /// [`El::slider`].
     ///
@@ -647,6 +634,27 @@ impl<L, Role> El<L, Role> {
 }
 
 impl<L> El<L, LayoutOnly> {
+    /// Marks this element as an editable IME widget.
+    ///
+    /// The `field_id` is panel-local semantic identity used for hit testing,
+    /// focus traversal, anchoring, and commit routing. The widget participates
+    /// in ordinary focus traversal automatically. Semantic activation opens
+    /// its editor; while editing, the active IME session reserves Tab and
+    /// Shift+Tab instead of moving widget focus.
+    pub fn editable_field(
+        mut self,
+        field_id: impl Into<PanelElementId>,
+        field_spec: ImeEditableFieldSpec,
+    ) -> El<L, WidgetElement> {
+        self.common.editable = Some(ImePanelField::new(field_id, field_spec));
+        self.common.visual_slot = Some(VisualSlotId::EDITABLE_ROOT);
+        El {
+            common:       self.common,
+            child_layout: self.child_layout,
+            role:         PhantomData,
+        }
+    }
+
     /// Marks this element as a button with panel-local semantic identity `id`.
     pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> El<L, WidgetElement> {
         self.common.id = Some(id.into());
@@ -678,6 +686,23 @@ impl<L> El<L, LayoutOnly> {
 }
 
 impl<L> El<L, WidgetElement> {
+    /// Sets the root border color shown while this widget's keyboard focus
+    /// indicator is visible.
+    ///
+    /// Requires an authored [`El::border`] on the widget element. For buttons
+    /// and sliders this is equivalent to setting the value on their direct
+    /// declaration; editable fields use this element builder because their
+    /// existing field spec describes editing behavior rather than appearance.
+    pub fn focused_border_color(mut self, color: Color) -> Self {
+        if let Some(field) = &mut self.common.editable {
+            field.set_focused_border_color(color);
+        }
+        if let Some(widget) = &mut self.common.widget {
+            widget.set_focused_border_color(color);
+        }
+        self
+    }
+
     /// Attaches a tooltip declaration to this widget element.
     ///
     /// A later call replaces the earlier declaration.

@@ -702,14 +702,14 @@ pub struct CancelFocusedWidget {
 #[derive(Clone, Copy, Debug, Event)]
 #[event(trigger = bevy::ecs::event::EntityTrigger)]
 pub(crate) enum SemanticWidgetIntent {
-    Activate { entity: Entity },
+    Activate { entity: Entity, window: Entity },
     Cancel { entity: Entity },
 }
 
 impl EntityEvent for SemanticWidgetIntent {
     fn event_target(&self) -> Entity {
         match *self {
-            Self::Activate { entity } | Self::Cancel { entity } => entity,
+            Self::Activate { entity, .. } | Self::Cancel { entity } => entity,
         }
     }
 }
@@ -835,7 +835,10 @@ fn route_activate_intent(
     if enabled_widgets.get(widget).is_err() {
         return;
     }
-    commands.trigger(SemanticWidgetIntent::Activate { entity: widget });
+    commands.trigger(SemanticWidgetIntent::Activate {
+        entity: widget,
+        window,
+    });
 }
 
 fn route_cancel_intent(
@@ -909,6 +912,7 @@ mod tests {
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
     use crate::ImeEditableFieldSpec;
+    use crate::ImeInputBlocker;
     use crate::ImeOpenSession;
     use crate::ImeTarget;
     use crate::LayoutBuilder;
@@ -922,6 +926,7 @@ mod tests {
     use crate::WidgetInteractivity;
     use crate::ime::ImePlugin;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::WidgetFocusAuthority;
     use crate::widgets::WidgetsPlugin;
 
     const PANEL_HEIGHT: f32 = 50.0;
@@ -965,7 +970,9 @@ mod tests {
 
     fn record_intent(intent: On<SemanticWidgetIntent>, mut recorded: ResMut<RecordedIntents>) {
         let entry = match *intent.event() {
-            SemanticWidgetIntent::Activate { entity } => (entity, RecordedIntentAction::Activate),
+            SemanticWidgetIntent::Activate { entity, .. } => {
+                (entity, RecordedIntentAction::Activate)
+            },
             SemanticWidgetIntent::Cancel { entity } => (entity, RecordedIntentAction::Cancel),
         };
         recorded.0.push(entry);
@@ -994,6 +1001,29 @@ mod tests {
         for id in ids {
             builder.with(El::new().button(*id, Button::new()), |_| {});
         }
+        let result = DiegeticPanel::world()
+            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+            .with_tree(builder.build())
+            .build();
+        assert!(result.is_ok());
+        let Ok(panel) = result else {
+            return Entity::PLACEHOLDER;
+        };
+        app.world_mut().spawn(panel).id()
+    }
+
+    fn spawn_editable_panel(app: &mut App) -> Entity {
+        let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
+        builder.with(
+            El::new().editable_field(
+                "editable",
+                ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test")),
+            ),
+            |builder| {
+                builder.text("Initial text");
+            },
+        );
+        builder.with(El::new().button("next", Button::new()), |_| {});
         let result = DiegeticPanel::world()
             .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
             .with_tree(builder.build())
@@ -2182,5 +2212,54 @@ mod tests {
             app.world().resource::<RecordedIntents>().0,
             vec![(available, RecordedIntentAction::Activate)]
         );
+    }
+
+    #[test]
+    fn focused_editable_field_activates_ime_and_reserves_traversal() {
+        let mut app = test_app(TestIme::Present);
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().spawn((
+            Camera::default(),
+            GlobalTransform::IDENTITY,
+            RenderTarget::Window(WindowRef::Entity(window)),
+        ));
+        let panel = spawn_editable_panel(&mut app);
+        app.update();
+        let editable = widget(&mut app, panel, "editable");
+        let next = widget(&mut app, panel, "next");
+        request_focus(&mut app, window, editable);
+        app.world_mut().flush();
+        app.world_mut()
+            .write_message(ActivateFocusedWidget { window });
+        let routed = app.world_mut().run_system_once(super::route_semantic_input);
+        assert!(routed.is_ok());
+        app.world_mut().flush();
+
+        assert!(
+            app.world()
+                .resource::<ImeInputBlocker>()
+                .blocks_window(window)
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(editable)
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<ActivateFocusedWidget>>()
+            .clear();
+        app.world_mut().write_message(FocusNextWidget { window });
+        let routed = app.world_mut().run_system_once(super::route_semantic_input);
+        assert!(routed.is_ok());
+        app.world_mut().flush();
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(editable)
+        );
+        assert_ne!(editable, next);
     }
 }

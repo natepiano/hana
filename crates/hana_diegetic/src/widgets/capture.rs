@@ -266,6 +266,7 @@ pub(super) fn reconcile_pointer_input(
                     &mut button_captures,
                     &mut commands,
                 ),
+                Some(WidgetKind::EditableField) => false,
                 Some(WidgetKind::Slider) => slider::cancel_slider_drag(
                     entity,
                     SliderCancelCause::PointerCanceled,
@@ -292,6 +293,7 @@ pub(super) fn reconcile_pointer_input(
                     &mut button_captures,
                     &mut commands,
                 ),
+                Some(WidgetKind::EditableField) => false,
                 Some(WidgetKind::Slider) => slider::resolve_release(
                     entity,
                     position,
@@ -497,6 +499,7 @@ fn queue_final_presses(
                 WidgetKind::Button => commands.queue(move |world: &mut World| {
                     button::capture_reconciled_press(world, entity, pointer_id, sequence);
                 }),
+                WidgetKind::EditableField => {},
                 WidgetKind::Slider => commands.queue(move |world: &mut World| {
                     slider::capture_reconciled_press(world, entity, pointer_id, sequence);
                 }),

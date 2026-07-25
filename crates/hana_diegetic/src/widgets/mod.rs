@@ -1,5 +1,6 @@
 mod button;
 mod capture;
+mod editable;
 mod focus;
 mod id;
 mod input;
@@ -113,6 +114,7 @@ pub use tooltip::TooltipTarget;
 pub use tooltip::TooltipTargetEntity;
 pub use tooltip::TooltipTargetSpace;
 pub(crate) use tooltip::remove_materialized_state as remove_materialized_tooltip_state;
+pub(crate) use tooltip::select_window_presentation_camera;
 pub(crate) use visual::ComputedVisualSlot;
 pub(crate) use visual::VisualOverrideIndex;
 pub(crate) use visual::VisualSlotId;
@@ -287,6 +289,10 @@ impl Plugin for WidgetsPlugin {
                     ApplyDeferred.in_set(WidgetSystems::FocusCommandsApplied),
                     button::present_button_state
                         .run_if(button::presentation_inputs_changed)
+                        .after(WidgetSystems::FocusCommandsApplied)
+                        .before(WidgetSystems::PresentationCommandsApplied),
+                    editable::present_focus
+                        .run_if(editable::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),
                     slider::present_slider_state

@@ -111,6 +111,13 @@ impl WidgetFocusAuthority {
         self.scopes.get(&window).and_then(|scope| scope.widget)
     }
 
+    pub(crate) fn interaction_camera(&self, window: Entity, widget: Entity) -> Option<Entity> {
+        self.scopes
+            .get(&window)
+            .filter(|scope| scope.widget == Some(widget))
+            .and_then(|scope| scope.interaction_camera)
+    }
+
     pub(crate) fn tooltip_focus_context(
         &self,
         widget: Entity,
@@ -541,6 +548,8 @@ mod tests {
     use crate::FocusNextWidget;
     use crate::FocusPreviousWidget;
     use crate::HeadlessLayoutPlugin;
+    use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeEditableFieldSpec;
     use crate::LayoutBuilder;
     use crate::LayoutTree;
     use crate::Mm;
@@ -603,6 +612,20 @@ mod tests {
         for id in ids {
             builder.with(El::new().button(*id, Button::new()), |_| {});
         }
+        builder.build()
+    }
+
+    fn widget_and_field_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
+        builder.with(El::new().button("first", Button::new()), |_| {});
+        builder.with(
+            El::new().editable_field(
+                "editable",
+                ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test")),
+            ),
+            |_| {},
+        );
+        builder.with(El::new().button("last", Button::new()), |_| {});
         builder.build()
     }
 
@@ -674,6 +697,35 @@ mod tests {
         app.world_mut().write_message(FocusLastWidget { window });
         app.update();
         assert_eq!(focused(&app, window), Some(third));
+    }
+
+    #[test]
+    fn traversal_includes_editable_fields_without_author_focus_configuration() {
+        let mut app = test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let result = DiegeticPanel::world()
+            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+            .with_tree(widget_and_field_tree())
+            .build();
+        assert!(result.is_ok());
+        let Ok(panel_data) = result else {
+            return;
+        };
+        let panel = app.world_mut().spawn(panel_data).id();
+        app.update();
+        let first = widget(&mut app, panel, "first");
+        let editable = widget(&mut app, panel, "editable");
+        let last = widget(&mut app, panel, "last");
+        assert!(app.world().get::<WidgetFocusable>(editable).is_some());
+        request_focus(&mut app, window, first);
+
+        app.world_mut().write_message(FocusNextWidget { window });
+        app.update();
+        assert_eq!(focused(&app, window), Some(editable));
+
+        app.world_mut().write_message(FocusNextWidget { window });
+        app.update();
+        assert_eq!(focused(&app, window), Some(last));
     }
 
     #[test]

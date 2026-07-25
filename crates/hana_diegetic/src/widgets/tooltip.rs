@@ -823,6 +823,30 @@ fn select_tooltip_presentation_camera(
     let (window, _, preferred) = focus_visible
         .then(|| focus_authority.tooltip_focus_context(target))
         .flatten()?;
+    select_window_presentation_camera(
+        preferred,
+        window,
+        target_layers,
+        cameras,
+        windows,
+        primary_window,
+    )
+}
+
+pub(crate) fn select_window_presentation_camera(
+    preferred: Option<Entity>,
+    window: Entity,
+    target_layers: &RenderLayers,
+    cameras: &Query<(
+        Entity,
+        &Camera,
+        &GlobalTransform,
+        Option<&RenderTarget>,
+        Option<&RenderLayers>,
+    )>,
+    windows: &Query<(), With<Window>>,
+    primary_window: &Query<Entity, With<PrimaryWindow>>,
+) -> Option<Entity> {
     if let Some(camera) = preferred
         && compatible_presentation_camera(
             camera,
@@ -3540,6 +3564,8 @@ mod tests {
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::HeadlessLayoutPlugin;
+    use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeEditableFieldSpec;
     use crate::LayoutBuilder;
     use crate::Mm;
     use crate::PanelDefaults;
@@ -3874,6 +3900,16 @@ mod tests {
         builder.build()
     }
 
+    fn editable_tooltip_tree(tooltip: Tooltip) -> crate::LayoutTree {
+        let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().editable_field("action", field).tooltip(tooltip),
+            |_| {},
+        );
+        builder.build()
+    }
+
     fn spawn_panel(app: &mut App, tree: crate::LayoutTree) -> Entity {
         let result = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
@@ -3908,6 +3944,22 @@ mod tests {
             .unwrap_or(Entity::PLACEHOLDER);
         assert_ne!(controller, Entity::PLACEHOLDER);
         controller
+    }
+
+    #[test]
+    fn editable_field_tooltip_reifies_against_its_widget_entity() {
+        let mut app = test_app();
+        let panel = spawn_panel(&mut app, editable_tooltip_tree(Tooltip::new(El::new())));
+        app.update();
+        let field = widget(&mut app, panel);
+        let tooltip = controller(&app, field);
+
+        assert_eq!(
+            app.world()
+                .get::<TooltipFor>(tooltip)
+                .map(TooltipFor::target),
+            Some(field),
+        );
     }
 
     fn count_tooltip_cleanup(

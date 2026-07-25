@@ -86,7 +86,7 @@ impl PendingImePanelAnchor {
         &mut self,
         panel: Entity,
         field_id: PanelElementId,
-        camera: Entity,
+        camera: Option<Entity>,
         window: Entity,
         bounds: BoundingBox,
         presentation: PanelFieldPresentation,
@@ -114,7 +114,7 @@ impl PendingImePanelAnchor {
 struct ImePanelAnchorSource {
     panel:        Entity,
     field_id:     PanelElementId,
-    camera:       Entity,
+    camera:       Option<Entity>,
     window:       Entity,
     bounds:       BoundingBox,
     presentation: PanelFieldPresentation,
@@ -554,7 +554,7 @@ fn target_screen_rect(
             let (panel, computed, panel_transform) = panels.get(*panel).ok()?;
             let record = field_record(computed, field_id)?;
             let source = editor.source.as_ref()?;
-            let (camera, camera_transform) = cameras.get(source.camera).ok()?;
+            let (camera, camera_transform) = cameras.get(source.camera?).ok()?;
             project_field_record(record, panel, panel_transform, camera, camera_transform)
         },
         ImeTarget::ScreenPanelField { panel, field_id } => {

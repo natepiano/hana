@@ -68,6 +68,9 @@ pub enum PanelBuildError {
     /// A button authored a state material without a background or border.
     #[error("button `{0}` state material requires an authored background or border")]
     ButtonStateMaterialRequiresSurface(PanelElementId),
+    /// An editable field authored a focus border color without a normal border.
+    #[error("editable field `{0}` focus border color requires an authored border")]
+    EditableFieldFocusBorderColorRequiresBorder(PanelElementId),
     /// A slider-thumb marker sits outside every slider subtree.
     #[error("slider thumb `{0}` must be inside a slider subtree")]
     SliderThumbOutsideSlider(PanelElementId),
@@ -1030,6 +1033,12 @@ mod tests {
                 "button `action` state material requires an authored background or border",
             ),
             (
+                PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(
+                    PanelElementId::named("name"),
+                ),
+                "editable field `name` focus border color requires an authored border",
+            ),
+            (
                 PanelBuildError::SliderThumbOutsideSlider(PanelElementId::named("thumb")),
                 "slider thumb `thumb` must be inside a slider subtree",
             ),
@@ -1215,6 +1224,27 @@ mod tests {
             result,
             Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id))
                 if id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn editable_focus_border_color_without_border_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .editable_field("name", field_spec())
+                        .focused_border_color(Color::srgb(0.9, 0.8, 0.2)),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(id))
+                if id == PanelElementId::named("name")
         ));
     }
 

@@ -783,12 +783,7 @@ impl LayoutTree {
                     .id
                     .clone()
                     .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
-                if !id.is_named() {
-                    return Err(PanelBuildError::WidgetRequiresNamedId(id));
-                }
-                if precompose == PrecomposeMode::Ldr {
-                    return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
-                }
+                let id = validated_widget_id(id, precompose)?;
                 match widget {
                     WidgetSpec::Button(button) => {
                         if button.has_state_background() && element.background.is_none() {
@@ -806,6 +801,7 @@ impl LayoutTree {
                             return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
                         }
                     },
+                    WidgetSpec::EditableField(_) => {},
                     WidgetSpec::Slider(slider) => {
                         if slider.has_state_background() && element.background.is_none() {
                             return Err(PanelBuildError::SliderStateBackgroundRequiresBackground(
@@ -824,6 +820,12 @@ impl LayoutTree {
                     },
                 }
                 Some((id, widget.kind()))
+            } else if let Some(field) = &element.editable {
+                let id = validated_widget_id(field.field_id.clone(), precompose)?;
+                if field.focused_border_color().is_some() && element.border.is_none() {
+                    return Err(PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(id));
+                }
+                Some((id, WidgetKind::EditableField))
             } else {
                 owning_widget
             };
@@ -860,13 +862,26 @@ impl LayoutTree {
                 Cascade::Inherit => inherited_interactivity,
                 Cascade::Override(value) => Cascade::Override(value),
             };
-            let owning_record = if let (Some(id), Some(widget)) = (&element.id, &element.widget) {
+            let widget_declaration = element
+                .id
+                .as_ref()
+                .zip(element.widget.as_ref())
+                .map(|(id, widget)| (id.clone(), widget.clone()))
+                .or_else(|| {
+                    element.editable.as_ref().map(|field| {
+                        (
+                            field.field_id.clone(),
+                            WidgetSpec::EditableField(field.clone()),
+                        )
+                    })
+                });
+            let owning_record = if let Some((id, widget)) = widget_declaration {
                 ranked_records.push((
                     element.z_index,
                     ComputedWidgetRecord::new(
-                        id.clone(),
+                        id,
                         preorder,
-                        widget.clone(),
+                        widget,
                         interactivity,
                         computed.bounds,
                         computed.bounds.intersect(&inherited_clip),
@@ -921,8 +936,11 @@ impl LayoutTree {
         self.elements
             .iter()
             .filter_map(|element| {
-                let widget_id = element.id.as_ref()?;
-                element.widget.as_ref()?;
+                let widget_id = element
+                    .id
+                    .as_ref()
+                    .filter(|_| element.widget.is_some())
+                    .or_else(|| element.editable.as_ref().map(|field| &field.field_id))?;
                 let tooltip = element.tooltip.as_ref()?;
                 Some(crate::widgets::ComputedTooltipRecord::new(
                     widget_id.clone(),
@@ -1069,6 +1087,19 @@ impl LayoutTree {
         }
         tree
     }
+}
+
+fn validated_widget_id(
+    id: PanelElementId,
+    precompose: PrecomposeMode,
+) -> Result<PanelElementId, PanelBuildError> {
+    if !id.is_named() {
+        return Err(PanelBuildError::WidgetRequiresNamedId(id));
+    }
+    if precompose == PrecomposeMode::Ldr {
+        return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
+    }
+    Ok(id)
 }
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {

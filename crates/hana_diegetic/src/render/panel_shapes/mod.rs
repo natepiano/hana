@@ -13,6 +13,7 @@ use self::batching::ShapeBatchStore;
 use self::batching::commit_panel_line_batch_buffers;
 use self::batching::reconcile_panel_line_batches;
 use self::batching::update_panel_line_batch_bounds;
+pub(crate) use self::primitive::PanelShapeRenderKey;
 use self::relationship::PanelShapes;
 use super::PanelChildSystems;
 use super::material_table;

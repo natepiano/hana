@@ -6,6 +6,8 @@ use bevy::prelude::Entity;
 use hana_diegetic::Button;
 use hana_diegetic::ChildDivider;
 use hana_diegetic::El;
+use hana_diegetic::ImeAppOwnedFieldSpec;
+use hana_diegetic::ImeEditableFieldSpec;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::MeshAnchorCommandsExt;
 use hana_diegetic::MeshFace;
@@ -34,6 +36,10 @@ fn associated_tooltips(slider: Slider) {
         .button("button", Button::new())
         .tooltip(tooltip.clone());
     let _ = El::new().slider("slider", slider).tooltip(tooltip);
+    let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+    let _ = El::new()
+        .editable_field("editable", field)
+        .tooltip(Tooltip::new(El::new()));
 }
 
 fn post_widget_row_and_column_builders(slider: Slider) {

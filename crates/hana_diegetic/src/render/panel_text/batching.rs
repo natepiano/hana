@@ -302,20 +302,14 @@ pub(super) fn update_panel_text_batches(
             continue;
         };
         if hidden {
-            backend.batch_store_mut().remove_run(storage_key);
-            // Preserve this run's frame-table position while omitting its
-            // glyph records. Otherwise a tooltip hide renumbers every later
-            // text/shape material in the shared table.
-            if build_glyph_records(
-                &backend,
-                &prepared.prepared,
-                prepared.clip_rect,
+            update_hidden_text_run(
+                &mut backend,
+                material_table.builder_mut(),
+                storage_key,
+                &prepared,
                 &panel_text_child,
-            )
-            .is_some_and(|glyphs| !glyphs.is_empty())
-            {
-                let _ = append_text_material_row(material_table.builder_mut(), material_candidate);
-            }
+                material_candidate,
+            );
             continue;
         }
         let batch_key = batch_key_for_run(
@@ -326,21 +320,7 @@ pub(super) fn update_panel_text_batches(
             material_candidate.pipeline_compatibility,
             material_candidate.resource_compatibility.clone(),
         );
-        let key_changed = backend
-            .batch_store()
-            .key_for_run(storage_key)
-            .is_none_or(|current| current != &batch_key);
-        let geometry_changed = panel_text_geometry_changed(
-            &prepared,
-            &panel_text_child,
-            &z_index,
-            &z_index_rank,
-            &cascade_changed,
-            label_entity,
-            key_changed,
-        );
-        let render_record_changed = record_changed.contains(&label_entity);
-        apply_text_run_update(
+        apply_routed_text_run_update(
             RebuiltTextRunInput {
                 backend: &mut backend,
                 builder: material_table.builder_mut(),
@@ -353,8 +333,12 @@ pub(super) fn update_panel_text_batches(
                 hdr_text_coverage_bias: cascades.hdr_text_coverage_bias(label_entity),
                 material_candidate,
             },
-            geometry_changed,
-            prepared.is_changed() || render_record_changed,
+            &prepared,
+            &panel_text_child,
+            &z_index,
+            &z_index_rank,
+            cascade_changed.contains(&label_entity),
+            record_changed.contains(&label_entity),
         );
     }
 
@@ -389,23 +373,27 @@ fn remove_emptied_panel_text_runs(
     }
 }
 
-fn panel_text_geometry_changed(
-    prepared: &Ref<'_, PreparedPanelText>,
-    panel_text_child: &Ref<'_, PanelTextLayout>,
-    z_index: &Ref<'_, PanelTextDrawZIndex>,
-    z_index_rank: &Ref<'_, PanelTextDrawZIndexRank>,
-    cascade_changed: &EntityHashSet,
-    label_entity: Entity,
-    key_changed: bool,
-) -> bool {
-    // A render-only prepared change leaves glyph geometry intact; every other
-    // signal here re-derives the quads.
-    (prepared.is_changed() && !prepared.render_only)
-        || panel_text_child.is_changed()
-        || z_index.is_changed()
-        || z_index_rank.is_changed()
-        || cascade_changed.contains(&label_entity)
-        || key_changed
+fn update_hidden_text_run(
+    backend: &mut GlyphCache,
+    builder: &mut FrameMaterialTableBuilder,
+    storage_key: RunStorageKey,
+    prepared: &PreparedPanelText,
+    panel_text_child: &PanelTextLayout,
+    material_candidate: MaterialSlotCandidate,
+) {
+    backend.batch_store_mut().remove_run(storage_key);
+    // Retain the row while omitting glyph records so toggling a tooltip does
+    // not renumber later materials in the shared table.
+    if build_glyph_records(
+        backend,
+        &prepared.prepared,
+        prepared.clip_rect,
+        panel_text_child,
+    )
+    .is_some_and(|glyphs| !glyphs.is_empty())
+    {
+        let _ = append_text_material_row(builder, storage_key, material_candidate);
+    }
 }
 
 fn update_existing_text_run_material(
@@ -414,7 +402,8 @@ fn update_existing_text_run_material(
     storage_key: RunStorageKey,
     material_candidate: MaterialSlotCandidate,
 ) {
-    let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
+    let Some(material_slot) = append_text_material_row(builder, storage_key, material_candidate)
+    else {
         backend.batch_store_mut().remove_run(storage_key);
         return;
     };
@@ -434,6 +423,32 @@ struct RebuiltTextRunInput<'a> {
     anti_alias:             AntiAlias,
     hdr_text_coverage_bias: HdrTextCoverageBias,
     material_candidate:     MaterialSlotCandidate,
+}
+
+fn apply_routed_text_run_update(
+    input: RebuiltTextRunInput<'_>,
+    prepared: &Ref<'_, PreparedPanelText>,
+    panel_text_child: &Ref<'_, PanelTextLayout>,
+    z_index: &Ref<'_, PanelTextDrawZIndex>,
+    z_index_rank: &Ref<'_, PanelTextDrawZIndexRank>,
+    cascade_changed: bool,
+    render_record_changed: bool,
+) {
+    let key_changed = input
+        .backend
+        .batch_store()
+        .key_for_run(input.storage_key)
+        .is_none_or(|current| current != &input.batch_key);
+    // A render-only prepared change leaves glyph geometry intact; every other
+    // signal here re-derives the quads.
+    let geometry_changed = (prepared.is_changed() && !prepared.render_only)
+        || panel_text_child.is_changed()
+        || z_index.is_changed()
+        || z_index_rank.is_changed()
+        || cascade_changed
+        || key_changed;
+    let render_only_changed = prepared.is_changed() || render_record_changed;
+    apply_text_run_update(input, geometry_changed, render_only_changed);
 }
 
 /// Routes one run by what changed: a full glyph rebuild, a render-only record
@@ -481,6 +496,7 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         anti_alias,
         hdr_text_coverage_bias,
         material_candidate,
+        ..
     } = input;
     // A glyph missing from the atlas means shaping has not packed it yet. An
     // unrouted run stays out and self-heals next frame; a run that was already
@@ -502,7 +518,8 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         backend.batch_store_mut().remove_run(storage_key);
         return;
     }
-    let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
+    let Some(material_slot) = append_text_material_row(builder, storage_key, material_candidate)
+    else {
         backend.batch_store_mut().remove_run(storage_key);
         return;
     };
@@ -550,7 +567,8 @@ fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
         hdr_text_coverage_bias,
         material_candidate,
     } = input;
-    let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
+    let Some(material_slot) = append_text_material_row(builder, storage_key, material_candidate)
+    else {
         backend.batch_store_mut().remove_run(storage_key);
         return;
     };
@@ -660,9 +678,10 @@ fn strip_tangent_dependent_maps(base: &StandardMaterial) -> StandardMaterial {
 
 fn append_text_material_row(
     builder: &mut FrameMaterialTableBuilder,
+    storage_key: RunStorageKey,
     candidate: MaterialSlotCandidate,
 ) -> Option<MaterialSlotId> {
-    match builder.append_values(candidate.values) {
+    match builder.upsert_values(storage_key.into(), candidate.values) {
         FrameMaterialSlotAppend::Appended(slot) => Some(slot),
         FrameMaterialSlotAppend::DroppedLimit => None,
     }
@@ -1700,11 +1719,14 @@ mod tests {
     }
 
     #[test]
-    fn hidden_panel_routes_no_batched_runs_until_visible() {
+    fn hidden_panel_retains_text_material_rows_without_batched_runs() {
         let mut app = pipeline_app();
         let panel = spawn_panel(&mut app, two_text_tree());
         app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
         settle(&mut app);
+        let hidden_material_table = app.world().resource::<FrameMaterialTableBuild>().table();
+        let hidden_material_rows = hidden_material_table.row_count();
+        let hidden_material_sources = hidden_material_table.live_row_count();
 
         assert_eq!(
             store_stats(&app),
@@ -1712,6 +1734,10 @@ mod tests {
             "a hidden panel's text should not enter the batch store"
         );
         assert!(batch_entities(&mut app).is_empty());
+        assert_eq!(
+            hidden_material_sources, 2,
+            "hidden text should retain one live material source per prepared run",
+        );
 
         app.world_mut()
             .entity_mut(panel)
@@ -1723,6 +1749,18 @@ mod tests {
             "restoring inherited visibility routes the existing text runs"
         );
         assert_eq!(batch_entities(&mut app).len(), 1);
+        let visible_material_slots: Vec<_> = text_run_records(&app)
+            .into_iter()
+            .map(|record| record.material.as_u32())
+            .collect();
+        assert_eq!(visible_material_slots.len(), hidden_material_sources);
+        assert_eq!(
+            app.world()
+                .resource::<FrameMaterialTableBuild>()
+                .table()
+                .row_count(),
+            hidden_material_rows,
+        );
 
         app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
         settle(&mut app);
@@ -1732,6 +1770,22 @@ mod tests {
             "hiding the panel again removes its text from the batch store"
         );
         assert!(batch_entities(&mut app).is_empty());
+        let hidden_again = app.world().resource::<FrameMaterialTableBuild>().table();
+        assert_eq!(hidden_again.row_count(), hidden_material_rows);
+        assert_eq!(hidden_again.live_row_count(), hidden_material_sources);
+
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(Visibility::Inherited);
+        settle(&mut app);
+        let reshown_material_slots: Vec<_> = text_run_records(&app)
+            .into_iter()
+            .map(|record| record.material.as_u32())
+            .collect();
+        assert_eq!(
+            reshown_material_slots, visible_material_slots,
+            "showing the same text again should restore the same material rows",
+        );
     }
 
     #[test]
