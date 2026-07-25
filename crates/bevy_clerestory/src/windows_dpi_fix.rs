@@ -12,6 +12,8 @@
 //! **This workaround can be removed when winit releases a version with the fix
 //! from <https://github.com/rust-windowing/winit/pull/4341>**
 
+use std::cell::Cell;
+
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -79,6 +81,23 @@ fn get_hwnd(window_entity: Entity) -> Option<HWND> {
     })
 }
 
+thread_local! {
+    /// Set while [`handle_dpi_changed`] applies the suggested rect. `SetWindowPos` can
+    /// synchronously re-dispatch `WM_DPICHANGED` to the same window when the move crosses a
+    /// DPI boundary (as a mixed-DPI monitor-reconnect restore does); the flag lets
+    /// [`subclass_proc`] make the re-entrant callback a no-op so it terminates instead of
+    /// recursing without a base case and overflowing the stack.
+    static APPLYING_SUGGESTED_RECT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Clears [`APPLYING_SUGGESTED_RECT`] on scope exit so a failed `SetWindowPos` cannot leave
+/// the re-entrancy guard stuck on.
+struct ClearOnDrop;
+
+impl Drop for ClearOnDrop {
+    fn drop(&mut self) { APPLYING_SUGGESTED_RECT.set(false); }
+}
+
 /// Handle `WM_DPICHANGED` using Microsoft's recommended simple approach.
 ///
 /// The `lparam` contains a pointer to a `RECT` with the suggested new size/position.
@@ -86,6 +105,11 @@ fn get_hwnd(window_entity: Entity) -> Option<HWND> {
 fn handle_dpi_changed(hwnd: HWND, lparam: LPARAM) -> LRESULT {
     // SAFETY: `lparam` is a valid pointer to `RECT` per the `WM_DPICHANGED` contract.
     let suggested_rect = unsafe { &*(lparam.0 as *const RECT) };
+
+    // Guard the reposition: the `SetWindowPos` below can synchronously re-dispatch
+    // `WM_DPICHANGED`, which `subclass_proc` then skips instead of repositioning again.
+    APPLYING_SUGGESTED_RECT.set(true);
+    let _clear = ClearOnDrop;
 
     // SAFETY: `SetWindowPos` is safe with a valid `HWND` and dimensions.
     let result = unsafe {
@@ -101,7 +125,7 @@ fn handle_dpi_changed(hwnd: HWND, lparam: LPARAM) -> LRESULT {
     };
 
     if result.is_err() {
-        warn!("[windows_dpi_fix] SetWindowPos failed: {:?}", result);
+        warn!("[windows_dpi_fix] SetWindowPos failed: {result:?}");
     }
 
     LRESULT(DPI_CHANGE_HANDLED_RESULT)
@@ -121,6 +145,12 @@ unsafe extern "system" fn subclass_proc(
     _: usize,
 ) -> LRESULT {
     if msg == WM_DPICHANGED {
+        if APPLYING_SUGGESTED_RECT.get() {
+            // Re-entrant `WM_DPICHANGED` from our own `SetWindowPos`; the window already sits
+            // on the suggested rect. Report it handled without repositioning again so the
+            // native callback terminates instead of recursing until the stack overflows.
+            return LRESULT(DPI_CHANGE_HANDLED_RESULT);
+        }
         debug!("[windows_dpi_fix] Intercepted WM_DPICHANGED");
         return handle_dpi_changed(hwnd, lparam);
     }

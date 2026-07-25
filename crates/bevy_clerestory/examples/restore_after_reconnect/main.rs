@@ -59,6 +59,7 @@ impl Plugin for HotplugProbePlugin {
             .init_resource::<control::CommandReceipts>()
             .init_resource::<recovery_trace::ApplicationRecoveryCycles>()
             .init_resource::<recovery_trace::PreUnplugReadiness>()
+            .init_resource::<recovery_trace::HeldApplicationSpawn>()
             .init_resource::<window_panel::ProbePanelMaterial>()
             .init_resource::<window_panel::ProbeTarget>()
             .init_resource::<window_trace::WindowBindings>()
@@ -102,6 +103,7 @@ impl Plugin for HotplugProbePlugin {
             .add_systems(
                 PreUpdate,
                 (
+                    recovery_trace::apply_held_application_spawn,
                     window_panel::attach_window_content,
                     recovery_trace::request_application_window_restore,
                 )

@@ -120,6 +120,8 @@ class TestEntry(_TestEntryRequired, total=False):
     description: str
     automation: str
     launch_monitor: int
+    launch_monitor_role: str
+    launch_size: str
     requires: TestRequirements
     mutation: MutationConfig
     workaround_validation: WorkaroundValidation
@@ -196,6 +198,7 @@ configured_artifact_directory: Path | None = None
 configured_persistence_path: Path | None = None
 configured_launch_monitor: int | None = None
 configured_launch_position: tuple[int, int] | None = None
+configured_launch_size: str | None = None
 
 
 # =============================================================================
@@ -546,6 +549,8 @@ def launch_app(
         env["CLERESTORY_TEST_LAUNCH_POSITION"] = (
             f"{configured_launch_position[0]},{configured_launch_position[1]}"
         )
+    if configured_launch_size is not None:
+        env["CLERESTORY_TEST_LAUNCH_SIZE"] = configured_launch_size
 
     artifact_directory = configured_artifact_directory
     if artifact_directory is None:
@@ -803,7 +808,26 @@ def _strategy_name(raw: object) -> str:
     return "unknown"
 
 
-def validate_launch_monitor(test: TestEntry, entity: JsonDict, backend: str) -> None:
+def resolve_launch_monitor(test: TestEntry, env_vars: dict[str, str]) -> int | None:
+    """Launch monitor index for a case, by scale ROLE when set, else fixed slot.
+
+    A case may pin its launch monitor to a scale role instead of a numeric slot by
+    setting "launch_monitor_role" to "high" or "low". The role resolves against the
+    HIGH_SCALE_MONITOR_INDEX / LOW_SCALE_MONITOR_INDEX exported by discovery, so the
+    differently-scaled monitor can land on any index. Cases without a role fall back
+    to the numeric "launch_monitor" (unchanged for every non-cross-DPI case).
+    """
+    role = test.get("launch_monitor_role")
+    if role is not None:
+        key = "HIGH_SCALE_MONITOR_INDEX" if role == "high" else "LOW_SCALE_MONITOR_INDEX"
+        value = env_vars.get(key)
+        return int(value) if value is not None else None
+    return test.get("launch_monitor")
+
+
+def validate_launch_monitor(
+    test: TestEntry, entity: JsonDict, backend: str, env_vars: dict[str, str]
+) -> None:
     """Verify the window launched on the test's launch_monitor and, for
     different-scale tests, genuinely exercised a cross-DPI strategy.
 
@@ -841,7 +865,9 @@ def validate_launch_monitor(test: TestEntry, entity: JsonDict, backend: str) -> 
         return
     diagnostics = cast(JsonDict, diagnostics)
 
-    expected_launch = test.get("launch_monitor", 0)
+    expected_launch = resolve_launch_monitor(test, env_vars)
+    if expected_launch is None:
+        expected_launch = 0
     actual_launch = diagnostics.get("starting_monitor_index")
     strategy = _strategy_name(diagnostics.get("monitor_scale_strategy"))
     starting_scale = diagnostics.get("starting_scale")
@@ -1204,8 +1230,8 @@ def setup_test(
     """
     global configured_launch_monitor
     global configured_launch_position
+    global configured_launch_size
     test = find_test(config, test_id)
-    configured_launch_monitor = test.get("launch_monitor")
     resolved_backend = resolve_backend(backend, test)
     env_vars = load_env_file(env_file) if env_file else {}
 
@@ -1214,12 +1240,19 @@ def setup_test(
     if resolved_backend == "x11":
         _swap_x11_env_vars(env_vars)
 
+    # Resolve after env is loaded so a scale-role launch monitor can look up its index.
+    configured_launch_monitor = resolve_launch_monitor(test, env_vars)
+
     configured_launch_position = None
     if configured_launch_monitor is not None:
         position_x = env_vars.get(f"MONITOR_{configured_launch_monitor}_POS_X")
         position_y = env_vars.get(f"MONITOR_{configured_launch_monitor}_POS_Y")
         if position_x is not None and position_y is not None:
             configured_launch_position = (int(position_x) + 100, int(position_y) + 100)
+
+    # A small launch window keeps the born-on monitor from receiving an oversized software
+    # (WARP) swapchain before the restore relocates it; only the cross-DPI cases set it.
+    configured_launch_size = test.get("launch_size")
 
     write_ron(test["ron_file"], ron_dir, ron_path, env_vars)
     return test, resolved_backend, env_vars
@@ -1386,11 +1419,22 @@ def run_discovery(
     except (URLError, OSError):
         print("# WARNING: WindowRestoredReceived resource query failed")
 
-    # Compute DIFFERENT_SCALES
-    if num_monitors >= 2:
-        s0 = json_str(monitor_list[0].get("scale"))
-        s1 = json_str(monitor_list[1].get("scale"))
-        different = "true" if s0 != s1 else "false"
+    # Compute DIFFERENT_SCALES across ALL monitors (not just 0 vs 1) and, when scales differ,
+    # expose the highest- and lowest-scale monitor indices plus their logical origins. Cross-DPI
+    # cases pick their launch/target monitor by scale role instead of a fixed slot, so the
+    # differently-scaled monitor can be any discovered display (e.g. a provisioned virtual one).
+    scales = [(i, float(json_str(m.get("scale")))) for i, m in enumerate(monitor_list)]
+    if len({scale for _, scale in scales}) >= 2:
+        different = "true"
+        high_index = max(scales, key=lambda pair: pair[1])[0]
+        low_index = min(scales, key=lambda pair: pair[1])[0]
+        for role, index in (("HIGH", high_index), ("LOW", low_index)):
+            env_vars[f"{role}_SCALE_MONITOR_INDEX"] = str(index)
+            print(f"export {role}_SCALE_MONITOR_INDEX={index}")
+            for suffix in ("LOGICAL_POS_X", "LOGICAL_POS_Y"):
+                value = env_vars.get(f"MONITOR_{index}_{suffix}", "0")
+                env_vars[f"{role}_SCALE_MONITOR_{suffix}"] = value
+                print(f"export {role}_SCALE_MONITOR_{suffix}={value}")
     else:
         different = "false"
 
@@ -1542,13 +1586,16 @@ def run_test(
     # precondition. (env_vars holds X11-swapped scales for the x11 backend.)
     requires = test.get("requires", {})
     if requires.get("different_scales"):
-        scale0 = env_vars.get("MONITOR_0_SCALE")
-        scale1 = env_vars.get("MONITOR_1_SCALE")
-        if scale0 is not None and scale1 is not None and scale0 == scale1:
+        seen_scales: set[str] = set()
+        monitor_i = 0
+        while f"MONITOR_{monitor_i}_SCALE" in env_vars:
+            seen_scales.add(env_vars[f"MONITOR_{monitor_i}_SCALE"])
+            monitor_i += 1
+        if len(seen_scales) < 2:
             skip_line(
                 "primary",
                 "different_scales",
-                f"backend={resolved_backend} reports uniform scale {scale0}; cross-DPI scenario unavailable",
+                f"backend={resolved_backend} reports uniform scale; cross-DPI scenario unavailable",
             )
             sys.exit(0)
 
@@ -1603,7 +1650,7 @@ def run_test(
     # rather than spawning same-scale and passing the checks above hollowly.
     primary_entity = resolve_primary_entity()
     if primary_entity is not None:
-        validate_launch_monitor(test, primary_entity, resolved_backend)
+        validate_launch_monitor(test, primary_entity, resolved_backend, env_vars)
 
     # Persistence setup (set mode before shutdown)
     if has_persistence:

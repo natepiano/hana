@@ -174,6 +174,10 @@ pub(super) fn application_name() -> String {
         .unwrap_or_default()
 }
 
+#[allow(
+    clippy::missing_const_for_fn,
+    reason = "const-eligibility is platform- and cfg-divergent: get_window_position is const only on non-macOS non-test builds"
+)]
 fn capture_window_position(
     entity: Entity,
     window: &Window,

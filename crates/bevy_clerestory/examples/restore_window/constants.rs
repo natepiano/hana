@@ -78,6 +78,10 @@ pub(crate) const TEST_HTTP_PORT_ENVIRONMENT_VARIABLE: &str = "BRP_EXTRAS_PORT";
 pub(crate) const TEST_LAUNCH_MONITOR_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_LAUNCH_MONITOR";
 pub(crate) const TEST_LAUNCH_POSITION_ENVIRONMENT_VARIABLE: &str =
     "CLERESTORY_TEST_LAUNCH_POSITION";
+/// Physical `width,height` for the initial window, used by the cross-DPI cases so the launch
+/// window fits the (possibly small, software-rendered) monitor it is born on before the restore
+/// relocates it. Absent for every other case, which keeps Bevy's default window size.
+pub(crate) const TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_LAUNCH_SIZE";
 pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_MODE";
 pub(crate) const TEST_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE: &str =
     "CLERESTORY_TEST_PERSISTENCE_PATH";

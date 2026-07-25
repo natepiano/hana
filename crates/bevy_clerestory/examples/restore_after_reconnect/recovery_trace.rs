@@ -36,6 +36,39 @@ pub(super) struct PendingApplicationRestore {
     monitor:    MonitorInfo,
 }
 
+/// Seconds to let the display settle after a monitor topology change before spawning the
+/// application-controlled window. On a GPU-less Windows host wgpu falls back to the WARP
+/// software rasterizer, which can deadlock when a new window surface is created while it is
+/// still reconfiguring for the changed display; waiting lets it finish first. Zero on
+/// platforms with a hardware renderer, which handle live surface creation fine.
+const APPLICATION_SPAWN_SETTLE_SECS: f32 = if cfg!(windows) { 8.0 } else { 0.0 };
+
+/// A deferred application-controlled window spawn, held until the display settles.
+struct HeldSpawn {
+    window_key: WindowKey,
+    monitor:    MonitorInfo,
+    timer:      Timer,
+}
+
+/// Holds a pending application-window spawn while the settle timer runs.
+#[derive(Resource)]
+pub(super) struct HeldApplicationSpawn {
+    pending:     Option<HeldSpawn>,
+    /// Seconds to defer the application-window spawn after a reconnect. Defaults to
+    /// [`APPLICATION_SPAWN_SETTLE_SECS`]; unit tests inject `0.0` for a deterministic
+    /// immediate spawn.
+    settle_secs: f32,
+}
+
+impl Default for HeldApplicationSpawn {
+    fn default() -> Self {
+        Self {
+            pending:     None,
+            settle_secs: APPLICATION_SPAWN_SETTLE_SECS,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ReadinessState {
     #[default]
@@ -355,14 +388,13 @@ pub(super) fn on_window_recovery_pending(
     );
 }
 
-pub(super) fn prepare_application_window_restore(
-    event: On<WindowRecoveryAvailable>,
-    windows: Query<(Entity, &ManagedWindow)>,
-    mut commands: Commands,
+/// Spawn (or reuse) the application-controlled window and mark it for restore.
+fn spawn_or_reuse_application_window(
+    commands: &mut Commands,
+    windows: &Query<(Entity, &ManagedWindow)>,
+    window_key: WindowKey,
+    monitor: MonitorInfo,
 ) {
-    if event.window_key != WindowKey::Managed(APPLICATION_WINDOW_KEY.into()) {
-        return;
-    }
     let entity = windows
         .iter()
         .find(|(_, managed_window)| managed_window.name == APPLICATION_WINDOW_KEY)
@@ -380,9 +412,56 @@ pub(super) fn prepare_application_window_restore(
             |(entity, _)| entity,
         );
     commands.entity(entity).insert(PendingApplicationRestore {
-        window_key: event.window_key.clone(),
-        monitor:    event.monitor,
+        window_key,
+        monitor,
     });
+}
+
+pub(super) fn prepare_application_window_restore(
+    event: On<WindowRecoveryAvailable>,
+    windows: Query<(Entity, &ManagedWindow)>,
+    mut commands: Commands,
+    mut held: ResMut<HeldApplicationSpawn>,
+) {
+    if event.window_key != WindowKey::Managed(APPLICATION_WINDOW_KEY.into()) {
+        return;
+    }
+    if held.settle_secs > 0.0 {
+        // Hold the spawn until the display settles so the WARP software rasterizer does not
+        // deadlock creating the surface mid-topology-change; `apply_held_application_spawn`
+        // performs it once the timer finishes.
+        held.pending = Some(HeldSpawn {
+            window_key: event.window_key.clone(),
+            monitor:    event.monitor,
+            timer:      Timer::from_seconds(held.settle_secs, TimerMode::Once),
+        });
+    } else {
+        spawn_or_reuse_application_window(
+            &mut commands,
+            &windows,
+            event.window_key.clone(),
+            event.monitor,
+        );
+    }
+}
+
+/// Perform a held application-window spawn once its settle timer finishes.
+pub(super) fn apply_held_application_spawn(
+    time: Res<Time>,
+    mut held: ResMut<HeldApplicationSpawn>,
+    windows: Query<(Entity, &ManagedWindow)>,
+    mut commands: Commands,
+) {
+    let ready = match held.pending.as_mut() {
+        Some(spawn) => spawn.timer.tick(time.delta()).is_finished(),
+        None => return,
+    };
+    if !ready {
+        return;
+    }
+    if let Some(spawn) = held.pending.take() {
+        spawn_or_reuse_application_window(&mut commands, &windows, spawn.window_key, spawn.monitor);
+    }
 }
 
 pub(super) fn request_application_window_restore(
@@ -737,6 +816,10 @@ mod tests {
             .init_resource::<Assets<StandardMaterial>>()
             .init_resource::<super::super::window_panel::ProbePanelMaterial>()
             .init_resource::<super::super::window_panel::ProbeTarget>()
+            .insert_resource(HeldApplicationSpawn {
+                pending:     None,
+                settle_secs: 0.0,
+            })
             .insert_resource(ProbeTrace::default())
             .add_observer(on_window_recovery_pending)
             .add_observer(prepare_application_window_restore)
