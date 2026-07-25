@@ -24,7 +24,9 @@ use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
 use crate::constants::SCALE_FACTOR_EPSILON;
 use crate::constants::SETTLE_STABILITY_SECS;
 use crate::constants::SETTLE_TIMEOUT_SECS;
+#[cfg(target_os = "macos")]
 use crate::macos_tabbing_fix;
+#[cfg(target_os = "macos")]
 use crate::macos_tabbing_fix::NativeFullscreenObservations;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::MonitorTopologyRevision;
@@ -141,6 +143,25 @@ fn matching_scale_change(
                     && (input.scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
             }) && (live_scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
         })
+}
+
+/// Whether Clerestory's monitor association already reports the window on a monitor at the
+/// target scale.
+///
+/// The Windows two-phase cross-DPI restore (`CompensateSizeOnly`) normally waits for winit's
+/// `WindowScaleFactorChanged` to confirm the DPI crossing before applying the exact size. But
+/// the restore window is hidden until it completes, and winit does not emit that event for a
+/// hidden window (the same reason the no-saved-position branch of [`begin_cross_dpi_restore`]
+/// skips the wait). The monitor association — updated from the OS monitor the window actually
+/// landed on — is an equivalent "the cross-DPI move landed on the target scale" signal that does
+/// not require revealing the window, so the reveal still happens once, at the final geometry.
+fn current_monitor_reached_target_scale(
+    current_monitor: Option<&CurrentMonitor>,
+    target_scale: f64,
+) -> bool {
+    current_monitor.is_some_and(|current| {
+        (current.monitor_info.scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
+    })
 }
 
 fn correct_initial_starting_scale(
@@ -480,6 +501,58 @@ pub(crate) fn restore_windows(
     }
 }
 
+/// Advance a cross-DPI restore out of `WaitingForScaleChange` once the scale change is
+/// confirmed — either by winit's `WindowScaleFactorChanged` ([`matching_scale_change`]) or, for
+/// the Windows `CompensateSizeOnly` path whose hidden window never receives that event, by the
+/// monitor association reaching the target scale ([`current_monitor_reached_target_scale`]).
+fn advance_scale_change_wait(
+    entity: Entity,
+    restore_preparation: &RestorePreparation,
+    target_position: &mut TargetPosition,
+    window: &Window,
+    scale_inputs: &ObservedScaleInputs,
+    current_monitor: Option<&CurrentMonitor>,
+) {
+    match target_position.monitor_scale_strategy {
+        MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange {
+            attempt_id,
+        }) if matching_scale_change(
+            entity,
+            restore_preparation.attempt_id(),
+            attempt_id,
+            target_position.target_scale,
+            f64::from(window.resolution.base_scale_factor()),
+            scale_inputs,
+        ) =>
+        {
+            debug!(
+                "[Restore] ScaleChanged received, transitioning to WindowRestoreState::ApplySize"
+            );
+            target_position.monitor_scale_strategy =
+                MonitorScaleStrategy::HigherToLower(WindowRestoreState::ApplySize);
+        },
+        MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange {
+            attempt_id,
+        }) if matching_scale_change(
+            entity,
+            restore_preparation.attempt_id(),
+            attempt_id,
+            target_position.target_scale,
+            f64::from(window.resolution.base_scale_factor()),
+            scale_inputs,
+        ) || current_monitor_reached_target_scale(
+            current_monitor,
+            target_position.target_scale,
+        ) =>
+        {
+            debug!("[Restore] CompensateSizeOnly: transitioning to ApplySize");
+            target_position.monitor_scale_strategy =
+                MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize);
+        },
+        _ => {},
+    }
+}
+
 fn restore_window(
     entity: Entity,
     restore_preparation: &RestorePreparation,
@@ -530,41 +603,14 @@ fn restore_window(
         return;
     }
 
-    match target_position.monitor_scale_strategy {
-        MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange {
-            attempt_id,
-        }) if matching_scale_change(
-            entity,
-            restore_preparation.attempt_id(),
-            attempt_id,
-            target_position.target_scale,
-            f64::from(window.resolution.base_scale_factor()),
-            scale_inputs,
-        ) =>
-        {
-            debug!(
-                "[Restore] ScaleChanged received, transitioning to WindowRestoreState::ApplySize"
-            );
-            target_position.monitor_scale_strategy =
-                MonitorScaleStrategy::HigherToLower(WindowRestoreState::ApplySize);
-        },
-        MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange {
-            attempt_id,
-        }) if matching_scale_change(
-            entity,
-            restore_preparation.attempt_id(),
-            attempt_id,
-            target_position.target_scale,
-            f64::from(window.resolution.base_scale_factor()),
-            scale_inputs,
-        ) =>
-        {
-            debug!("[Restore] CompensateSizeOnly: transitioning to ApplySize");
-            target_position.monitor_scale_strategy =
-                MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize);
-        },
-        _ => {},
-    }
+    advance_scale_change_wait(
+        entity,
+        restore_preparation,
+        target_position,
+        window,
+        scale_inputs,
+        current_monitor,
+    );
 
     if !macos_fullscreen
         && matches!(

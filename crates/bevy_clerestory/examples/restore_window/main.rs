@@ -31,10 +31,12 @@ use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy::window::MonitorSelection;
 use bevy::window::WindowPosition;
+use bevy::window::WindowResolution;
 use bevy_clerestory::WindowManagerPlugin;
 use constants::PRIMARY_WINDOW_TITLE;
 use constants::TEST_LAUNCH_MONITOR_ENVIRONMENT_VARIABLE;
 use constants::TEST_LAUNCH_POSITION_ENVIRONMENT_VARIABLE;
+use constants::TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE;
 use constants::TEST_MODE_ENVIRONMENT_VARIABLE;
 use constants::TEST_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE;
 use events::MismatchStates;
@@ -100,18 +102,54 @@ fn test_launch_position() -> std::io::Result<WindowPosition> {
     )
 }
 
+/// Parse `CLERESTORY_TEST_LAUNCH_SIZE` (physical `width,height`) into a window resolution.
+/// Returns `None` when unset, keeping Bevy's default window size for non-cross-DPI cases.
+fn parse_launch_size(value: Option<&str>) -> std::io::Result<Option<WindowResolution>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let (width, height) = value.split_once(',').ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid {TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE}: expected width,height"),
+        )
+    })?;
+    let width = width.trim().parse::<u32>().map_err(|error| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid {TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE} width: {error}"),
+        )
+    })?;
+    let height = height.trim().parse::<u32>().map_err(|error| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid {TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE} height: {error}"),
+        )
+    })?;
+    Ok(Some(WindowResolution::new(width, height)))
+}
+
+fn test_launch_size() -> std::io::Result<Option<WindowResolution>> {
+    parse_launch_size(optional_environment_value(TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE)?.as_deref())
+}
+
 fn main() -> std::io::Result<()> {
     let launch_position = test_launch_position()?;
+    let launch_size = test_launch_size()?;
     let persistence_path = optional_environment_value(TEST_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE)?;
+    let mut primary_window = Window {
+        title: PRIMARY_WINDOW_TITLE.into(),
+        position: launch_position,
+        ..default()
+    };
+    if let Some(resolution) = launch_size {
+        primary_window.resolution = resolution;
+    }
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: PRIMARY_WINDOW_TITLE.into(),
-                    position: launch_position,
-                    ..default()
-                }),
+                primary_window: Some(primary_window),
                 ..default()
             })
             // This window manager renders only flat UI, so GPU mesh preprocessing and its
@@ -174,25 +212,44 @@ mod tests {
 
     #[test]
     fn absent_launch_monitor_keeps_automatic_positioning() {
+        // `io::Error` is not `PartialEq`, so unwrap and compare the `WindowPosition` itself.
         assert_eq!(
-            parse_launch_position(None, None),
-            Ok(WindowPosition::Automatic),
+            parse_launch_position(None, None).unwrap(),
+            WindowPosition::Automatic,
         );
     }
 
     #[test]
     fn launch_monitor_centers_the_initial_window_on_that_monitor() {
         assert_eq!(
-            parse_launch_position(Some("2"), None),
-            Ok(WindowPosition::Centered(MonitorSelection::Index(2))),
+            parse_launch_position(Some("2"), None).unwrap(),
+            WindowPosition::Centered(MonitorSelection::Index(2)),
         );
     }
 
     #[test]
     fn explicit_launch_position_takes_precedence_over_monitor_centering() {
         assert_eq!(
-            parse_launch_position(Some("2"), Some("-1200,80")),
-            Ok(WindowPosition::At(IVec2::new(-1200, 80))),
+            parse_launch_position(Some("2"), Some("-1200,80")).unwrap(),
+            WindowPosition::At(IVec2::new(-1200, 80)),
         );
+    }
+
+    #[test]
+    fn absent_launch_size_keeps_default_resolution() {
+        assert!(parse_launch_size(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn explicit_launch_size_sets_the_window_resolution() {
+        let resolution = parse_launch_size(Some("640,480")).unwrap().unwrap();
+        assert_eq!(resolution.physical_width(), 640);
+        assert_eq!(resolution.physical_height(), 480);
+    }
+
+    #[test]
+    fn malformed_launch_size_is_an_error() {
+        assert!(parse_launch_size(Some("640")).is_err());
+        assert!(parse_launch_size(Some("640,abc")).is_err());
     }
 }

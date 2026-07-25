@@ -412,9 +412,11 @@ def run_discovery(
     executable: Path,
     report: RunReport,
     selected_platform: str,
+    suffix: str = "",
 ) -> Path:
-    environment_path = report.artifact_directory / "discovery.env"
-    artifact_directory = report.artifact_directory / "discovery"
+    tag = f"-{suffix}" if suffix else ""
+    environment_path = report.artifact_directory / f"discovery{tag}.env"
+    artifact_directory = report.artifact_directory / f"discovery{tag}"
     persistence_path = artifact_directory / "windows.ron"
     backend = "x11-also" if selected_platform == "linux" else "native"
     print("Discovery: reading monitor capabilities", flush=True)
@@ -443,7 +445,7 @@ def run_discovery(
         result = run_command(
             command,
             cwd=CRATE_ROOT,
-            log_path=report.artifact_directory / f"discovery-attempt-{attempt}.log",
+            log_path=report.artifact_directory / f"discovery{tag}-attempt-{attempt}.log",
             timeout_seconds=CASE_TIMEOUT_SECONDS,
             report=report,
         )
@@ -730,6 +732,25 @@ def run_assisted_partition(
         )
         report.append(result)
         report.event("case-completed", result.outcome.value, case_id)
+
+
+def _needs_cross_dpi_provisioning(
+    test: dict[str, object],
+    environment: dict[str, str],
+) -> bool:
+    """A cross-DPI case that the real-monitor startup discovery cannot satisfy.
+
+    The startup discovery runs against the host's real monitors (uniform scale on
+    this hardware), so different_scales cases are deferred to a dedicated partition
+    that provisions a differently-scaled virtual monitor. If the real environment
+    already reports differing scales, the case runs normally in the main loop.
+    """
+    requirements = test.get("requires", {})
+    return (
+        isinstance(requirements, dict)
+        and bool(requirements.get("different_scales"))
+        and environment.get("DIFFERENT_SCALES") != "true"
+    )
 
 
 def requirement_result(
@@ -1155,8 +1176,15 @@ def main() -> int:
             if args.single_monitor:
                 environment["NUM_MONITORS"] = "1"
             total = len(automated_tests)
+            cross_dpi_ids = {
+                str(test["id"])
+                for test in automated_tests
+                if _needs_cross_dpi_provisioning(test, environment)
+            }
             for index, test in enumerate(automated_tests, start=1):
                 case_id = str(test["id"])
+                if case_id in cross_dpi_ids:
+                    continue  # handled by the cross-DPI partition below
                 print(f"Restore {index}/{total}: {case_id}", flush=True)
                 report.event("case-started", f"restore {index}/{total}", case_id)
                 unavailable = requirement_result(test, environment, selected_platform)
@@ -1166,6 +1194,121 @@ def main() -> int:
                 report.append(result)
                 report.event("case-completed", result.outcome.value, case_id)
                 print(f"  {result.outcome.value}", flush=True)
+
+            # Cross-DPI restore partition. These cases need two monitors with different
+            # scale factors; the real-monitor startup discovery has uniform scale, so they
+            # were deferred out of the loop above. Provision a differently-scaled virtual
+            # monitor (the VDD, which power_on forces to scale 1), re-discover so the
+            # HIGH/LOW_SCALE_* role vars are populated, run the cases against that
+            # discovery, then disable the VDD to restore the desktop. Without a
+            # --hardware-profile (or off Windows) there is no way to create the second
+            # scale, so the cases stay unavailable — preserving prior behavior.
+            cross_dpi_tests = [
+                test for test in automated_tests if str(test["id"]) in cross_dpi_ids
+            ]
+            if cross_dpi_tests and (
+                args.hardware_profile is None or sys.platform != "win32"
+            ):
+                for test in cross_dpi_tests:
+                    case_id = str(test["id"])
+                    result = requirement_result(
+                        test, environment, selected_platform
+                    ) or unavailable_case(
+                        case_id,
+                        case_interaction(test),
+                        Evidence.APPLICATION,
+                        "requires a differently-scaled monitor; provision via "
+                        "--hardware-profile on Windows",
+                        "different-scales",
+                    )
+                    report.append(result)
+                    report.event("case-completed", result.outcome.value, case_id)
+                    print(f"  {result.outcome.value}", flush=True)
+            elif cross_dpi_tests:
+                assert args.hardware_profile is not None
+                cross_dpi_profile = HardwareProfile.load(
+                    args.hardware_profile.resolve()
+                )
+                print(
+                    "cross-dpi: enabling virtual monitor before discovery", flush=True
+                )
+                report.event("cross-dpi", "enabling virtual monitor before discovery")
+                power_on = cross_dpi_profile.power_on.run(dict(os.environ))
+                if power_on.returncode != 0:
+                    raise RuntimeError(
+                        "failed to enable the virtual display before cross-DPI discovery"
+                    )
+                # The virtual monitor comes up at the desktop scale (matching the real
+                # monitors), so discovery would report DIFFERENT_SCALES=false and skip the
+                # cross-DPI cases. Force its source DPI to the recommended (100%) scale via the
+                # DisplayConfig API so it differs from the real scale-2 monitors — live, no
+                # sign-out. See phase15-cross-dpi-provisioning in project memory.
+                print("cross-dpi: forcing virtual monitor to scale 1", flush=True)
+                report.event("cross-dpi", "forcing virtual monitor to scale 1")
+                force_low_dpi = subprocess.run(
+                    [
+                        "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File",
+                        str(SCRIPT_DIRECTORY / "windows_vdd" / "dpi_scale.ps1"),
+                        "-Match", "MTT1337", "-Action", "setrel", "-Rel", "0",
+                    ],
+                    check=False,
+                    timeout=90,
+                )
+                if force_low_dpi.returncode != 0:
+                    raise RuntimeError(
+                        "failed to force the virtual display to scale 1 for cross-DPI"
+                    )
+                try:
+                    cross_dpi_environment_path = run_discovery(
+                        config_path,
+                        binaries[""],
+                        report,
+                        selected_platform,
+                        suffix="crossdpi",
+                    )
+                    cross_dpi_environment = load_environment_file(
+                        cross_dpi_environment_path
+                    )
+                    for cross_index, test in enumerate(cross_dpi_tests, start=1):
+                        case_id = str(test["id"])
+                        print(
+                            f"Cross-DPI {cross_index}/{len(cross_dpi_tests)}: {case_id}",
+                            flush=True,
+                        )
+                        report.event(
+                            "case-started",
+                            f"cross-dpi {cross_index}/{len(cross_dpi_tests)}",
+                            case_id,
+                        )
+                        unavailable = requirement_result(
+                            test, cross_dpi_environment, selected_platform
+                        )
+                        result = unavailable or run_restore_case(
+                            test,
+                            binaries,
+                            config_path,
+                            cross_dpi_environment_path,
+                            report,
+                        )
+                        report.append(result)
+                        report.event("case-completed", result.outcome.value, case_id)
+                        print(f"  {result.outcome.value}", flush=True)
+                finally:
+                    # Raw power_off (not PowerSafety) avoids writing a restore-required
+                    # marker; disabling returns the host to its real monitors.
+                    print(
+                        "cross-dpi: disabling virtual monitor to restore the desktop",
+                        flush=True,
+                    )
+                    report.event("cross-dpi", "disabling virtual monitor")
+                    try:
+                        _ = cross_dpi_profile.power_off.run(dict(os.environ))
+                    except Exception as error:
+                        print(
+                            f"could not disable the virtual display after cross-DPI: {error}",
+                            flush=True,
+                        )
 
             automated_probe_cases = [
                 case
@@ -1189,11 +1332,24 @@ def main() -> int:
                             outcome=Outcome.HARNESS_ERROR,
                         )
                     else:
-                        result = run_zero_window_case(
-                            reconnect_executable,
-                            report.artifact_directory / "probe-cases" / case_id,
-                            report.run_id,
-                        )
+                        try:
+                            result = run_zero_window_case(
+                                reconnect_executable,
+                                report.artifact_directory / "probe-cases" / case_id,
+                                report.run_id,
+                            )
+                        except Exception as error:
+                            # A no-EDID host has no verified monitor for the probe to
+                            # target, so this lifecycle case cannot establish its subject.
+                            # Report it unavailable and keep going instead of aborting the
+                            # whole controller before the physical reconnect partition.
+                            result = unavailable_case(
+                                case_id,
+                                Interaction.AUTOMATED,
+                                Evidence.APPLICATION,
+                                f"probe lifecycle case could not run: {error}",
+                                "verified-monitor-identity",
+                            )
                     report.append(result)
                     report.event("case-completed", result.outcome.value, case_id)
 
@@ -1229,11 +1385,35 @@ def main() -> int:
                     print(message, flush=True)
                     report.event("physical-progress", message)
 
+                # The startup discovery ran with the reconnect monitor off, so it is absent
+                # from `environment`. On Windows the reconnect monitor is the virtual display;
+                # enable it and re-discover so its monitor is in the environment the reconnect
+                # matcher selects from. The restore cases above keep the original discovery.
+                reconnect_environment = environment
+                if sys.platform == "win32":
+                    reconnect_progress(
+                        "windows reconnect: enabling virtual monitor before discovery"
+                    )
+                    power_on = hardware_profile.power_on.run(dict(os.environ))
+                    if power_on.returncode != 0:
+                        raise RuntimeError(
+                            "failed to enable the virtual display before reconnect discovery"
+                        )
+                    reconnect_environment = load_environment_file(
+                        run_discovery(
+                            config_path,
+                            binaries[""],
+                            report,
+                            selected_platform,
+                            suffix="reconnect",
+                        )
+                    )
+
                 try:
                     reconnect_results = run_automated_reconnect(
                         reconnect_executable,
                         hardware_profile,
-                        environment,
+                        reconnect_environment,
                         report.artifact_directory / "reconnect",
                         report.run_id,
                         reconnect_progress,
@@ -1266,6 +1446,21 @@ def main() -> int:
                         )
                         for case in automated_reconnect
                     ]
+
+                # The reconnect run leaves the virtual display enabled; on Windows that extra
+                # monitor offsets the desktop cursor mapping. Turn it back off so the host
+                # returns to its real monitors. Raw `power_off` (not PowerSafety) avoids
+                # writing a restore-required marker.
+                if sys.platform == "win32":
+                    reconnect_progress(
+                        "windows reconnect: disabling virtual monitor to restore the desktop"
+                    )
+                    try:
+                        _ = hardware_profile.power_off.run(dict(os.environ))
+                    except Exception as error:
+                        reconnect_progress(
+                            f"could not disable the virtual display after reconnect: {error}"
+                        )
                 for physical_index, result in enumerate(reconnect_results, start=1):
                     print(
                         f"Physical {physical_index}/{len(reconnect_results)}: "

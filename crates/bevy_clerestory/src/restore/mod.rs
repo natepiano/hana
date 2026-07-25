@@ -41,6 +41,7 @@ pub(crate) use winit_info::queue_primary_restore;
 
 use crate::ClerestoryPreStartupSet;
 use crate::ClerestoryUpdateSet;
+#[cfg(target_os = "macos")]
 use crate::macos_tabbing_fix;
 use crate::monitors;
 use crate::recovery;

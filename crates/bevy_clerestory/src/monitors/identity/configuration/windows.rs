@@ -390,7 +390,8 @@ unsafe extern "system" fn configuration_window_proc(
 ) -> LRESULT {
     match message {
         WM_NCCREATE => {
-            if !unsafe { install_window_tracker(window, lparam) } {
+            let installed = unsafe { install_window_tracker(window, lparam) };
+            if !installed {
                 return LRESULT(0);
             }
         },
