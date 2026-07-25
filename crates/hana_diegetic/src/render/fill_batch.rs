@@ -1279,9 +1279,10 @@ fn route_sdf_batch_records(
             stale_panels.insert(stored_surface.panel_entity());
             continue;
         };
-        if matches!(panel_visibility, Some(Visibility::Hidden)) {
-            continue;
-        }
+        // Hidden panels keep reserving their frame-table rows. Their records
+        // leave the batch below, but later panels retain the same material
+        // slots when a tooltip toggles `Visibility`.
+        let visible = !matches!(panel_visibility, Some(Visibility::Hidden));
         let panel_lighting = resolved_lighting.map_or(*lighting_default, |resolved| resolved.0);
         let panel_sidedness = resolved_sidedness.map_or(*sidedness_default, |resolved| resolved.0);
         let panel_shadow_casting =
@@ -1296,11 +1297,11 @@ fn route_sdf_batch_records(
         ) {
             apply_sdf_visual_override(&mut resolved, slot_override);
         }
-        resolved_surfaces.push((resolved, panel_lighting, panel_sidedness));
+        resolved_surfaces.push((resolved, panel_lighting, panel_sidedness, visible));
     }
     let mut appended = Vec::new();
     let builder = build.builder_mut();
-    for (surface, panel_lighting, panel_sidedness) in &resolved_surfaces {
+    for (surface, panel_lighting, panel_sidedness, visible) in &resolved_surfaces {
         let record_key = SdfRecordKey {
             panel:         surface.panel_entity,
             command_index: surface.command_index,
@@ -1314,8 +1315,10 @@ fn route_sdf_batch_records(
             &asset_server,
             &sdf_material_default,
         ) {
-            active_records.insert(record_key);
-            appended.push((materials, surface));
+            if *visible {
+                active_records.insert(record_key);
+                appended.push((materials, surface));
+            }
         }
     }
 
@@ -2009,6 +2012,11 @@ mod tests {
             Some(&Visibility::Inherited),
         );
         assert_tooltip_surface_is_retained(&app, controller);
+        let visible_material_rows = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .row_count();
 
         app.world_mut()
             .entity_mut(widget)
@@ -2019,6 +2027,14 @@ mod tests {
                 .iter()
                 .all(|record| record.record_key.panel != controller),
             "hiding should retire the tooltip's retained record",
+        );
+        assert_eq!(
+            app.world()
+                .resource::<FrameMaterialTableBuild>()
+                .table()
+                .row_count(),
+            visible_material_rows,
+            "a hidden materialized tooltip should reserve its frame-table rows",
         );
 
         let Some(mut panel_transform) = app.world_mut().get_mut::<Transform>(panel) else {

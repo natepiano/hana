@@ -123,6 +123,20 @@ impl ImeEditBuffer {
         }
     }
 
+    pub(super) fn new_selected(text: impl Into<String>) -> Self {
+        let text = text.into();
+        let end = text.len();
+        let selection = if end == 0 {
+            ImeSelection::insertion(0)
+        } else {
+            ImeSelection {
+                anchor: 0,
+                focus:  end,
+            }
+        };
+        Self { text, selection }
+    }
+
     pub(super) fn committed_text(&self) -> &str { &self.text }
 
     pub(super) fn replacement_range(&self) -> ImeBufferRange {
@@ -383,6 +397,20 @@ mod tests {
         buffer.apply(ImeEditCommand::InsertText("gamma".to_owned()));
 
         assert_eq!(buffer.committed_text(), "alpha gamma");
+    }
+
+    #[test]
+    fn selected_initial_text_is_ready_for_replacement() {
+        let mut buffer = ImeEditBuffer::new_selected("Editable text");
+
+        assert!(matches!(
+            buffer.snapshot(None).cursor,
+            ImeCursorState::Selection(ImeSelectionSnapshot { anchor, focus })
+                if anchor.as_usize() == 0 && focus.as_usize() == "Editable text".len()
+        ));
+
+        buffer.apply(ImeEditCommand::InsertText("Replacement".to_owned()));
+        assert_eq!(buffer.committed_text(), "Replacement");
     }
 
     #[test]

@@ -510,6 +510,33 @@ impl LayoutTree {
             .map_or(CornerRadius::ZERO, |e| e.corner_radius)
     }
 
+    /// Returns the visual presentation authored on an editable field element.
+    pub(crate) fn editable_field_presentation(
+        &self,
+        index: usize,
+    ) -> Option<crate::panel::PanelFieldPresentation> {
+        let element = self.elements.get(index)?;
+        element.editable.as_ref()?;
+        let text_style = self
+            .first_text_descendant(index)
+            .and_then(|text_index| self.elements.get(text_index))
+            .and_then(|text_element| match &text_element.content {
+                ElementContent::Text { config, .. } => Some(config.clone()),
+                ElementContent::Children(_)
+                | ElementContent::Empty
+                | ElementContent::Image { .. } => None,
+            });
+        Some(crate::panel::PanelFieldPresentation {
+            background: element.background,
+            border: element.border,
+            corner_radius: element.corner_radius,
+            padding: element.padding,
+            align_x: element.child_layout.align_x(),
+            align_y: element.child_layout.align_y(),
+            text_style,
+        })
+    }
+
     /// Returns editable field metadata for the element at `index`, if any.
     #[must_use]
     pub(crate) fn editable_field(&self, index: usize) -> Option<&ImePanelField> {

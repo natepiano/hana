@@ -81,6 +81,7 @@ pub use events::PanelChanged;
 pub use events::PanelDimensions;
 pub use events::PanelDimensionsChanged;
 pub(crate) use events::trigger_panel_dimensions_changed;
+pub(crate) use field::PanelFieldPresentation;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;

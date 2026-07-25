@@ -361,13 +361,19 @@ pub(super) fn open_session(
     }
 
     let session_id = active_session.next_session_id();
+    let buffer = match &request.target {
+        ImeTarget::WorldPanelField { .. } | ImeTarget::ScreenPanelField { .. } => {
+            ImeEditBuffer::new_selected(request.initial_text.clone())
+        },
+        ImeTarget::AppOwned { .. } => ImeEditBuffer::new(request.initial_text.clone()),
+    };
     let session = ImeSession {
         session_id,
         target: request.target.clone(),
         window: request.window,
         field_spec: request.field_spec.clone(),
         anchor: request.anchor,
-        buffer: ImeEditBuffer::new(request.initial_text.clone()),
+        buffer,
         state: ImeSessionState::Editing,
     };
     let changed = session.text_changed_event();

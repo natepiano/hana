@@ -53,6 +53,8 @@ fn open_from_panel_click(
         record.field_id.clone(),
         click.hit.camera,
         window,
+        record.bounds,
+        record.presentation().clone(),
     );
     let target = if panel.coordinate_space().is_screen() {
         ImeTarget::ScreenPanelField {

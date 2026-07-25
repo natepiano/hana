@@ -95,7 +95,10 @@ pub(crate) fn record_sdf_driver_run(
     }
 }
 
-const DEFAULT_TABLE_CAPACITY: u32 = 1;
+const DEFAULT_TABLE_CAPACITY: u32 = 64;
+/// Spare rows reserved when choosing a capacity so a small dynamic panel does
+/// not immediately force every batch material to bind a replacement buffer.
+const CAPACITY_HEADROOM_DIVISOR: u32 = 8;
 /// Frames a lower row demand must persist before the table is allowed to shrink.
 /// Growth is immediate; shrink waits this long so a transient drop in live rows
 /// does not reallocate the buffer down only to reallocate it back up.
@@ -599,6 +602,9 @@ impl FrameMaterialTableBuild {
     #[must_use]
     pub(crate) const fn table(&self) -> &FrameMaterialTable { &self.table }
 
+    /// Maximum table capacity supported by the active render device.
+    pub(crate) const fn row_limit(&self) -> u32 { self.row_limit }
+
     /// Returns the number of row-limit drops in the current frame.
     #[must_use]
     pub(crate) const fn dropped_record_count(&self) -> u32 { self.builder.dropped_record_count() }
@@ -630,7 +636,10 @@ impl CapacityWindow {
             .max()
             .unwrap_or(0)
             .max(DEFAULT_TABLE_CAPACITY);
-        peak.next_power_of_two()
+        let headroom = peak.div_ceil(CAPACITY_HEADROOM_DIVISOR);
+        peak.saturating_add(headroom)
+            .checked_next_power_of_two()
+            .unwrap_or(u32::MAX)
     }
 }
 
@@ -906,7 +915,10 @@ fn ensure_material_table_buffer_handle(
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
     let live_rows = build.table().row_count().to_u32();
-    let capacity = table_buffer.window.observe(live_rows);
+    let capacity = table_buffer
+        .window
+        .observe(live_rows)
+        .min(build.row_limit().max(1));
     if table_buffer.handle.is_some() && table_buffer.capacity == capacity {
         return;
     }
@@ -1510,6 +1522,13 @@ mod tests {
         assert_eq!(window.observe(343), 512);
         // A spike raises the target the same frame, no dwell.
         assert_eq!(window.observe(600), 1024);
+    }
+
+    #[test]
+    fn capacity_keeps_headroom_below_a_power_of_two_boundary() {
+        let mut window = CapacityWindow::default();
+
+        assert_eq!(window.observe(126), 256);
     }
 
     #[test]

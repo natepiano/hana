@@ -276,10 +276,7 @@ pub(super) fn update_panel_text_batches(
             backend.batch_store_mut().remove_run(storage_key);
             continue;
         };
-        if is_hidden(label_visibility) || is_hidden(panel_visibility) {
-            backend.batch_store_mut().remove_run(storage_key);
-            continue;
-        }
+        let hidden = is_hidden(label_visibility) || is_hidden(panel_visibility);
 
         let alpha_mode = cascades.alpha(label_entity);
         let lighting = cascades.lighting(label_entity);
@@ -304,6 +301,23 @@ pub(super) fn update_panel_text_batches(
             backend.batch_store_mut().remove_run(storage_key);
             continue;
         };
+        if hidden {
+            backend.batch_store_mut().remove_run(storage_key);
+            // Preserve this run's frame-table position while omitting its
+            // glyph records. Otherwise a tooltip hide renumbers every later
+            // text/shape material in the shared table.
+            if build_glyph_records(
+                &backend,
+                &prepared.prepared,
+                prepared.clip_rect,
+                &panel_text_child,
+            )
+            .is_some_and(|glyphs| !glyphs.is_empty())
+            {
+                let _ = append_text_material_row(material_table.builder_mut(), material_candidate);
+            }
+            continue;
+        }
         let batch_key = batch_key_for_run(
             panel_layers,
             *z_index,

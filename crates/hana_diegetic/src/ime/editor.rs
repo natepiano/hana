@@ -29,6 +29,7 @@ use crate::Anchor;
 use crate::Border;
 use crate::BoundingBox;
 use crate::ComputedDiegeticPanel;
+use crate::CornerRadius;
 use crate::DiegeticPanel;
 use crate::DiegeticPanelCommands;
 use crate::DiegeticTextMeasurer;
@@ -48,6 +49,7 @@ use crate::TextStyle;
 use crate::Unit;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
+use crate::panel::PanelFieldPresentation;
 
 const EDITOR_CAMERA_ORDER: isize = 120;
 const DEFAULT_EDITOR_WIDTH: f32 = 180.0;
@@ -86,12 +88,16 @@ impl PendingImePanelAnchor {
         field_id: PanelElementId,
         camera: Entity,
         window: Entity,
+        bounds: BoundingBox,
+        presentation: PanelFieldPresentation,
     ) {
         self.pending = Some(ImePanelAnchorSource {
             panel,
             field_id,
             camera,
             window,
+            bounds,
+            presentation,
         });
     }
 
@@ -106,10 +112,12 @@ impl PendingImePanelAnchor {
 
 #[derive(Clone, Debug)]
 struct ImePanelAnchorSource {
-    panel:    Entity,
-    field_id: PanelElementId,
-    camera:   Entity,
-    window:   Entity,
+    panel:        Entity,
+    field_id:     PanelElementId,
+    camera:       Entity,
+    window:       Entity,
+    bounds:       BoundingBox,
+    presentation: PanelFieldPresentation,
 }
 
 impl ImePanelAnchorSource {
@@ -154,15 +162,16 @@ impl ImeEditorState {
 
 #[derive(Debug)]
 struct ImeEditor {
-    session_id: ImeSessionId,
-    target:     ImeTarget,
-    window:     Entity,
-    snapshot:   ImeBufferSnapshot,
-    validation: Option<String>,
-    panel:      Entity,
-    source:     Option<ImePanelAnchorSource>,
-    app_anchor: Option<ImeSessionAnchor>,
-    anchor:     Option<ImeEditorAnchor>,
+    session_id:   ImeSessionId,
+    target:       ImeTarget,
+    window:       Entity,
+    snapshot:     ImeBufferSnapshot,
+    validation:   Option<String>,
+    panel:        Entity,
+    source:       Option<ImePanelAnchorSource>,
+    app_anchor:   Option<ImeSessionAnchor>,
+    anchor:       Option<ImeEditorAnchor>,
+    presentation: Option<ImeEditorPresentation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -171,6 +180,17 @@ struct ImeEditorAnchor {
     editor_pos:  Vec2,
     editor_size: Vec2,
     caret_pos:   Vec2,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ImeEditorPresentation {
+    background:    Option<Color>,
+    border:        Option<Border>,
+    corner_radius: CornerRadius,
+    padding:       Padding,
+    align_x:       AlignX,
+    align_y:       AlignY,
+    text_style:    TextStyle,
 }
 
 /// Last panel click that was classified as outside the active editor.
@@ -249,6 +269,7 @@ pub(super) fn update_editor_from_text_changed(
             source,
             app_anchor,
             anchor: None,
+            presentation: None,
         });
     } else if let Some(editor) = editor_state.active_mut() {
         if source.is_some() {
@@ -265,7 +286,11 @@ pub(super) fn update_editor_from_text_changed(
     if let Some(editor) = editor_state.active()
         && let Err(error) = commands.set_tree(
             editor.panel,
-            editor_tree(&editor.snapshot, editor.validation.as_deref()),
+            editor_tree(
+                &editor.snapshot,
+                editor.validation.as_deref(),
+                editor.presentation.as_ref(),
+            ),
         )
     {
         warn!("failed to update IME editor panel: {error}");
@@ -288,7 +313,11 @@ pub(super) fn update_editor_validation(
     editor.validation = Some(format!("{:?}", event.reason));
     if let Err(error) = commands.set_tree(
         editor.panel,
-        editor_tree(&editor.snapshot, editor.validation.as_deref()),
+        editor_tree(
+            &editor.snapshot,
+            editor.validation.as_deref(),
+            editor.presentation.as_ref(),
+        ),
     ) {
         warn!("failed to update IME editor panel: {error}");
     }
@@ -358,6 +387,23 @@ pub(super) fn update_editor_anchor(
     let mut panels = panel_queries.p0();
     let editor_size = editor_size(screen_rect);
     let editor_pos = clamp_editor_position(screen_rect.min, editor_size, window);
+    let presentation = editor
+        .source
+        .as_ref()
+        .map(|source| projected_editor_presentation(source, screen_rect));
+    if editor.presentation != presentation {
+        editor.presentation = presentation;
+        if let Err(error) = commands.set_tree(
+            editor.panel,
+            editor_tree(
+                &editor.snapshot,
+                editor.validation.as_deref(),
+                editor.presentation.as_ref(),
+            ),
+        ) {
+            warn!("failed to update IME editor presentation: {error}");
+        }
+    }
     let font_scale;
     {
         let Ok(mut panel) = panels.get_mut(editor.panel) else {
@@ -472,7 +518,7 @@ fn spawn_editor_panel(
         .screen_position(0.0, 0.0)
         .camera_order(EDITOR_CAMERA_ORDER)
         .window(WindowRef::Entity(window))
-        .with_tree(editor_tree(snapshot, validation))
+        .with_tree(editor_tree(snapshot, validation, None))
         .build()
     {
         Ok(panel) => panel,
@@ -646,7 +692,53 @@ fn app_anchor_rect(anchor: Option<ImeSessionAnchor>, window: &Window) -> Rect {
 fn editor_size(screen_rect: Rect) -> Vec2 {
     let width =
         (screen_rect.width() + EDITOR_EXTRA_WIDTH).clamp(MIN_EDITOR_WIDTH, MAX_EDITOR_WIDTH);
-    Vec2::new(width, DEFAULT_EDITOR_HEIGHT)
+    Vec2::new(width, screen_rect.height())
+}
+
+fn projected_editor_presentation(
+    source: &ImePanelAnchorSource,
+    screen_rect: Rect,
+) -> ImeEditorPresentation {
+    let scale_x = screen_rect.width() / source.bounds.width;
+    let scale_y = screen_rect.height() / source.bounds.height;
+    let corner_scale = scale_x.min(scale_y);
+    let authored = &source.presentation;
+    let padding = Padding::new(
+        Px(authored.padding.left.value * scale_x),
+        Px(authored.padding.right.value * scale_x),
+        Px(authored.padding.top.value * scale_y),
+        Px(authored.padding.bottom.value * scale_y),
+    );
+    let border = authored.border.map(|border| {
+        Border::new()
+            .left(Px(border.left.value * scale_x))
+            .right(Px(border.right.value * scale_x))
+            .top(Px(border.top.value * scale_y))
+            .bottom(Px(border.bottom.value * scale_y))
+            .color(border.color)
+    });
+    let corner_radius = CornerRadius::new(
+        Px(authored.corner_radius.top_left.value * corner_scale),
+        Px(authored.corner_radius.top_right.value * corner_scale),
+        Px(authored.corner_radius.bottom_right.value * corner_scale),
+        Px(authored.corner_radius.bottom_left.value * corner_scale),
+    );
+    let mut text_style = authored
+        .text_style
+        .clone()
+        .unwrap_or_else(editor_text_style)
+        .scaled(corner_scale);
+    text_style.set_dimension(Px(text_style.size()));
+
+    ImeEditorPresentation {
+        background: authored.background,
+        border,
+        corner_radius,
+        padding,
+        align_x: authored.align_x,
+        align_y: authored.align_y,
+        text_style,
+    }
 }
 
 fn clamp_editor_position(position: Vec2, editor_size: Vec2, window: &Window) -> Vec2 {
@@ -699,53 +791,102 @@ fn editor_text_measure() -> TextMeasure { editor_text_style().as_measure() }
 
 fn editor_text_style() -> TextStyle { TextStyle::new(EDITOR_FONT_SIZE) }
 
-fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(
-        El::column()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::xy(EDITOR_PADDING_X, EDITOR_PADDING_Y))
-            .gap(EDITOR_GAP)
-            .alignment(AlignX::Left, AlignY::Center)
-            .background(EDITOR_BACKGROUND)
-            .border(Border::all(EDITOR_BORDER_WIDTH, EDITOR_BORDER))
-            .corner_radius(EDITOR_CORNER_RADIUS),
-    );
+fn editor_tree(
+    snapshot: &ImeBufferSnapshot,
+    validation: Option<&str>,
+    presentation: Option<&ImeEditorPresentation>,
+) -> LayoutTree {
+    let fallback = default_editor_presentation();
+    let presentation = presentation.unwrap_or(&fallback);
+    let mut root = El::column()
+        .width(Sizing::GROW)
+        .height(Sizing::GROW)
+        .padding(presentation.padding)
+        .gap(EDITOR_GAP)
+        .alignment(presentation.align_x, presentation.align_y)
+        .corner_radius(presentation.corner_radius);
+    if let Some(background) = presentation.background {
+        root = root.background(background);
+    }
+    if let Some(border) = presentation.border {
+        root = root.border(border);
+    }
+    let mut builder = LayoutBuilder::with_root(root);
 
     builder.with(
         El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .gap(0.0)
-            .alignment(AlignX::Left, AlignY::Center),
-        |builder| append_buffer(builder, snapshot),
+            .alignment(presentation.align_x, presentation.align_y),
+        |builder| append_buffer(builder, snapshot, presentation),
     );
 
     if let Some(validation) = validation {
-        add_text(&mut builder, validation, EDITOR_VALIDATION);
+        let validation_style = presentation
+            .text_style
+            .clone()
+            .with_color(EDITOR_VALIDATION);
+        add_text(&mut builder, validation, &validation_style);
     }
 
     builder.build()
 }
 
-fn append_buffer(builder: &mut LayoutBuilder, snapshot: &ImeBufferSnapshot) {
+fn default_editor_presentation() -> ImeEditorPresentation {
+    ImeEditorPresentation {
+        background:    Some(EDITOR_BACKGROUND),
+        border:        Some(Border::all(EDITOR_BORDER_WIDTH, EDITOR_BORDER)),
+        corner_radius: CornerRadius::all(EDITOR_CORNER_RADIUS),
+        padding:       Padding::xy(EDITOR_PADDING_X, EDITOR_PADDING_Y),
+        align_x:       AlignX::Left,
+        align_y:       AlignY::Center,
+        text_style:    editor_text_style().with_color(EDITOR_TEXT),
+    }
+}
+
+fn append_buffer(
+    builder: &mut LayoutBuilder,
+    snapshot: &ImeBufferSnapshot,
+    presentation: &ImeEditorPresentation,
+) {
     if let Some(preedit) = &snapshot.preedit {
-        append_preedit_buffer(builder, snapshot, preedit);
+        append_preedit_buffer(builder, snapshot, preedit, presentation);
         return;
     }
 
     match &snapshot.cursor {
         ImeCursorState::Insertion(boundary) => {
             let index = boundary.as_usize();
-            add_text(builder, &snapshot.committed_text[..index], EDITOR_TEXT);
+            add_text(
+                builder,
+                &snapshot.committed_text[..index],
+                &presentation.text_style,
+            );
             add_caret(builder);
-            add_text(builder, &snapshot.committed_text[index..], EDITOR_TEXT);
+            add_text(
+                builder,
+                &snapshot.committed_text[index..],
+                &presentation.text_style,
+            );
         },
         ImeCursorState::Selection(selection) => {
             let (start, end) = selection_range(selection);
-            add_text(builder, &snapshot.committed_text[..start], EDITOR_TEXT);
-            add_selected_text(builder, &snapshot.committed_text[start..end]);
-            add_text(builder, &snapshot.committed_text[end..], EDITOR_TEXT);
+            add_text(
+                builder,
+                &snapshot.committed_text[..start],
+                &presentation.text_style,
+            );
+            add_selected_text(
+                builder,
+                &snapshot.committed_text[start..end],
+                &presentation.text_style,
+            );
+            add_text(
+                builder,
+                &snapshot.committed_text[end..],
+                &presentation.text_style,
+            );
         },
     }
 }
@@ -754,6 +895,7 @@ fn append_preedit_buffer(
     builder: &mut LayoutBuilder,
     snapshot: &ImeBufferSnapshot,
     preedit: &ImePreedit,
+    presentation: &ImeEditorPresentation,
 ) {
     let start = preedit.replacement.start.as_usize();
     let end = preedit.replacement.end.as_usize();
@@ -761,11 +903,20 @@ fn append_preedit_buffer(
         .cursor
         .map_or(preedit.text.len(), ImePreeditBoundary::as_usize);
 
-    add_text(builder, &snapshot.committed_text[..start], EDITOR_TEXT);
-    add_text(builder, &preedit.text[..cursor], EDITOR_PREEDIT);
+    add_text(
+        builder,
+        &snapshot.committed_text[..start],
+        &presentation.text_style,
+    );
+    let preedit_style = presentation.text_style.clone().with_color(EDITOR_PREEDIT);
+    add_text(builder, &preedit.text[..cursor], &preedit_style);
     add_caret(builder);
-    add_text(builder, &preedit.text[cursor..], EDITOR_PREEDIT);
-    add_text(builder, &snapshot.committed_text[end..], EDITOR_TEXT);
+    add_text(builder, &preedit.text[cursor..], &preedit_style);
+    add_text(
+        builder,
+        &snapshot.committed_text[end..],
+        &presentation.text_style,
+    );
 }
 
 fn selection_range(selection: &ImeSelectionSnapshot) -> (usize, usize) {
@@ -774,14 +925,14 @@ fn selection_range(selection: &ImeSelectionSnapshot) -> (usize, usize) {
     (anchor.min(focus), anchor.max(focus))
 }
 
-fn add_text(builder: &mut LayoutBuilder, text: &str, color: Color) {
+fn add_text(builder: &mut LayoutBuilder, text: &str, style: &TextStyle) {
     if text.is_empty() {
         return;
     }
-    builder.text((text, editor_text_style().with_color(color)));
+    builder.text((text, style.clone()));
 }
 
-fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {
+fn add_selected_text(builder: &mut LayoutBuilder, text: &str, style: &TextStyle) {
     if text.is_empty() {
         return;
     }
@@ -791,7 +942,7 @@ fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {
             .height(Sizing::FIT)
             .background(EDITOR_SELECTION)
             .padding(Padding::xy(0.0, 0.0)),
-        |builder| add_text(builder, text, EDITOR_TEXT),
+        |builder| add_text(builder, text, style),
     );
 }
 
@@ -901,6 +1052,7 @@ mod tests {
                 source: None,
                 app_anchor: None,
                 anchor: None,
+                presentation: None,
             }),
         }
     }
@@ -984,6 +1136,7 @@ mod tests {
             display_text:  String::new(),
             element_index: 0,
             duplicate_id:  false,
+            presentation:  crate::panel::PanelFieldPresentation::default(),
         };
         let bounds = PanelScreenBounds::new(Vec2::new(100.0, 50.0), Vec2::new(200.0, 100.0))
             .expect("screen bounds are valid");

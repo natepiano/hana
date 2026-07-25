@@ -779,10 +779,10 @@ pub(super) fn reconcile_panel_line_batches(
             store.remove_panel(panel_entity);
             continue;
         };
-        if is_hidden(panel_visibility) {
-            store.remove_panel(panel_entity);
-            continue;
-        }
+        // Build material rows even while hidden so `Visibility` changes do not
+        // renumber later users of the shared table. Only the batch records are
+        // retired below.
+        let hidden = is_hidden(panel_visibility);
 
         let (anchor_x, anchor_y) = panel.anchor_offsets();
         let context = PanelShapeReconcileContext {
@@ -824,7 +824,11 @@ pub(super) fn reconcile_panel_line_batches(
             ),
             &material_assets.visual_overrides,
         );
-        store.upsert_panel(panel_entity, records);
+        if hidden {
+            store.remove_panel(panel_entity);
+        } else {
+            store.upsert_panel(panel_entity, records);
+        }
     }
 
     store.rebuild_path_atlas_if_dirty();

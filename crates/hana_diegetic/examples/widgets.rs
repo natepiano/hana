@@ -55,6 +55,9 @@ use hana_diegetic::FacePicking;
 use hana_diegetic::Fit;
 use hana_diegetic::FitMax;
 use hana_diegetic::FocusPreviousWidget;
+use hana_diegetic::ImeBuiltInFieldKind;
+use hana_diegetic::ImeBuiltInFieldSpec;
+use hana_diegetic::ImeEditableFieldSpec;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::MeshAnchorCommandsExt;
@@ -69,6 +72,7 @@ use hana_diegetic::PanelText;
 use hana_diegetic::PanelWidget;
 use hana_diegetic::PanelWidgetReader;
 use hana_diegetic::PanelWidgetWriter;
+use hana_diegetic::Pt;
 use hana_diegetic::Px;
 use hana_diegetic::RequestSliderAdjustment;
 use hana_diegetic::RequestWidgetFocus;
@@ -91,6 +95,7 @@ use hana_diegetic::Tooltip;
 use hana_diegetic::TooltipCommandsExt;
 use hana_diegetic::TooltipFor;
 use hana_diegetic::TooltipHidden;
+use hana_diegetic::TooltipPlacementPolicy;
 use hana_diegetic::TooltipShown;
 use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
@@ -114,8 +119,7 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
-const DESCRIPTION_LINES: [&str; 9] = [
-    "Buttons restyle on hover, press, and focus; interaction changes log in the terminal.",
+const DESCRIPTION_LINES: [&str; 8] = [
     "D disables the secondary button and level slider, which then show their disabled surfaces.",
     "Tab controls use Hana's adapter; P sends the same request from an app-owned action.",
     "The primary button's on_click callback counts clicks in the status readout.",
@@ -128,13 +132,13 @@ const DESCRIPTION_LINES: [&str; 9] = [
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
 const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
 const PANEL_BORDER_WIDTH: Px = Px(2.0);
-const PANEL_FACE_OFFSET: f32 = 0.012;
-const PANEL_MAX_HEIGHT: Px = Px(240.0);
+const PANEL_FACE_OFFSET: f32 = 0.03;
+const PANEL_MAX_HEIGHT: Px = Px(300.0);
 const PANEL_MAX_WIDTH: Px = Px(340.0);
 const PANEL_PADDING: Px = Px(12.0);
 const PANEL_RADIUS: Px = Px(10.0);
 const PANEL_TITLE: &str = "Widget Lab";
-const PANEL_WORLD_HEIGHT: f32 = 0.32;
+const PANEL_WORLD_HEIGHT: f32 = 0.40;
 const BUTTON_STATUS_ID: &str = "button-status";
 const BUTTON_STATUS_IDLE: &str = "Button: none";
 const BUTTON_STATUS_MEASURE: &str = "Button: Canceled secondary-button (pointer/cause)";
@@ -164,6 +168,8 @@ const SCREEN_TARGET_LABEL: &str = "Target widget";
 const STATE_STATUS_ID: &str = "state-status";
 const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal lvl=normal";
 const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off lvl=pressed,off";
+const TEXT_FIELD_ID: &str = "editable-text";
+const TEXT_FIELD_INITIAL: &str = "Editable text";
 const TOOLTIP_STATUS_ID: &str = "tooltip-status";
 const TOOLTIP_STATUS_IDLE: &str = "Tooltip: none";
 const TOOLTIP_STATUS_MEASURE: &str = "Tooltip: hidden secondary-button";
@@ -193,14 +199,20 @@ const SLIDER_THUMB_HEIGHT: Px = Px(16.0);
 const SLIDER_THUMB_ID: &str = "slider-thumb";
 const SLIDER_THUMB_WIDTH: Px = Px(12.0);
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
-const STATUS_ANCHOR_OFFSET: Px = Px(12.0);
+const STATUS_ANCHOR_OFFSET: Px = Px(24.0);
 const STATUS_BORDER: Color = Color::srgba(0.20, 0.80, 0.68, 0.86);
 const STATUS_BORDER_WIDTH: Px = Px(1.0);
 const STATUS_COLOR: Color = Color::srgb(0.38, 0.94, 0.78);
-const STATUS_GAP: f32 = 0.012;
+const STATUS_GAP: f32 = 0.03;
 const STATUS_LINE_GAP: Px = Px(4.0);
 const STATUS_PADDING: Px = Px(6.0);
-const STATUS_RADIUS: Px = Px(7.0);
+const STATUS_RADIUS: Px = PANEL_RADIUS;
+const TOOLTIP_BORDER_WIDTH: Px = Px(5.0);
+const TOOLTIP_GAP: Px = Px(20.0);
+const TOOLTIP_OFFSET: Px = Px(16.0);
+const TOOLTIP_PADDING: Px = Px(30.0);
+const TOOLTIP_RADIUS: Px = Px(35.0);
+const TOOLTIP_TEXT_SIZE: Pt = Pt(fairy_dust::LABEL_SIZE.0 * 5.0);
 const WORLD_READOUT_MAX_WIDTH: Px = Px(500.0);
 const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.18;
 
@@ -403,6 +415,7 @@ fn main() {
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_stable_transparency()
         .with_camera_home()
+        .margin(0.5)
         .with_title_bar(
             TitleBar::new()
                 .with_title("Widgets")
@@ -1050,6 +1063,7 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
         PANEL_TITLE,
         TextStyle::new(fairy_dust::TITLE_SIZE).with_color(fairy_dust::TITLE_COLOR),
     ));
+    add_editable_text(&mut builder);
     add_button(
         &mut builder,
         PRIMARY_BUTTON_ID,
@@ -1123,6 +1137,26 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
         },
     );
     builder.build()
+}
+
+fn add_editable_text(builder: &mut LayoutBuilder) {
+    let field = ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
+    builder.with(
+        El::new()
+            .size(CONTROL_WIDTH, BUTTON_HEIGHT)
+            .padding(Padding::all(CONTROL_PADDING))
+            .alignment(AlignX::Center, AlignY::Center)
+            .background(BUTTON_FILL)
+            .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
+            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
+            .editable_field(TEXT_FIELD_ID, field),
+        |builder| {
+            builder.text((
+                TEXT_FIELD_INITIAL,
+                TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+            ));
+        },
+    );
 }
 
 fn interaction_status_tree() -> LayoutTree {
@@ -1264,6 +1298,7 @@ fn slider_tooltip() -> Tooltip {
 
 fn cube_tooltip() -> Tooltip {
     authored_tooltip("Widget cube", "Standalone PositiveZ mesh-face target")
+        .placement_policy(TooltipPlacementPolicy::Fixed)
 }
 
 fn authored_tooltip(title: &'static str, body: &'static str) -> Tooltip {
@@ -1271,19 +1306,22 @@ fn authored_tooltip(title: &'static str, body: &'static str) -> Tooltip {
         El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .padding(Padding::all(STATUS_PADDING))
-            .gap(STATUS_LINE_GAP)
+            .padding(Padding::all(TOOLTIP_PADDING))
+            .gap(TOOLTIP_GAP)
             .background(STATUS_BACKGROUND)
-            .border(Border::all(STATUS_BORDER_WIDTH, STATUS_BORDER))
-            .corner_radius(CornerRadius::all(STATUS_RADIUS)),
-    );
+            .border(Border::all(TOOLTIP_BORDER_WIDTH, STATUS_BORDER))
+            .corner_radius(CornerRadius::all(TOOLTIP_RADIUS)),
+    )
+    .source_anchor(Anchor::CenterLeft)
+    .target_anchor(Anchor::CenterRight)
+    .offset(PanelAnchorOffset::new(TOOLTIP_OFFSET, Px(0.0)));
     tooltip.text((
         title,
-        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+        TextStyle::new(TOOLTIP_TEXT_SIZE).with_color(CONTROL_TEXT),
     ));
     tooltip.text((
         body,
-        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
+        TextStyle::new(TOOLTIP_TEXT_SIZE).with_color(STATUS_COLOR),
     ));
     tooltip
 }
