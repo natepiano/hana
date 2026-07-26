@@ -77,6 +77,9 @@ pub enum PanelBuildError {
     /// A slider subtree marks more than one thumb.
     #[error("slider `{0}` contains more than one thumb")]
     SliderHasMultipleThumbs(PanelElementId),
+    /// A slider authored a focused thumb border color without a bordered thumb.
+    #[error("slider `{0}` focused thumb border color requires an authored thumb border")]
+    SliderFocusedThumbBorderColorRequiresThumbBorder(PanelElementId),
     /// A slider authored a state background without a normal background.
     #[error("slider `{0}` state background requires an authored background")]
     SliderStateBackgroundRequiresBackground(PanelElementId),
@@ -1045,6 +1048,12 @@ mod tests {
             (
                 PanelBuildError::SliderHasMultipleThumbs(PanelElementId::named("volume")),
                 "slider `volume` contains more than one thumb",
+            ),
+            (
+                PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(
+                    PanelElementId::named("volume"),
+                ),
+                "slider `volume` focused thumb border color requires an authored thumb border",
             ),
             (
                 PanelBuildError::SliderStateBackgroundRequiresBackground(PanelElementId::named(

@@ -31,8 +31,8 @@ use super::WidgetOf;
 use super::WidgetSpec;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
+use super::capture;
 use super::capture::WidgetCaptures;
-use super::capture::trigger_immediate;
 use super::visual;
 use crate::PanelElementId;
 use crate::ime;
@@ -961,7 +961,7 @@ fn emit_button_terminal(mut world: DeferredWorld, context: HookContext) {
 
     match terminal {
         ButtonTerminal::Release(outcome) => {
-            trigger_immediate(
+            capture::trigger_immediate(
                 &mut world,
                 ButtonReleased {
                     entity,
@@ -970,7 +970,7 @@ fn emit_button_terminal(mut world: DeferredWorld, context: HookContext) {
                 },
             );
             if outcome == ButtonReleaseOutcome::Clicked {
-                trigger_immediate(
+                capture::trigger_immediate(
                     &mut world,
                     ButtonClicked {
                         entity,
@@ -986,7 +986,7 @@ fn emit_button_terminal(mut world: DeferredWorld, context: HookContext) {
                 ButtonTerminal::Pending => ButtonCancelCause::CaptureLost,
                 ButtonTerminal::Release(_) => return,
             };
-            trigger_immediate(
+            capture::trigger_immediate(
                 &mut world,
                 ButtonCanceled {
                     entity,
@@ -1067,7 +1067,6 @@ mod tests {
     use hana_valence::AnchoredHere;
     use hana_valence::AnchoredTo;
 
-    use super::super::capture::reconcile_pointer_input;
     use super::ButtonCancelCause;
     use super::ButtonCanceled;
     use super::ButtonCaptures;
@@ -1136,7 +1135,9 @@ mod tests {
     use crate::widgets::WidgetVisualOverrides;
     use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
+    use crate::widgets::capture;
     use crate::widgets::capture::CapturedWidget;
+    use crate::widgets::slider::SliderCaptures;
 
     const BUTTON_ID: &str = "action";
     const FIELD_ID: &str = "field";
@@ -1237,7 +1238,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<WidgetCaptures>()
             .init_resource::<ButtonCaptures>()
-            .init_resource::<super::super::slider::SliderCaptures>()
+            .init_resource::<SliderCaptures>()
             .init_resource::<RecordedButtonEvents>()
             .init_resource::<HoverMap>()
             .init_resource::<PickingSettings>()
@@ -1260,7 +1261,7 @@ mod tests {
             .add_observer(record_canceled)
             .add_systems(
                 PreUpdate,
-                reconcile_pointer_input.in_set(PickingSystems::Last),
+                capture::reconcile_pointer_input.in_set(PickingSystems::Last),
             );
         app
     }
@@ -1334,7 +1335,9 @@ mod tests {
         }
         let result = app.world_mut().run_system_cached(pointer_events);
         assert!(result.is_ok());
-        let result = app.world_mut().run_system_cached(reconcile_pointer_input);
+        let result = app
+            .world_mut()
+            .run_system_cached(capture::reconcile_pointer_input);
         assert!(result.is_ok());
     }
 
@@ -2164,7 +2167,9 @@ mod tests {
         set_hover_maps(&mut app, pointer_id, &[], &[]);
 
         run_pointer_actions(&mut app, pointer_id, [PointerAction::Cancel]);
-        let result = app.world_mut().run_system_cached(reconcile_pointer_input);
+        let result = app
+            .world_mut()
+            .run_system_cached(capture::reconcile_pointer_input);
         assert!(result.is_ok());
 
         assert_eq!(
@@ -2317,7 +2322,9 @@ mod tests {
                 PointerAction::Press(PointerButton::Primary),
             ],
         );
-        let result = app.world_mut().run_system_cached(reconcile_pointer_input);
+        let result = app
+            .world_mut()
+            .run_system_cached(capture::reconcile_pointer_input);
         assert!(result.is_ok());
 
         assert_eq!(

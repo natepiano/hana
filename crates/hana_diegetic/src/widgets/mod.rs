@@ -1,5 +1,6 @@
 mod button;
 mod capture;
+mod constants;
 mod editable;
 mod focus;
 mod id;
@@ -32,6 +33,7 @@ pub(crate) use button::ButtonPress;
 pub use button::ButtonPressed;
 pub use button::ButtonReleased;
 pub(crate) use button::finalize_panel_buttons;
+use capture::WidgetCaptures;
 pub use focus::ClearWidgetFocus;
 pub use focus::RequestWidgetFocus;
 pub(crate) use focus::WidgetFocusAuthority;
@@ -90,8 +92,10 @@ pub use slider::SliderConfigError;
 pub use slider::SliderDirection;
 pub(crate) use slider::SliderDrag;
 pub use slider::SliderGrabbed;
+use slider::SliderPlugin;
 pub use slider::SliderRange;
 pub use slider::SliderReleased;
+pub use slider::SliderResetBehavior;
 pub use slider::SliderState;
 pub use slider::SliderStep;
 pub(crate) use slider::finalize_panel_sliders;
@@ -109,6 +113,7 @@ pub(crate) use tooltip::TooltipControllerIndex;
 pub use tooltip::TooltipDisabledPolicy;
 pub use tooltip::TooltipHidden;
 pub use tooltip::TooltipPlacementPolicy;
+use tooltip::TooltipPlugin;
 pub use tooltip::TooltipShown;
 pub use tooltip::TooltipTarget;
 pub use tooltip::TooltipTargetEntity;
@@ -212,7 +217,7 @@ impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MeshPickingSettings>()
             .init_resource::<WidgetFocusAuthority>()
-            .init_resource::<capture::WidgetCaptures>()
+            .init_resource::<WidgetCaptures>()
             .init_resource::<ButtonCaptures>()
             .init_resource::<VisualOverrideIndex>()
             .init_resource::<MeshAnchorWarnings>()
@@ -225,8 +230,8 @@ impl Plugin for WidgetsPlugin {
             .add_message::<CancelFocusedWidget>()
             .add_plugins((
                 cascade::cascade_plugin::<WidgetInteractivity>(),
-                slider::SliderPlugin,
-                tooltip::TooltipPlugin,
+                SliderPlugin,
+                TooltipPlugin,
             ))
             .configure_sets(
                 Update,

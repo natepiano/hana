@@ -365,6 +365,7 @@ pub use widgets::SliderDirection;
 pub use widgets::SliderGrabbed;
 pub use widgets::SliderRange;
 pub use widgets::SliderReleased;
+pub use widgets::SliderResetBehavior;
 pub use widgets::SliderState;
 pub use widgets::SliderStep;
 pub use widgets::Tooltip;

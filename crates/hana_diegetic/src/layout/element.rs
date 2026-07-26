@@ -36,14 +36,18 @@ use super::TextStyle;
 use super::Unit;
 use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
+use super::engine;
 use crate::ImePanelField;
 use crate::PanelBuildError;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
+use crate::panel::PanelFieldPresentation;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::ComputedTooltipRecord;
 use crate::widgets::ComputedVisualSlot;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::Tooltip;
 use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetKind;
@@ -137,7 +141,7 @@ pub(super) struct Element {
     /// Optional authored widget contract.
     pub(super) widget:          Option<WidgetSpec>,
     /// Optional tooltip declaration associated with this widget.
-    pub(super) tooltip:         Option<crate::widgets::Tooltip>,
+    pub(super) tooltip:         Option<Tooltip>,
     /// Optional stable visual-slot id for widget-owned retained records.
     pub(super) visual_slot:     Option<VisualSlotId>,
     /// Optional paint-only draw data.
@@ -514,7 +518,7 @@ impl LayoutTree {
     pub(crate) fn editable_field_presentation(
         &self,
         index: usize,
-    ) -> Option<crate::panel::PanelFieldPresentation> {
+    ) -> Option<PanelFieldPresentation> {
         let element = self.elements.get(index)?;
         element.editable.as_ref()?;
         let text_style = self
@@ -526,7 +530,7 @@ impl LayoutTree {
                 | ElementContent::Empty
                 | ElementContent::Image { .. } => None,
             });
-        Some(crate::panel::PanelFieldPresentation {
+        Some(PanelFieldPresentation {
             background: element.background,
             border: element.border,
             corner_radius: element.corner_radius,
@@ -742,6 +746,7 @@ impl LayoutTree {
             return Ok(());
         };
         let mut sliders_with_thumb = HashSet::new();
+        let mut thumb_border_requirements = Vec::new();
         let mut stack = vec![(
             root,
             Option::<(PanelElementId, WidgetKind)>::None,
@@ -769,6 +774,19 @@ impl LayoutTree {
                     if !sliders_with_thumb.insert(slider_id.clone()) {
                         return Err(PanelBuildError::SliderHasMultipleThumbs(slider_id.clone()));
                     }
+                    if let Some(position) = thumb_border_requirements
+                        .iter()
+                        .position(|required| required == slider_id)
+                    {
+                        if element.border.is_none() {
+                            return Err(
+                                PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(
+                                    slider_id.clone(),
+                                ),
+                            );
+                        }
+                        thumb_border_requirements.swap_remove(position);
+                    }
                 } else {
                     let thumb_id = element
                         .id
@@ -778,61 +796,20 @@ impl LayoutTree {
                 }
             }
 
-            let next_owning_widget = if let Some(widget) = &element.widget {
-                let id = element
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
-                let id = validated_widget_id(id, precompose)?;
-                match widget {
-                    WidgetSpec::Button(button) => {
-                        if button.has_state_background() && element.background.is_none() {
-                            return Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(
-                                id,
-                            ));
-                        }
-                        if button.has_state_border_color() && element.border.is_none() {
-                            return Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id));
-                        }
-                        if button.has_state_material()
-                            && element.background.is_none()
-                            && element.border.is_none()
-                        {
-                            return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
-                        }
-                    },
-                    WidgetSpec::EditableField(_) => {},
-                    WidgetSpec::Slider(slider) => {
-                        if slider.has_state_background() && element.background.is_none() {
-                            return Err(PanelBuildError::SliderStateBackgroundRequiresBackground(
-                                id,
-                            ));
-                        }
-                        if slider.has_state_border_color() && element.border.is_none() {
-                            return Err(PanelBuildError::SliderStateBorderColorRequiresBorder(id));
-                        }
-                        if slider.has_state_material()
-                            && element.background.is_none()
-                            && element.border.is_none()
-                        {
-                            return Err(PanelBuildError::SliderStateMaterialRequiresSurface(id));
-                        }
-                    },
-                }
-                Some((id, widget.kind()))
-            } else if let Some(field) = &element.editable {
-                let id = validated_widget_id(field.field_id.clone(), precompose)?;
-                if field.focused_border_color().is_some() && element.border.is_none() {
-                    return Err(PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(id));
-                }
-                Some((id, WidgetKind::EditableField))
-            } else {
-                owning_widget
-            };
+            let next_owning_widget = validated_element_widget_owner(
+                element,
+                index,
+                owning_widget,
+                precompose,
+                &mut thumb_border_requirements,
+            )?;
 
             for &child in self.children_of(index).iter().rev() {
                 stack.push((child, next_owning_widget.clone(), precompose));
             }
+        }
+        if let Some(id) = thumb_border_requirements.pop() {
+            return Err(PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(id));
         }
         Ok(())
     }
@@ -893,7 +870,7 @@ impl LayoutTree {
             };
             if let (Some(slot), Some(record_index)) = (element.visual_slot, owning_record) {
                 let border_box = computed.bounds;
-                let content_box = super::engine::content_box_bounds(element, border_box);
+                let content_box = engine::content_box_bounds(element, border_box);
                 ranked_records[record_index]
                     .1
                     .push_visual_slot(ComputedVisualSlot {
@@ -932,7 +909,7 @@ impl LayoutTree {
             .collect()
     }
 
-    pub(crate) fn computed_tooltip_records(&self) -> Vec<crate::widgets::ComputedTooltipRecord> {
+    pub(crate) fn computed_tooltip_records(&self) -> Vec<ComputedTooltipRecord> {
         self.elements
             .iter()
             .filter_map(|element| {
@@ -1100,6 +1077,65 @@ fn validated_widget_id(
         return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
     }
     Ok(id)
+}
+
+fn validated_element_widget_owner(
+    element: &Element,
+    index: usize,
+    owning_widget: Option<(PanelElementId, WidgetKind)>,
+    precompose: PrecomposeMode,
+    thumb_border_requirements: &mut Vec<PanelElementId>,
+) -> Result<Option<(PanelElementId, WidgetKind)>, PanelBuildError> {
+    if let Some(widget) = &element.widget {
+        let id = element
+            .id
+            .clone()
+            .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
+        let id = validated_widget_id(id, precompose)?;
+        match widget {
+            WidgetSpec::Button(button) => {
+                if button.has_state_background() && element.background.is_none() {
+                    return Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id));
+                }
+                if button.has_state_border_color() && element.border.is_none() {
+                    return Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id));
+                }
+                if button.has_state_material()
+                    && element.background.is_none()
+                    && element.border.is_none()
+                {
+                    return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
+                }
+            },
+            WidgetSpec::EditableField(_) => {},
+            WidgetSpec::Slider(slider) => {
+                if slider.has_focused_thumb_border_color() {
+                    thumb_border_requirements.push(id.clone());
+                }
+                if slider.has_state_background() && element.background.is_none() {
+                    return Err(PanelBuildError::SliderStateBackgroundRequiresBackground(id));
+                }
+                if slider.has_state_border_color() && element.border.is_none() {
+                    return Err(PanelBuildError::SliderStateBorderColorRequiresBorder(id));
+                }
+                if slider.has_state_material()
+                    && element.background.is_none()
+                    && element.border.is_none()
+                {
+                    return Err(PanelBuildError::SliderStateMaterialRequiresSurface(id));
+                }
+            },
+        }
+        return Ok(Some((id, widget.kind())));
+    }
+    if let Some(field) = &element.editable {
+        let id = validated_widget_id(field.field_id.clone(), precompose)?;
+        if field.focused_border_color().is_some() && element.border.is_none() {
+            return Err(PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(id));
+        }
+        return Ok(Some((id, WidgetKind::EditableField)));
+    }
+    Ok(owning_widget)
 }
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {

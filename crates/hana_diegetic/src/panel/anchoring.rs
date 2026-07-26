@@ -16,6 +16,8 @@ use bevy::prelude::*;
 use bevy::transform::helper::TransformHelper;
 use hana_valence::AnchorId;
 use hana_valence::AnchoredTo as ValenceAnchoredTo;
+use hana_valence::ResolveDiagnostics;
+use hana_valence::ResolvedAnchorGeometry;
 use hana_valence::ResolvedAnchorOffset;
 
 use super::CoordinateSpace;
@@ -460,7 +462,7 @@ pub(crate) fn world_attachment_is_ready(
     source: Entity,
     target: Entity,
     relation: &ValenceAnchoredTo,
-    diagnostics: &hana_valence::ResolveDiagnostics,
+    diagnostics: &ResolveDiagnostics,
 ) -> bool {
     relation.target() == target && diagnostics.current().all(|entry| entry.source != source)
 }
@@ -482,7 +484,7 @@ pub(crate) fn refresh_world_anchor_globals(
     mut participants: Query<
         (Entity, &mut GlobalTransform),
         (
-            Or<(With<hana_valence::ResolvedAnchorGeometry>, With<Camera>)>,
+            Or<(With<ResolvedAnchorGeometry>, With<Camera>)>,
             With<Transform>,
             Without<ValenceAnchoredTo>,
         ),
@@ -766,7 +768,7 @@ pub(crate) fn write_panel_anchor_offsets(
     )>,
     panel_targets: Query<(&DiegeticPanel, &GlobalTransform)>,
     widget_targets: Query<&WidgetOf, With<PanelWidget>>,
-    general_targets: Query<(), With<hana_valence::ResolvedAnchorGeometry>>,
+    general_targets: Query<(), With<ResolvedAnchorGeometry>>,
 ) {
     for (entity, authored, offset, source_panel, relation, ownership, materialized) in &attachments
     {
@@ -819,7 +821,7 @@ fn lowered_world_offset(
     materialized: Option<&MaterializedTooltip>,
     panel_targets: &Query<(&DiegeticPanel, &GlobalTransform)>,
     widget_targets: &Query<&WidgetOf, With<PanelWidget>>,
-    general_targets: &Query<(), With<hana_valence::ResolvedAnchorGeometry>>,
+    general_targets: &Query<(), With<ResolvedAnchorGeometry>>,
 ) -> Option<Vec3> {
     let Some(metrics) = anchor_target_metrics(target, panel_targets, widget_targets) else {
         let materialized = materialized.filter(|materialized| {

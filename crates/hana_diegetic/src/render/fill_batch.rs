@@ -1754,6 +1754,7 @@ mod tests {
     use crate::SliderRange;
     use crate::SliderState;
     use crate::Tooltip;
+    use crate::TooltipPlacementPolicy;
     use crate::Tooltips;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
@@ -1789,6 +1790,7 @@ mod tests {
     use crate::render::panel_geometry::ResolvedSdfMaterial;
     use crate::render::panel_geometry::ResolvedSdfSurface;
     use crate::render::panel_geometry::SdfRoleAuthorship;
+    use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::ComputedWidgetRecord;
     use crate::widgets::VisualOverrideIndex;
@@ -1914,7 +1916,7 @@ mod tests {
         )
         .show_after(Duration::ZERO)
         .hide_after(Duration::ZERO)
-        .placement_policy(crate::TooltipPlacementPolicy::Fixed);
+        .placement_policy(TooltipPlacementPolicy::Fixed);
         tooltip.text((label, TextStyle::new(4.0)));
         let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
         builder.with(
@@ -2171,12 +2173,7 @@ mod tests {
         let visible_material_table = app.world().resource::<FrameMaterialTableBuild>().table();
         let visible_material_rows = visible_material_table.row_count();
         let visible_material_sources = visible_material_table.live_row_count();
-        let visible_tooltip_slots = authored_slot_ids(
-            &sdf_records(&app)
-                .into_iter()
-                .filter(|record| record.record_key.panel == controller)
-                .collect::<Vec<_>>(),
-        );
+        let visible_tooltip_slots = panel_authored_slot_ids(&app, controller);
         assert!(
             !visible_tooltip_slots.is_empty(),
             "a visible tooltip should reference authored material rows",
@@ -2240,12 +2237,7 @@ mod tests {
             .entity_mut(widget)
             .insert(PickingInteraction::Hovered);
         app.update();
-        let reshown_tooltip_slots = authored_slot_ids(
-            &sdf_records(&app)
-                .into_iter()
-                .filter(|record| record.record_key.panel == controller)
-                .collect::<Vec<_>>(),
-        );
+        let reshown_tooltip_slots = panel_authored_slot_ids(&app, controller);
         assert_eq!(
             reshown_tooltip_slots, visible_tooltip_slots,
             "showing the same tooltip again should restore the same material rows",
@@ -2324,7 +2316,7 @@ mod tests {
     #[test]
     fn secondary_window_tooltip_reveal_routes_its_final_transform() {
         let mut app = sdf_pipeline_app();
-        app.add_plugins((WidgetsPlugin, crate::screen_space::ScreenSpacePlugin));
+        app.add_plugins((WidgetsPlugin, ScreenSpacePlugin));
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         let secondary_window = app
             .world_mut()
@@ -2681,6 +2673,14 @@ mod tests {
                 SdfPaintMaterial::NotAuthored => None,
             })
             .collect()
+    }
+
+    fn panel_authored_slot_ids(app: &App, panel: Entity) -> Vec<MaterialSlotId> {
+        let records = sdf_records(app)
+            .into_iter()
+            .filter(|record| record.record_key.panel == panel)
+            .collect::<Vec<_>>();
+        authored_slot_ids(&records)
     }
 
     fn sdf_material_assignments_except(

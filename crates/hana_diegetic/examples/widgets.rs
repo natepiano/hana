@@ -19,6 +19,7 @@
 
 use std::time::Duration;
 
+use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -55,11 +56,13 @@ use hana_diegetic::ButtonReleased;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
+use hana_diegetic::DiegeticText;
 use hana_diegetic::El;
 use hana_diegetic::FacePicking;
 use hana_diegetic::Fit;
 use hana_diegetic::FitMax;
 use hana_diegetic::FocusPreviousWidget;
+use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::ImeBuiltInFieldKind;
 use hana_diegetic::ImeBuiltInFieldSpec;
 use hana_diegetic::ImeEditableFieldSpec;
@@ -80,6 +83,7 @@ use hana_diegetic::PanelWidgetWriter;
 use hana_diegetic::Pt;
 use hana_diegetic::Px;
 use hana_diegetic::RequestSliderAdjustment;
+use hana_diegetic::ShadowCasting;
 use hana_diegetic::Sizing;
 use hana_diegetic::Slider;
 use hana_diegetic::SliderAdjustment;
@@ -91,9 +95,11 @@ use hana_diegetic::SliderDirection;
 use hana_diegetic::SliderGrabbed;
 use hana_diegetic::SliderRange;
 use hana_diegetic::SliderReleased;
+use hana_diegetic::SliderResetBehavior;
 use hana_diegetic::SliderState;
 use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
+use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Tooltip;
 use hana_diegetic::TooltipCommandsExt;
@@ -109,13 +115,13 @@ use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
 
 // widget lab
-const BUTTON_BORDER: Color = Color::srgba(0.30, 0.62, 1.0, 0.82);
+const BUTTON_BORDER: Color = Color::srgba(0.30, 0.62, 1.0, 0.90);
 const BUTTON_BORDER_DISABLED: Color = Color::srgba(0.34, 0.36, 0.40, 0.60);
 const BUTTON_BORDER_FOCUSED: Color = Color::srgba(1.0, 0.86, 0.30, 0.94);
-const BUTTON_FILL: Color = Color::srgba(0.03, 0.10, 0.24, 0.82);
-const BUTTON_FILL_DISABLED: Color = Color::srgba(0.10, 0.11, 0.13, 0.66);
-const BUTTON_FILL_HOVERED: Color = Color::srgba(0.10, 0.26, 0.52, 0.88);
-const BUTTON_FILL_PRESSED: Color = Color::srgba(0.55, 0.30, 0.08, 0.94);
+const BUTTON_FILL: Color = Color::srgba(0.03, 0.10, 0.24, 0.92);
+const BUTTON_FILL_DISABLED: Color = Color::srgba(0.10, 0.11, 0.13, 0.78);
+const BUTTON_FILL_HOVERED: Color = Color::srgba(0.10, 0.26, 0.52, 0.95);
+const BUTTON_FILL_PRESSED: Color = Color::srgba(0.55, 0.30, 0.08, 0.98);
 const BUTTON_HEIGHT: Px = Px(42.0);
 const CONTROL_BORDER_WIDTH: Px = Px(1.0);
 const CONTROL_GAP: Px = Px(8.0);
@@ -124,16 +130,17 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
+const CUBE_EDGE_INSET: f32 = 0.06;
+const CUBE_HALF_USABLE_WIDTH: f32 = (fairy_dust::EXAMPLE_CUBE_SIZE - CUBE_EDGE_INSET * 2.0) * 0.5;
 const DESCRIPTION_LINES: [&str; 6] = [
     "D disables the secondary button and level slider.",
     "Tab and Shift+Tab move keyboard focus to the next or previous widget.",
     "Enter edits the focused text field; while editing, Tab and Shift+Tab stay with the editor.",
     "The primary button's on_click callback counts clicks in the status readout.",
-    "Left and Right Arrow step the focused slider; holding repeats after a short pause.",
+    "Left and Right Arrow step the focused slider; double-click its thumb to reset to 50%.",
     "T switches the primary-button tooltip between 500 ms and 1.5 s show delays; the tooltip displays its current delay.",
 ];
 const PANEL_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.92);
-const PANEL_BORDER: Color = Color::srgba(0.05, 0.60, 0.86, 0.86);
 const PANEL_BORDER_WIDTH: Px = Px(2.0);
 const PANEL_FACE_OFFSET: f32 = 0.03;
 const PANEL_MAX_HEIGHT: Px = Px(300.0);
@@ -141,21 +148,22 @@ const PANEL_MAX_WIDTH: Px = Px(340.0);
 const PANEL_PADDING: Px = Px(12.0);
 const PANEL_RADIUS: Px = Px(10.0);
 const PANEL_TITLE: &str = "Widget Lab";
-const PANEL_WORLD_HEIGHT: f32 = 0.40;
+const PANEL_TITLE_GAP: f32 = 0.05;
+const PANEL_TITLE_WORLD_HEIGHT: f32 = 0.085;
 const BUTTON_STATUS_ID: &str = "button-status";
-const BUTTON_STATUS_IDLE: &str = "Button: none";
-const BUTTON_STATUS_MEASURE: &str = "Button: Canceled secondary-button (pointer/cause)";
+const BUTTON_STATUS_IDLE: &str = "none";
+const BUTTON_STATUS_MEASURE: &str = "Canceled secondary-button (pointer/cause)";
 const CALLBACK_STATUS_ID: &str = "callback-status";
-const CALLBACK_STATUS_IDLE: &str = "Callback: none";
-const CALLBACK_STATUS_MEASURE: &str = "Callback: 999 clicks on primary-button";
+const CALLBACK_STATUS_IDLE: &str = "none";
+const CALLBACK_STATUS_MEASURE: &str = "999 clicks on primary-button";
 const FOCUS_STATUS_ID: &str = "focus-status";
-const FOCUS_STATUS_MEASURE: &str = "Focus: secondary-button";
-const FOCUS_STATUS_NONE: &str = "Focus: none";
-const FOCUS_STATUS_UNAVAILABLE: &str = "Focus: unavailable";
+const FOCUS_STATUS_MEASURE: &str = "secondary-button";
+const FOCUS_STATUS_NONE: &str = "none";
+const FOCUS_STATUS_UNAVAILABLE: &str = "unavailable";
 const PRIMARY_BUTTON_ID: &str = "primary-button";
 const POINTER_STATUS_ID: &str = "pointer-status";
-const POINTER_STATUS_IDLE: &str = "Pointer: none";
-const POINTER_STATUS_MEASURE: &str = "Pointer: Pressed secondary-button";
+const POINTER_STATUS_IDLE: &str = "none";
+const POINTER_STATUS_MEASURE: &str = "Pressed secondary-button";
 const PRIMARY_TOOLTIP_DEFAULT_BODY: &str = "Show delay: 500 ms";
 const PRIMARY_TOOLTIP_DEFAULT_DELAY: Duration = Duration::from_millis(500);
 const PRIMARY_TOOLTIP_SLOW_BODY: &str = "Show delay: 1.5 seconds";
@@ -173,60 +181,57 @@ const SCREEN_READOUT_TEXT: &str = "^ Attached panel";
 const SCREEN_TARGET_ID: &str = "screen-target-button";
 const SCREEN_TARGET_LABEL: &str = "Target widget";
 const STATE_STATUS_ID: &str = "state-status";
-const STATE_STATUS_IDLE: &str = "State: pri=normal sec=normal lvl=normal";
-const STATE_STATUS_MEASURE: &str = "State: pri=pressed,off sec=pressed,off lvl=pressed,off";
+const STATE_STATUS_IDLE: &str = "pri=normal sec=normal lvl=normal";
+const STATE_STATUS_MEASURE: &str = "pri=pressed,off sec=pressed,off lvl=pressed,off";
 const TEXT_FIELD_ID: &str = "editable-text";
 const TEXT_FIELD_INITIAL: &str = "Editable text";
 const TOOLTIP_STATUS_ID: &str = "tooltip-status";
-const TOOLTIP_STATUS_IDLE: &str = "Tooltip: none";
-const TOOLTIP_STATUS_MEASURE: &str = "Tooltip: hidden secondary-button";
+const TOOLTIP_STATUS_IDLE: &str = "none";
+const TOOLTIP_STATUS_MEASURE: &str = "hidden secondary-button";
 const SLIDER_ADJUST_STEPS: f32 = 1.0;
-const SLIDER_BORDER: Color = Color::srgba(0.62, 0.46, 1.0, 0.82);
-const SLIDER_BORDER_DISABLED: Color = Color::srgba(0.34, 0.32, 0.40, 0.60);
-const SLIDER_BORDER_FOCUSED: Color = Color::srgba(1.0, 0.86, 0.30, 0.94);
-const SLIDER_FILL: Color = Color::srgba(0.12, 0.04, 0.26, 0.82);
-const SLIDER_FILL_DISABLED: Color = Color::srgba(0.10, 0.08, 0.14, 0.66);
-const SLIDER_FILL_HOVERED: Color = Color::srgba(0.20, 0.09, 0.40, 0.88);
-const SLIDER_FILL_PRESSED: Color = Color::srgba(0.34, 0.16, 0.60, 0.94);
-const SLIDER_HEIGHT: Px = Px(52.0);
 const SLIDER_ID: &str = "level-slider";
 const SLIDER_INITIAL_VALUE: f32 = 0.5;
+const SLIDER_LABEL_GAP: Px = Px(5.0);
 const SLIDER_LABEL_ID: &str = "slider-label";
 const SLIDER_LABEL_IDLE: &str = "50%";
-const SLIDER_LABEL_MEASURE: &str = "100%";
+const SLIDER_LABEL_TEXT: Color = Color::BLACK;
 const SLIDER_RANGE_END: f32 = 1.0;
 const SLIDER_RANGE_START: f32 = 0.0;
 const SLIDER_REPEAT_INITIAL_DELAY_SECONDS: f32 = 0.4;
 const SLIDER_REPEAT_INTERVAL_SECONDS: f32 = 0.15;
 const SLIDER_STATUS_ID: &str = "slider-status";
-const SLIDER_STATUS_IDLE: &str = "Slider: 0.50 (50%)";
-const SLIDER_STATUS_MEASURE: &str = "Slider: 0.00 (100%)";
+const SLIDER_STATUS_IDLE: &str = "0.50 (50%)";
+const SLIDER_STATUS_MEASURE: &str = "0.00 (100%)";
 const SLIDER_STEP: f32 = 0.05;
-const SLIDER_THUMB_BORDER: Color = Color::srgba(0.86, 0.80, 1.0, 0.96);
+const SLIDER_THUMB_BORDER: Color = Color::srgba(0.62, 1.0, 1.0, 1.0);
 const SLIDER_THUMB_DIAMETER: Px = Px(16.0);
-const SLIDER_THUMB_FILL: Color = Color::srgba(0.74, 0.60, 1.0, 0.96);
+const SLIDER_THUMB_FILL: Color = Color::srgba(0.05, 0.90, 1.0, 1.0);
+const SLIDER_THUMB_FOCUSED_BORDER: Color = BUTTON_BORDER_FOCUSED;
 const SLIDER_THUMB_ID: &str = "slider-thumb";
 const SLIDER_THUMB_RADIUS: Px = Px(8.0);
-const SLIDER_TRACK_FILL: Color = Color::srgba(0.46, 0.38, 0.66, 0.92);
+const SLIDER_TRACK_FILL: Color = Color::srgba(0.00, 0.62, 0.78, 0.98);
 const SLIDER_TRACK_HEIGHT: Px = Px(5.0);
+const SLIDER_TRACK_INSET: Px = SLIDER_THUMB_RADIUS;
 const SLIDER_TRACK_RADIUS: Px = Px(2.5);
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
 const STATUS_ANCHOR_OFFSET: Px = Px(24.0);
 const STATUS_BORDER: Color = Color::srgba(0.20, 0.80, 0.68, 0.86);
 const STATUS_BORDER_WIDTH: Px = Px(1.0);
+const STATUS_COLUMN_GAP: Px = Px(10.0);
 const STATUS_COLOR: Color = Color::srgb(0.38, 0.94, 0.78);
-const STATUS_GAP: f32 = 0.03;
+const STATUS_LABEL_COLOR: Color = Color::srgba(0.68, 0.75, 0.88, 0.92);
+const STATUS_LABEL_WIDTH: Px = Px(88.0);
 const STATUS_LINE_GAP: Px = Px(4.0);
 const STATUS_PADDING: Px = Px(6.0);
 const STATUS_RADIUS: Px = PANEL_RADIUS;
+const STATUS_TEXT_SIZE: Pt = Pt(14.0);
 const TOOLTIP_BORDER_WIDTH: Px = Px(5.0);
 const TOOLTIP_GAP: Px = Px(20.0);
 const TOOLTIP_OFFSET: Px = Px(16.0);
 const TOOLTIP_PADDING: Px = Px(30.0);
 const TOOLTIP_RADIUS: Px = Px(35.0);
 const TOOLTIP_TEXT_SIZE: Pt = Pt(fairy_dust::LABEL_SIZE.0 * 5.0);
-const WORLD_READOUT_MAX_WIDTH: Px = Px(500.0);
-const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.18;
+const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.25;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum ToggleMode {
@@ -358,9 +363,6 @@ struct WidgetLabPanel;
 struct WidgetInteractionReadout;
 
 #[derive(Component)]
-struct WidgetAnchorInstalled;
-
-#[derive(Component)]
 struct ScreenWidgetLabPanel;
 
 #[derive(Component)]
@@ -429,7 +431,11 @@ fn main() {
             fairy_dust::example_cube_on_ground(CUBE_CLEARANCE),
         ))
         .insert(CameraHomeTarget)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
+        .with_orbit_cam_preset_bundle(
+            |_| {},
+            OrbitCamPreset::blender_like(),
+            (Msaa::Off, TemporalAntiAliasing::default()),
+        )
         .with_stable_transparency()
         .with_camera_home()
         .margin(0.5)
@@ -467,7 +473,6 @@ fn main() {
         .add_systems(
             Update,
             (
-                anchor_interaction_readout,
                 anchor_screen_interaction_readout,
                 report_interaction_changes,
                 report_presentation_states,
@@ -486,7 +491,7 @@ fn report_button_pressed(
     retain_button_status(
         &readouts,
         &mut panel_text,
-        format!("Button: Pressed {} ({:?})", event.id, event.pointer_id),
+        format!("Pressed {} ({:?})", event.id, event.pointer_id),
     );
     info!("widgets: {} pressed by {:?}", event.id, event.pointer_id);
 }
@@ -499,7 +504,7 @@ fn report_button_released(
     retain_button_status(
         &readouts,
         &mut panel_text,
-        format!("Button: Released {} ({:?})", event.id, event.pointer_id),
+        format!("Released {} ({:?})", event.id, event.pointer_id),
     );
     info!("widgets: {} released by {:?}", event.id, event.pointer_id);
 }
@@ -510,8 +515,8 @@ fn report_button_clicked(
     mut panel_text: PanelText,
 ) {
     let status = event.pointer_id.as_ref().map_or_else(
-        || format!("Button: Clicked {} (semantic)", event.id),
-        |pointer_id| format!("Button: Clicked {} ({pointer_id:?})", event.id),
+        || format!("Clicked {} (semantic)", event.id),
+        |pointer_id| format!("Clicked {} ({pointer_id:?})", event.id),
     );
     retain_button_status(&readouts, &mut panel_text, status);
     info!("widgets: {} clicked by {:?}", event.id, event.pointer_id);
@@ -526,7 +531,7 @@ fn report_button_canceled(
         &readouts,
         &mut panel_text,
         format!(
-            "Button: Canceled {} ({:?}, {:?})",
+            "Canceled {} ({:?}, {:?})",
             event.id, event.pointer_id, event.cause
         ),
     );
@@ -555,7 +560,7 @@ fn count_primary_click(
     let Ok(readout) = readouts.single() else {
         return;
     };
-    let status = format!("Callback: {} clicks on {}", clicks.0, click.id);
+    let status = format!("{} clicks on {}", clicks.0, click.id);
     if !panel_text.set_text(readout, &PanelElementId::named(CALLBACK_STATUS_ID), status) {
         warn!("widgets: callback status has not been reified");
     }
@@ -681,11 +686,6 @@ fn apply_slider_change(
     let range = state.range();
     let span = range.end() - range.start();
     let percent = (state.value() - range.start()) / span * 100.0;
-    info!(
-        "widgets: {} applied value {:.2} ({percent:.0}%)",
-        change.id,
-        state.value()
-    );
     if let Ok(panel) = panels.single()
         && !panel_text.set_text(
             panel,
@@ -701,7 +701,7 @@ fn apply_slider_change(
     if !panel_text.set_text(
         readout,
         &PanelElementId::named(SLIDER_STATUS_ID),
-        format!("Slider: {:.2} ({percent:.0}%)", state.value()),
+        format!("{:.2} ({percent:.0}%)", state.value()),
     ) {
         warn!("widgets: slider status has not been reified");
     }
@@ -805,7 +805,7 @@ fn report_tooltip_visibility(
     if !panel_text.set_text(
         readout,
         &PanelElementId::named(TOOLTIP_STATUS_ID),
-        format!("Tooltip: {visibility} {target}"),
+        format!("{visibility} {target}"),
     ) {
         warn!("widgets: tooltip status has not been reified");
     }
@@ -825,7 +825,7 @@ fn report_widget_focus_changed(
     let focus_status = match change.current {
         Some(entity) => widgets.get(entity).map_or_else(
             |_| FOCUS_STATUS_UNAVAILABLE.to_owned(),
-            |widget| format!("Focus: {}", widget.id()),
+            |widget| widget.id().to_string(),
         ),
         None => FOCUS_STATUS_NONE.to_owned(),
     };
@@ -879,35 +879,6 @@ fn anchor_screen_interaction_readout(
         .insert(ScreenWidgetAnchorInstalled);
 }
 
-fn anchor_interaction_readout(
-    mut commands: Commands,
-    panel: Single<Entity, With<WidgetLabPanel>>,
-    readout: Single<
-        Entity,
-        (
-            With<WidgetInteractionReadout>,
-            Without<WidgetAnchorInstalled>,
-        ),
-    >,
-    reader: PanelWidgetReader,
-    panel_entities: PanelEntityReader,
-) {
-    let id = PanelElementId::named(SLIDER_ID);
-    let Some(owner) = panel_entities.world(*panel) else {
-        return;
-    };
-    let Some(source) = panel_entities.world(*readout) else {
-        return;
-    };
-    let Some(widget) = reader.typed_entity(owner, &id) else {
-        return;
-    };
-    let authored = PanelAttachment::new(Anchor::TopCenter, Anchor::BottomCenter)
-        .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET));
-    commands.attach_to_widget(source, widget, authored);
-    commands.entity(*readout).insert(WidgetAnchorInstalled);
-}
-
 fn spawn_widget_lab(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -930,12 +901,13 @@ fn spawn_widget_lab(
             FitMax(PANEL_MAX_WIDTH.into()),
             FitMax(PANEL_MAX_HEIGHT.into()),
         )
-        .world_height(PANEL_WORLD_HEIGHT)
-        .anchor(Anchor::Center)
+        .world_width(CUBE_HALF_USABLE_WIDTH)
+        .anchor(Anchor::TopLeft)
         .picking(PanelPicking {
             front: FacePicking::Interactive,
             back:  FacePicking::PanelOnly,
         })
+        .shadow_casting(ShadowCasting::Off)
         .material(material.clone())
         .text_material(material.clone())
         .with_tree(widget_tree(
@@ -945,37 +917,28 @@ fn spawn_widget_lab(
         ))
         .build();
     let readout = DiegeticPanel::world()
-        .size(FitMax(WORLD_READOUT_MAX_WIDTH.into()), Fit)
+        .size(Fit, Fit)
         .world_height(WORLD_READOUT_WORLD_HEIGHT)
-        .anchor(Anchor::Center)
+        .anchor(Anchor::BottomLeft)
+        .shadow_casting(ShadowCasting::Off)
         .material(material.clone())
         .text_material(material.clone())
         .with_tree(interaction_status_tree())
         .build();
-    let screen_panel = DiegeticPanel::screen()
-        .size(
-            FitMax(SCREEN_PANEL_MAX_WIDTH.into()),
-            FitMax(SCREEN_PANEL_MAX_HEIGHT.into()),
-        )
-        .anchor(Anchor::TopRight)
-        .material(material.clone())
-        .text_material(material.clone())
-        .with_tree(screen_widget_tree())
-        .build();
-    let screen_readout = DiegeticPanel::screen()
-        .size(
-            FitMax(SCREEN_READOUT_MAX_WIDTH.into()),
-            FitMax(SCREEN_READOUT_MAX_HEIGHT.into()),
-        )
-        .anchor(Anchor::TopRight)
-        .material(material.clone())
-        .text_material(material)
-        .with_tree(screen_interaction_status_tree())
-        .build();
-
     match panel {
         Ok(panel) => {
             commands.entity(*cube).with_children(|cube| {
+                cube.spawn((
+                    Name::new("Widget lab title"),
+                    DiegeticText::world(PANEL_TITLE)
+                        .size(fairy_dust::TITLE_SIZE)
+                        .color(fairy_dust::TITLE_COLOR)
+                        .shadow_mode(GlyphShadowMode::None)
+                        .anchor(Anchor::BottomLeft)
+                        .world_height(PANEL_TITLE_WORLD_HEIGHT)
+                        .transform(widget_title_transform())
+                        .build(),
+                ));
                 cube.spawn((
                     Name::new("Widget lab panel"),
                     WidgetLabPanel,
@@ -997,6 +960,33 @@ fn spawn_widget_lab(
         },
         Err(error) => error!("widgets: failed to build widget panel: {error}"),
     }
+
+    spawn_screen_widget_lab(&mut commands, material);
+}
+
+fn spawn_screen_widget_lab(commands: &mut Commands, material: Handle<StandardMaterial>) {
+    let screen_panel = DiegeticPanel::screen()
+        .size(
+            FitMax(SCREEN_PANEL_MAX_WIDTH.into()),
+            FitMax(SCREEN_PANEL_MAX_HEIGHT.into()),
+        )
+        .anchor(Anchor::TopRight)
+        .shadow_casting(ShadowCasting::Off)
+        .material(material.clone())
+        .text_material(material.clone())
+        .with_tree(screen_widget_tree())
+        .build();
+    let screen_readout = DiegeticPanel::screen()
+        .size(
+            FitMax(SCREEN_READOUT_MAX_WIDTH.into()),
+            FitMax(SCREEN_READOUT_MAX_HEIGHT.into()),
+        )
+        .anchor(Anchor::TopRight)
+        .shadow_casting(ShadowCasting::Off)
+        .material(material.clone())
+        .text_material(material)
+        .with_tree(screen_interaction_status_tree())
+        .build();
 
     match (screen_panel, screen_readout) {
         (Ok(screen_panel), Ok(screen_readout)) => {
@@ -1069,11 +1059,8 @@ fn slider_declaration() -> Result<Slider, SliderConfigError> {
     Ok(Slider::new(range, SLIDER_INITIAL_VALUE)?
         .step(step)
         .direction(SliderDirection::LeftToRight)
-        .hovered_background(SLIDER_FILL_HOVERED)
-        .pressed_background(SLIDER_FILL_PRESSED)
-        .focused_border_color(SLIDER_BORDER_FOCUSED)
-        .disabled_background(SLIDER_FILL_DISABLED)
-        .disabled_border_color(SLIDER_BORDER_DISABLED))
+        .reset_behavior(SliderResetBehavior::DoubleClick)
+        .focused_thumb_border_color(SLIDER_THUMB_FOCUSED_BORDER))
 }
 
 fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip) -> LayoutTree {
@@ -1081,16 +1068,8 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
         El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .padding(Padding::all(PANEL_PADDING))
-            .gap(CONTROL_GAP)
-            .background(PANEL_BACKGROUND)
-            .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER))
-            .corner_radius(CornerRadius::all(PANEL_RADIUS)),
+            .gap(CONTROL_GAP),
     );
-    builder.text((
-        PANEL_TITLE,
-        TextStyle::new(fairy_dust::TITLE_SIZE).with_color(fairy_dust::TITLE_COLOR),
-    ));
     add_editable_text(&mut builder);
     add_button(
         &mut builder,
@@ -1119,47 +1098,43 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
 
 fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Tooltip) {
     builder.with(
-        El::overlay()
-            .size(CONTROL_WIDTH, SLIDER_HEIGHT)
-            .padding(Padding::all(CONTROL_PADDING))
-            .background(SLIDER_FILL)
-            .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_BORDER))
-            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
+        El::column()
+            .width(Sizing::fixed(CONTROL_WIDTH))
+            .height(Sizing::FIT)
+            .gap(SLIDER_LABEL_GAP)
+            .alignment(AlignX::Center, AlignY::Center)
             .slider(SLIDER_ID, slider)
             .tooltip(slider_tooltip),
         |builder| {
-            // The value occupies the top of the control independently of the
-            // track and moving thumb.
             builder.with(
                 El::overlay()
                     .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .alignment(AlignX::Center, AlignY::Top),
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Center, AlignY::Center),
                 |builder| {
                     builder.text(
                         Text::new(
                             SLIDER_LABEL_IDLE,
-                            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+                            TextStyle::new(fairy_dust::LABEL_SIZE)
+                                .with_color(SLIDER_LABEL_TEXT)
+                                .with_align(TextAlign::Center),
                         )
                         .id(SLIDER_LABEL_ID)
-                        .measure_as(SLIDER_LABEL_MEASURE),
+                        .layout(El::new().width(Sizing::FIT).height(Sizing::FIT)),
                     );
                 },
             );
 
-            // The track is inset by the thumb radius so its endpoints match the
-            // centers reached by `SliderDirection::LeftToRight`.
             builder.with(
                 El::overlay()
                     .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .alignment(AlignX::Center, AlignY::Bottom),
+                    .height(Sizing::fixed(SLIDER_THUMB_DIAMETER)),
                 |builder| {
                     builder.with(
                         El::overlay()
                             .width(Sizing::GROW)
                             .height(Sizing::fixed(SLIDER_THUMB_DIAMETER))
-                            .padding(Padding::xy(SLIDER_THUMB_RADIUS, Px(0.0)))
+                            .padding(Padding::xy(SLIDER_TRACK_INSET, Px(0.0)))
                             .alignment(AlignX::Center, AlignY::Center),
                         |builder| {
                             builder.with(
@@ -1172,26 +1147,23 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                             );
                         },
                     );
-                },
-            );
-
-            // The thumb is authored at the left endpoint. Slider presentation
-            // translates this visual slot along the track without relayout.
-            builder.with(
-                El::overlay()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .alignment(AlignX::Left, AlignY::Bottom),
-                |builder| {
                     builder.with(
-                        El::new()
-                            .size(SLIDER_THUMB_DIAMETER, SLIDER_THUMB_DIAMETER)
-                            .background(SLIDER_THUMB_FILL)
-                            .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_THUMB_BORDER))
-                            .corner_radius(CornerRadius::all(SLIDER_THUMB_RADIUS))
-                            .id(SLIDER_THUMB_ID)
-                            .slider_thumb(),
-                        |_| {},
+                        El::overlay()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .alignment(AlignX::Left, AlignY::Center),
+                        |builder| {
+                            builder.with(
+                                El::new()
+                                    .size(SLIDER_THUMB_DIAMETER, SLIDER_THUMB_DIAMETER)
+                                    .background(SLIDER_THUMB_FILL)
+                                    .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_THUMB_BORDER))
+                                    .corner_radius(CornerRadius::all(SLIDER_THUMB_RADIUS))
+                                    .id(SLIDER_THUMB_ID)
+                                    .slider_thumb(),
+                                |_| {},
+                            );
+                        },
                     );
                 },
             );
@@ -1236,76 +1208,138 @@ fn interaction_status_tree() -> LayoutTree {
             .border(Border::all(STATUS_BORDER_WIDTH, STATUS_BORDER))
             .corner_radius(CornerRadius::all(STATUS_RADIUS)),
     );
-    builder.text(
-        Text::new(
-            POINTER_STATUS_IDLE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(POINTER_STATUS_ID)
-        .measure_as(POINTER_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "Pointer",
+        POINTER_STATUS_ID,
+        POINTER_STATUS_IDLE,
+        POINTER_STATUS_MEASURE,
     );
-    builder.text(
-        Text::new(
-            FOCUS_STATUS_NONE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(FOCUS_STATUS_ID)
-        .measure_as(FOCUS_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "Focus",
+        FOCUS_STATUS_ID,
+        FOCUS_STATUS_NONE,
+        FOCUS_STATUS_MEASURE,
     );
-    builder.text(
-        Text::new(
-            BUTTON_STATUS_IDLE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(BUTTON_STATUS_ID)
-        .measure_as(BUTTON_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "Button",
+        BUTTON_STATUS_ID,
+        BUTTON_STATUS_IDLE,
+        BUTTON_STATUS_MEASURE,
     );
-    builder.text(
-        Text::new(
-            CALLBACK_STATUS_IDLE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(CALLBACK_STATUS_ID)
-        .measure_as(CALLBACK_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "Callback",
+        CALLBACK_STATUS_ID,
+        CALLBACK_STATUS_IDLE,
+        CALLBACK_STATUS_MEASURE,
     );
-    builder.text(
-        Text::new(
-            STATE_STATUS_IDLE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(STATE_STATUS_ID)
-        .measure_as(STATE_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "State",
+        STATE_STATUS_ID,
+        STATE_STATUS_IDLE,
+        STATE_STATUS_MEASURE,
     );
-    builder.text(
-        Text::new(
-            SLIDER_STATUS_IDLE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(SLIDER_STATUS_ID)
-        .measure_as(SLIDER_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "Slider",
+        SLIDER_STATUS_ID,
+        SLIDER_STATUS_IDLE,
+        SLIDER_STATUS_MEASURE,
     );
-    builder.text(
-        Text::new(
-            TOOLTIP_STATUS_IDLE,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(STATUS_COLOR),
-        )
-        .id(TOOLTIP_STATUS_ID)
-        .measure_as(TOOLTIP_STATUS_MEASURE),
+    interaction_status_row(
+        &mut builder,
+        "Tooltip",
+        TOOLTIP_STATUS_ID,
+        TOOLTIP_STATUS_IDLE,
+        TOOLTIP_STATUS_MEASURE,
     );
     builder.build()
 }
 
-fn widget_panel_transform() -> Transform {
+fn interaction_status_row(
+    builder: &mut LayoutBuilder,
+    label: &'static str,
+    id: &'static str,
+    value: &'static str,
+    measure_as: &'static str,
+) {
+    builder.with(
+        El::row()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .gap(STATUS_COLUMN_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(STATUS_LABEL_WIDTH))
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text((label, status_label_style()));
+                },
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text(
+                        Text::new(value, status_value_style())
+                            .id(id)
+                            .measure_as(measure_as),
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn status_label_style() -> TextStyle {
+    TextStyle::new(STATUS_TEXT_SIZE)
+        .with_color(STATUS_LABEL_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn status_value_style() -> TextStyle {
+    TextStyle::new(STATUS_TEXT_SIZE)
+        .with_color(STATUS_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn cube_front_transform(local_position: Vec2) -> Transform {
     let mut transform = cube_face_transform(Face::Front, fairy_dust::EXAMPLE_CUBE_SIZE);
-    transform.translation += transform.rotation * Vec3::Z * PANEL_FACE_OFFSET;
+    transform.translation += transform.rotation * local_position.extend(PANEL_FACE_OFFSET);
     transform
 }
 
+fn widget_title_transform() -> Transform {
+    let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
+    cube_front_transform(Vec2::new(
+        -half_extent + CUBE_EDGE_INSET,
+        half_extent + PANEL_TITLE_GAP,
+    ))
+}
+
+fn widget_panel_transform() -> Transform {
+    let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
+    cube_front_transform(Vec2::new(
+        -half_extent + CUBE_EDGE_INSET,
+        half_extent - CUBE_EDGE_INSET,
+    ))
+}
+
 fn interaction_status_transform() -> Transform {
-    let mut transform = widget_panel_transform();
-    transform.translation.y -=
-        (PANEL_WORLD_HEIGHT + WORLD_READOUT_WORLD_HEIGHT).mul_add(0.5, STATUS_GAP);
-    transform
+    let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
+    cube_front_transform(Vec2::new(
+        -half_extent + CUBE_EDGE_INSET,
+        -half_extent + CUBE_EDGE_INSET,
+    ))
 }
 
 /// Direct state presentation shared by the world-panel buttons: hover and
@@ -1347,7 +1381,10 @@ fn add_button(
 }
 
 fn slider_tooltip() -> Tooltip {
-    authored_tooltip("Level slider", "Drag or use Left/Right Arrow while focused")
+    authored_tooltip(
+        "Level slider",
+        "Drag or use Left/Right Arrow; double-click the thumb to reset to 50%",
+    )
 }
 
 fn cube_tooltip() -> Tooltip {
@@ -1362,6 +1399,7 @@ fn authored_tooltip(title: &'static str, body: &'static str) -> Tooltip {
             .height(Sizing::FIT)
             .padding(Padding::all(TOOLTIP_PADDING))
             .gap(TOOLTIP_GAP)
+            .shadow_casting(ShadowCasting::Off)
             .background(STATUS_BACKGROUND)
             .border(Border::all(TOOLTIP_BORDER_WIDTH, STATUS_BORDER))
             .corner_radius(CornerRadius::all(TOOLTIP_RADIUS)),
@@ -1414,7 +1452,7 @@ fn report_interaction_changes(
         let priority = InteractionPriority::from(*interaction);
         if priority > active_priority {
             active_priority = priority;
-            active_status = Some(format!("Pointer: {:?} {}", *interaction, widget.id()));
+            active_status = Some(format!("{:?} {}", *interaction, widget.id()));
         }
     }
 
@@ -1488,7 +1526,7 @@ fn report_presentation_states(
             )
     };
     let status = format!(
-        "State: pri={} sec={} lvl={}",
+        "pri={} sec={} lvl={}",
         flags(PRIMARY_BUTTON_ID, PressedSource::PointerAggregate),
         flags(SECONDARY_BUTTON_ID, PressedSource::PointerAggregate),
         flags(SLIDER_ID, PressedSource::DragRecord)

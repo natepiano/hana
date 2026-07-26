@@ -10,7 +10,9 @@ use bevy::prelude::*;
 use bevy::window::WindowRef;
 
 use super::DiegeticPanel;
+use crate::layout;
 use crate::layout::Dimension;
+use crate::layout::LayoutTree;
 use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 
@@ -165,7 +167,7 @@ impl From<&CoordinateSpace> for PanelSpace {
 
 pub(crate) fn constrain_fit_width(
     panel: &mut DiegeticPanel,
-    blueprint: &crate::layout::LayoutTree,
+    blueprint: &LayoutTree,
     max_width: f32,
 ) {
     let unit = panel.layout_unit();
@@ -183,7 +185,7 @@ pub(crate) fn constrain_fit_width(
         },
     }
     let mut tree = blueprint.clone();
-    crate::layout::set_root_fit_width(&mut tree, min, max);
+    layout::set_root_fit_width(&mut tree, min, max);
     panel.replace_tree_full_rebuild(tree);
 }
 

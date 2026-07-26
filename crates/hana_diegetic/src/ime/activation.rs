@@ -14,12 +14,12 @@ use super::editor::PendingImePanelAnchor;
 use crate::ComputedDiegeticPanel;
 use crate::DiegeticPanel;
 use crate::render;
+use crate::widgets;
 use crate::widgets::PanelWidget;
 use crate::widgets::SemanticWidgetIntent;
 use crate::widgets::WidgetFocusAuthority;
 use crate::widgets::WidgetKind;
 use crate::widgets::WidgetOf;
-use crate::widgets::select_window_presentation_camera;
 
 pub(super) fn observe_panel_clicks(trigger: On<Add, DiegeticPanel>, mut commands: Commands) {
     commands
@@ -142,7 +142,7 @@ pub(super) fn open_from_semantic_activation(
             .cloned()
             .unwrap_or_else(|| RenderLayers::layer(0));
         let preferred = focus_authority.interaction_camera(window, entity);
-        select_window_presentation_camera(
+        widgets::select_window_presentation_camera(
             preferred,
             window,
             &target_layers,

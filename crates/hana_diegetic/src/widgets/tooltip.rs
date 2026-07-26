@@ -29,6 +29,7 @@ use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 use hana_valence::AnchorId;
 use hana_valence::AnchorPoint;
+use hana_valence::AnchorSystems;
 use hana_valence::AnchoredHere;
 use hana_valence::AnchoredTo;
 use hana_valence::Edge;
@@ -36,7 +37,9 @@ use hana_valence::ResolveDiagnostics;
 use hana_valence::ResolvedAnchorGeometry;
 
 use super::TooltipFor;
+use super::TooltipSystems;
 use super::Tooltips;
+use super::WidgetSystems;
 use crate::PanelSystems;
 use crate::layout::Anchor;
 use crate::layout::ChildLayoutState;
@@ -49,19 +52,29 @@ use crate::layout::Px;
 use crate::layout::Sizing;
 use crate::layout::Text;
 use crate::layout::Unit;
+use crate::panel;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPanelCommands;
 use crate::panel::PanelAnchorOffset;
 use crate::panel::PanelAttachment;
+use crate::panel::PanelAttachmentAuthored;
 use crate::panel::PanelEntity;
 use crate::panel::PanelEntityReader;
+use crate::panel::PanelPlane;
 use crate::panel::PanelScreenBounds;
 use crate::panel::PanelSpace;
+use crate::panel::ResolvedScreenPanelPosition;
 use crate::panel::Screen;
 use crate::panel::WidgetEntity;
 use crate::panel::World;
+use crate::render::MaterialTableAppendReady;
+use crate::render::PanelChildSystems;
+use crate::screen_space;
+use crate::screen_space::AnchorResolveDiagnostics;
+use crate::screen_space::ScreenAnchorTarget;
+use crate::screen_space::ScreenPanelRect;
 use crate::screen_space::ScreenSpaceSystems;
 
 const DEFAULT_SHOW_DELAY: Duration = Duration::from_millis(500);
@@ -96,19 +109,16 @@ impl Plugin for TooltipPlugin {
             .configure_sets(
                 Update,
                 (
-                    super::TooltipSystems::Eligibility
-                        .after(super::WidgetSystems::FocusCommandsApplied)
-                        .after(super::TooltipSystems::ControllerCommandsApplied),
-                    super::TooltipSystems::EligibilityCommandsApplied
-                        .after(super::TooltipSystems::Eligibility),
-                    super::TooltipSystems::Materialize
-                        .after(super::TooltipSystems::EligibilityCommandsApplied),
-                    super::TooltipSystems::MaterializationCommandsApplied
-                        .after(super::TooltipSystems::Materialize),
-                    super::TooltipSystems::Attach
-                        .after(super::TooltipSystems::MaterializationCommandsApplied),
-                    super::TooltipSystems::AttachmentCommandsApplied
-                        .after(super::TooltipSystems::Attach)
+                    TooltipSystems::Eligibility
+                        .after(WidgetSystems::FocusCommandsApplied)
+                        .after(TooltipSystems::ControllerCommandsApplied),
+                    TooltipSystems::EligibilityCommandsApplied.after(TooltipSystems::Eligibility),
+                    TooltipSystems::Materialize.after(TooltipSystems::EligibilityCommandsApplied),
+                    TooltipSystems::MaterializationCommandsApplied
+                        .after(TooltipSystems::Materialize),
+                    TooltipSystems::Attach.after(TooltipSystems::MaterializationCommandsApplied),
+                    TooltipSystems::AttachmentCommandsApplied
+                        .after(TooltipSystems::Attach)
                         .before(ScreenSpaceSystems::WidgetDemandCommandsApplied)
                         .before(PanelSystems::ResolvePanelAttachments),
                     TooltipPlacementSystems::ScreenDecide
@@ -123,25 +133,25 @@ impl Plugin for TooltipPlugin {
             .add_systems(
                 Update,
                 (
-                    advance_tooltip_visibility.in_set(super::TooltipSystems::Eligibility),
-                    ApplyDeferred.in_set(super::TooltipSystems::EligibilityCommandsApplied),
+                    advance_tooltip_visibility.in_set(TooltipSystems::Eligibility),
+                    ApplyDeferred.in_set(TooltipSystems::EligibilityCommandsApplied),
                     apply_tooltip_width_constraints.before(PanelSystems::ComputeLayout),
-                    materialize_requested_tooltips.in_set(super::TooltipSystems::Materialize),
-                    ApplyDeferred.in_set(super::TooltipSystems::MaterializationCommandsApplied),
+                    materialize_requested_tooltips.in_set(TooltipSystems::Materialize),
+                    ApplyDeferred.in_set(TooltipSystems::MaterializationCommandsApplied),
                     (
                         invalidate_stale_materialized_tooltips,
                         attach_materialized_tooltips,
                     )
                         .chain()
                         .run_if(tooltip_readiness_inputs_changed)
-                        .in_set(super::TooltipSystems::Attach),
-                    ApplyDeferred.in_set(super::TooltipSystems::AttachmentCommandsApplied),
+                        .in_set(TooltipSystems::Attach),
+                    ApplyDeferred.in_set(TooltipSystems::AttachmentCommandsApplied),
                     resolve_screen_tooltip_placements
                         .in_set(TooltipPlacementSystems::ScreenDecide)
                         .run_if(tooltip_readiness_inputs_changed),
                     ApplyDeferred.in_set(TooltipPlacementSystems::ScreenCommandsApplied),
                     (
-                        crate::screen_space::resolve_screen_space_panel_attachments,
+                        screen_space::resolve_screen_space_panel_attachments,
                         clear_screen_tooltip_attachment_corrections,
                     )
                         .chain()
@@ -152,33 +162,32 @@ impl Plugin for TooltipPlugin {
             .configure_sets(
                 PostUpdate,
                 (
-                    super::TooltipSystems::Reveal
-                        .before(crate::render::PanelChildSystems::Build)
-                        .before(crate::render::MaterialTableAppendReady),
-                    TooltipPlacementSystems::WorldDecide
-                        .after(crate::panel::refresh_world_anchor_globals),
+                    TooltipSystems::Reveal
+                        .before(PanelChildSystems::Build)
+                        .before(MaterialTableAppendReady),
+                    TooltipPlacementSystems::WorldDecide.after(panel::refresh_world_anchor_globals),
                     TooltipPlacementSystems::WorldCommandsApplied
                         .after(TooltipPlacementSystems::WorldDecide)
-                        .before(crate::panel::write_panel_anchor_offsets)
-                        .before(hana_valence::AnchorSystems::Resolve),
-                    super::TooltipSystems::Readiness.after(TransformSystems::Propagate),
-                    super::TooltipSystems::VisibilityEvents
-                        .after(super::TooltipSystems::Readiness)
+                        .before(panel::write_panel_anchor_offsets)
+                        .before(AnchorSystems::Resolve),
+                    TooltipSystems::Readiness.after(TransformSystems::Propagate),
+                    TooltipSystems::VisibilityEvents
+                        .after(TooltipSystems::Readiness)
                         .after(TransformSystems::Propagate),
                 ),
             )
             .add_systems(
                 PostUpdate,
                 (
-                    reveal_ready_tooltips.in_set(super::TooltipSystems::Reveal),
+                    reveal_ready_tooltips.in_set(TooltipSystems::Reveal),
                     resolve_world_tooltip_placements
                         .in_set(TooltipPlacementSystems::WorldDecide)
                         .run_if(tooltip_readiness_inputs_changed),
                     ApplyDeferred.in_set(TooltipPlacementSystems::WorldCommandsApplied),
                     finalize_tooltip_readiness
-                        .in_set(super::TooltipSystems::Readiness)
+                        .in_set(TooltipSystems::Readiness)
                         .run_if(tooltip_readiness_inputs_changed),
-                    emit_tooltip_shown.in_set(super::TooltipSystems::VisibilityEvents),
+                    emit_tooltip_shown.in_set(TooltipSystems::VisibilityEvents),
                 ),
             );
     }
@@ -1087,9 +1096,9 @@ struct TooltipReadinessInputChanges<'w, 's> {
                 Changed<TooltipPresentationCamera>,
                 Changed<TooltipWidthConstraint>,
                 Changed<TooltipPlacementState>,
-                Changed<crate::panel::ResolvedScreenPanelPosition>,
+                Changed<ResolvedScreenPanelPosition>,
                 Changed<AnchoredTo>,
-                Changed<crate::panel::PanelAttachmentAuthored>,
+                Changed<PanelAttachmentAuthored>,
             )>,
         ),
     >,
@@ -1100,7 +1109,7 @@ struct TooltipReadinessInputChanges<'w, 's> {
             Ref<'static, DiegeticPanel>,
             Ref<'static, Transform>,
             Ref<'static, GlobalTransform>,
-            Ref<'static, crate::panel::ResolvedScreenPanelPosition>,
+            Ref<'static, ResolvedScreenPanelPosition>,
         ),
         (
             Without<MaterializedTooltip>,
@@ -1108,7 +1117,7 @@ struct TooltipReadinessInputChanges<'w, 's> {
                 Changed<DiegeticPanel>,
                 Changed<Transform>,
                 Changed<GlobalTransform>,
-                Changed<crate::panel::ResolvedScreenPanelPosition>,
+                Changed<ResolvedScreenPanelPosition>,
             )>,
         ),
     >,
@@ -1142,8 +1151,8 @@ struct TooltipReadinessInputChanges<'w, 's> {
         ),
     >,
     windows:                     Query<'w, 's, (), Changed<Window>>,
-    screen_targets: Query<'w, 's, (), Changed<crate::screen_space::ScreenAnchorTarget>>,
-    authored_attachments:        Query<'w, 's, (), Changed<crate::panel::PanelAttachmentAuthored>>,
+    screen_targets:              Query<'w, 's, (), Changed<ScreenAnchorTarget>>,
+    authored_attachments:        Query<'w, 's, (), Changed<PanelAttachmentAuthored>>,
     world_attachments:           Query<'w, 's, (), Changed<AnchoredTo>>,
     removed_geometry:            RemovedComponents<'w, 's, ResolvedAnchorGeometry>,
     removed_presentation_camera: RemovedComponents<'w, 's, TooltipPresentationCamera>,
@@ -1151,8 +1160,8 @@ struct TooltipReadinessInputChanges<'w, 's> {
     removed_render_target:       RemovedComponents<'w, 's, RenderTarget>,
     removed_render_layers:       RemovedComponents<'w, 's, RenderLayers>,
     removed_window:              RemovedComponents<'w, 's, Window>,
-    removed_screen_target:       RemovedComponents<'w, 's, crate::screen_space::ScreenAnchorTarget>,
-    removed_attachment:          RemovedComponents<'w, 's, crate::panel::PanelAttachmentAuthored>,
+    removed_screen_target:       RemovedComponents<'w, 's, ScreenAnchorTarget>,
+    removed_attachment:          RemovedComponents<'w, 's, PanelAttachmentAuthored>,
     removed_world_attachment:    RemovedComponents<'w, 's, AnchoredTo>,
     removed_transform:           RemovedComponents<'w, 's, Transform>,
     removed_global_transform:    RemovedComponents<'w, 's, GlobalTransform>,
@@ -1301,7 +1310,7 @@ pub trait ScreenAnchorCommandsExt {
     fn screen_anchor_target(
         &mut self,
         entity: Entity,
-        data: crate::screen_space::ScreenAnchorTarget,
+        data: ScreenAnchorTarget,
     ) -> TooltipTargetEntity<Screen>;
 }
 
@@ -1309,7 +1318,7 @@ impl ScreenAnchorCommandsExt for Commands<'_, '_> {
     fn screen_anchor_target(
         &mut self,
         entity: Entity,
-        data: crate::screen_space::ScreenAnchorTarget,
+        data: ScreenAnchorTarget,
     ) -> TooltipTargetEntity<Screen> {
         self.queue(move |world: &mut bevy::ecs::world::World| {
             if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
@@ -1373,12 +1382,12 @@ struct StandaloneTooltipOperation {
 fn apply_standalone_tooltip(
     In(operation): In<StandaloneTooltipOperation>,
     targets: Query<(
-        Option<&crate::panel::DiegeticPanel>,
+        Option<&DiegeticPanel>,
         Option<&super::PanelWidget>,
         Option<&super::WidgetOf>,
-        Option<&hana_valence::ResolvedAnchorGeometry>,
+        Option<&ResolvedAnchorGeometry>,
         Option<&super::MeshAnchorTarget>,
-        Option<&crate::screen_space::ScreenAnchorTarget>,
+        Option<&ScreenAnchorTarget>,
     )>,
     mut commands: Commands,
 ) {
@@ -1706,7 +1715,7 @@ pub(super) fn materialize_requested_tooltips(
     widgets: Query<&super::WidgetOf, With<super::PanelWidget>>,
     anchor_geometry: Query<(), With<ResolvedAnchorGeometry>>,
     mesh_targets: Query<(), With<MeshAnchorTarget>>,
-    screen_targets: Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: Query<&ScreenAnchorTarget>,
     target_layers: Query<&RenderLayers>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -1779,7 +1788,7 @@ pub(super) fn materialize_requested_tooltips(
         if let Some(width_constraint) = width_constraint {
             commands.entity(controller).insert(width_constraint);
         }
-        crate::panel::write_owned_render_layers(
+        panel::write_owned_render_layers(
             &mut commands,
             controller,
             controller,
@@ -1810,7 +1819,7 @@ fn tooltip_materialization_context(
     widgets: &Query<&super::WidgetOf, With<super::PanelWidget>>,
     anchor_geometry: &Query<(), With<ResolvedAnchorGeometry>>,
     mesh_targets: &Query<(), With<MeshAnchorTarget>>,
-    screen_targets: &Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: &Query<&ScreenAnchorTarget>,
     target_layers: &Query<&RenderLayers>,
     windows: &Query<&Window>,
     primary_window: &Query<Entity, With<PrimaryWindow>>,
@@ -2006,7 +2015,7 @@ pub(super) fn invalidate_stale_materialized_tooltips(
         set_tooltip_placement_result(&mut placement, TooltipPlacementResult::Unavailable);
         *visibility = Visibility::Hidden;
         commands.entity(controller).remove::<(
-            crate::panel::PanelAttachmentAuthored,
+            PanelAttachmentAuthored,
             PanelAnchorOffset,
             TooltipWidthConstraintRequest,
         )>();
@@ -2021,7 +2030,7 @@ pub(super) fn attach_materialized_tooltips(
             &MaterializedTooltip,
             &TooltipPlacementState,
         ),
-        Without<crate::panel::PanelAttachmentAuthored>,
+        Without<PanelAttachmentAuthored>,
     >,
     panel_reader: PanelEntityReader,
     widget_reader: super::PanelWidgetReader,
@@ -2115,7 +2124,7 @@ fn apply_general_tooltip_attachment(
     controllers: Query<(&DiegeticPanel, &TooltipFor, &MaterializedTooltip)>,
     anchor_geometry: Query<(), With<ResolvedAnchorGeometry>>,
     mesh_targets: Query<(), With<MeshAnchorTarget>>,
-    screen_targets: Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: Query<&ScreenAnchorTarget>,
     windows: Query<(), With<Window>>,
     mut commands: Commands,
 ) {
@@ -2153,7 +2162,7 @@ fn apply_general_tooltip_attachment(
 #[derive(Clone)]
 struct ScreenTooltipTarget {
     bounds:        PanelScreenBounds,
-    rect:          crate::screen_space::ScreenPanelRect,
+    rect:          ScreenPanelRect,
     window:        Entity,
     camera_order:  isize,
     render_layers: RenderLayers,
@@ -2178,17 +2187,17 @@ pub(super) fn resolve_screen_tooltip_placements(
         &DiegeticPanel,
         &ComputedDiegeticPanel,
         &Transform,
-        &crate::panel::ResolvedScreenPanelPosition,
+        &ResolvedScreenPanelPosition,
         Option<&TooltipWidthConstraint>,
         &mut TooltipPlacementState,
     )>,
     panels: Query<(
         &DiegeticPanel,
         &Transform,
-        Option<&crate::panel::ResolvedScreenPanelPosition>,
+        Option<&ResolvedScreenPanelPosition>,
     )>,
     widgets: Query<(&super::WidgetOf, &super::WidgetAnchorRect), With<super::PanelWidget>>,
-    screen_targets: Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: Query<&ScreenAnchorTarget>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
@@ -2273,7 +2282,7 @@ struct ScreenTooltipPlacementInput<'a> {
     panel:              &'a DiegeticPanel,
     computed:           &'a ComputedDiegeticPanel,
     transform:          &'a Transform,
-    resolved_position:  &'a crate::panel::ResolvedScreenPanelPosition,
+    resolved_position:  &'a ResolvedScreenPanelPosition,
     width_constraint:   Option<&'a TooltipWidthConstraint>,
     current_attachment: PanelAttachment,
 }
@@ -2283,10 +2292,10 @@ fn screen_tooltip_placement(
     panels: &Query<(
         &DiegeticPanel,
         &Transform,
-        Option<&crate::panel::ResolvedScreenPanelPosition>,
+        Option<&ResolvedScreenPanelPosition>,
     )>,
     widgets: &Query<(&super::WidgetOf, &super::WidgetAnchorRect), With<super::PanelWidget>>,
-    screen_targets: &Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: &Query<&ScreenAnchorTarget>,
     windows: &Query<&Window>,
     primary_window: &Query<Entity, With<PrimaryWindow>>,
 ) -> TooltipPlacementDecision {
@@ -2328,7 +2337,7 @@ fn screen_tooltip_placement(
     if !valid_screen_size(source_size) {
         return TooltipPlacementDecision::Unavailable;
     }
-    let Some(source_rect) = crate::screen_space::screen_panel_rect(
+    let Some(source_rect) = screen_space::screen_panel_rect(
         input.panel,
         Some(input.resolved_position),
         Some(input.transform),
@@ -2369,10 +2378,10 @@ fn screen_tooltip_target(
     panels: &Query<(
         &DiegeticPanel,
         &Transform,
-        Option<&crate::panel::ResolvedScreenPanelPosition>,
+        Option<&ResolvedScreenPanelPosition>,
     )>,
     widgets: &Query<(&super::WidgetOf, &super::WidgetAnchorRect), With<super::PanelWidget>>,
-    screen_targets: &Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: &Query<&ScreenAnchorTarget>,
     windows: &Query<&Window>,
     primary_window: &Query<Entity, With<PrimaryWindow>>,
 ) -> Option<ScreenTooltipTarget> {
@@ -2408,7 +2417,7 @@ fn screen_tooltip_target(
 fn screen_panel_target(
     panel: &DiegeticPanel,
     transform: &Transform,
-    resolved: Option<&crate::panel::ResolvedScreenPanelPosition>,
+    resolved: Option<&ResolvedScreenPanelPosition>,
     windows: &Query<&Window>,
     primary_window: &Query<Entity, With<PrimaryWindow>>,
 ) -> Option<ScreenTooltipTarget> {
@@ -2424,7 +2433,7 @@ fn screen_panel_target(
     let window = live_window(*window, windows, primary_window)?;
     let window_component = windows.get(window).ok()?;
     let viewport = Vec2::new(window_component.width(), window_component.height());
-    let rect = crate::screen_space::screen_panel_rect(panel, resolved, Some(transform), viewport)?;
+    let rect = screen_space::screen_panel_rect(panel, resolved, Some(transform), viewport)?;
     Some(ScreenTooltipTarget {
         bounds: rect.projected_bounds()?,
         rect,
@@ -2503,7 +2512,7 @@ impl TooltipSide {
 
 fn fit_tooltip_in_viewport(
     authored: PanelAttachment,
-    source: crate::screen_space::ScreenPanelRect,
+    source: ScreenPanelRect,
     target: &ScreenTooltipTarget,
     viewport: Rect,
 ) -> Option<PanelAttachment> {
@@ -2697,7 +2706,7 @@ pub(super) fn apply_tooltip_width_constraints(
                     .remove::<TooltipWidthConstraintRequest>();
             },
             TooltipWidthConstraintRequest::Apply(max_width) => {
-                crate::panel::constrain_fit_width(&mut panel, &materialized.blueprint, max_width);
+                panel::constrain_fit_width(&mut panel, &materialized.blueprint, max_width);
                 *readiness = TooltipReadiness::Pending;
                 commands
                     .entity(entity)
@@ -2710,7 +2719,7 @@ pub(super) fn apply_tooltip_width_constraints(
                     .remove::<TooltipWidthConstraintRequest>();
             },
             TooltipWidthConstraintRequest::Restore => {
-                crate::panel::constrain_fit_width(&mut panel, &materialized.blueprint, f32::MAX);
+                panel::constrain_fit_width(&mut panel, &materialized.blueprint, f32::MAX);
                 *readiness = TooltipReadiness::Pending;
                 commands
                     .entity(entity)
@@ -3235,9 +3244,7 @@ fn world_tooltip_target(
     })
 }
 
-fn world_panel_anchor_frames(
-    plane: crate::panel::PanelPlane,
-) -> [WorldAnchorFrame; QUAD_ANCHOR_COUNT] {
+fn world_panel_anchor_frames(plane: PanelPlane) -> [WorldAnchorFrame; QUAD_ANCHOR_COUNT] {
     all_anchors().map(|anchor| WorldAnchorFrame {
         position: plane.point(anchor),
         right:    plane.right(),
@@ -3347,20 +3354,20 @@ pub(super) fn finalize_tooltip_readiness(
         &TooltipPlacementState,
         &GlobalTransform,
         &mut TooltipReadiness,
-        Option<&crate::panel::ResolvedScreenPanelPosition>,
+        Option<&ResolvedScreenPanelPosition>,
         Option<&AnchoredTo>,
-        Option<&crate::panel::PanelAttachmentAuthored>,
+        Option<&PanelAttachmentAuthored>,
     )>,
     panels: Query<(
         &DiegeticPanel,
         &Transform,
-        Option<&crate::panel::ResolvedScreenPanelPosition>,
+        Option<&ResolvedScreenPanelPosition>,
     )>,
     widgets: Query<(&super::WidgetOf, &super::WidgetAnchorRect), With<super::PanelWidget>>,
-    screen_targets: Query<&crate::screen_space::ScreenAnchorTarget>,
+    screen_targets: Query<&ScreenAnchorTarget>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    screen_diagnostics: Option<Res<crate::screen_space::AnchorResolveDiagnostics>>,
+    screen_diagnostics: Option<Res<AnchorResolveDiagnostics>>,
     world_diagnostics: Option<Res<ResolveDiagnostics>>,
 ) {
     for (
@@ -3388,7 +3395,7 @@ pub(super) fn finalize_tooltip_readiness(
                 let Some(world_diagnostics) = world_diagnostics.as_deref() else {
                     return false;
                 };
-                crate::panel::world_attachment_is_ready(
+                panel::world_attachment_is_ready(
                     entity,
                     materialized.target,
                     attachment,
@@ -3399,11 +3406,7 @@ pub(super) fn finalize_tooltip_readiness(
                 let Some(screen_diagnostics) = screen_diagnostics.as_deref() else {
                     return false;
                 };
-                crate::screen_space::screen_attachment_is_ready(
-                    entity,
-                    position,
-                    screen_diagnostics,
-                )
+                screen_space::screen_attachment_is_ready(entity, position, screen_diagnostics)
             }),
         };
         let presentation_matches =
@@ -3529,11 +3532,12 @@ impl TooltipControllerIndex {
 }
 
 mod private {
+    use crate::panel::Screen;
     pub trait SealedSpace {}
 
     impl SealedSpace for crate::panel::World {}
 
-    impl SealedSpace for crate::panel::Screen {}
+    impl SealedSpace for Screen {}
 }
 
 #[cfg(test)]
@@ -3580,7 +3584,14 @@ mod tests {
     use crate::WidgetOf;
     use crate::layout::El;
     use crate::layout::LayoutTreeChange;
+    use crate::panel::PanelAttachmentAuthored;
+    use crate::panel::ResolvedScreenPanelPosition;
+    use crate::screen_space::AnchorResolveDiagnostics;
+    use crate::screen_space::ScreenPanelRect;
+    use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::WidgetFocusAuthority;
+    use crate::widgets::WidgetSpec;
     use crate::widgets::WidgetsPlugin;
 
     const DISTANT_WORLD_TARGET_Z: f32 = -45.0;
@@ -3625,11 +3636,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, TransformPlugin))
             .insert_resource(DiegeticTextMeasurer::default())
-            .add_plugins((
-                HeadlessLayoutPlugin,
-                WidgetsPlugin,
-                crate::screen_space::ScreenSpacePlugin,
-            ));
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ScreenSpacePlugin));
         app
     }
 
@@ -3695,7 +3702,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(step))
-            .init_resource::<super::super::WidgetFocusAuthority>()
+            .init_resource::<WidgetFocusAuthority>()
             .init_resource::<TooltipVisibilityLog>()
             .add_observer(record_tooltip_shown)
             .add_observer(record_tooltip_hidden)
@@ -3814,7 +3821,7 @@ mod tests {
         }
     }
 
-    fn screen_tooltip_source(size: Vec2) -> Option<crate::screen_space::ScreenPanelRect> {
+    fn screen_tooltip_source(size: Vec2) -> Option<ScreenPanelRect> {
         let bounds = PanelScreenBounds::new(Vec2::ZERO, size).ok()?;
         Some(screen_tooltip_target(bounds).rect)
     }
@@ -3826,9 +3833,7 @@ mod tests {
     ) -> Option<PanelScreenBounds> {
         let panel = app.world().get::<DiegeticPanel>(controller)?;
         let transform = app.world().get::<Transform>(controller)?;
-        let resolved = app
-            .world()
-            .get::<crate::panel::ResolvedScreenPanelPosition>(controller)?;
+        let resolved = app.world().get::<ResolvedScreenPanelPosition>(controller)?;
         let window = app.world().get::<Window>(window)?;
         crate::screen_space::screen_panel_rect(
             panel,
@@ -4873,7 +4878,7 @@ mod tests {
         let panel = spawn_panel(&mut app, tree_without_tooltip);
         app.update();
         let widget = widget(&mut app, panel);
-        let button_declaration = app.world().get::<super::super::WidgetSpec>(widget).cloned();
+        let button_declaration = app.world().get::<WidgetSpec>(widget).cloned();
         assert!(button_declaration.is_some());
         assert!(app.world().get::<super::super::Tooltips>(widget).is_none());
 
@@ -5027,7 +5032,7 @@ mod tests {
         };
         let tree_without_tooltip = slider_tooltip_tree(slider.clone(), None);
         let tree = slider_tooltip_tree(slider.clone(), Some(Tooltip::new(El::new())));
-        let declaration = super::super::WidgetSpec::Slider(slider);
+        let declaration = WidgetSpec::Slider(slider);
 
         let panel = spawn_panel(&mut app, tree_without_tooltip);
         app.update();
@@ -6209,7 +6214,7 @@ mod tests {
             }
             let diagnostics = app
                 .world()
-                .resource::<crate::screen_space::AnchorResolveDiagnostics>()
+                .resource::<AnchorResolveDiagnostics>()
                 .current()
                 .copied()
                 .collect::<Vec<_>>();
@@ -7073,9 +7078,7 @@ mod tests {
         prepare_tooltip(&mut app, controller);
         update_materialization(&mut app);
 
-        let initial_attachment = app
-            .world()
-            .get::<crate::panel::PanelAttachmentAuthored>(controller);
+        let initial_attachment = app.world().get::<PanelAttachmentAuthored>(controller);
         assert!(initial_attachment.is_some());
         if let Some(initial_attachment) = initial_attachment {
             assert_eq!(initial_attachment.source_anchor(), Anchor::TopCenter);
@@ -7103,9 +7106,7 @@ mod tests {
         app.update();
         app.update();
 
-        let moved_attachment = app
-            .world()
-            .get::<crate::panel::PanelAttachmentAuthored>(controller);
+        let moved_attachment = app.world().get::<PanelAttachmentAuthored>(controller);
         assert!(moved_attachment.is_some());
         if let Some(moved_attachment) = moved_attachment {
             assert_eq!(moved_attachment.source_anchor(), Anchor::BottomCenter);

@@ -21,14 +21,16 @@ use super::WidgetOf;
 use super::WidgetSpec;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
+use super::capture;
 use super::capture::WidgetCaptures;
-use super::capture::trigger_immediate;
+use super::constants::THUMB_CLICK_JITTER_PIXELS_SQUARED;
+use super::constants::THUMB_HIT_SLOP_POINTS;
 use super::visual;
 use crate::DiegeticPanel;
 use crate::PanelElementId;
 use crate::layout::BoundingBox;
+use crate::render;
 use crate::render::CapturedCameraRay;
-use crate::render::project_flat_panel_ray_hit;
 
 /// Registers slider runtime state, pointer capture, and adjustment handling.
 pub(super) struct SliderPlugin;
@@ -40,6 +42,7 @@ impl Plugin for SliderPlugin {
             .add_observer(grab_from_pointer)
             .add_observer(drag_from_pointer)
             .add_observer(release_from_pointer)
+            .add_observer(reset_from_pointer)
             .add_observer(release_from_drag_end)
             .add_observer(cancel_from_pointer)
             .add_observer(cancel_from_pointer_removal)
@@ -62,6 +65,17 @@ pub enum SliderDirection {
     BottomToTop,
     /// Values increase from top to bottom.
     TopToBottom,
+}
+
+/// Optional thumb gesture that proposes the slider's authored default value.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SliderResetBehavior {
+    /// Pointer clicks never propose the authored default value.
+    #[default]
+    Disabled,
+    /// A primary-button double-click on the marked thumb proposes the authored
+    /// default value without moving on the first click.
+    DoubleClick,
 }
 
 /// Validated numeric range for a slider.
@@ -149,34 +163,42 @@ struct SliderStatePresentation {
 /// declarations; the root-state builders here patch only that root surface's
 /// retained records at runtime, layering normal → focused → hovered → pressed →
 /// disabled per property with missing values falling through to the prior
-/// layer. Child thumb and label appearance stays application-authored and
-/// constant.
+/// layer. Child appearance stays application-authored except for the marked
+/// thumb's optional keyboard-focus border color.
 #[must_use]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider {
-    range:         SliderRange,
-    initial_value: f32,
-    step:          Option<SliderStep>,
-    direction:     SliderDirection,
-    states:        Option<Box<SliderStatePresentation>>,
+    range:                      SliderRange,
+    default_value:              f32,
+    step:                       Option<SliderStep>,
+    direction:                  SliderDirection,
+    reset_behavior:             SliderResetBehavior,
+    focused_thumb_border_color: Option<Color>,
+    states:                     Option<Box<SliderStatePresentation>>,
 }
 
 impl Slider {
-    /// Creates a slider declaration with a finite initial value.
+    /// Creates a slider declaration with a finite default value.
+    ///
+    /// The default value initializes the first runtime [`SliderState`] and is
+    /// the target proposed by [`SliderResetBehavior::DoubleClick`] when that
+    /// behavior is enabled.
     ///
     /// # Errors
     ///
-    /// Returns [`SliderConfigError::NonFiniteValue`] when `initial_value` is
+    /// Returns [`SliderConfigError::NonFiniteValue`] when `default_value` is
     /// non-finite.
-    pub fn new(range: SliderRange, initial_value: f32) -> Result<Self, SliderConfigError> {
-        if !initial_value.is_finite() {
+    pub fn new(range: SliderRange, default_value: f32) -> Result<Self, SliderConfigError> {
+        if !default_value.is_finite() {
             return Err(SliderConfigError::NonFiniteValue);
         }
         Ok(Self {
             range,
-            initial_value,
+            default_value,
             step: None,
             direction: SliderDirection::default(),
+            reset_behavior: SliderResetBehavior::default(),
+            focused_thumb_border_color: None,
             states: None,
         })
     }
@@ -190,6 +212,21 @@ impl Slider {
     /// Sets the direction in which values increase.
     pub const fn direction(mut self, direction: SliderDirection) -> Self {
         self.direction = direction;
+        self
+    }
+
+    /// Sets the optional thumb gesture that proposes the authored default.
+    pub const fn reset_behavior(mut self, reset_behavior: SliderResetBehavior) -> Self {
+        self.reset_behavior = reset_behavior;
+        self
+    }
+
+    /// Sets the marked thumb's border color while keyboard focus is visible.
+    ///
+    /// Requires an authored border on the element marked with
+    /// [`El::slider_thumb`](crate::El::slider_thumb).
+    pub const fn focused_thumb_border_color(mut self, color: Color) -> Self {
+        self.focused_thumb_border_color = Some(color);
         self
     }
 
@@ -346,6 +383,10 @@ impl Slider {
         })
     }
 
+    pub(crate) const fn has_focused_thumb_border_color(&self) -> bool {
+        self.focused_thumb_border_color.is_some()
+    }
+
     /// Composes the desired root-slot override for the active state set.
     ///
     /// Each property layers independently in the fixed order normal → focused →
@@ -386,10 +427,11 @@ impl Slider {
 
     /// Builds the first-spawn runtime state for this authored slider.
     ///
-    /// The authored initial value applies only here; later reifications
-    /// preserve the live applied value.
+    /// The authored default initializes only the first state; later
+    /// reifications preserve the live applied value while retaining the latest
+    /// default for reset proposals.
     pub(crate) fn initial_state(&self) -> SliderState {
-        SliderState::from_validated(self.range, self.initial_value, self.step, self.direction)
+        SliderState::from_validated(self.range, self.default_value, self.step, self.direction)
     }
 }
 
@@ -481,8 +523,8 @@ impl SliderState {
     pub const fn direction(&self) -> SliderDirection { self.direction }
 
     /// Whether this state already carries `authored`'s range, step, and
-    /// direction; the authored initial value is spawn-only and never
-    /// compared.
+    /// direction; the authored default does not alter an existing applied value
+    /// and is therefore not compared.
     pub(crate) fn matches_configuration(&self, authored: &Slider) -> bool {
         self.range == authored.range
             && self.step == authored.step
@@ -798,6 +840,27 @@ enum SliderTerminal {
     Cancel(SliderCancelCause),
 }
 
+/// Where a reset-enabled pointer press began.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PressOrigin {
+    Thumb,
+    Track,
+}
+
+/// Whether pointer motion remains within click jitter tolerance.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PressMotion {
+    WithinSlop,
+    Moved,
+}
+
+/// Release behavior selected when a pointer press begins.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ClickResolution {
+    Ordinary,
+    ResetDefault,
+}
+
 /// Slider-only capture payload keyed by the captured widget entity.
 ///
 /// Pointer/widget occupancy and raw-action ordering live in the shared
@@ -807,28 +870,37 @@ enum SliderTerminal {
 /// terminal outcome.
 struct SliderCapture {
     id:                PanelElementId,
+    pointer_id:        PointerId,
     camera:            Entity,
     captured_target:   NormalizedRenderTarget,
+    press_position:    Vec2,
     latest_raw_target: f32,
+    press_origin:      PressOrigin,
+    press_motion:      PressMotion,
+    click_resolution:  ClickResolution,
     terminal:          SliderTerminal,
 }
 
 /// A projected slider press that shared occupancy rejected, awaiting recapture
 /// by the raw dispatcher once its pointer and widget free within the batch.
 struct PendingSliderPress {
-    entity:          Entity,
-    sequence:        u64,
-    id:              PanelElementId,
-    camera:          Entity,
-    captured_target: NormalizedRenderTarget,
-    value:           f32,
+    entity:           Entity,
+    sequence:         u64,
+    id:               PanelElementId,
+    camera:           Entity,
+    captured_target:  NormalizedRenderTarget,
+    press_position:   Vec2,
+    value:            f32,
+    press_origin:     PressOrigin,
+    click_resolution: ClickResolution,
 }
 
 /// Slider drag payloads and rejected-press pending records.
 #[derive(Default, Resource)]
 pub(crate) struct SliderCaptures {
-    drags:   HashMap<Entity, SliderCapture>,
-    pending: HashMap<PointerId, PendingSliderPress>,
+    drags:            HashMap<Entity, SliderCapture>,
+    pending:          HashMap<PointerId, PendingSliderPress>,
+    reset_candidates: HashMap<PointerId, Entity>,
 }
 
 impl SliderCaptures {
@@ -836,17 +908,26 @@ impl SliderCaptures {
         &mut self,
         entity: Entity,
         id: PanelElementId,
+        pointer_id: PointerId,
         camera: Entity,
         captured_target: NormalizedRenderTarget,
+        press_position: Vec2,
         value: f32,
+        press_origin: PressOrigin,
+        click_resolution: ClickResolution,
     ) {
         self.drags.insert(
             entity,
             SliderCapture {
                 id,
+                pointer_id,
                 camera,
                 captured_target,
+                press_position,
                 latest_raw_target: value,
+                press_origin,
+                press_motion: PressMotion::WithinSlop,
+                click_resolution,
                 terminal: SliderTerminal::Pending,
             },
         );
@@ -860,10 +941,70 @@ impl SliderCaptures {
             .map(|capture| (capture.camera, capture.captured_target.clone()))
     }
 
-    fn update_raw_target(&mut self, entity: Entity, value: f32) {
-        if let Some(capture) = self.drags.get_mut(&entity) {
+    fn update_raw_target(&mut self, entity: Entity, position: Vec2, value: f32) -> bool {
+        let pointer_id = self.drags.get_mut(&entity).and_then(|capture| {
+            if capture.press_origin == PressOrigin::Thumb
+                && capture.press_motion == PressMotion::WithinSlop
+                && position.distance_squared(capture.press_position)
+                    <= THUMB_CLICK_JITTER_PIXELS_SQUARED
+            {
+                return None;
+            }
             capture.latest_raw_target = value;
+            capture.press_motion = PressMotion::Moved;
+            Some(capture.pointer_id)
+        });
+        if let Some(pointer_id) = pointer_id {
+            self.reset_candidates.remove(&pointer_id);
+            true
+        } else {
+            false
         }
+    }
+
+    fn observe_reset_press(
+        &mut self,
+        pointer_id: PointerId,
+        entity: Entity,
+        count: u8,
+        press_origin: PressOrigin,
+    ) -> ClickResolution {
+        let resets = count >= 2
+            && press_origin == PressOrigin::Thumb
+            && self.reset_candidates.get(&pointer_id) == Some(&entity);
+        if press_origin == PressOrigin::Thumb {
+            self.reset_candidates.insert(pointer_id, entity);
+        } else {
+            self.reset_candidates.remove(&pointer_id);
+        }
+        if resets {
+            ClickResolution::ResetDefault
+        } else {
+            ClickResolution::Ordinary
+        }
+    }
+
+    fn preserves_click_value(&self, entity: Entity) -> Option<f32> {
+        let capture = self.drags.get(&entity)?;
+        (capture.press_origin == PressOrigin::Thumb
+            && capture.press_motion == PressMotion::WithinSlop)
+            .then_some(capture.latest_raw_target)
+    }
+
+    fn resets_on_click(&self, entity: Entity) -> bool {
+        self.drags.get(&entity).is_some_and(|capture| {
+            capture.click_resolution == ClickResolution::ResetDefault
+                && capture.press_motion == PressMotion::WithinSlop
+        })
+    }
+
+    fn clear_reset_pointer(&mut self, pointer_id: PointerId) {
+        self.reset_candidates.remove(&pointer_id);
+    }
+
+    fn clear_reset_widget(&mut self, entity: Entity) {
+        self.reset_candidates
+            .retain(|_, candidate| *candidate != entity);
     }
 
     /// Records a valid release outcome when the drag is still pending, storing
@@ -883,12 +1024,18 @@ impl SliderCaptures {
     /// Records a cancellation when the drag is still pending. Returns whether
     /// the outcome was recorded.
     fn cancel(&mut self, entity: Entity, cause: SliderCancelCause) -> bool {
-        match self.drags.get_mut(&entity) {
+        let recorded = match self.drags.get_mut(&entity) {
             Some(capture) if matches!(capture.terminal, SliderTerminal::Pending) => {
                 capture.terminal = SliderTerminal::Cancel(cause);
-                true
+                Some(capture.pointer_id)
             },
-            _ => false,
+            _ => None,
+        };
+        if let Some(pointer_id) = recorded {
+            self.reset_candidates.remove(&pointer_id);
+            true
+        } else {
+            false
         }
     }
 
@@ -950,7 +1097,7 @@ impl SliderProjection<'_, '_> {
         thumb_extent: Option<f32>,
         range: SliderRange,
         direction: SliderDirection,
-    ) -> Result<f32, SliderCancelCause> {
+    ) -> Result<(Vec2, f32), SliderCancelCause> {
         let Ok((camera, camera_transform, render_target)) = self.cameras.get(camera_entity) else {
             return Err(SliderCancelCause::ProjectionUnavailable);
         };
@@ -967,10 +1114,11 @@ impl SliderProjection<'_, '_> {
             viewport_position,
         };
         let pointer_local =
-            project_flat_panel_ray_hit(&captured_camera_ray, panel, panel_transform)
+            render::project_flat_panel_ray_hit(&captured_camera_ray, panel, panel_transform)
                 .map_err(|_| SliderCancelCause::ProjectionUnavailable)?;
-        project_pointer_value(pointer_local, content, thumb_extent, range, direction)
-            .map_err(|_| SliderCancelCause::ProjectionUnavailable)
+        let value = project_pointer_value(pointer_local, content, thumb_extent, range, direction)
+            .map_err(|_| SliderCancelCause::ProjectionUnavailable)?;
+        Ok((pointer_local, value))
     }
 }
 
@@ -993,6 +1141,27 @@ fn project_widget(
     state: &SliderState,
     slots: &WidgetVisualSlots,
 ) -> Result<f32, SliderCancelCause> {
+    project_widget_hit(
+        projection,
+        camera,
+        captured_target,
+        viewport_position,
+        panel,
+        state,
+        slots,
+    )
+    .map(|(_, value)| value)
+}
+
+fn project_widget_hit(
+    projection: &SliderProjection<'_, '_>,
+    camera: Entity,
+    captured_target: &NormalizedRenderTarget,
+    viewport_position: Vec2,
+    panel: Entity,
+    state: &SliderState,
+    slots: &WidgetVisualSlots,
+) -> Result<(Vec2, f32), SliderCancelCause> {
     let Some(content) = slots.content_box(VisualSlotId::SLIDER_ROOT) else {
         return Err(SliderCancelCause::ProjectionUnavailable);
     };
@@ -1006,6 +1175,18 @@ fn project_widget(
         state.range(),
         state.direction(),
     )
+}
+
+/// Presented thumb bounds in panel layout coordinates, expanded by a small
+/// pointer allowance on every side.
+fn current_thumb_hit_bounds(slots: &WidgetVisualSlots, state: &SliderState) -> Option<BoundingBox> {
+    let mut bounds = slots.border_box(VisualSlotId::SLIDER_THUMB)?;
+    let translation = thumb_translation(slots, state)?;
+    bounds.x += translation.x - THUMB_HIT_SLOP_POINTS;
+    bounds.y += translation.y - THUMB_HIT_SLOP_POINTS;
+    bounds.width = THUMB_HIT_SLOP_POINTS.mul_add(2.0, bounds.width);
+    bounds.height = THUMB_HIT_SLOP_POINTS.mul_add(2.0, bounds.height);
+    Some(bounds)
 }
 
 /// Layout-frame translation delta — layout points with Y increasing downward —
@@ -1124,9 +1305,10 @@ pub(super) fn presentation_inputs_changed(
 /// marker; [`SliderCaptures`] stays lifecycle authority and is never consulted
 /// for presentation. Writes go through [`visual::write_slot_override`], which
 /// compares immutably first, so an unchanged state never marks
-/// [`WidgetVisualOverrides`] changed. The thumb slot is always resolved so a
-/// same-id slider re-authored from a marked thumb to no thumb clears its stale
-/// translation through that same writer.
+/// [`WidgetVisualOverrides`] changed. The thumb slot combines its value-derived
+/// translation with the authored focus border color. It is always resolved so
+/// a same-id slider re-authored from a marked thumb to no thumb clears its stale
+/// override through that same writer.
 pub(super) fn present_slider_state(
     sliders: Query<
         (
@@ -1196,11 +1378,14 @@ pub(super) fn present_slider_state(
             let panel = panels.get(widget_of.panel()).ok()?;
             visual::layout_delta_to_render_offset(layout_delta, panel.points_to_world())
         });
-        let thumb_override =
+        let mut thumb_override =
             render_offset.map_or_else(VisualSlotOverride::default, |offset| VisualSlotOverride {
                 offset: Some(offset),
                 ..VisualSlotOverride::default()
             });
+        if focused {
+            thumb_override.border_color = slider.focused_thumb_border_color;
+        }
         visual::write_slot_override(
             entity,
             VisualSlotId::SLIDER_THUMB,
@@ -1218,10 +1403,23 @@ fn begin_drag(
     id: PanelElementId,
     camera: Entity,
     captured_target: NormalizedRenderTarget,
+    press_position: Vec2,
     value: f32,
     pointer_id: PointerId,
+    press_origin: PressOrigin,
+    click_resolution: ClickResolution,
 ) {
-    slider_captures.begin(entity, id.clone(), camera, captured_target, value);
+    slider_captures.begin(
+        entity,
+        id.clone(),
+        pointer_id,
+        camera,
+        captured_target,
+        press_position,
+        value,
+        press_origin,
+        click_resolution,
+    );
     commands.entity(entity).insert(SliderDrag);
     commands.trigger(SliderGrabbed {
         entity,
@@ -1245,6 +1443,7 @@ pub(super) fn grab_from_pointer(
         (
             &PanelWidget,
             &WidgetKind,
+            &WidgetSpec,
             &WidgetOf,
             &SliderState,
             &WidgetVisualSlots,
@@ -1262,7 +1461,8 @@ pub(super) fn grab_from_pointer(
         return;
     }
     let entity = press.event_target();
-    let Ok((widget, kind, widget_of, state, slots, disabled, dragging)) = widgets.get(entity)
+    let Ok((widget, kind, authored, widget_of, state, slots, disabled, dragging)) =
+        widgets.get(entity)
     else {
         return;
     };
@@ -1276,7 +1476,7 @@ pub(super) fn grab_from_pointer(
     let camera = press.hit.camera;
     let captured_target = press.pointer_location.target.clone();
     let viewport_position = press.pointer_location.position;
-    let Ok(value) = project_widget(
+    let Ok((pointer_local, projected_value)) = project_widget_hit(
         &projection,
         camera,
         &captured_target,
@@ -1286,6 +1486,25 @@ pub(super) fn grab_from_pointer(
         slots,
     ) else {
         return;
+    };
+    let reset_enabled = matches!(
+        authored,
+        WidgetSpec::Slider(slider)
+            if slider.reset_behavior == SliderResetBehavior::DoubleClick
+    );
+    let press_origin = if reset_enabled
+        && current_thumb_hit_bounds(slots, state).is_some_and(|thumb| thumb.contains(pointer_local))
+    {
+        PressOrigin::Thumb
+    } else {
+        PressOrigin::Track
+    };
+    let click_resolution =
+        slider_captures.observe_reset_press(press.pointer_id, entity, press.count, press_origin);
+    let value = if press_origin == PressOrigin::Thumb {
+        state.value()
+    } else {
+        projected_value
     };
     let Some(sequence) = captures.observe_press(press.pointer_id, entity) else {
         return;
@@ -1298,8 +1517,11 @@ pub(super) fn grab_from_pointer(
             widget.id().clone(),
             camera,
             captured_target,
+            viewport_position,
             value,
             press.pointer_id,
+            press_origin,
+            click_resolution,
         );
     } else {
         slider_captures.record_pending(
@@ -1310,7 +1532,10 @@ pub(super) fn grab_from_pointer(
                 id: widget.id().clone(),
                 camera,
                 captured_target,
+                press_position: viewport_position,
                 value,
+                press_origin,
+                click_resolution,
             },
         );
     }
@@ -1359,14 +1584,15 @@ pub(super) fn drag_from_pointer(
         slots,
     ) {
         Ok(value) => {
-            slider_captures.update_raw_target(entity, value);
-            commands.trigger(SliderChangeRequested {
-                entity,
-                id: widget.id().clone(),
-                value,
-                is_final: false,
-                pointer_id: Some(drag.pointer_id),
-            });
+            if slider_captures.update_raw_target(entity, drag.pointer_location.position, value) {
+                commands.trigger(SliderChangeRequested {
+                    entity,
+                    id: widget.id().clone(),
+                    value,
+                    is_final: false,
+                    pointer_id: Some(drag.pointer_id),
+                });
+            }
         },
         Err(cause) => {
             cancel_slider_drag(entity, cause, &mut slider_captures, &mut commands);
@@ -1410,6 +1636,48 @@ pub(super) fn release_from_pointer(
         &mut slider_captures,
         &mut commands,
     );
+}
+
+/// Completes a captured slider interaction at its authored default when the
+/// second primary click arrives.
+///
+/// The reset becomes the capture's release value before [`Pointer<Release>`]
+/// is dispatched. Removing [`SliderDrag`] then emits the ordinary final
+/// proposal and frees the capture, so the following release cannot overwrite
+/// the reset with the pointer position.
+pub(super) fn reset_from_pointer(
+    mut click: On<Pointer<Click>>,
+    sliders: Query<(&WidgetKind, &WidgetSpec, Has<WidgetDisabled>), With<PanelWidget>>,
+    captures: Res<WidgetCaptures>,
+    mut slider_captures: ResMut<SliderCaptures>,
+    mut commands: Commands,
+) {
+    if click.button != PointerButton::Primary {
+        return;
+    }
+    let entity = click.event_target();
+    let Ok((kind, authored, disabled)) = sliders.get(entity) else {
+        return;
+    };
+    if *kind != WidgetKind::Slider {
+        return;
+    }
+    click.propagate(false);
+    let WidgetSpec::Slider(slider) = authored else {
+        return;
+    };
+    if disabled
+        || click.count < 2
+        || slider.reset_behavior != SliderResetBehavior::DoubleClick
+        || !captures.captures(click.pointer_id, entity)
+        || !slider_captures.resets_on_click(entity)
+    {
+        return;
+    }
+    if slider_captures.set_release(entity, slider.default_value) {
+        slider_captures.clear_reset_pointer(click.pointer_id);
+        commands.entity(entity).remove::<SliderDrag>();
+    }
 }
 
 pub(super) fn release_from_drag_end(
@@ -1483,17 +1751,21 @@ pub(super) fn resolve_release(
     let Some((camera, captured_target)) = slider_captures.capture_context(entity) else {
         return false;
     };
-    let recorded = match project_widget(
-        projection,
-        camera,
-        &captured_target,
-        viewport_position,
-        widget_of.panel(),
-        state,
-        slots,
-    ) {
-        Ok(value) => slider_captures.set_release(entity, value),
-        Err(cause) => slider_captures.cancel(entity, cause),
+    let recorded = if let Some(value) = slider_captures.preserves_click_value(entity) {
+        slider_captures.set_release(entity, value)
+    } else {
+        match project_widget(
+            projection,
+            camera,
+            &captured_target,
+            viewport_position,
+            widget_of.panel(),
+            state,
+            slots,
+        ) {
+            Ok(value) => slider_captures.set_release(entity, value),
+            Err(cause) => slider_captures.cancel(entity, cause),
+        }
     };
     if recorded {
         commands.entity(entity).remove::<SliderDrag>();
@@ -1536,6 +1808,7 @@ pub(super) fn cancel_from_pointer_removal(
     let Ok(&pointer_id) = pointers.get(removed.entity) else {
         return;
     };
+    slider_captures.clear_reset_pointer(pointer_id);
     let Some(widget) = captures.widget(pointer_id) else {
         return;
     };
@@ -1552,6 +1825,7 @@ pub(super) fn cancel_from_disabled(
     mut slider_captures: ResMut<SliderCaptures>,
     mut commands: Commands,
 ) {
+    slider_captures.clear_reset_widget(disabled.entity);
     cancel_slider_drag(
         disabled.entity,
         SliderCancelCause::Disabled,
@@ -1565,6 +1839,7 @@ pub(super) fn cancel_from_widget_removal(
     mut slider_captures: ResMut<SliderCaptures>,
     mut commands: Commands,
 ) {
+    slider_captures.clear_reset_widget(removed.entity);
     cancel_slider_drag(
         removed.entity,
         SliderCancelCause::WidgetRemoved,
@@ -1577,6 +1852,7 @@ pub(super) fn cancel_before_widget_despawn(
     despawn: On<Despawn, PanelWidget>,
     mut slider_captures: ResMut<SliderCaptures>,
 ) {
+    slider_captures.clear_reset_widget(despawn.entity);
     slider_captures.cancel(despawn.entity, SliderCancelCause::WidgetRemoved);
 }
 
@@ -1672,15 +1948,22 @@ pub(super) fn capture_reconciled_press(
         id,
         camera,
         captured_target,
+        press_position,
         value,
+        press_origin,
+        click_resolution,
         ..
     } = pending;
     world.resource_mut::<SliderCaptures>().begin(
         entity,
         id.clone(),
+        pointer_id,
         camera,
         captured_target,
+        press_position,
         value,
+        press_origin,
+        click_resolution,
     );
     world.entity_mut(entity).insert(SliderDrag);
     world.trigger(SliderGrabbed {
@@ -1720,7 +2003,7 @@ fn emit_slider_terminal(mut world: DeferredWorld, context: HookContext) {
     let SliderCapture { id, terminal, .. } = capture;
     match terminal {
         SliderTerminal::Release(value) => {
-            trigger_immediate(
+            capture::trigger_immediate(
                 &mut world,
                 SliderChangeRequested {
                     entity,
@@ -1730,7 +2013,7 @@ fn emit_slider_terminal(mut world: DeferredWorld, context: HookContext) {
                     pointer_id: Some(pointer_id),
                 },
             );
-            trigger_immediate(
+            capture::trigger_immediate(
                 &mut world,
                 SliderReleased {
                     entity,
@@ -1740,7 +2023,7 @@ fn emit_slider_terminal(mut world: DeferredWorld, context: HookContext) {
             );
         },
         SliderTerminal::Cancel(cause) => {
-            trigger_immediate(
+            capture::trigger_immediate(
                 &mut world,
                 SliderCanceled {
                     entity,
@@ -1751,7 +2034,7 @@ fn emit_slider_terminal(mut world: DeferredWorld, context: HookContext) {
             );
         },
         SliderTerminal::Pending => {
-            trigger_immediate(
+            capture::trigger_immediate(
                 &mut world,
                 SliderCanceled {
                     entity,
@@ -1792,6 +2075,7 @@ mod tests {
     use bevy::camera::Projection;
     use bevy::camera::RenderTarget;
     use bevy::camera::RenderTargetInfo;
+    use bevy::ecs::change_detection::Tick;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::input::ButtonState;
     use bevy::input::InputPlugin;
@@ -1828,8 +2112,6 @@ mod tests {
     use bevy_enhanced_input::prelude::InputContextAppExt;
     use bevy_kana::Keybindings;
 
-    use super::super::capture::WidgetCaptures;
-    use super::super::capture::reconcile_pointer_input;
     use super::ProjectionUnavailable;
     use super::RequestSliderAdjustment;
     use super::Slider;
@@ -1844,12 +2126,16 @@ mod tests {
     use super::SliderGrabbed;
     use super::SliderRange;
     use super::SliderReleased;
+    use super::SliderResetBehavior;
     use super::SliderState;
     use super::SliderStep;
+    use super::THUMB_HIT_SLOP_POINTS;
+    use super::current_thumb_hit_bounds;
     use super::project_pointer_value;
     use super::slider_self_update;
     use crate::AlignX;
     use crate::AlignY;
+    use crate::Anchor;
     use crate::Border;
     use crate::Button;
     use crate::ButtonClicked;
@@ -1873,6 +2159,7 @@ mod tests {
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::ButtonPress;
     use crate::widgets::SemanticWidgetIntent;
+    use crate::widgets::VisualOverrideIndex;
     use crate::widgets::VisualSlotId;
     use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetDisabled;
@@ -1881,6 +2168,8 @@ mod tests {
     use crate::widgets::WidgetVisualOverrides;
     use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
+    use crate::widgets::capture;
+    use crate::widgets::capture::WidgetCaptures;
 
     #[test]
     fn range_rejects_non_finite_endpoints() {
@@ -1907,7 +2196,7 @@ mod tests {
     }
 
     #[test]
-    fn slider_rejects_non_finite_initial_value() {
+    fn slider_rejects_non_finite_default_value() {
         let Ok(range) = SliderRange::new(0.0, 1.0) else {
             return;
         };
@@ -1938,12 +2227,26 @@ mod tests {
         let Ok(slider) = Slider::new(range, 0.5) else {
             return;
         };
-        let slider = slider.step(step).direction(SliderDirection::TopToBottom);
+        let slider = slider
+            .step(step)
+            .direction(SliderDirection::TopToBottom)
+            .reset_behavior(SliderResetBehavior::DoubleClick)
+            .focused_thumb_border_color(Color::WHITE);
 
         assert_eq!(slider.range, range);
-        assert!((slider.initial_value - 0.5).abs() <= f32::EPSILON);
+        assert!((slider.default_value - 0.5).abs() <= f32::EPSILON);
         assert_eq!(slider.step, Some(step));
         assert_eq!(slider.direction, SliderDirection::TopToBottom);
+        assert_eq!(slider.reset_behavior, SliderResetBehavior::DoubleClick);
+        assert_eq!(slider.focused_thumb_border_color, Some(Color::WHITE));
+    }
+
+    #[test]
+    fn slider_reset_behavior_is_disabled_by_default() {
+        assert_eq!(
+            SliderResetBehavior::default(),
+            SliderResetBehavior::Disabled
+        );
     }
 
     #[test]
@@ -2209,11 +2512,11 @@ mod tests {
     }
 
     #[test]
-    fn first_spawn_normalizes_out_of_range_and_off_step_initial_values() {
+    fn first_spawn_normalizes_out_of_range_and_off_step_default_values() {
         let mut app = test_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        for (id, initial_value) in [("over", 25.0), ("off", 4.4)] {
-            let slider = Slider::new(range(0.0, 10.0), initial_value)
+        for (id, default_value) in [("over", 25.0), ("off", 4.4)] {
+            let slider = Slider::new(range(0.0, 10.0), default_value)
                 .expect("slider should validate")
                 .step(step(3.0));
             builder.with(El::new().size(20.0, 10.0).slider(id, slider), |_| {});
@@ -2406,8 +2709,8 @@ mod tests {
             .expect("widget should carry slider state")
             .last_changed();
 
-        // An authored initial-value change alone is spawn-only: the reused
-        // widget keeps its live value and the state is not rewritten.
+        // An authored default-value change alone does not rewrite the reused
+        // widget's live value or its state component.
         let replacement = Slider::new(range(0.0, 10.0), 2.0).expect("slider should validate");
         app.world_mut()
             .commands()
@@ -2978,7 +3281,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .world_height(0.5)
-            .anchor(crate::Anchor::Center)
+            .anchor(Anchor::Center)
             .with_tree(tree)
             .build()
             .expect("panel should build");
@@ -3249,7 +3552,7 @@ mod tests {
             Some(Lifecycle::Released)
         ));
         // No proposal was accepted, so the applied value never left its
-        // authored initial.
+        // authored default.
         assert_close(applied_value(&scene), before);
         // The final proposal still carries the raw release-position value,
         // independent of the untouched applied state.
@@ -3679,6 +3982,48 @@ mod tests {
             .write_message(PointerInput::new(pointer_id, location, action));
     }
 
+    /// Drives one complete click through Bevy's real pointer dispatcher.
+    fn dispatch_click(scene: &mut DispatchScene, widget: Entity) {
+        dispatch_click_with_jitter(scene, widget, Vec2::ZERO);
+    }
+
+    /// Adds a small dispatched drag between the real press and release.
+    fn dispatch_click_with_jitter(scene: &mut DispatchScene, widget: Entity, jitter: Vec2) {
+        let camera = scene.camera;
+        feed_hit(scene, DISPATCH_POINTER, camera, widget);
+        feed_input(
+            scene,
+            DISPATCH_POINTER,
+            center(),
+            PointerAction::Press(PointerButton::Primary),
+        );
+        scene.app.update();
+        if jitter != Vec2::ZERO {
+            scene.app.world_mut().trigger(Pointer::new(
+                DISPATCH_POINTER,
+                Location {
+                    target:   scene.target.clone(),
+                    position: center() + jitter,
+                },
+                Drag {
+                    button:   PointerButton::Primary,
+                    distance: jitter,
+                    delta:    jitter,
+                },
+                widget,
+            ));
+            scene.app.world_mut().flush();
+        }
+        feed_hit(scene, DISPATCH_POINTER, camera, widget);
+        feed_input(
+            scene,
+            DISPATCH_POINTER,
+            center(),
+            PointerAction::Release(PointerButton::Primary),
+        );
+        scene.app.update();
+    }
+
     /// Sets the current and previous hover maps directly so raw-batch ordering
     /// is exact.
     fn set_hover(
@@ -3719,7 +4064,7 @@ mod tests {
         let result = scene
             .app
             .world_mut()
-            .run_system_cached(reconcile_pointer_input);
+            .run_system_cached(capture::reconcile_pointer_input);
         assert!(result.is_ok());
     }
 
@@ -3745,6 +4090,17 @@ mod tests {
     }
 
     fn slider0() -> Slider { Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate") }
+
+    fn reset_slider_tree(slider: Slider) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_root(
+            El::overlay()
+                .size(100.0, 50.0)
+                .alignment(AlignX::Left, AlignY::Top)
+                .slider("level", slider),
+        );
+        builder.with(El::new().size(10.0, 10.0).slider_thumb(), |_| {});
+        builder.build()
+    }
 
     fn button_and_slider_tree() -> LayoutTree {
         let slider = slider0()
@@ -3906,6 +4262,48 @@ mod tests {
         // A further quiet update emits nothing more.
         scene.app.update();
         assert_eq!(dispatch_lifecycle(&scene).len(), 4);
+    }
+
+    #[test]
+    fn dispatched_double_click_resets_to_the_authored_default() {
+        let slider = plain_slider(0.25).reset_behavior(SliderResetBehavior::DoubleClick);
+        let mut scene = dispatch_scene(reset_slider_tree(slider));
+        scene.app.add_observer(slider_self_update);
+        let widget = resolve_widget(&mut scene.app, scene.panel, "level");
+        add_pointer(&mut scene, DISPATCH_POINTER);
+        set_slider_value(&mut scene.app, widget, 0.0);
+        scene.app.update();
+
+        dispatch_click_with_jitter(&mut scene, widget, Vec2::new(2.0, 1.0));
+        assert_close(slider_value(&scene.app, widget), 0.0);
+        dispatch_click_with_jitter(&mut scene, widget, Vec2::new(1.0, 2.0));
+
+        assert_close(slider_value(&scene.app, widget), 0.25);
+        assert!(!dragging(&scene, widget));
+        assert!(dispatch_empty(&scene));
+        let proposals = &scene.app.world().resource::<RecordedProposals>().0;
+        let (_, value, is_final, pointer_id) =
+            *proposals.last().expect("reset proposal should be recorded");
+        assert_close(value, 0.25);
+        assert!(is_final);
+        assert_eq!(pointer_id, Some(DISPATCH_POINTER));
+    }
+
+    #[test]
+    fn dispatched_double_click_started_on_track_stays_at_pointer_value() {
+        let slider = plain_slider(0.25).reset_behavior(SliderResetBehavior::DoubleClick);
+        let mut scene = dispatch_scene(reset_slider_tree(slider));
+        scene.app.add_observer(slider_self_update);
+        let widget = resolve_widget(&mut scene.app, scene.panel, "level");
+        add_pointer(&mut scene, DISPATCH_POINTER);
+
+        dispatch_click(&mut scene, widget);
+        assert_close(slider_value(&scene.app, widget), 0.0);
+        dispatch_click(&mut scene, widget);
+
+        assert_close(slider_value(&scene.app, widget), 0.0);
+        assert!(!dragging(&scene, widget));
+        assert!(dispatch_empty(&scene));
     }
 
     #[test]
@@ -4355,7 +4753,7 @@ mod tests {
         let result = scene
             .app
             .world_mut()
-            .run_system_cached(reconcile_pointer_input);
+            .run_system_cached(capture::reconcile_pointer_input);
         assert!(result.is_ok());
         scene.app.world_mut().flush();
 
@@ -4795,6 +5193,7 @@ mod tests {
     const THUMB_ID: &str = "thumb";
     const STATE_HOVER_FILL: Color = Color::srgb(0.2, 0.4, 0.6);
     const STATE_FOCUS_BORDER: Color = Color::srgb(0.9, 0.8, 0.2);
+    const STATE_THUMB_FOCUS_BORDER: Color = Color::srgb(0.95, 0.75, 0.1);
 
     fn plain_slider(value: f32) -> Slider {
         Slider::new(range(0.0, 1.0), value)
@@ -4813,7 +5212,11 @@ mod tests {
                 .slider(id, slider),
             |builder| {
                 builder.with(
-                    El::new().size(thumb_size, 8.0).id(THUMB_ID).slider_thumb(),
+                    El::new()
+                        .size(thumb_size, 8.0)
+                        .border(Border::all(1.0, Color::BLACK))
+                        .id(THUMB_ID)
+                        .slider_thumb(),
                     |_| {},
                 );
             },
@@ -4899,6 +5302,46 @@ mod tests {
             .get_ref::<ComputedDiegeticPanel>()
             .map(|computed| computed.last_changed());
         assert_eq!(computed_after, computed_before);
+    }
+
+    #[test]
+    fn thumb_hit_bounds_follow_the_presented_thumb_on_both_axes() {
+        let mut app = test_app();
+        let panel = spawn_panel(&mut app, thumb_slider_tree("level", plain_slider(0.5), 8.0));
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "level");
+        let slots = slots_of(&app, widget);
+        let state = app
+            .world()
+            .get::<SliderState>(widget)
+            .expect("widget should carry slider state");
+        let bounds = current_thumb_hit_bounds(&slots, state).expect("thumb should have hit bounds");
+        let center = Vec2::from(bounds.center());
+
+        assert!(bounds.contains(center));
+        assert!(!bounds.contains(Vec2::new(center.x, bounds.y - THUMB_HIT_SLOP_POINTS,)));
+        assert!(!bounds.contains(Vec2::new(bounds.x - THUMB_HIT_SLOP_POINTS, center.y,)));
+    }
+
+    #[test]
+    fn focused_thumb_border_layers_with_the_value_offset() {
+        let mut app = test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let slider = plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER);
+        let panel = spawn_panel(&mut app, thumb_slider_tree("level", slider, 8.0));
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "level");
+        let idle = thumb_override(&app, widget).expect("thumb override present");
+        assert_eq!(idle.border_color, None);
+
+        app.world_mut()
+            .trigger(RequestWidgetFocus { window, widget });
+        app.world_mut().flush();
+        app.update();
+
+        let focused = thumb_override(&app, widget).expect("focused thumb override present");
+        assert_eq!(focused.offset, idle.offset);
+        assert_eq!(focused.border_color, Some(STATE_THUMB_FOCUS_BORDER));
     }
 
     #[test]
@@ -5000,6 +5443,25 @@ mod tests {
         assert!(matches!(
             build_world_panel(builder.build()),
             Err(PanelBuildError::SliderHasMultipleThumbs(id))
+                if id == PanelElementId::named("level")
+        ));
+    }
+
+    #[test]
+    fn focused_thumb_border_requires_an_authored_thumb_border() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::overlay().size(40.0, 16.0).slider(
+                "level",
+                plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER),
+            ),
+            |builder| {
+                builder.with(El::new().size(8.0, 8.0).slider_thumb(), |_| {});
+            },
+        );
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(id))
                 if id == PanelElementId::named("level")
         ));
     }
@@ -5217,19 +5679,19 @@ mod tests {
 
     fn indexed_offset(app: &App, panel: Entity, element_index: usize) -> Option<Vec2> {
         app.world()
-            .resource::<crate::widgets::VisualOverrideIndex>()
+            .resource::<VisualOverrideIndex>()
             .get(panel, element_index)
             .and_then(|value| value.offset)
     }
 
     fn indexed_root(app: &App, panel: Entity, element_index: usize) -> Option<VisualSlotOverride> {
         app.world()
-            .resource::<crate::widgets::VisualOverrideIndex>()
+            .resource::<VisualOverrideIndex>()
             .get(panel, element_index)
             .cloned()
     }
 
-    fn computed_tick(app: &App, panel: Entity) -> Option<bevy::ecs::change_detection::Tick> {
+    fn computed_tick(app: &App, panel: Entity) -> Option<Tick> {
         app.world()
             .entity(panel)
             .get_ref::<ComputedDiegeticPanel>()
@@ -5683,7 +6145,7 @@ mod tests {
             .expect("button root element index");
 
         // The idle slider owns no root override; its marked thumb already carries
-        // a translation override for the authored initial value.
+        // a translation override for the authored default value.
         assert_eq!(root_override(&app, slider), None);
         assert_eq!(indexed_root(&app, panel, slider_root), None);
         let initial_thumb_offset = thumb_offset(&app, slider).expect("initial thumb offset");

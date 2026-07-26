@@ -1746,6 +1746,49 @@ mod tests {
         result
     }
 
+    fn with_initialized_render<T>(app: &mut App, inspect: impl FnOnce(&Schedule) -> T) -> T {
+        let render_app = app
+            .get_sub_app_mut(RenderApp)
+            .expect("the fixture should include a render app");
+        let mut schedules = render_app
+            .world_mut()
+            .remove_resource::<Schedules>()
+            .expect("the render app should own schedules");
+        let result = {
+            let world = render_app.world_mut();
+            let schedule = schedules
+                .get_mut(Render)
+                .expect("the Render schedule should exist");
+            schedule
+                .initialize(world)
+                .expect("the Render schedule should initialize");
+            inspect(schedule)
+        };
+        render_app.world_mut().insert_resource(schedules);
+        result
+    }
+
+    fn assert_batch_asset_write_systems(schedule: &Schedule) {
+        let graph = schedule.graph();
+        let asset_write_systems = graph
+            .systems_in_set(BatchAssetWrites.intern())
+            .expect("BatchAssetWrites systems should resolve");
+        for required in [
+            "update_panel_text_batches",
+            "reconcile_panel_line_batches",
+            "reconcile_sdf_batch_entities",
+            "reconcile_image_batch_entities",
+        ] {
+            let is_member = schedule
+                .systems()
+                .expect("PostUpdate schedule should be initialized")
+                .any(|(system_key, system)| {
+                    system.name().contains(required) && asset_write_systems.contains(&system_key)
+                });
+            assert!(is_member, "{required} should be inside BatchAssetWrites");
+        }
+    }
+
     fn wgsl_material_slot_fields(wgsl: &str) -> Vec<&str> {
         let Some((_, after_start)) = wgsl.split_once("struct MaterialSlotValues {") else {
             return Vec::new();
@@ -2349,27 +2392,7 @@ mod tests {
                     .contains_edge(NodeId::Set(asset_write_set), NodeId::Set(asset_event_set)),
                 "BatchAssetWrites should run before Bevy AssetEventSystems"
             );
-            let asset_write_systems = graph
-                .systems_in_set(BatchAssetWrites.intern())
-                .expect("BatchAssetWrites systems should resolve");
-            for required in [
-                "update_panel_text_batches",
-                "reconcile_panel_line_batches",
-                "reconcile_sdf_batch_entities",
-                "reconcile_image_batch_entities",
-            ] {
-                let system = schedule
-                    .systems()
-                    .expect("PostUpdate schedule should be initialized")
-                    .find_map(|(system_key, system)| {
-                        system.name().contains(required).then_some(system_key)
-                    })
-                    .unwrap_or_else(|| panic!("{required} should exist in PostUpdate"));
-                assert!(
-                    asset_write_systems.contains(&system),
-                    "{required} should be inside BatchAssetWrites"
-                );
-            }
+            assert_batch_asset_write_systems(schedule);
             let batch_systems = graph
                 .systems_in_set(BatchResourcesReady.intern())
                 .expect("BatchResourcesReady systems should resolve");
@@ -2414,21 +2437,7 @@ mod tests {
         ));
         app.finish();
 
-        let render_app = app
-            .get_sub_app_mut(RenderApp)
-            .expect("the fixture should include a render app");
-        let mut schedules = render_app
-            .world_mut()
-            .remove_resource::<Schedules>()
-            .expect("the render app should own schedules");
-        let result = {
-            let world = render_app.world_mut();
-            let schedule = schedules
-                .get_mut(Render)
-                .expect("the Render schedule should exist");
-            schedule
-                .initialize(world)
-                .expect("the Render schedule should initialize");
+        let result = with_initialized_render(&mut app, |schedule| {
             let graph = schedule.graph();
             let buffer_set = graph
                 .system_sets
@@ -2499,8 +2508,7 @@ mod tests {
                 buffer_precedes_upload,
                 materials_follow_upload,
             )
-        };
-        render_app.world_mut().insert_resource(schedules);
+        });
 
         assert!(
             result.0,
