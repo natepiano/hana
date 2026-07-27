@@ -35,6 +35,7 @@ pub use button::ButtonReleased;
 pub(crate) use button::finalize_panel_buttons;
 use capture::WidgetCaptures;
 pub use focus::ClearWidgetFocus;
+pub use focus::RequestPanelFocus;
 pub use focus::RequestWidgetFocus;
 pub(crate) use focus::WidgetFocusAuthority;
 pub use focus::WidgetFocusChangeCause;
@@ -51,14 +52,9 @@ pub use id::PanelWidgetReader;
 pub(crate) use id::WidgetKind;
 pub(crate) use id::WidgetSpec;
 pub(crate) use id::validate_tree;
-pub use input::ActivateFocusedWidget;
-pub use input::CancelFocusedWidget;
-pub use input::FocusFirstWidget;
-pub use input::FocusLastWidget;
-pub use input::FocusNextWidget;
-pub use input::FocusPreviousWidget;
 pub(crate) use input::SemanticWidgetIntent;
 pub use input::WidgetControlSummary;
+pub use input::WidgetInput;
 pub use input::WidgetInputBindings;
 pub use input::WidgetInputBindingsBuilder;
 pub use input::WidgetInputBindingsError;
@@ -184,7 +180,8 @@ pub(crate) enum TooltipSystems {
 pub(crate) struct WidgetsPlugin;
 
 fn add_widget_observers(app: &mut App) {
-    app.add_observer(focus::request_widget_focus)
+    app.add_observer(focus::request_panel_focus)
+        .add_observer(focus::request_widget_focus)
         .add_observer(focus::clear_widget_focus)
         .add_observer(focus::focus_from_pointer_press)
         .add_observer(button::press_from_pointer)
@@ -222,12 +219,7 @@ impl Plugin for WidgetsPlugin {
             .init_resource::<VisualOverrideIndex>()
             .init_resource::<MeshAnchorWarnings>()
             .add_message::<WindowFocused>()
-            .add_message::<FocusNextWidget>()
-            .add_message::<FocusPreviousWidget>()
-            .add_message::<FocusFirstWidget>()
-            .add_message::<FocusLastWidget>()
-            .add_message::<ActivateFocusedWidget>()
-            .add_message::<CancelFocusedWidget>()
+            .add_message::<WidgetInput>()
             .add_plugins((
                 cascade::cascade_plugin::<WidgetInteractivity>(),
                 SliderPlugin,

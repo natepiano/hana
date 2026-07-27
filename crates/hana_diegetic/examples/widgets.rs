@@ -7,7 +7,6 @@
 //!   D - Disable or re-enable the secondary button and level slider
 //!   H - Return to the camera home pose
 //!   Tab / Shift+Tab - Move keyboard focus to the next/previous widget
-//!   Home / End - Move keyboard focus to the first/last widget
 //!   Enter or Space / Escape - Activate/cancel the focused widget
 //!   P - Move keyboard focus to the previous widget through an app-defined
 //!     shortcut
@@ -19,7 +18,7 @@
 
 use std::time::Duration;
 
-use bevy::anti_alias::taa::TemporalAntiAliasing;
+use bevy::anti_alias::smaa::Smaa;
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -61,7 +60,6 @@ use hana_diegetic::El;
 use hana_diegetic::FacePicking;
 use hana_diegetic::Fit;
 use hana_diegetic::FitMax;
-use hana_diegetic::FocusPreviousWidget;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::ImeBuiltInFieldKind;
 use hana_diegetic::ImeBuiltInFieldSpec;
@@ -82,6 +80,7 @@ use hana_diegetic::PanelWidgetReader;
 use hana_diegetic::PanelWidgetWriter;
 use hana_diegetic::Pt;
 use hana_diegetic::Px;
+use hana_diegetic::RequestPanelFocus;
 use hana_diegetic::RequestSliderAdjustment;
 use hana_diegetic::ShadowCasting;
 use hana_diegetic::Sizing;
@@ -110,6 +109,7 @@ use hana_diegetic::TooltipShown;
 use hana_diegetic::WidgetDisabled;
 use hana_diegetic::WidgetFocusChanged;
 use hana_diegetic::WidgetFocused;
+use hana_diegetic::WidgetInput;
 use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
@@ -189,6 +189,7 @@ const TOOLTIP_STATUS_ID: &str = "tooltip-status";
 const TOOLTIP_STATUS_IDLE: &str = "none";
 const TOOLTIP_STATUS_MEASURE: &str = "hidden secondary-button";
 const SLIDER_ADJUST_STEPS: f32 = 1.0;
+const SLIDER_DISABLED_COLOR: Color = Color::srgba(0.32, 0.34, 0.37, 0.90);
 const SLIDER_ID: &str = "level-slider";
 const SLIDER_INITIAL_VALUE: f32 = 0.5;
 const SLIDER_LABEL_GAP: Px = Px(5.0);
@@ -360,6 +361,9 @@ impl PrimaryTooltipTiming {
 struct WidgetLabPanel;
 
 #[derive(Component)]
+struct WidgetLabFocusInitialized;
+
+#[derive(Component)]
 struct WidgetInteractionReadout;
 
 #[derive(Component)]
@@ -434,7 +438,7 @@ fn main() {
         .with_orbit_cam_preset_bundle(
             |_| {},
             OrbitCamPreset::blender_like(),
-            (Msaa::Off, TemporalAntiAliasing::default()),
+            (Msaa::Off, Smaa::default()),
         )
         .with_stable_transparency()
         .with_camera_home()
@@ -474,8 +478,10 @@ fn main() {
             Update,
             (
                 anchor_screen_interaction_readout,
+                initialize_widget_lab_focus,
                 report_interaction_changes,
                 report_presentation_states,
+                reset_widget_lab_focus_on_window_blur,
             ),
         )
         .with_shortcut(KeyCode::KeyD, toggle_disabled_widgets)
@@ -843,9 +849,9 @@ fn report_widget_focus_changed(
 
 fn focus_previous_widget(
     window: Single<Entity, With<PrimaryWindow>>,
-    mut requests: MessageWriter<FocusPreviousWidget>,
+    mut widget_input: MessageWriter<WidgetInput>,
 ) {
-    requests.write(FocusPreviousWidget { window: *window });
+    widget_input.write(WidgetInput::FocusPrevious { window: *window });
 }
 
 fn anchor_screen_interaction_readout(
@@ -877,6 +883,34 @@ fn anchor_screen_interaction_readout(
     commands
         .entity(*readout)
         .insert(ScreenWidgetAnchorInstalled);
+}
+
+fn initialize_widget_lab_focus(
+    mut commands: Commands,
+    window: Single<(Entity, &Window), With<PrimaryWindow>>,
+    panel: Single<Entity, (With<WidgetLabPanel>, Without<WidgetLabFocusInitialized>)>,
+) {
+    let (window_entity, window) = *window;
+    if !window.focused {
+        return;
+    }
+    commands.trigger(RequestPanelFocus {
+        window: window_entity,
+        panel:  *panel,
+    });
+    commands.entity(*panel).insert(WidgetLabFocusInitialized);
+}
+
+fn reset_widget_lab_focus_on_window_blur(
+    windows: Query<&Window, (With<PrimaryWindow>, Changed<Window>)>,
+    panels: Query<Entity, (With<WidgetLabPanel>, With<WidgetLabFocusInitialized>)>,
+    mut commands: Commands,
+) {
+    if windows.iter().any(|window| !window.focused) {
+        for panel in panels.iter() {
+            commands.entity(panel).remove::<WidgetLabFocusInitialized>();
+        }
+    }
 }
 
 fn spawn_widget_lab(
@@ -1060,7 +1094,8 @@ fn slider_declaration() -> Result<Slider, SliderConfigError> {
         .step(step)
         .direction(SliderDirection::LeftToRight)
         .reset_behavior(SliderResetBehavior::DoubleClick)
-        .focused_thumb_border_color(SLIDER_THUMB_FOCUSED_BORDER))
+        .focused_thumb_border_color(SLIDER_THUMB_FOCUSED_BORDER)
+        .disabled_color(SLIDER_DISABLED_COLOR))
 }
 
 fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip) -> LayoutTree {

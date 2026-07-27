@@ -3,7 +3,6 @@
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::render::RenderApp;
-use hana_diegetic::ActivateFocusedWidget;
 use hana_diegetic::Button;
 use hana_diegetic::ButtonClicked;
 use hana_diegetic::DiegeticPanel;
@@ -26,6 +25,7 @@ use hana_diegetic::Slider;
 use hana_diegetic::SliderAdjustment;
 use hana_diegetic::SliderChangeRequested;
 use hana_diegetic::SliderRange;
+use hana_diegetic::WidgetInput;
 
 #[derive(Default, Resource)]
 struct ObservedBehavior {
@@ -105,7 +105,7 @@ fn client_can_test_button_slider_and_ime_behavior_without_rendering() {
         widget: button,
     });
     app.world_mut()
-        .write_message(ActivateFocusedWidget { window });
+        .write_message(WidgetInput::Activate { window });
     app.update();
     assert_eq!(
         app.world().resource::<ObservedBehavior>().clicked,

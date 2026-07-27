@@ -50,9 +50,8 @@ app.add_plugins(MinimalPlugins)
 `HeadlessLayoutPlugin` remains the layout-only entry point used by benchmarks.
 `HeadlessDiegeticUiPlugin` adds widget and IME behavior to that layout path.
 `WidgetInputPlugin` is not required for widget behavior. Add it when
-`hana_diegetic` should translate Bevy input bindings into requests such as
-`FocusNextWidget` and `ActivateFocusedWidget`. A test can omit the input plugin
-and send those requests directly.
+`hana_diegetic` should translate Bevy input bindings into `WidgetInput`
+requests. A test can omit the input plugin and write those requests directly.
 
 ## Text transparency
 
@@ -133,23 +132,26 @@ stays on. Five things to know when you enable it:
 5. **Text must be `Blend` or `Premultiplied`.** `Opaque`/`Mask` render in the
    normal passes and bypass OIT entirely.
 
-For mesh-edge AA *with* OIT, use a post-process AA (FXAA/SMAA/TAA) — MSAA is the
-one AA incompatible with OIT.
+For mesh-edge AA *with* OIT, use a current-frame post-process AA such as FXAA or
+SMAA. MSAA is incompatible with OIT, while TAA can make transparent panel
+surfaces flicker or disappear because they do not write the depth and motion
+data its temporal reprojection requires.
 
-### TAA is optional but recommended
+### Post-process AA is optional
 
 The SDF panel shader's `fwidth`-based edges and slug's analytic per-pixel
 coverage both produce clean edges without any post-process AA. Panels look
 good with no AA at all.
 
-That said, Temporal Anti-Aliasing smooths everything — geometric edges,
-SDF panel boundaries, slug text edges, and specular aliasing — with
-minimal GPU cost.
+SMAA smooths geometric and panel edges without relying on prior-frame history,
+making it the stable default for scenes containing transparent diegetic panels.
+When Bevy's default features are disabled, enable its `smaa_luts` feature as
+well so SMAA receives its two-dimensional lookup textures.
 
 ```rust
 commands.spawn((
     Camera3d::default(),
-    bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+    bevy::anti_alias::smaa::Smaa::default(),
     // ...
 ));
 ```

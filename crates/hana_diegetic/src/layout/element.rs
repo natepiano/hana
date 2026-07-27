@@ -868,6 +868,9 @@ impl LayoutTree {
             } else {
                 inherited_owner
             };
+            if let Some(record_index) = owning_record {
+                ranked_records[record_index].1.push_visual_element(index);
+            }
             if let (Some(slot), Some(record_index)) = (element.visual_slot, owning_record) {
                 let border_box = computed.bounds;
                 let content_box = engine::content_box_bounds(element, border_box);

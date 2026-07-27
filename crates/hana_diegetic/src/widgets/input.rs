@@ -1,4 +1,3 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::ActionOf;
 use bevy_enhanced_input::prelude::ActionSettings;
@@ -39,12 +38,7 @@ impl Plugin for WidgetInputPlugin {
         }
         app.add_input_context::<WidgetInputContext>()
             .init_resource::<PendingWidgetInputActions>()
-            .add_message::<FocusNextWidget>()
-            .add_message::<FocusPreviousWidget>()
-            .add_message::<FocusFirstWidget>()
-            .add_message::<FocusLastWidget>()
-            .add_message::<ActivateFocusedWidget>()
-            .add_message::<CancelFocusedWidget>()
+            .add_message::<WidgetInput>()
             .configure_sets(
                 PreUpdate,
                 (
@@ -56,7 +50,7 @@ impl Plugin for WidgetInputPlugin {
             )
             .configure_sets(
                 Update,
-                WidgetInputSystems::EmitMessages
+                WidgetInputSystems::EmitInput
                     .after(ImeSystemSet::PublishInputBlockers)
                     .before(WidgetSystems::SemanticInput),
             )
@@ -72,7 +66,7 @@ impl Plugin for WidgetInputPlugin {
             )
             .add_systems(
                 Update,
-                emit_semantic_messages.in_set(WidgetInputSystems::EmitMessages),
+                emit_widget_input.in_set(WidgetInputSystems::EmitInput),
             )
             .add_observer(record_action_start::<NextWidgetAction>)
             .add_observer(record_action_start::<PreviousWidgetAction>)
@@ -88,7 +82,7 @@ impl Plugin for WidgetInputPlugin {
 #[reflect(Component, Default)]
 #[require(WidgetInputModeInitialized)]
 pub enum WidgetInputMode {
-    /// Installs Tab, Shift+Tab, Home, End, Enter or Space, and Escape.
+    /// Installs Tab, Shift+Tab, Enter or Space, and Escape.
     #[default]
     Default,
     /// Installs the supplied bindings for this window.
@@ -167,8 +161,8 @@ impl Default for WidgetInputBindings {
         Self {
             next:     vec![KeyCode::Tab.into()],
             previous: vec![KeyCode::Tab.with_mod_keys(ModKeys::SHIFT)],
-            first:    vec![KeyCode::Home.into()],
-            last:     vec![KeyCode::End.into()],
+            first:    Vec::new(),
+            last:     Vec::new(),
             activate: vec![KeyCode::Enter.into(), KeyCode::Space.into()],
             cancel:   vec![KeyCode::Escape.into()],
         }
@@ -293,7 +287,7 @@ pub struct WidgetControlSummary {
 enum WidgetInputSystems {
     Reconcile,
     ActivateContexts,
-    EmitMessages,
+    EmitInput,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default)]
@@ -619,84 +613,75 @@ fn synchronize_context_activity(
     }
 }
 
-#[derive(SystemParam)]
-struct SemanticInputWriters<'w> {
-    next:     MessageWriter<'w, FocusNextWidget>,
-    previous: MessageWriter<'w, FocusPreviousWidget>,
-    first:    MessageWriter<'w, FocusFirstWidget>,
-    last:     MessageWriter<'w, FocusLastWidget>,
-    activate: MessageWriter<'w, ActivateFocusedWidget>,
-    cancel:   MessageWriter<'w, CancelFocusedWidget>,
-}
-
-fn emit_semantic_messages(
+fn emit_widget_input(
     mut pending: ResMut<PendingWidgetInputActions>,
-    mut writers: SemanticInputWriters,
+    mut widget_input: MessageWriter<WidgetInput>,
 ) {
     for (window, action) in pending.actions.drain(..) {
-        match action {
-            WidgetInputAction::Next => {
-                writers.next.write(FocusNextWidget { window });
-            },
-            WidgetInputAction::Previous => {
-                writers.previous.write(FocusPreviousWidget { window });
-            },
-            WidgetInputAction::First => {
-                writers.first.write(FocusFirstWidget { window });
-            },
-            WidgetInputAction::Last => {
-                writers.last.write(FocusLastWidget { window });
-            },
-            WidgetInputAction::Activate => {
-                writers.activate.write(ActivateFocusedWidget { window });
-            },
-            WidgetInputAction::Cancel => {
-                writers.cancel.write(CancelFocusedWidget { window });
-            },
-        }
+        widget_input.write(match action {
+            WidgetInputAction::Next => WidgetInput::FocusNext { window },
+            WidgetInputAction::Previous => WidgetInput::FocusPrevious { window },
+            WidgetInputAction::First => WidgetInput::FocusFirst { window },
+            WidgetInputAction::Last => WidgetInput::FocusLast { window },
+            WidgetInputAction::Activate => WidgetInput::Activate { window },
+            WidgetInputAction::Cancel => WidgetInput::Cancel { window },
+        });
     }
 }
 
-/// Requests focus on the next widget in the active panel for a window.
+/// Requests one operation from the widget currently associated with a window.
+///
+/// `WidgetInput` is buffered so every producer feeds one ordered stream that
+/// [`route_semantic_input`] processes after [`ImeSystemSet::PublishInputBlockers`].
+/// Applications may write these requests directly or add [`WidgetInputPlugin`]
+/// to translate configured Bevy Enhanced Input bindings into them.
 #[derive(Clone, Copy, Debug, Message)]
-pub struct FocusNextWidget {
-    /// Window whose active panel should be traversed.
-    pub window: Entity,
+pub enum WidgetInput {
+    /// Focuses the next widget in the window's active panel.
+    FocusNext {
+        /// Window whose active panel should be traversed.
+        window: Entity,
+    },
+    /// Focuses the previous widget in the window's active panel.
+    FocusPrevious {
+        /// Window whose active panel should be traversed.
+        window: Entity,
+    },
+    /// Focuses the first widget in the window's active panel.
+    FocusFirst {
+        /// Window whose active panel should be traversed.
+        window: Entity,
+    },
+    /// Focuses the last widget in the window's active panel.
+    FocusLast {
+        /// Window whose active panel should be traversed.
+        window: Entity,
+    },
+    /// Activates the focused widget in the window.
+    Activate {
+        /// Window whose focused widget should receive activation.
+        window: Entity,
+    },
+    /// Cancels the focused widget's active interaction in the window.
+    Cancel {
+        /// Window whose focused widget should receive cancellation.
+        window: Entity,
+    },
 }
 
-/// Requests focus on the previous widget in the active panel for a window.
-#[derive(Clone, Copy, Debug, Message)]
-pub struct FocusPreviousWidget {
-    /// Window whose active panel should be traversed.
-    pub window: Entity,
-}
-
-/// Requests focus on the first widget in the active panel for a window.
-#[derive(Clone, Copy, Debug, Message)]
-pub struct FocusFirstWidget {
-    /// Window whose active panel should be traversed.
-    pub window: Entity,
-}
-
-/// Requests focus on the last widget in the active panel for a window.
-#[derive(Clone, Copy, Debug, Message)]
-pub struct FocusLastWidget {
-    /// Window whose active panel should be traversed.
-    pub window: Entity,
-}
-
-/// Requests activation of the focused widget in a window.
-#[derive(Clone, Copy, Debug, Message)]
-pub struct ActivateFocusedWidget {
-    /// Window whose focused widget should receive activation.
-    pub window: Entity,
-}
-
-/// Requests cancellation of the focused widget in a window.
-#[derive(Clone, Copy, Debug, Message)]
-pub struct CancelFocusedWidget {
-    /// Window whose focused widget should receive cancellation.
-    pub window: Entity,
+impl WidgetInput {
+    /// Returns the window whose widget focus scope receives this request.
+    #[must_use]
+    pub const fn window(&self) -> Entity {
+        match *self {
+            Self::FocusNext { window }
+            | Self::FocusPrevious { window }
+            | Self::FocusFirst { window }
+            | Self::FocusLast { window }
+            | Self::Activate { window }
+            | Self::Cancel { window } => window,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Event)]
@@ -714,18 +699,8 @@ impl EntityEvent for SemanticWidgetIntent {
     }
 }
 
-#[derive(SystemParam)]
-pub(super) struct SemanticInputReaders<'w, 's> {
-    next:     MessageReader<'w, 's, FocusNextWidget>,
-    previous: MessageReader<'w, 's, FocusPreviousWidget>,
-    first:    MessageReader<'w, 's, FocusFirstWidget>,
-    last:     MessageReader<'w, 's, FocusLastWidget>,
-    activate: MessageReader<'w, 's, ActivateFocusedWidget>,
-    cancel:   MessageReader<'w, 's, CancelFocusedWidget>,
-}
-
 pub(super) fn route_semantic_input(
-    mut readers: SemanticInputReaders,
+    mut widget_input: MessageReader<WidgetInput>,
     input_blocker: Option<Res<ImeInputBlocker>>,
     mut authority: ResMut<WidgetFocusAuthority>,
     panels: Query<(&ComputedDiegeticPanel, &PanelWidgets)>,
@@ -733,67 +708,59 @@ pub(super) fn route_semantic_input(
     enabled_widgets: Query<(), (With<PanelWidget>, Without<WidgetDisabled>)>,
     mut commands: Commands,
 ) {
-    for request in readers.next.read() {
-        route_traversal(
-            request.window,
-            WidgetTraversal::Next,
-            input_blocker.as_deref(),
-            &mut authority,
-            &panels,
-            &focusable_widgets,
-            &mut commands,
-        );
-    }
-    for request in readers.previous.read() {
-        route_traversal(
-            request.window,
-            WidgetTraversal::Previous,
-            input_blocker.as_deref(),
-            &mut authority,
-            &panels,
-            &focusable_widgets,
-            &mut commands,
-        );
-    }
-    for request in readers.first.read() {
-        route_traversal(
-            request.window,
-            WidgetTraversal::First,
-            input_blocker.as_deref(),
-            &mut authority,
-            &panels,
-            &focusable_widgets,
-            &mut commands,
-        );
-    }
-    for request in readers.last.read() {
-        route_traversal(
-            request.window,
-            WidgetTraversal::Last,
-            input_blocker.as_deref(),
-            &mut authority,
-            &panels,
-            &focusable_widgets,
-            &mut commands,
-        );
-    }
-    for request in readers.activate.read() {
-        route_activate_intent(
-            request.window,
-            input_blocker.as_deref(),
-            &authority,
-            &enabled_widgets,
-            &mut commands,
-        );
-    }
-    for request in readers.cancel.read() {
-        route_cancel_intent(
-            request.window,
-            input_blocker.as_deref(),
-            &authority,
-            &enabled_widgets,
-            &mut commands,
-        );
+    for input in widget_input.read() {
+        match *input {
+            WidgetInput::FocusNext { window } => route_traversal(
+                window,
+                WidgetTraversal::Next,
+                input_blocker.as_deref(),
+                &mut authority,
+                &panels,
+                &focusable_widgets,
+                &mut commands,
+            ),
+            WidgetInput::FocusPrevious { window } => route_traversal(
+                window,
+                WidgetTraversal::Previous,
+                input_blocker.as_deref(),
+                &mut authority,
+                &panels,
+                &focusable_widgets,
+                &mut commands,
+            ),
+            WidgetInput::FocusFirst { window } => route_traversal(
+                window,
+                WidgetTraversal::First,
+                input_blocker.as_deref(),
+                &mut authority,
+                &panels,
+                &focusable_widgets,
+                &mut commands,
+            ),
+            WidgetInput::FocusLast { window } => route_traversal(
+                window,
+                WidgetTraversal::Last,
+                input_blocker.as_deref(),
+                &mut authority,
+                &panels,
+                &focusable_widgets,
+                &mut commands,
+            ),
+            WidgetInput::Activate { window } => route_activate_intent(
+                window,
+                input_blocker.as_deref(),
+                &authority,
+                &enabled_widgets,
+                &mut commands,
+            ),
+            WidgetInput::Cancel { window } => route_cancel_intent(
+                window,
+                input_blocker.as_deref(),
+                &authority,
+                &enabled_widgets,
+                &mut commands,
+            ),
+        }
     }
 }
 
@@ -894,12 +861,9 @@ mod tests {
     use bevy_enhanced_input::prelude::ModKeys;
     use bevy_kana::Keybindings;
 
-    use super::ActivateFocusedWidget;
-    use super::CancelFocusedWidget;
-    use super::FocusNextWidget;
-    use super::FocusPreviousWidget;
     use super::InstalledWidgetInputBinding;
     use super::SemanticWidgetIntent;
+    use super::WidgetInput;
     use super::WidgetInputAction;
     use super::WidgetInputBindings;
     use super::WidgetInputBindingsError;
@@ -925,6 +889,7 @@ mod tests {
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
     use crate::PanelWidgetWriter;
+    use crate::RequestPanelFocus;
     use crate::RequestWidgetFocus;
     use crate::WidgetDisabled;
     use crate::WidgetFocused;
@@ -934,6 +899,7 @@ mod tests {
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::WidgetFocusAuthority;
     use crate::widgets::WidgetsPlugin;
+    use crate::widgets::focus::WidgetFocusVisible;
 
     const PANEL_HEIGHT: f32 = 50.0;
     const PANEL_WIDTH: f32 = 100.0;
@@ -1137,39 +1103,38 @@ mod tests {
             .is_some_and(|activity| **activity)
     }
 
-    fn next_requests(app: &App) -> Vec<FocusNextWidget> {
-        let mut cursor = MessageCursor::<FocusNextWidget>::default();
+    fn widget_input(app: &App) -> Vec<WidgetInput> {
+        let mut cursor = MessageCursor::<WidgetInput>::default();
         cursor
-            .read(app.world().resource::<Messages<FocusNextWidget>>())
+            .read(app.world().resource::<Messages<WidgetInput>>())
             .copied()
             .collect()
     }
 
-    fn previous_requests(app: &App) -> Vec<FocusPreviousWidget> {
-        let mut cursor = MessageCursor::<FocusPreviousWidget>::default();
-        cursor
-            .read(app.world().resource::<Messages<FocusPreviousWidget>>())
-            .copied()
+    fn next_requests(app: &App) -> Vec<WidgetInput> {
+        widget_input(app)
+            .into_iter()
+            .filter(|input| matches!(input, WidgetInput::FocusNext { .. }))
             .collect()
     }
 
-    fn activate_requests(app: &App) -> Vec<ActivateFocusedWidget> {
-        let mut cursor = MessageCursor::<ActivateFocusedWidget>::default();
-        cursor
-            .read(app.world().resource::<Messages<ActivateFocusedWidget>>())
-            .copied()
+    fn previous_requests(app: &App) -> Vec<WidgetInput> {
+        widget_input(app)
+            .into_iter()
+            .filter(|input| matches!(input, WidgetInput::FocusPrevious { .. }))
             .collect()
     }
 
-    fn clear_semantic_requests(app: &mut App) {
+    fn activate_requests(app: &App) -> Vec<WidgetInput> {
+        widget_input(app)
+            .into_iter()
+            .filter(|input| matches!(input, WidgetInput::Activate { .. }))
+            .collect()
+    }
+
+    fn clear_widget_input(app: &mut App) {
         app.world_mut()
-            .resource_mut::<Messages<FocusNextWidget>>()
-            .clear();
-        app.world_mut()
-            .resource_mut::<Messages<FocusPreviousWidget>>()
-            .clear();
-        app.world_mut()
-            .resource_mut::<Messages<ActivateFocusedWidget>>()
+            .resource_mut::<Messages<WidgetInput>>()
             .clear();
     }
 
@@ -1210,9 +1175,9 @@ mod tests {
 
     fn send_app_owned_next(
         window: Res<AppOwnedWindow>,
-        mut requests: MessageWriter<FocusNextWidget>,
+        mut widget_input: MessageWriter<WidgetInput>,
     ) {
-        requests.write(FocusNextWidget { window: window.0 });
+        widget_input.write(WidgetInput::FocusNext { window: window.0 });
     }
 
     #[test]
@@ -1276,6 +1241,8 @@ mod tests {
             defaults.previous,
             vec![KeyCode::Tab.with_mod_keys(ModKeys::SHIFT).to_string()]
         );
+        assert!(defaults.first.is_empty());
+        assert!(defaults.last.is_empty());
         assert_eq!(
             defaults.activate,
             vec![
@@ -1512,12 +1479,12 @@ mod tests {
         assert_eq!(
             previous_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![focused_window]
         );
 
-        clear_semantic_requests(&mut app);
+        clear_widget_input(&mut app);
         release_key(&mut app, focused_window, KeyCode::ShiftLeft);
         app.update();
         assert!(next_requests(&app).is_empty());
@@ -1545,7 +1512,7 @@ mod tests {
 
         press_key(&mut app, first_window, KeyCode::ShiftLeft);
         app.update();
-        clear_semantic_requests(&mut app);
+        clear_widget_input(&mut app);
 
         if let Some(mut window) = app.world_mut().get_mut::<Window>(first_window) {
             window.focused = false;
@@ -1563,7 +1530,7 @@ mod tests {
         assert_eq!(
             previous_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![second_window]
         );
@@ -1594,11 +1561,11 @@ mod tests {
         assert_eq!(
             previous_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![first_window]
         );
-        clear_semantic_requests(&mut app);
+        clear_widget_input(&mut app);
 
         if let Some(mut window) = app.world_mut().get_mut::<Window>(first_window) {
             window.focused = false;
@@ -1622,7 +1589,7 @@ mod tests {
         assert_eq!(
             previous_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![second_window]
         );
@@ -1669,7 +1636,7 @@ mod tests {
         assert_eq!(
             activate_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -1705,13 +1672,13 @@ mod tests {
         assert_eq!(
             next_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
         assert!(activate_requests(&app).is_empty());
 
-        clear_semantic_requests(&mut app);
+        clear_widget_input(&mut app);
         release_key(&mut app, window, KeyCode::ShiftLeft);
         press_key(&mut app, window, KeyCode::KeyN);
         app.update();
@@ -1720,7 +1687,7 @@ mod tests {
         assert_eq!(
             activate_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -1756,7 +1723,7 @@ mod tests {
         assert_eq!(
             next_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -1792,7 +1759,7 @@ mod tests {
         assert_eq!(
             next_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -1809,7 +1776,7 @@ mod tests {
         assert_eq!(
             activate_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -1844,12 +1811,12 @@ mod tests {
         assert_eq!(
             next_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
 
-        clear_semantic_requests(&mut app);
+        clear_widget_input(&mut app);
         release_key(&mut app, window, KeyCode::ShiftLeft);
         app.update();
         assert!(next_requests(&app).is_empty());
@@ -1875,6 +1842,39 @@ mod tests {
         app.update();
 
         assert!(next_requests(&app).is_empty());
+    }
+
+    #[test]
+    fn first_tab_focuses_first_widget_in_application_selected_panel() {
+        let mut app = test_app(TestIme::Absent);
+        app.add_plugins((InputPlugin, WidgetInputPlugin));
+        app.finish();
+        let window = app
+            .world_mut()
+            .spawn(Window {
+                focused: true,
+                ..default()
+            })
+            .id();
+        let panel = spawn_panel(&mut app, &["first", "second"]);
+        let other_panel = spawn_panel(&mut app, &["other"]);
+        app.update();
+        let first = widget(&mut app, panel, "first");
+        let other = widget(&mut app, other_panel, "other");
+
+        app.world_mut().trigger(RequestPanelFocus { window, panel });
+        press_key(&mut app, window, KeyCode::Tab);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(first)
+        );
+        assert!(app.world().get::<WidgetFocused>(first).is_some());
+        assert!(app.world().get::<WidgetFocusVisible>(first).is_some());
+        assert!(app.world().get::<WidgetFocused>(other).is_none());
     }
 
     #[test]
@@ -1911,7 +1911,7 @@ mod tests {
         assert_eq!(
             activate_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -1968,7 +1968,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, InputPlugin, EnhancedInputPlugin))
             .add_input_context::<AppOwnedInputContext>()
-            .add_message::<FocusNextWidget>()
+            .add_message::<WidgetInput>()
             .add_systems(Startup, spawn_app_owned_input);
         bevy_kana::bind_action_system!(
             app,
@@ -1993,7 +1993,7 @@ mod tests {
         assert_eq!(
             next_requests(&app)
                 .iter()
-                .map(|request| request.window)
+                .map(WidgetInput::window)
                 .collect::<Vec<_>>(),
             vec![window]
         );
@@ -2178,9 +2178,9 @@ mod tests {
             target,
         ));
         app.world_mut()
-            .write_message(ActivateFocusedWidget { window });
+            .write_message(WidgetInput::Activate { window });
         app.world_mut()
-            .write_message(CancelFocusedWidget { window });
+            .write_message(WidgetInput::Cancel { window });
         app.update();
 
         assert_eq!(
@@ -2189,6 +2189,47 @@ mod tests {
                 (target, RecordedIntentAction::Activate),
                 (target, RecordedIntentAction::Cancel),
             ]
+        );
+    }
+
+    #[test]
+    fn same_frame_widget_input_preserves_write_order() {
+        let mut app = test_app(TestIme::Absent);
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = spawn_panel(&mut app, &["first", "second"]);
+        app.update();
+        let first = widget(&mut app, panel, "first");
+        let second = widget(&mut app, panel, "second");
+        request_focus(&mut app, window, first);
+
+        app.world_mut()
+            .write_message(WidgetInput::Activate { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<RecordedIntents>().0,
+            vec![(first, RecordedIntentAction::Activate)]
+        );
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(second)
+        );
+
+        app.world_mut().resource_mut::<RecordedIntents>().0.clear();
+        request_focus(&mut app, window, first);
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
+        app.world_mut()
+            .write_message(WidgetInput::Activate { window });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<RecordedIntents>().0,
+            vec![(second, RecordedIntentAction::Activate)]
         );
     }
 
@@ -2208,7 +2249,7 @@ mod tests {
             });
         assert!(matches!(result, Ok(true)));
         app.world_mut()
-            .write_message(ActivateFocusedWidget { window });
+            .write_message(WidgetInput::Activate { window });
         app.update();
 
         assert!(app.world().get::<WidgetDisabled>(target).is_some());
@@ -2239,10 +2280,10 @@ mod tests {
             field_spec:   ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test")),
             anchor:       None,
         });
-        app.world_mut().write_message(ActivateFocusedWidget {
+        app.world_mut().write_message(WidgetInput::Activate {
             window: blocked_window,
         });
-        app.world_mut().write_message(ActivateFocusedWidget {
+        app.world_mut().write_message(WidgetInput::Activate {
             window: available_window,
         });
         app.update();
@@ -2269,7 +2310,7 @@ mod tests {
         request_focus(&mut app, window, editable);
         app.world_mut().flush();
         app.world_mut()
-            .write_message(ActivateFocusedWidget { window });
+            .write_message(WidgetInput::Activate { window });
         let routed = app.world_mut().run_system_once(super::route_semantic_input);
         assert!(routed.is_ok());
         app.world_mut().flush();
@@ -2287,9 +2328,10 @@ mod tests {
         );
 
         app.world_mut()
-            .resource_mut::<Messages<ActivateFocusedWidget>>()
+            .resource_mut::<Messages<WidgetInput>>()
             .clear();
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         let routed = app.world_mut().run_system_once(super::route_semantic_input);
         assert!(routed.is_ok());
         app.world_mut().flush();
@@ -2327,7 +2369,7 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
         app.world_mut()
-            .write_message(ActivateFocusedWidget { window });
+            .write_message(WidgetInput::Activate { window });
         app.update();
 
         assert_eq!(
@@ -2376,7 +2418,7 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
         app.world_mut()
-            .write_message(ActivateFocusedWidget { window });
+            .write_message(WidgetInput::Activate { window });
         app.update();
 
         assert_eq!(

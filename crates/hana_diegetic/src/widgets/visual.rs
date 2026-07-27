@@ -76,12 +76,28 @@ pub(crate) struct ComputedVisualSlot {
 /// Reified slot-to-record references owned by one widget entity.
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct WidgetVisualSlots {
-    slots: Vec<ComputedVisualSlot>,
+    slots:    Vec<ComputedVisualSlot>,
+    elements: Vec<usize>,
 }
 
 impl WidgetVisualSlots {
     #[must_use]
-    pub(crate) const fn new(slots: Vec<ComputedVisualSlot>) -> Self { Self { slots } }
+    pub(crate) const fn new(slots: Vec<ComputedVisualSlot>) -> Self {
+        Self {
+            slots,
+            elements: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn with_elements(mut self, elements: Vec<usize>) -> Self {
+        self.elements = elements;
+        self
+    }
+
+    /// Returns every `LayoutTree` element owned by the widget declaration.
+    #[must_use]
+    pub(crate) fn elements(&self) -> &[usize] { &self.elements }
 
     /// Resolves a stable slot id to its current `LayoutTree` element index.
     #[must_use]
@@ -145,6 +161,21 @@ pub(crate) struct VisualSlotOverride {
     pub texture:      Option<Handle<Image>>,
 }
 
+impl VisualSlotOverride {
+    fn apply(&mut self, overlay: &Self) {
+        self.color = overlay.color.or(self.color);
+        self.fill_color = overlay.fill_color.or(self.fill_color);
+        self.border_color = overlay.border_color.or(self.border_color);
+        self.offset = overlay.offset.or(self.offset);
+        if overlay.material.is_some() {
+            self.material.clone_from(&overlay.material);
+        }
+        if overlay.texture.is_some() {
+            self.texture.clone_from(&overlay.texture);
+        }
+    }
+}
+
 /// Fluent construction helpers for retained-renderer tests.
 #[cfg(test)]
 impl VisualSlotOverride {
@@ -188,10 +219,19 @@ impl VisualSlotOverride {
 /// Changed-only override authoring owned by one widget entity.
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct WidgetVisualOverrides {
-    overrides: Vec<(VisualSlotId, VisualSlotOverride)>,
+    subtree_color: Option<Color>,
+    overrides:     Vec<(VisualSlotId, VisualSlotOverride)>,
 }
 
 impl WidgetVisualOverrides {
+    /// Recolors every retained record authored inside the widget subtree.
+    pub(crate) const fn set_subtree_color(&mut self, color: Option<Color>) {
+        self.subtree_color = color;
+    }
+
+    #[must_use]
+    const fn subtree_color(&self) -> Option<Color> { self.subtree_color }
+
     /// Returns the stored override for `slot`.
     #[must_use]
     pub(crate) fn get(&self, slot: VisualSlotId) -> Option<&VisualSlotOverride> {
@@ -210,10 +250,10 @@ impl WidgetVisualOverrides {
     /// widget's index entries. The repeated-identical no-op guarantee lives
     /// at the retained renderer level — every route rebuilds the same record
     /// values and the batch stores compare before dirtying, so no GPU buffer
-    /// re-uploads. Production writers go through [`write_slot_override`],
-    /// which compares immutably before taking a mutable component reference,
-    /// keeping unchanged frames out of `Changed<WidgetVisualOverrides>`
-    /// entirely.
+    /// re-uploads. Production writers go through [`write_slot_override`] or
+    /// [`write_widget_overrides`], which compare immutably before taking a
+    /// mutable component reference, keeping unchanged frames out of
+    /// `Changed<WidgetVisualOverrides>` entirely.
     pub(crate) fn set(&mut self, slot: VisualSlotId, value: VisualSlotOverride) {
         match self.overrides.iter_mut().find(|(id, _)| *id == slot) {
             Some((_, current)) => {
@@ -233,6 +273,33 @@ impl WidgetVisualOverrides {
     fn iter(&self) -> impl Iterator<Item = (VisualSlotId, &VisualSlotOverride)> {
         self.overrides.iter().map(|(slot, value)| (*slot, value))
     }
+}
+
+/// Replaces one widget's complete desired presentation override, touching
+/// mutable state only when the component value changes.
+pub(crate) fn write_widget_overrides(
+    widget: Entity,
+    desired: WidgetVisualOverrides,
+    overrides: &mut Query<&mut WidgetVisualOverrides>,
+    commands: &mut Commands<'_, '_>,
+) {
+    let Ok(current) = overrides.get(widget) else {
+        if desired != WidgetVisualOverrides::default() {
+            commands.entity(widget).insert(desired);
+        }
+        return;
+    };
+    if *current == desired {
+        return;
+    }
+    if desired == WidgetVisualOverrides::default() {
+        commands.entity(widget).remove::<WidgetVisualOverrides>();
+        return;
+    }
+    let Ok(mut current) = overrides.get_mut(widget) else {
+        return;
+    };
+    *current = desired;
 }
 
 /// Writes one widget slot's desired override, touching mutable state only for
@@ -387,13 +454,30 @@ pub(crate) fn dispatch_visual_overrides(
     }
     for (widget, widget_of, slots, overrides) in &changed_widgets {
         let entries = overrides.map_or_else(Vec::new, |overrides| {
-            overrides
-                .iter()
-                .filter_map(|(slot, value)| {
-                    slots
-                        .element_index(slot)
-                        .map(|element_index| ((widget_of.panel(), element_index), value.clone()))
-                })
+            let mut by_element = HashMap::<usize, VisualSlotOverride>::new();
+            if let Some(color) = overrides.subtree_color() {
+                for &element_index in slots.elements() {
+                    by_element.insert(
+                        element_index,
+                        VisualSlotOverride {
+                            color: Some(color),
+                            ..VisualSlotOverride::default()
+                        },
+                    );
+                }
+            }
+            for (slot, value) in overrides.iter() {
+                let Some(element_index) = slots.element_index(slot) else {
+                    continue;
+                };
+                by_element
+                    .entry(element_index)
+                    .and_modify(|existing| existing.apply(value))
+                    .or_insert_with(|| value.clone());
+            }
+            by_element
+                .into_iter()
+                .map(|(element_index, value)| ((widget_of.panel(), element_index), value))
                 .collect()
         });
         index.insert_widget(widget, entries);

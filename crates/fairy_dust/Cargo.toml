@@ -30,6 +30,7 @@ bevy = { workspace = true, features = [
   "ktx2",
   "mesh_picking",
   "multi_threaded",
+  "smaa_luts",
   "tonemapping_luts",
   "zstd_rust",
 ] }

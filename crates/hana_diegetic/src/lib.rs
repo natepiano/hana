@@ -331,20 +331,14 @@ pub use text::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
 use text::TextPlugin;
-pub use widgets::ActivateFocusedWidget;
 pub use widgets::Button;
 pub use widgets::ButtonCancelCause;
 pub use widgets::ButtonCanceled;
 pub use widgets::ButtonClicked;
 pub use widgets::ButtonPressed;
 pub use widgets::ButtonReleased;
-pub use widgets::CancelFocusedWidget;
 pub use widgets::ClearWidgetFocus;
 pub use widgets::FacePicking;
-pub use widgets::FocusFirstWidget;
-pub use widgets::FocusLastWidget;
-pub use widgets::FocusNextWidget;
-pub use widgets::FocusPreviousWidget;
 pub use widgets::MeshAnchorCommandsExt;
 pub use widgets::MeshFace;
 pub use widgets::PanelPicking;
@@ -352,6 +346,7 @@ pub use widgets::PanelWidget;
 pub use widgets::PanelWidgetReader;
 pub use widgets::PanelWidgetWriter;
 pub use widgets::PanelWidgets;
+pub use widgets::RequestPanelFocus;
 pub use widgets::RequestSliderAdjustment;
 pub use widgets::RequestWidgetFocus;
 pub use widgets::ScreenAnchorCommandsExt;
@@ -385,6 +380,7 @@ pub use widgets::WidgetFocusChangeCause;
 pub use widgets::WidgetFocusChanged;
 pub use widgets::WidgetFocusable;
 pub use widgets::WidgetFocused;
+pub use widgets::WidgetInput;
 pub use widgets::WidgetInputBindings;
 pub use widgets::WidgetInputBindingsBuilder;
 pub use widgets::WidgetInputBindingsError;
@@ -406,8 +402,7 @@ pub use widgets::slider_self_update;
 /// [`WidgetInputPlugin`] is not required for widget behavior. Add it when
 /// `hana_diegetic` should translate Bevy input bindings into widget focus,
 /// activation, and cancellation requests. Without it, an application or test
-/// can send requests such as [`FocusNextWidget`] or [`ActivateFocusedWidget`]
-/// directly.
+/// can send [`WidgetInput`] requests directly.
 ///
 /// # Example
 ///

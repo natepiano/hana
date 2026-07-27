@@ -11,6 +11,7 @@ use super::PanelWidget;
 use super::PanelWidgets;
 use super::WidgetOf;
 use crate::panel::ComputedDiegeticPanel;
+use crate::panel::DiegeticPanel;
 
 /// Marks a widget as eligible for window-scoped keyboard focus.
 #[derive(Clone, Copy, Component, Debug, Eq, PartialEq, Reflect)]
@@ -31,6 +32,20 @@ pub struct WidgetFocused(());
 #[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
 #[component(immutable)]
 pub(crate) struct WidgetFocusVisible(());
+
+/// Selects a live panel as one window's widget-focus scope.
+///
+/// This does not focus a widget. A subsequent traversal request starts from
+/// the selected panel's first or last focusable widget, according to the
+/// requested traversal direction.
+#[derive(Clone, Copy, Debug, EntityEvent)]
+pub struct RequestPanelFocus {
+    /// Window whose focus scope should select the panel.
+    pub window: Entity,
+    /// Live panel selected for subsequent widget traversal.
+    #[event_target]
+    pub panel:  Entity,
+}
 
 /// Requests focus for a live widget in one window.
 #[derive(Clone, Copy, Debug, EntityEvent)]
@@ -150,6 +165,36 @@ pub(super) enum WidgetTraversal {
     Previous,
     First,
     Last,
+}
+
+pub(super) fn request_panel_focus(
+    request: On<RequestPanelFocus>,
+    windows: Query<(), With<Window>>,
+    panels: Query<(), With<DiegeticPanel>>,
+    mut authority: ResMut<WidgetFocusAuthority>,
+    mut commands: Commands,
+) {
+    let request = request.event();
+    if windows.get(request.window).is_err() || panels.get(request.panel).is_err() {
+        return;
+    }
+    let interaction_camera = authority
+        .scopes
+        .get(&request.window)
+        .filter(|scope| scope.active_panel == request.panel)
+        .and_then(|scope| scope.interaction_camera);
+    transition_focus(
+        &mut authority,
+        request.window,
+        Some(WindowFocusScope {
+            active_panel: request.panel,
+            indicator: FocusIndicator::Hidden,
+            widget: None,
+            interaction_camera,
+        }),
+        WidgetFocusChangeCause::Application,
+        &mut commands,
+    );
 }
 
 pub(super) fn request_widget_focus(
@@ -532,6 +577,7 @@ mod tests {
     use hana_valence::AnchoredTo;
 
     use super::ClearWidgetFocus;
+    use super::RequestPanelFocus;
     use super::RequestWidgetFocus;
     use super::WidgetFocusAuthority;
     use super::WidgetFocusChangeCause;
@@ -543,10 +589,6 @@ mod tests {
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::El;
-    use crate::FocusFirstWidget;
-    use crate::FocusLastWidget;
-    use crate::FocusNextWidget;
-    use crate::FocusPreviousWidget;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
     use crate::ImeEditableFieldSpec;
@@ -555,6 +597,7 @@ mod tests {
     use crate::Mm;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
+    use crate::WidgetInput;
     use crate::WidgetOf;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::PanelWidget;
@@ -666,6 +709,49 @@ mod tests {
         app.world_mut().flush();
     }
 
+    fn request_panel_focus(app: &mut App, window: Entity, panel: Entity) {
+        app.world_mut().trigger(RequestPanelFocus { window, panel });
+        app.world_mut().flush();
+    }
+
+    #[test]
+    fn panel_focus_request_selects_traversal_scope_without_focusing_a_widget() {
+        let mut app = test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let first_panel = spawn_panel(&mut app, &["first"]);
+        let selected_panel = spawn_panel(&mut app, &["selected"]);
+        app.update();
+        let first = widget(&mut app, first_panel, "first");
+        let selected = widget(&mut app, selected_panel, "selected");
+        request_focus(&mut app, window, first);
+        app.world_mut().resource_mut::<FocusChanges>().0.clear();
+
+        request_panel_focus(&mut app, window, selected_panel);
+
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .active_panel(window),
+            Some(selected_panel)
+        );
+        assert_eq!(focused(&app, window), None);
+        assert!(app.world().get::<WidgetFocused>(first).is_none());
+        assert!(app.world().get::<WidgetFocusVisible>(first).is_none());
+        let changes = &app.world().resource::<FocusChanges>().0;
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].previous, Some(first));
+        assert_eq!(changes[0].current, None);
+        assert_eq!(changes[0].cause, WidgetFocusChangeCause::Application);
+
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
+        app.update();
+
+        assert_eq!(focused(&app, window), Some(selected));
+        assert!(app.world().get::<WidgetFocused>(selected).is_some());
+        assert!(app.world().get::<WidgetFocusVisible>(selected).is_some());
+    }
+
     #[test]
     fn traversal_uses_record_preorder_and_wraps() {
         let mut app = test_app();
@@ -677,24 +763,28 @@ mod tests {
         let third = widget(&mut app, panel, "third");
         request_focus(&mut app, window, second);
 
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
         assert_eq!(focused(&app, window), Some(third));
 
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
         assert_eq!(focused(&app, window), Some(first));
 
         app.world_mut()
-            .write_message(FocusPreviousWidget { window });
+            .write_message(WidgetInput::FocusPrevious { window });
         app.update();
         assert_eq!(focused(&app, window), Some(third));
 
-        app.world_mut().write_message(FocusFirstWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusFirst { window });
         app.update();
         assert_eq!(focused(&app, window), Some(first));
 
-        app.world_mut().write_message(FocusLastWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusLast { window });
         app.update();
         assert_eq!(focused(&app, window), Some(third));
     }
@@ -719,11 +809,13 @@ mod tests {
         assert!(app.world().get::<WidgetFocusable>(editable).is_some());
         request_focus(&mut app, window, first);
 
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
         assert_eq!(focused(&app, window), Some(editable));
 
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
         assert_eq!(focused(&app, window), Some(last));
     }
@@ -749,7 +841,8 @@ mod tests {
         assert_eq!(widget(&mut app, panel, "first"), first);
         assert_eq!(widget(&mut app, panel, "second"), second);
         assert_eq!(widget(&mut app, panel, "third"), third);
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
         assert_eq!(focused(&app, window), Some(first));
     }
@@ -923,7 +1016,7 @@ mod tests {
         );
 
         app.world_mut().resource_mut::<FocusChanges>().0.clear();
-        app.world_mut().write_message(FocusLastWidget {
+        app.world_mut().write_message(WidgetInput::FocusLast {
             window: primary_window,
         });
         app.update();

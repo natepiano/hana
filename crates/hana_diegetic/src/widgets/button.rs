@@ -1086,7 +1086,6 @@ mod tests {
     use super::handle_semantic_intent;
     use super::press_from_pointer;
     use super::release_from_pointer;
-    use crate::ActivateFocusedWidget;
     use crate::Border;
     use crate::Button;
     use crate::CascadeEntityCommandsExt;
@@ -1095,7 +1094,6 @@ mod tests {
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::El;
-    use crate::FocusNextWidget;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
     use crate::ImeCommitCause;
@@ -1116,6 +1114,7 @@ mod tests {
     use crate::Sizing;
     use crate::Slider;
     use crate::SliderRange;
+    use crate::WidgetInput;
     use crate::WidgetInputPlugin;
     use crate::WidgetInteractivity;
     use crate::ime;
@@ -2786,7 +2785,7 @@ mod tests {
         app.world_mut().flush();
         assert!(app.world().get::<crate::WidgetFocused>(widget).is_some());
         app.world_mut()
-            .write_message(ActivateFocusedWidget { window });
+            .write_message(WidgetInput::Activate { window });
         app.update();
         app.world_mut().flush();
 
@@ -3561,7 +3560,8 @@ mod tests {
         app.update();
         assert_eq!(root_override(&app, widget), None);
 
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
 
         let expected = VisualSlotOverride {
@@ -3653,7 +3653,8 @@ mod tests {
         );
         assert_eq!(indexed_root_override(&app, panel, widget), Some(expected));
 
-        app.world_mut().write_message(FocusNextWidget { window });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
         app.update();
 
         assert!(app.world().get::<WidgetFocusVisible>(widget).is_some());

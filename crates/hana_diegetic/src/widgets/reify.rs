@@ -225,7 +225,8 @@ pub(super) fn reify_widgets(
         let mut next_widget_index = HashMap::with_capacity(computed.widget_records().len());
         for record in computed.widget_records() {
             let anchor_rect = WidgetAnchorRect::new(panel, record.rect());
-            let visual_slots = WidgetVisualSlots::new(record.visual_slots().to_vec());
+            let visual_slots = WidgetVisualSlots::new(record.visual_slots().to_vec())
+                .with_elements(record.visual_elements().to_vec());
             let entity = match existing_by_id.get(record.id()).copied() {
                 None => spawn_widget(
                     &mut commands,
