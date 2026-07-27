@@ -153,14 +153,14 @@ pub(super) const fn default_inner_background() -> Color { INNER_BACKGROUND }
 
 fn ignore_screen_panel_picking(
     trigger: On<Add, DiegeticPanel>,
-    panels: Query<&DiegeticPanel>,
+    panels: Query<(&DiegeticPanel, Has<PanelPicking>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let Ok(panel) = panels.get(entity) else {
+    let Ok((panel, has_authored_picking)) = panels.get(entity) else {
         return;
     };
-    if panel.coordinate_space().is_screen() {
+    if panel.coordinate_space().is_screen() && !has_authored_picking {
         commands
             .entity(entity)
             .insert((FairyDustOverlayPanel, PanelPicking::PASS_THROUGH));
@@ -241,6 +241,28 @@ mod tests {
             Some(&PanelPicking::PASS_THROUGH),
         );
         assert!(app.world().get::<FairyDustOverlayPanel>(panel).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_screen_panel_picking_remains_authoritative() -> Result<(), String> {
+        let mut app = App::new();
+        install_overlay_picking(&mut app);
+
+        let panel = DiegeticPanel::screen()
+            .size(Sizing::FIT, Sizing::FIT)
+            .build()
+            .map_err(|error| format!("{error}"))?;
+        let entity = app
+            .world_mut()
+            .spawn((panel, PanelPicking::INTERACTIVE))
+            .id();
+
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::INTERACTIVE),
+        );
+        assert!(app.world().get::<FairyDustOverlayPanel>(entity).is_none());
         Ok(())
     }
 

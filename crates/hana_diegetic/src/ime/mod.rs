@@ -61,6 +61,7 @@ pub use input::ImeAppInputDisposition;
 pub use input::ImeAppInputDispositionHook;
 use input::ImeInputFrame;
 use input::ImeWindowState;
+use input::PendingImeTraversal;
 pub use lease::ImeInputBlocker;
 use session::ActiveImeSession;
 pub use session::ImeCommitAuthority;
@@ -109,6 +110,7 @@ impl Plugin for ImePlugin {
             .init_resource::<PendingImePanelAnchor>()
             .init_resource::<ImeEditorState>()
             .init_resource::<ImeBlurIntent>()
+            .init_resource::<PendingImeTraversal>()
             .configure_sets(
                 Update,
                 (
@@ -131,6 +133,9 @@ impl Plugin for ImePlugin {
             .add_observer(session::accept_commit)
             .add_observer(session::reject_commit)
             .add_observer(apply::apply_builtin_commit)
+            .add_observer(input::continue_widget_traversal_after_apply)
+            .add_observer(input::clear_widget_traversal_after_rejection)
+            .add_observer(input::clear_widget_traversal_after_cancel)
             .add_observer(editor::update_editor_from_text_changed)
             .add_observer(editor::update_editor_validation)
             .add_observer(editor::close_editor_on_cancel)

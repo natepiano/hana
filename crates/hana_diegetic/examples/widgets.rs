@@ -135,7 +135,7 @@ const CUBE_HALF_USABLE_WIDTH: f32 = (fairy_dust::EXAMPLE_CUBE_SIZE - CUBE_EDGE_I
 const DESCRIPTION_LINES: [&str; 6] = [
     "D disables the secondary button and level slider.",
     "Tab and Shift+Tab move keyboard focus to the next or previous widget.",
-    "Enter edits the focused text field; while editing, Tab and Shift+Tab stay with the editor.",
+    "Tabbing to the text field selects it for editing; Enter completes the edit.",
     "The primary button's on_click callback counts clicks in the status readout.",
     "Left and Right Arrow step the focused slider; double-click its thumb to reset to 50%.",
     "T switches the primary-button tooltip between 500 ms and 1.5 s show delays; the tooltip displays its current delay.",
@@ -170,21 +170,23 @@ const PRIMARY_TOOLTIP_SLOW_BODY: &str = "Show delay: 1.5 seconds";
 const PRIMARY_TOOLTIP_SLOW_DELAY: Duration = Duration::from_millis(1_500);
 const SECONDARY_BUTTON_ID: &str = "secondary-button";
 const TOGGLE_CONTROL: &str = "D Toggle Disabled";
+const SCREEN_ATTACHMENT_ATTACHED_LABEL: &str = "Attached to this button";
+const SCREEN_ATTACHMENT_COLOR: Color = Color::srgb(1.0, 0.78, 0.32);
+const SCREEN_ATTACHMENT_DETACHED_LABEL: &str = "Detached: screen anchored";
+const SCREEN_ATTACHMENT_MAX_HEIGHT: Px = Px(64.0);
+const SCREEN_ATTACHMENT_MAX_WIDTH: Px = Px(260.0);
+const SCREEN_ATTACHMENT_STATUS_ID: &str = "screen-attachment-status";
 const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
 const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
 const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
-const SCREEN_READOUT_MAX_HEIGHT: Px = Px(64.0);
-const SCREEN_READOUT_MAX_WIDTH: Px = Px(260.0);
-const SCREEN_READOUT_COLOR: Color = Color::srgb(1.0, 0.78, 0.32);
-const SCREEN_READOUT_ID: &str = "screen-anchor-status";
-const SCREEN_READOUT_TEXT: &str = "^ Attached panel";
 const SCREEN_TARGET_ID: &str = "screen-target-button";
-const SCREEN_TARGET_LABEL: &str = "Target widget";
+const SCREEN_TARGET_LABEL: &str = "Toggle attachment";
 const STATE_STATUS_ID: &str = "state-status";
 const STATE_STATUS_IDLE: &str = "pri=normal sec=normal lvl=normal";
 const STATE_STATUS_MEASURE: &str = "pri=pressed,off sec=pressed,off lvl=pressed,off";
 const TEXT_FIELD_ID: &str = "editable-text";
 const TEXT_FIELD_INITIAL: &str = "Editable text";
+const TEXT_FIELD_TEXT: Color = Color::BLACK;
 const TOOLTIP_STATUS_ID: &str = "tooltip-status";
 const TOOLTIP_STATUS_IDLE: &str = "none";
 const TOOLTIP_STATUS_MEASURE: &str = "hidden secondary-button";
@@ -370,10 +372,32 @@ struct WidgetInteractionReadout;
 struct ScreenWidgetLabPanel;
 
 #[derive(Component)]
-struct ScreenWidgetInteractionReadout;
+struct ScreenWidgetAttachmentCard;
 
 #[derive(Component)]
-struct ScreenWidgetAnchorInstalled;
+struct ScreenWidgetAttachmentInitialized;
+
+#[derive(Clone, Copy, Component, Debug, Eq, PartialEq)]
+enum ScreenWidgetAttachmentState {
+    Attached,
+    Detached,
+}
+
+impl ScreenWidgetAttachmentState {
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Attached => Self::Detached,
+            Self::Detached => Self::Attached,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Attached => SCREEN_ATTACHMENT_ATTACHED_LABEL,
+            Self::Detached => SCREEN_ATTACHMENT_DETACHED_LABEL,
+        }
+    }
+}
 
 #[derive(Component)]
 struct AppWidgetInputContext;
@@ -465,6 +489,7 @@ fn main() {
         .add_observer(report_button_pressed)
         .add_observer(report_button_released)
         .add_observer(report_button_clicked)
+        .add_observer(toggle_screen_widget_attachment)
         .add_observer(report_button_canceled)
         .add_observer(report_widget_focus_changed)
         .add_observer(apply_slider_change)
@@ -477,7 +502,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                anchor_screen_interaction_readout,
+                initialize_screen_widget_attachment,
                 initialize_widget_lab_focus,
                 report_interaction_changes,
                 report_presentation_states,
@@ -854,14 +879,14 @@ fn focus_previous_widget(
     widget_input.write(WidgetInput::FocusPrevious { window: *window });
 }
 
-fn anchor_screen_interaction_readout(
+fn initialize_screen_widget_attachment(
     mut commands: Commands,
     panel: Single<Entity, With<ScreenWidgetLabPanel>>,
-    readout: Single<
+    card: Single<
         Entity,
         (
-            With<ScreenWidgetInteractionReadout>,
-            Without<ScreenWidgetAnchorInstalled>,
+            With<ScreenWidgetAttachmentCard>,
+            Without<ScreenWidgetAttachmentInitialized>,
         ),
     >,
     reader: PanelWidgetReader,
@@ -871,18 +896,59 @@ fn anchor_screen_interaction_readout(
     let Some(owner) = panel_entities.screen(*panel) else {
         return;
     };
-    let Some(source) = panel_entities.screen(*readout) else {
+    let Some(source) = panel_entities.screen(*card) else {
         return;
     };
     let Some(widget) = reader.typed_entity(owner, &id) else {
         return;
     };
-    let authored = PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
-        .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET));
-    commands.attach_to_widget(source, widget, authored);
-    commands
-        .entity(*readout)
-        .insert(ScreenWidgetAnchorInstalled);
+    commands.attach_to_widget(source, widget, screen_widget_attachment());
+    commands.entity(*card).insert((
+        ScreenWidgetAttachmentInitialized,
+        ScreenWidgetAttachmentState::Attached,
+    ));
+}
+
+fn toggle_screen_widget_attachment(
+    event: On<ButtonClicked>,
+    mut commands: Commands,
+    panel: Single<Entity, With<ScreenWidgetLabPanel>>,
+    mut cards: Query<(Entity, &mut ScreenWidgetAttachmentState), With<ScreenWidgetAttachmentCard>>,
+    reader: PanelWidgetReader,
+    panel_entities: PanelEntityReader,
+) {
+    if event.id.as_str() != Some(SCREEN_TARGET_ID) {
+        return;
+    }
+    let Ok((card, mut state)) = cards.single_mut() else {
+        return;
+    };
+    let Some(owner) = panel_entities.screen(*panel) else {
+        return;
+    };
+    let Some(source) = panel_entities.screen(card) else {
+        return;
+    };
+    let Some(widget) = reader.typed_entity(owner, &PanelElementId::named(SCREEN_TARGET_ID)) else {
+        return;
+    };
+    let next = state.toggled();
+    if let Err(error) = commands.set_tree(card, screen_attachment_status_tree(next)) {
+        warn!("widgets: failed to update screen attachment status: {error}");
+        return;
+    }
+    match next {
+        ScreenWidgetAttachmentState::Attached => {
+            commands.attach_to_widget(source, widget, screen_widget_attachment());
+        },
+        ScreenWidgetAttachmentState::Detached => commands.detach(source),
+    }
+    *state = next;
+}
+
+fn screen_widget_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), STATUS_ANCHOR_OFFSET))
 }
 
 fn initialize_widget_lab_focus(
@@ -1010,33 +1076,36 @@ fn spawn_screen_widget_lab(commands: &mut Commands, material: Handle<StandardMat
         .text_material(material.clone())
         .with_tree(screen_widget_tree())
         .build();
-    let screen_readout = DiegeticPanel::screen()
+    let attachment_card = DiegeticPanel::screen()
         .size(
-            FitMax(SCREEN_READOUT_MAX_WIDTH.into()),
-            FitMax(SCREEN_READOUT_MAX_HEIGHT.into()),
+            FitMax(SCREEN_ATTACHMENT_MAX_WIDTH.into()),
+            FitMax(SCREEN_ATTACHMENT_MAX_HEIGHT.into()),
         )
-        .anchor(Anchor::TopRight)
+        .anchor(Anchor::CenterRight)
         .shadow_casting(ShadowCasting::Off)
         .material(material.clone())
         .text_material(material)
-        .with_tree(screen_interaction_status_tree())
+        .with_tree(screen_attachment_status_tree(
+            ScreenWidgetAttachmentState::Attached,
+        ))
         .build();
 
-    match (screen_panel, screen_readout) {
-        (Ok(screen_panel), Ok(screen_readout)) => {
+    match (screen_panel, attachment_card) {
+        (Ok(screen_panel), Ok(attachment_card)) => {
             commands.spawn((
                 Name::new("Screen widget target panel"),
                 ScreenWidgetLabPanel,
                 screen_panel,
+                PanelPicking::INTERACTIVE,
             ));
             commands.spawn((
-                Name::new("Screen widget attachment readout"),
-                ScreenWidgetInteractionReadout,
-                screen_readout,
+                Name::new("Screen widget attachment card"),
+                ScreenWidgetAttachmentCard,
+                attachment_card,
             ));
         },
         (Err(error), _) => error!("widgets: failed to build screen widget panel: {error}"),
-        (_, Err(error)) => error!("widgets: failed to build screen widget readout: {error}"),
+        (_, Err(error)) => error!("widgets: failed to build screen attachment card: {error}"),
     }
 }
 
@@ -1048,25 +1117,25 @@ fn screen_widget_tree() -> LayoutTree {
             .padding(Padding::all(PANEL_PADDING))
             .gap(CONTROL_GAP)
             .background(PANEL_BACKGROUND)
-            .border(Border::all(PANEL_BORDER_WIDTH, SCREEN_READOUT_COLOR))
+            .border(Border::all(PANEL_BORDER_WIDTH, SCREEN_ATTACHMENT_COLOR))
             .corner_radius(CornerRadius::all(PANEL_RADIUS)),
     );
     builder.text((
-        "Screen anchoring",
-        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(SCREEN_READOUT_COLOR),
+        "Screen widget attachment",
+        TextStyle::new(fairy_dust::LABEL_SIZE).with_color(SCREEN_ATTACHMENT_COLOR),
     ));
     add_button(
         &mut builder,
         SCREEN_TARGET_ID,
         SCREEN_TARGET_LABEL,
         SCREEN_CONTROL_WIDTH,
-        Button::new(),
+        state_styled(Button::new()),
         None,
     );
     builder.build()
 }
 
-fn screen_interaction_status_tree() -> LayoutTree {
+fn screen_attachment_status_tree(state: ScreenWidgetAttachmentState) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
         El::new()
             .width(Sizing::FIT)
@@ -1074,15 +1143,15 @@ fn screen_interaction_status_tree() -> LayoutTree {
             .padding(Padding::all(STATUS_PADDING))
             .alignment(AlignX::Center, AlignY::Center)
             .background(STATUS_BACKGROUND)
-            .border(Border::all(STATUS_BORDER_WIDTH, SCREEN_READOUT_COLOR))
+            .border(Border::all(STATUS_BORDER_WIDTH, SCREEN_ATTACHMENT_COLOR))
             .corner_radius(CornerRadius::all(STATUS_RADIUS)),
     );
     builder.text(
         Text::new(
-            SCREEN_READOUT_TEXT,
-            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(SCREEN_READOUT_COLOR),
+            state.label(),
+            TextStyle::new(fairy_dust::LABEL_SIZE).with_color(SCREEN_ATTACHMENT_COLOR),
         )
-        .id(SCREEN_READOUT_ID),
+        .id(SCREEN_ATTACHMENT_STATUS_ID),
     );
     builder.build()
 }
@@ -1213,19 +1282,15 @@ fn add_editable_text(builder: &mut LayoutBuilder) {
             .size(CONTROL_WIDTH, BUTTON_HEIGHT)
             .padding(Padding::all(CONTROL_PADDING))
             .alignment(AlignX::Center, AlignY::Center)
-            .background(BUTTON_FILL)
-            .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
-            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
             .editable_field(TEXT_FIELD_ID, field)
-            .focused_border_color(BUTTON_BORDER_FOCUSED)
             .tooltip(authored_tooltip(
                 "Editable text",
-                "Press Enter or double-click to edit",
+                "Tab selects all; Enter or double-click edits",
             )),
         |builder| {
             builder.text((
                 TEXT_FIELD_INITIAL,
-                TextStyle::new(fairy_dust::LABEL_SIZE).with_color(CONTROL_TEXT),
+                TextStyle::new(fairy_dust::LABEL_SIZE).with_color(TEXT_FIELD_TEXT),
             ));
         },
     );

@@ -20,6 +20,7 @@ use super::PanelWidgets;
 use super::WidgetDisabled;
 use super::WidgetFocusAuthority;
 use super::WidgetFocusable;
+use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSystems;
 use super::focus;
@@ -705,7 +706,7 @@ pub(super) fn route_semantic_input(
     mut authority: ResMut<WidgetFocusAuthority>,
     panels: Query<(&ComputedDiegeticPanel, &PanelWidgets)>,
     focusable_widgets: Query<(&PanelWidget, &WidgetOf), With<WidgetFocusable>>,
-    enabled_widgets: Query<(), (With<PanelWidget>, Without<WidgetDisabled>)>,
+    enabled_widgets: Query<&WidgetKind, (With<PanelWidget>, Without<WidgetDisabled>)>,
     mut commands: Commands,
 ) {
     for input in widget_input.read() {
@@ -717,6 +718,7 @@ pub(super) fn route_semantic_input(
                 &mut authority,
                 &panels,
                 &focusable_widgets,
+                &enabled_widgets,
                 &mut commands,
             ),
             WidgetInput::FocusPrevious { window } => route_traversal(
@@ -726,6 +728,7 @@ pub(super) fn route_semantic_input(
                 &mut authority,
                 &panels,
                 &focusable_widgets,
+                &enabled_widgets,
                 &mut commands,
             ),
             WidgetInput::FocusFirst { window } => route_traversal(
@@ -735,6 +738,7 @@ pub(super) fn route_semantic_input(
                 &mut authority,
                 &panels,
                 &focusable_widgets,
+                &enabled_widgets,
                 &mut commands,
             ),
             WidgetInput::FocusLast { window } => route_traversal(
@@ -744,6 +748,7 @@ pub(super) fn route_semantic_input(
                 &mut authority,
                 &panels,
                 &focusable_widgets,
+                &enabled_widgets,
                 &mut commands,
             ),
             WidgetInput::Activate { window } => route_activate_intent(
@@ -771,11 +776,13 @@ fn route_traversal(
     authority: &mut WidgetFocusAuthority,
     panels: &Query<(&ComputedDiegeticPanel, &PanelWidgets)>,
     focusable_widgets: &Query<(&PanelWidget, &WidgetOf), With<WidgetFocusable>>,
+    enabled_widgets: &Query<&WidgetKind, (With<PanelWidget>, Without<WidgetDisabled>)>,
     commands: &mut Commands<'_, '_>,
 ) {
     if input_blocker.is_some_and(|blocker| blocker.blocks_window(window)) {
         return;
     }
+    let previous = authority.focused_widget(window);
     focus::traverse_focus(
         window,
         traversal,
@@ -784,13 +791,27 @@ fn route_traversal(
         focusable_widgets,
         commands,
     );
+    let current = authority.focused_widget(window);
+    if current == previous {
+        return;
+    }
+    let Some(widget) = current else {
+        return;
+    };
+    if !matches!(enabled_widgets.get(widget), Ok(WidgetKind::EditableField)) {
+        return;
+    }
+    commands.trigger(SemanticWidgetIntent::Activate {
+        entity: widget,
+        window,
+    });
 }
 
 fn route_activate_intent(
     window: Entity,
     input_blocker: Option<&ImeInputBlocker>,
     authority: &WidgetFocusAuthority,
-    enabled_widgets: &Query<(), (With<PanelWidget>, Without<WidgetDisabled>)>,
+    enabled_widgets: &Query<&WidgetKind, (With<PanelWidget>, Without<WidgetDisabled>)>,
     commands: &mut Commands<'_, '_>,
 ) {
     if input_blocker.is_some_and(|blocker| blocker.blocks_window(window)) {
@@ -812,7 +833,7 @@ fn route_cancel_intent(
     window: Entity,
     input_blocker: Option<&ImeInputBlocker>,
     authority: &WidgetFocusAuthority,
-    enabled_widgets: &Query<(), (With<PanelWidget>, Without<WidgetDisabled>)>,
+    enabled_widgets: &Query<&WidgetKind, (With<PanelWidget>, Without<WidgetDisabled>)>,
     commands: &mut Commands<'_, '_>,
 ) {
     if input_blocker.is_some_and(|blocker| blocker.blocks_window(window)) {
@@ -828,6 +849,7 @@ fn route_cancel_intent(
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, reason = "tests should panic on unexpected values")]
 mod tests {
     use bevy::camera::NormalizedRenderTarget;
     use bevy::camera::RenderTarget;
@@ -876,13 +898,16 @@ mod tests {
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeBufferSnapshot;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
+    use crate::ImeCursorState;
     use crate::ImeEditableFieldSpec;
     use crate::ImeInputBlocker;
     use crate::ImeOpenSession;
     use crate::ImeSystemSet;
     use crate::ImeTarget;
+    use crate::ImeTextChanged;
     use crate::LayoutBuilder;
     use crate::LayoutTree;
     use crate::Mm;
@@ -922,6 +947,9 @@ mod tests {
     #[derive(Default, Resource)]
     struct ImeLeaseAfterInput(Option<Entity>);
 
+    #[derive(Default, Resource)]
+    struct RecordedImeTextChanges(Vec<ImeBufferSnapshot>);
+
     #[derive(Component)]
     struct AppOwnedInputContext;
 
@@ -960,13 +988,22 @@ mod tests {
         recorded.0 = blocker.window();
     }
 
+    fn record_ime_text_change(
+        change: On<ImeTextChanged>,
+        mut changes: ResMut<RecordedImeTextChanges>,
+    ) {
+        changes.0.push(change.snapshot.clone());
+    }
+
     fn test_app(test_ime: TestIme) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(DiegeticTextMeasurer::default())
             .init_resource::<RecordedIntents>()
+            .init_resource::<RecordedImeTextChanges>()
             .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin))
-            .add_observer(record_intent);
+            .add_observer(record_intent)
+            .add_observer(record_ime_text_change);
         if matches!(test_ime, TestIme::Present) {
             app.add_message::<Ime>()
                 .add_message::<KeyboardInput>()
@@ -1028,6 +1065,7 @@ mod tests {
                 builder.text("Initial text");
             },
         );
+        builder.with(El::new().button("next", Button::new()), |_| {});
         let tree = builder.build();
         let result = DiegeticPanel::world()
             .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
@@ -2342,6 +2380,106 @@ mod tests {
             Some(editable)
         );
         assert_ne!(editable, next);
+    }
+
+    #[test]
+    fn traversal_into_editable_field_starts_editing_with_all_text_selected() {
+        let mut app = test_app(TestIme::Present);
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().spawn((
+            Camera::default(),
+            GlobalTransform::IDENTITY,
+            RenderTarget::Window(WindowRef::Entity(window)),
+        ));
+        let panel = spawn_editable_panel(&mut app);
+        app.update();
+        let editable = widget(&mut app, panel, "editable");
+
+        app.world_mut().trigger(RequestPanelFocus { window, panel });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
+        let routed = app.world_mut().run_system_once(super::route_semantic_input);
+        assert!(routed.is_ok());
+        app.world_mut().flush();
+
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(editable)
+        );
+        assert!(
+            app.world()
+                .resource::<ImeInputBlocker>()
+                .blocks_window(window)
+        );
+        let changes = &app.world().resource::<RecordedImeTextChanges>().0;
+        let Some(snapshot) = changes.last() else {
+            panic!("traversal should start an IME edit session");
+        };
+        assert_eq!(snapshot.committed_text, "Initial text");
+        let ImeCursorState::Selection(selection) = &snapshot.cursor else {
+            panic!("traversal should select the editable field's text");
+        };
+        assert_eq!(selection.anchor.as_usize(), 0);
+        assert_eq!(selection.focus.as_usize(), "Initial text".len());
+    }
+
+    #[test]
+    fn tab_commits_an_inline_edit_and_traverses_to_the_next_widget() {
+        let mut app = test_app(TestIme::Present);
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().spawn((
+            Camera::default(),
+            GlobalTransform::IDENTITY,
+            RenderTarget::Window(WindowRef::Entity(window)),
+        ));
+        let (panel, _) = spawn_builtin_editable_panel(&mut app);
+        app.update();
+        let editable = widget(&mut app, panel, "editable");
+        let next = widget(&mut app, panel, "next");
+
+        app.world_mut().trigger(RequestPanelFocus { window, panel });
+        app.world_mut()
+            .write_message(WidgetInput::FocusNext { window });
+        let routed = app.world_mut().run_system_once(super::route_semantic_input);
+        assert!(routed.is_ok());
+        app.world_mut().flush();
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(editable)
+        );
+
+        let next_frame = app.world().resource::<FrameCount>().0.wrapping_add(1);
+        app.world_mut().resource_mut::<FrameCount>().0 = next_frame;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        press_key(&mut app, window, KeyCode::Tab);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Tab);
+        release_key(&mut app, window, KeyCode::Tab);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<WidgetFocusAuthority>()
+                .focused_widget(window),
+            Some(next)
+        );
+        assert!(
+            !app.world()
+                .resource::<ImeInputBlocker>()
+                .blocks_window(window)
+        );
+        assert!(
+            app.world().get::<WidgetFocusVisible>(editable).is_none(),
+            "the old field must stop qualifying for a focus-triggered tooltip"
+        );
     }
 
     #[test]

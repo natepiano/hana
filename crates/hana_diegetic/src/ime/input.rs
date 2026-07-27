@@ -7,23 +7,31 @@ use bevy::prelude::*;
 use bevy::window::Ime;
 
 use super::ActiveImeSession;
+use super::ImeApplied;
 use super::ImeCancelCause;
+use super::ImeCanceled;
 use super::ImeCommitCause;
 use super::ImeInputBlocker;
 use super::ImeRequestCancel;
 use super::ImeSessionId;
 use super::ImeTarget;
+use super::ImeValidationRejected;
 use super::buffer::ImeEditCommand;
 use super::buffer::ImeMovementDirection;
 use super::buffer::ImeMovementUnit;
 use super::buffer::ImeSelectionMode;
 use super::events::ImeTextChanged;
+use crate::widgets::WidgetInput;
 
 /// Per-frame IME input routing state.
 #[derive(Resource, Clone, Debug, Default)]
 pub(super) struct ImeInputFrame {
     saw_platform_ime: bool,
 }
+
+/// Widget traversal deferred until a panel field accepts its Tab commit.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub(super) struct PendingImeTraversal(Option<(ImeSessionId, WidgetInput)>);
 
 /// Window toggled by the previous IME update pass.
 #[derive(Resource, Clone, Copy, Debug, Default)]
@@ -149,6 +157,7 @@ pub(super) fn handle_keyboard(
     input_blocker: Res<ImeInputBlocker>,
     frame_count: Option<Res<FrameCount>>,
     mut app_hook: ResMut<ImeAppInputDispositionHook>,
+    mut pending_traversal: ResMut<PendingImeTraversal>,
     frame: Res<ImeInputFrame>,
     mut commands: Commands,
 ) {
@@ -185,6 +194,16 @@ pub(super) fn handle_keyboard(
         return;
     }
 
+    if let Some((session_id, input)) = panel_traversal_from_tab(&keys, &active_session) {
+        pending_traversal.0 = Some((session_id, input));
+        commands.trigger(super::ImeRequestCommit {
+            session_id,
+            cause: ImeCommitCause::Blur,
+        });
+        key_events.clear();
+        return;
+    }
+
     if let Some(request) = request_from_keys(&keys, &active_session) {
         trigger_session_request(request, &mut commands);
         return;
@@ -213,6 +232,69 @@ pub(super) fn handle_keyboard(
         };
         let changed = active_session.apply_keyboard_text(event.window, text, &input_blocker);
         trigger_text_changed(changed, &mut commands);
+    }
+}
+
+fn panel_traversal_from_tab(
+    keys: &ButtonInput<KeyCode>,
+    active_session: &ActiveImeSession,
+) -> Option<(ImeSessionId, WidgetInput)> {
+    if !keys.just_pressed(KeyCode::Tab) || active_session.is_pending_commit() {
+        return None;
+    }
+    if !matches!(
+        active_session.active_target(),
+        Some(ImeTarget::WorldPanelField { .. } | ImeTarget::ScreenPanelField { .. })
+    ) {
+        return None;
+    }
+    let window = active_session.active_window()?;
+    let input = if shift_pressed(keys) {
+        WidgetInput::FocusPrevious { window }
+    } else {
+        WidgetInput::FocusNext { window }
+    };
+    Some((active_session.active_session_id()?, input))
+}
+
+pub(super) fn continue_widget_traversal_after_apply(
+    applied: On<ImeApplied>,
+    mut pending: ResMut<PendingImeTraversal>,
+    mut widget_input: Option<ResMut<Messages<WidgetInput>>>,
+) {
+    let Some((session_id, input)) = pending.0 else {
+        return;
+    };
+    if session_id != applied.session_id {
+        return;
+    }
+    pending.0 = None;
+    if let Some(widget_input) = widget_input.as_deref_mut() {
+        widget_input.write(input);
+    }
+}
+
+pub(super) fn clear_widget_traversal_after_rejection(
+    rejected: On<ImeValidationRejected>,
+    mut pending: ResMut<PendingImeTraversal>,
+) {
+    if pending
+        .0
+        .is_some_and(|(session_id, _)| session_id == rejected.session_id)
+    {
+        pending.0 = None;
+    }
+}
+
+pub(super) fn clear_widget_traversal_after_cancel(
+    canceled: On<ImeCanceled>,
+    mut pending: ResMut<PendingImeTraversal>,
+) {
+    if pending
+        .0
+        .is_some_and(|(session_id, _)| session_id == canceled.session_id)
+    {
+        pending.0 = None;
     }
 }
 
