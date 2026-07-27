@@ -2831,7 +2831,7 @@ mod tests {
     }
 
     #[test]
-    fn button_click_classifies_same_and_other_panel_ime_scope() {
+    fn button_click_ends_panel_field_editing_on_same_or_other_panel() {
         let mut app = integrated_ime_test_app();
         let window = app.world_mut().spawn(Window::default()).id();
         let source_panel = spawn_panel(&mut app, button_and_field_tree());
@@ -2843,12 +2843,14 @@ mod tests {
         open_panel_ime(&mut app, window, source_panel);
         click(&mut app, source_button, PointerId::Mouse);
         handle_ime_blur(&mut app);
-        assert!(
-            app.world()
-                .resource::<ImeObservation>()
-                .commit_causes
-                .is_empty()
+        assert_eq!(
+            app.world().resource::<ImeObservation>().commit_causes,
+            [ImeCommitCause::Blur]
         );
+        app.world_mut()
+            .resource_mut::<ImeObservation>()
+            .commit_causes
+            .clear();
 
         open_panel_ime(&mut app, window, source_panel);
         click(&mut app, other_button, PointerId::Mouse);

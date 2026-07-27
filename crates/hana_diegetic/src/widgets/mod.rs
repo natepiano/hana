@@ -257,7 +257,9 @@ impl Plugin for WidgetsPlugin {
                     WidgetSystems::SemanticInput
                         .after(WidgetSystems::Focus)
                         .before(PanelSystems::ResolvePanelAttachments),
-                    WidgetSystems::FocusCommandsApplied.after(WidgetSystems::SemanticInput),
+                    WidgetSystems::FocusCommandsApplied
+                        .after(WidgetSystems::SemanticInput)
+                        .before(ImeSystemSet::Input),
                     WidgetSystems::PresentationCommandsApplied
                         .after(WidgetSystems::FocusCommandsApplied),
                 ),

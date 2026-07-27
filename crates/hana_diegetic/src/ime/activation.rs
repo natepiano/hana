@@ -8,6 +8,7 @@ use bevy::ecs::entity::ContainsEntity;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use super::ActiveImeSession;
 use super::ImeOpenSession;
 use super::ImeTarget;
 use super::editor::PendingImePanelAnchor;
@@ -30,6 +31,7 @@ pub(super) fn observe_panel_clicks(trigger: On<Add, DiegeticPanel>, mut commands
 fn open_from_panel_click(
     mut click: On<Pointer<Click>>,
     panels: Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
+    active_session: Res<ActiveImeSession>,
     frame_count: Option<Res<FrameCount>>,
     mut pending_anchor: ResMut<PendingImePanelAnchor>,
     mut commands: Commands,
@@ -56,15 +58,6 @@ fn open_from_panel_click(
         return;
     };
 
-    click.propagate(false);
-    pending_anchor.store(
-        panel_entity,
-        record.field_id.clone(),
-        Some(click.hit.camera),
-        window,
-        record.bounds,
-        record.presentation().clone(),
-    );
     let target = if panel.coordinate_space().is_screen() {
         ImeTarget::ScreenPanelField {
             panel:    panel_entity,
@@ -76,7 +69,19 @@ fn open_from_panel_click(
             field_id: record.field_id.clone(),
         }
     };
+    if active_session.active_target() == Some(&target) {
+        return;
+    }
 
+    click.propagate(false);
+    pending_anchor.store(
+        panel_entity,
+        record.field_id.clone(),
+        Some(click.hit.camera),
+        window,
+        record.bounds,
+        record.presentation().clone(),
+    );
     commands.trigger(ImeOpenSession {
         window,
         target,

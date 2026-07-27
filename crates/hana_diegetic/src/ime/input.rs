@@ -1,5 +1,6 @@
 //! Window IME and keyboard input routing for the active edit session.
 
+use bevy::diagnostic::FrameCount;
 use bevy::input::ButtonState;
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
@@ -146,11 +147,23 @@ pub(super) fn handle_keyboard(
     mut key_events: MessageReader<KeyboardInput>,
     mut active_session: ResMut<ActiveImeSession>,
     input_blocker: Res<ImeInputBlocker>,
+    frame_count: Option<Res<FrameCount>>,
     mut app_hook: ResMut<ImeAppInputDispositionHook>,
     frame: Res<ImeInputFrame>,
     mut commands: Commands,
 ) {
     if !active_session.is_leased(&input_blocker) {
+        key_events.clear();
+        return;
+    }
+
+    // A key that activates an editable widget must not also edit, commit, or
+    // cancel the session it just opened. The lease records that activation
+    // frame so the physical input edge belongs to widget activation only.
+    let captured_activation = frame_count
+        .as_ref()
+        .is_some_and(|count| input_blocker.captured_activation_frame(count.0));
+    if captured_activation {
         key_events.clear();
         return;
     }

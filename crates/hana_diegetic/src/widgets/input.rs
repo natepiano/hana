@@ -864,6 +864,7 @@ fn route_cancel_intent(
 mod tests {
     use bevy::camera::NormalizedRenderTarget;
     use bevy::camera::RenderTarget;
+    use bevy::diagnostic::FrameCount;
     use bevy::ecs::message::MessageCursor;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::input::ButtonState;
@@ -911,11 +912,15 @@ mod tests {
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::ImeInputBlocker;
     use crate::ImeOpenSession;
+    use crate::ImeSystemSet;
     use crate::ImeTarget;
     use crate::LayoutBuilder;
+    use crate::LayoutTree;
     use crate::Mm;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
@@ -925,6 +930,7 @@ mod tests {
     use crate::WidgetFocused;
     use crate::WidgetInteractivity;
     use crate::ime::ImePlugin;
+    use crate::layout::LayoutTreeChange;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::WidgetFocusAuthority;
     use crate::widgets::WidgetsPlugin;
@@ -946,6 +952,9 @@ mod tests {
 
     #[derive(Default, Resource)]
     struct RecordedIntents(Vec<(Entity, RecordedIntentAction)>);
+
+    #[derive(Default, Resource)]
+    struct ImeLeaseAfterInput(Option<Entity>);
 
     #[derive(Component)]
     struct AppOwnedInputContext;
@@ -976,6 +985,13 @@ mod tests {
             SemanticWidgetIntent::Cancel { entity } => (entity, RecordedIntentAction::Cancel),
         };
         recorded.0.push(entry);
+    }
+
+    fn record_ime_lease_after_input(
+        blocker: Res<ImeInputBlocker>,
+        mut recorded: ResMut<ImeLeaseAfterInput>,
+    ) {
+        recorded.0 = blocker.window();
     }
 
     fn test_app(test_ime: TestIme) -> App {
@@ -1033,6 +1049,29 @@ mod tests {
             return Entity::PLACEHOLDER;
         };
         app.world_mut().spawn(panel).id()
+    }
+
+    fn spawn_builtin_editable_panel(app: &mut App) -> (Entity, LayoutTree) {
+        let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
+        builder.with(
+            El::new().editable_field(
+                "editable",
+                ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text)),
+            ),
+            |builder| {
+                builder.text("Initial text");
+            },
+        );
+        let tree = builder.build();
+        let result = DiegeticPanel::world()
+            .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
+            .with_tree(tree.clone())
+            .build();
+        assert!(result.is_ok());
+        let Ok(panel) = result else {
+            return (Entity::PLACEHOLDER, tree);
+        };
+        (app.world_mut().spawn(panel).id(), tree)
     }
 
     fn widget(app: &mut App, panel: Entity, id: &'static str) -> Entity {
@@ -2261,5 +2300,102 @@ mod tests {
             Some(editable)
         );
         assert_ne!(editable, next);
+    }
+
+    #[test]
+    fn activating_editable_field_with_enter_does_not_close_new_session() {
+        let mut app = test_app(TestIme::Present);
+        app.init_resource::<ImeLeaseAfterInput>().add_systems(
+            Update,
+            record_ime_lease_after_input
+                .after(ImeSystemSet::Input)
+                .before(ImeSystemSet::UpdateEditorGeometry),
+        );
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().spawn((
+            Camera::default(),
+            GlobalTransform::IDENTITY,
+            RenderTarget::Window(WindowRef::Entity(window)),
+        ));
+        let (panel, _) = spawn_builtin_editable_panel(&mut app);
+        app.update();
+        let editable = widget(&mut app, panel, "editable");
+        request_focus(&mut app, window, editable);
+        app.world_mut().flush();
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.world_mut()
+            .write_message(ActivateFocusedWidget { window });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ImeLeaseAfterInput>().0,
+            Some(window),
+            "the Enter edge that opens the editor must not close it",
+        );
+    }
+
+    #[test]
+    fn enter_commits_inline_edit_and_removes_selection_without_reactivation() {
+        let mut app = test_app(TestIme::Present);
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().spawn((
+            Camera::default(),
+            GlobalTransform::IDENTITY,
+            RenderTarget::Window(WindowRef::Entity(window)),
+        ));
+        let (panel, authored_tree) = spawn_builtin_editable_panel(&mut app);
+        app.update();
+        let editable = widget(&mut app, panel, "editable");
+        request_focus(&mut app, window, editable);
+        app.world_mut().flush();
+        app.world_mut().trigger(ImeOpenSession {
+            target: ImeTarget::WorldPanelField {
+                panel,
+                field_id: PanelElementId::named("editable"),
+            },
+            window,
+            initial_text: "Initial text".to_owned(),
+            field_spec: ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(
+                ImeBuiltInFieldKind::Text,
+            )),
+            anchor: None,
+        });
+        app.world_mut().flush();
+        assert_eq!(
+            app.world().resource::<ImeInputBlocker>().window(),
+            Some(window),
+            "the inline session should be active before Enter",
+        );
+        let next_frame = app.world().resource::<FrameCount>().0.wrapping_add(1);
+        app.world_mut().resource_mut::<FrameCount>().0 = next_frame;
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Enter);
+        app.world_mut()
+            .write_message(ActivateFocusedWidget { window });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ImeInputBlocker>().window(),
+            None,
+            "Enter should complete the active edit instead of reopening it",
+        );
+        let committed_tree = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .map(DiegeticPanel::tree);
+        assert!(committed_tree.is_some(), "the editable panel should remain");
+        let Some(committed_tree) = committed_tree else {
+            return;
+        };
+        assert_eq!(
+            authored_tree.classify_change(committed_tree),
+            LayoutTreeChange::Identical,
+            "committing should remove the transient inline selection",
+        );
     }
 }

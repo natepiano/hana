@@ -11,6 +11,7 @@ use super::ImeBuiltInValue;
 use super::ImeCommitAuthority;
 use super::ImeCommitRequested;
 use super::ImeEditableFieldSpec;
+use super::ImeEditorState;
 use super::ImeRejectCommit;
 use super::ImeRejection;
 use super::ImeTarget;
@@ -29,6 +30,7 @@ const MISSING_TEXT_MESSAGE: &str = "field has no text display";
 pub(super) fn apply_builtin_commit(
     event: On<ImeCommitRequested>,
     authority: Res<ImeCommitAuthority>,
+    editor_state: Res<ImeEditorState>,
     panels: Query<&DiegeticPanel>,
     mut commands: Commands,
 ) {
@@ -60,7 +62,10 @@ pub(super) fn apply_builtin_commit(
         },
     };
 
-    let mut tree = panel.tree().clone();
+    let mut tree = editor_state
+        .authoritative_tree(event.session_id, panel_entity)
+        .unwrap_or_else(|| panel.tree())
+        .clone();
     let update = tree.set_field_display_text(target_field_id(&event.target), parsed.display_text());
     if update != FieldDisplayTextUpdate::Updated {
         reject(event, update_rejection(update), &mut commands);

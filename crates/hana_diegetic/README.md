@@ -32,6 +32,28 @@ App::new()
     .run();
 ```
 
+## Headless widget tests
+
+Client tests can install retained layout, widgets, tooltips, focus, and IME
+behavior without creating Bevy's render sub-app:
+
+```rust
+use bevy::prelude::*;
+use hana_diegetic::*;
+
+let mut app = App::new();
+app.add_plugins(MinimalPlugins)
+    .insert_resource(DiegeticTextMeasurer::default())
+    .add_plugins(HeadlessDiegeticUiPlugin);
+```
+
+`HeadlessLayoutPlugin` remains the layout-only entry point used by benchmarks.
+`HeadlessDiegeticUiPlugin` adds widget and IME behavior to that layout path.
+`WidgetInputPlugin` is not required for widget behavior. Add it when
+`hana_diegetic` should translate Bevy input bindings into requests such as
+`FocusNextWidget` and `ActivateFocusedWidget`. A test can omit the input plugin
+and send those requests directly.
+
 ## Text transparency
 
 Slug renders anti-aliased glyph edges from per-pixel coverage. It emits one

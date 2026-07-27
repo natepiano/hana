@@ -396,10 +396,39 @@ pub use widgets::WidgetOf;
 use widgets::WidgetsPlugin;
 pub use widgets::slider_self_update;
 
+/// Bevy plugin that adds diegetic layout, widgets, and IME behavior without
+/// renderer initialization.
+///
+/// Use this plugin in client tests that need the same panel and widget
+/// behavior as [`DiegeticUiPlugin`] without shaders, render assets, gizmos, or
+/// a render sub-app. Insert a [`DiegeticTextMeasurer`] before adding this
+/// plugin; deterministic tests may use `DiegeticTextMeasurer::default()`.
+/// [`WidgetInputPlugin`] is not required for widget behavior. Add it when
+/// `hana_diegetic` should translate Bevy input bindings into widget focus,
+/// activation, and cancellation requests. Without it, an application or test
+/// can send requests such as [`FocusNextWidget`] or [`ActivateFocusedWidget`]
+/// directly.
+///
+/// # Example
+///
+/// ```ignore
+/// App::new()
+///     .add_plugins(MinimalPlugins)
+///     .insert_resource(DiegeticTextMeasurer::default())
+///     .add_plugins(HeadlessDiegeticUiPlugin);
+/// ```
+pub struct HeadlessDiegeticUiPlugin;
+
+impl Plugin for HeadlessDiegeticUiPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ImePlugin));
+    }
+}
+
 /// Bevy plugin that adds diegetic UI panel support.
 ///
-/// Composes layout, rendering, text, and screen-space overlay
-/// support into a single plugin. Insert [`PanelDefaults`] before adding this
+/// Composes [`HeadlessDiegeticUiPlugin`] with rendering, text, gizmo, and
+/// screen-space overlay support. Insert [`PanelDefaults`] before adding this
 /// plugin; it takes effect through the child plugins at build time. A cascade
 /// root resource such as [`TextAlpha`] can go on either side: inserted first it
 /// is left alone, inserted afterwards it replaces the plugin's default and
@@ -436,9 +465,8 @@ impl Plugin for DiegeticUiPlugin {
         );
         app.add_plugins((
             TextPlugin,
+            HeadlessDiegeticUiPlugin,
             PanelPlugin,
-            WidgetsPlugin,
-            ImePlugin,
             ScreenSpacePlugin,
             RenderPlugin,
             DiegeticTextPlugin,

@@ -184,6 +184,8 @@ macro_rules! add_cascade_ownership_observers {
 /// External consumers (benchmarks, non-UI apps) register this plugin
 /// instead of [`DiegeticUiPlugin`](crate::DiegeticUiPlugin) when they
 /// only need [`DiegeticPanel`] → [`ComputedDiegeticPanel`] computation.
+/// Client tests that also need widget and IME behavior use
+/// [`HeadlessDiegeticUiPlugin`](crate::HeadlessDiegeticUiPlugin) instead.
 /// The plugin initializes [`PanelDefaults`] itself (idempotent); callers
 /// insert their own [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer)
 /// and optionally override construction defaults before adding this plugin.
@@ -298,14 +300,13 @@ impl Plugin for HeadlessLayoutPlugin {
     }
 }
 
-/// Full panel integration — headless layout plus gizmo debug rendering.
+/// Panel gizmo debug rendering installed after [`HeadlessLayoutPlugin`].
 /// Registered by [`DiegeticUiPlugin`](crate::DiegeticUiPlugin).
 pub(crate) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(HeadlessLayoutPlugin)
-            .init_resource::<ShowTextGizmos>()
+        app.init_resource::<ShowTextGizmos>()
             .init_gizmo_group::<DiegeticPanelGizmoGroup>()
             .configure_sets(
                 Update,

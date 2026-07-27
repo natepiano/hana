@@ -15,7 +15,11 @@ mod lease;
 mod session;
 mod target;
 
+use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
+use bevy::window::Ime;
+use bevy::window::WindowClosed;
+use bevy::window::WindowFocused;
 pub use buffer::ImeBufferBoundary;
 pub use buffer::ImeBufferRange;
 pub use buffer::ImeBufferSnapshot;
@@ -91,7 +95,12 @@ pub enum ImeSystemSet {
 
 impl Plugin for ImePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActiveImeSession>()
+        app.add_message::<Ime>()
+            .add_message::<KeyboardInput>()
+            .add_message::<WindowClosed>()
+            .add_message::<WindowFocused>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ActiveImeSession>()
             .init_resource::<ImeCommitAuthority>()
             .init_resource::<ImeInputBlocker>()
             .init_resource::<ImeInputFrame>()
@@ -115,6 +124,7 @@ impl Plugin for ImePlugin {
             .add_observer(activation::observe_panel_clicks)
             .add_observer(activation::open_from_semantic_activation)
             .add_observer(editor::observe_panel_clicks)
+            .add_observer(editor::classify_non_panel_click)
             .add_observer(session::open_session)
             .add_observer(session::request_commit)
             .add_observer(session::request_cancel)

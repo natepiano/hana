@@ -36,6 +36,10 @@ impl ImeInputBlocker {
     }
 
     /// Returns `true` when the activating gesture happened on `frame`.
+    ///
+    /// The IME input route uses this to assign one physical key press to one
+    /// role: a key that opens an editor cannot also edit or close that newly
+    /// opened session during the same frame.
     #[must_use]
     pub const fn captured_activation_frame(&self, frame: u32) -> bool {
         matches!(

@@ -99,6 +99,8 @@ pub(super) enum ImeEditCommand {
     InsertText(String),
     DeleteBackward(ImeMovementUnit),
     DeleteForward(ImeMovementUnit),
+    PlaceCursor(usize),
+    SelectWordAt(usize),
     Move {
         direction: ImeMovementDirection,
         unit:      ImeMovementUnit,
@@ -160,6 +162,8 @@ impl ImeEditBuffer {
             ImeEditCommand::InsertText(text) => self.insert_text(&text),
             ImeEditCommand::DeleteBackward(unit) => self.delete_backward(unit),
             ImeEditCommand::DeleteForward(unit) => self.delete_forward(unit),
+            ImeEditCommand::PlaceCursor(index) => self.place_cursor(index),
+            ImeEditCommand::SelectWordAt(index) => self.select_word_at(index),
             ImeEditCommand::Move {
                 direction,
                 unit,
@@ -248,6 +252,46 @@ impl ImeEditBuffer {
         let next = ImeSelection {
             anchor: 0,
             focus:  self.text.len(),
+        };
+        if self.selection == next {
+            ImeBufferEdit::Unchanged
+        } else {
+            self.selection = next;
+            ImeBufferEdit::Changed
+        }
+    }
+
+    fn place_cursor(&mut self, index: usize) -> ImeBufferEdit {
+        if !self.text.is_char_boundary(index) {
+            return ImeBufferEdit::Unchanged;
+        }
+        let next = ImeSelection::insertion(index);
+        if self.selection == next {
+            ImeBufferEdit::Unchanged
+        } else {
+            self.selection = next;
+            ImeBufferEdit::Changed
+        }
+    }
+
+    fn select_word_at(&mut self, index: usize) -> ImeBufferEdit {
+        if !self.text.is_char_boundary(index) || index == self.text.len() {
+            return self.place_cursor(index);
+        }
+        let end = self.next_boundary(index);
+        let Some(character) = self.char_at(index) else {
+            return self.place_cursor(index);
+        };
+        let next = if is_word_character(character) {
+            ImeSelection {
+                anchor: self.previous_word_boundary(end),
+                focus:  self.next_word_boundary(index),
+            }
+        } else {
+            ImeSelection {
+                anchor: index,
+                focus:  end,
+            }
         };
         if self.selection == next {
             ImeBufferEdit::Unchanged
@@ -411,6 +455,33 @@ mod tests {
 
         buffer.apply(ImeEditCommand::InsertText("Replacement".to_owned()));
         assert_eq!(buffer.committed_text(), "Replacement");
+    }
+
+    #[test]
+    fn pointer_cursor_replaces_the_initial_selection() {
+        let mut buffer = ImeEditBuffer::new_selected("alpha beta");
+
+        buffer.apply(ImeEditCommand::PlaceCursor("alpha ".len()));
+
+        assert_eq!(
+            buffer.snapshot(None).cursor,
+            ImeCursorState::Insertion(ImeBufferBoundary::new("alpha ".len())),
+        );
+    }
+
+    #[test]
+    fn pointer_word_selection_uses_the_character_under_the_click() {
+        let mut buffer = ImeEditBuffer::new("alpha béta");
+
+        buffer.apply(ImeEditCommand::SelectWordAt("alpha b".len()));
+
+        assert_eq!(
+            buffer.snapshot(None).cursor,
+            ImeCursorState::Selection(ImeSelectionSnapshot {
+                anchor: ImeBufferBoundary::new("alpha ".len()),
+                focus:  ImeBufferBoundary::new("alpha béta".len()),
+            }),
+        );
     }
 
     #[test]

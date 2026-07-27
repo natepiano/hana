@@ -981,6 +981,156 @@ impl LayoutTree {
         FieldDisplayTextUpdate::Updated
     }
 
+    /// Replaces one editable field's descendants with `replacement` while
+    /// preserving the editable field element itself.
+    ///
+    /// The result is rebuilt as a compact arena so descendants hidden by the
+    /// replacement cannot keep duplicate ids or participate in later scans.
+    /// Auto-generated text ids in `replacement` are reminted after the source
+    /// tree's ids because each tree was originally built with its own counter.
+    pub(crate) fn set_field_editing_content(
+        &mut self,
+        field_id: &PanelElementId,
+        replacement: &Self,
+    ) -> FieldDisplayTextUpdate {
+        let matches: Vec<usize> = self
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| {
+                element
+                    .editable
+                    .as_ref()
+                    .is_some_and(|field| field.field_id == *field_id)
+                    .then_some(index)
+            })
+            .collect();
+        let [field_index] = matches.as_slice() else {
+            return if matches.is_empty() {
+                FieldDisplayTextUpdate::MissingField
+            } else {
+                FieldDisplayTextUpdate::DuplicateField
+            };
+        };
+        let (Some(source_root), Some(replacement_root)) = (self.root, replacement.root) else {
+            return FieldDisplayTextUpdate::MissingText;
+        };
+
+        let mut next = Self::with_capacity(self.len() + replacement.len());
+        let mut next_auto_id = self.next_auto_element_id();
+        let Some(root) = self.clone_with_field_editing_content(
+            source_root,
+            *field_index,
+            replacement,
+            replacement_root,
+            &mut next,
+            &mut next_auto_id,
+        ) else {
+            return FieldDisplayTextUpdate::MissingText;
+        };
+        next.set_root(root);
+        *self = next;
+        FieldDisplayTextUpdate::Updated
+    }
+
+    fn clone_with_field_editing_content(
+        &self,
+        source_index: usize,
+        field_index: usize,
+        replacement: &Self,
+        replacement_root: usize,
+        target: &mut Self,
+        next_auto_id: &mut u32,
+    ) -> Option<usize> {
+        let source = self.elements.get(source_index)?;
+        let children = match &source.content {
+            ElementContent::Children(children) => children.clone(),
+            ElementContent::Empty | ElementContent::Text { .. } | ElementContent::Image { .. } => {
+                SmallVec::new()
+            },
+        };
+        let mut clone = source.clone();
+        if source_index == field_index || !children.is_empty() {
+            clone.content = ElementContent::Children(SmallVec::new());
+        }
+        let target_index = target.add(clone);
+
+        if source_index == field_index {
+            let replacement_index = replacement.clone_reminting_auto_ids_into(
+                replacement_root,
+                target,
+                next_auto_id,
+            )?;
+            if let ElementContent::Children(target_children) =
+                &mut target.elements.get_mut(target_index)?.content
+            {
+                target_children.push(replacement_index);
+            }
+            return Some(target_index);
+        }
+
+        for child in children {
+            let child_index = self.clone_with_field_editing_content(
+                child,
+                field_index,
+                replacement,
+                replacement_root,
+                target,
+                next_auto_id,
+            )?;
+            if let ElementContent::Children(target_children) =
+                &mut target.elements.get_mut(target_index)?.content
+            {
+                target_children.push(child_index);
+            }
+        }
+        Some(target_index)
+    }
+
+    fn clone_reminting_auto_ids_into(
+        &self,
+        source_index: usize,
+        target: &mut Self,
+        next_auto_id: &mut u32,
+    ) -> Option<usize> {
+        let source = self.elements.get(source_index)?;
+        let children = match &source.content {
+            ElementContent::Children(children) => children.clone(),
+            ElementContent::Empty | ElementContent::Text { .. } | ElementContent::Image { .. } => {
+                SmallVec::new()
+            },
+        };
+        let mut clone = source.clone();
+        if matches!(clone.id, Some(PanelElementId::Auto(_))) {
+            clone.id = Some(PanelElementId::auto(*next_auto_id));
+            *next_auto_id = next_auto_id.saturating_add(1);
+        }
+        if !children.is_empty() {
+            clone.content = ElementContent::Children(SmallVec::new());
+        }
+        let target_index = target.add(clone);
+        for child in children {
+            let child_index = self.clone_reminting_auto_ids_into(child, target, next_auto_id)?;
+            if let ElementContent::Children(target_children) =
+                &mut target.elements.get_mut(target_index)?.content
+            {
+                target_children.push(child_index);
+            }
+        }
+        Some(target_index)
+    }
+
+    fn next_auto_element_id(&self) -> u32 {
+        self.elements
+            .iter()
+            .filter_map(|element| match element.id.as_ref() {
+                Some(PanelElementId::Auto(id)) => Some(id.value()),
+                Some(PanelElementId::Named(_)) | None => None,
+            })
+            .max()
+            .map_or(0, |value| value.saturating_add(1))
+    }
+
     fn first_text_descendant(&self, index: usize) -> Option<usize> {
         let mut stack = vec![index];
         while let Some(current) = stack.pop() {
@@ -1398,6 +1548,7 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use bevy::asset::Assets;
@@ -2262,6 +2413,57 @@ mod tests {
 
         assert_eq!(update, FieldDisplayTextUpdate::Updated);
         assert_eq!(tree.field_display_text(1), Some("11"));
+    }
+
+    #[test]
+    fn editing_content_replaces_only_field_descendants_and_remints_text_ids() {
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.text(("before", TextStyle::new(10.0)));
+        builder.with(
+            El::new()
+                .padding(Padding::all(3.0))
+                .background(Color::BLACK)
+                .editable_field("gain", field_spec()),
+            |builder| {
+                builder.text(("10", TextStyle::new(10.0)));
+            },
+        );
+        builder.text(("after", TextStyle::new(10.0)));
+        let mut tree = builder.build();
+
+        let mut replacement = LayoutBuilder::with_root(El::row());
+        replacement.text(("left", TextStyle::new(10.0)));
+        replacement.text(("right", TextStyle::new(10.0)));
+        let update = tree.set_field_editing_content(&"gain".into(), &replacement.build());
+
+        assert_eq!(update, FieldDisplayTextUpdate::Updated);
+        let field_index = tree
+            .elements
+            .iter()
+            .position(|element| element.editable.is_some())
+            .expect("the editable field remains in the derived tree");
+        assert_eq!(tree.field_display_text(field_index), Some("left"));
+        assert_eq!(tree.elements[field_index].padding, Padding::all(3.0));
+        assert_eq!(tree.elements[field_index].background, Some(Color::BLACK));
+        assert!(
+            tree.elements.iter().all(|element| {
+                !matches!(&element.content, ElementContent::Text { text, .. } if text == "10")
+            }),
+            "the authored display descendant must not remain in the compact derived arena",
+        );
+        let auto_ids = tree
+            .elements
+            .iter()
+            .filter_map(|element| match element.id.as_ref() {
+                Some(PanelElementId::Auto(id)) => Some(id.value()),
+                Some(PanelElementId::Named(_)) | None => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            auto_ids.iter().copied().collect::<HashSet<_>>().len(),
+            auto_ids.len(),
+            "replacement text ids must not collide with source-tree text ids",
+        );
     }
 
     #[test]
