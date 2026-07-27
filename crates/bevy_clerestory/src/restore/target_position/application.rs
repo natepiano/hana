@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 #[cfg(test)]
 use std::collections::HashSet;
+use std::time::Duration;
 
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
@@ -21,6 +22,7 @@ use crate::Platform;
 use crate::constants::MILLIS_PER_SECOND;
 use crate::constants::RESTORE_STRATEGY_APPLY_UNCHANGED;
 use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
+use crate::constants::SCALE_CHANGE_WAIT_TIMEOUT_SECS;
 use crate::constants::SCALE_FACTOR_EPSILON;
 use crate::constants::SETTLE_STABILITY_SECS;
 use crate::constants::SETTLE_TIMEOUT_SECS;
@@ -145,22 +147,27 @@ fn matching_scale_change(
         })
 }
 
-/// Whether Clerestory's monitor association already reports the window on a monitor at the
-/// target scale.
+/// Whether the window has arrived on the target monitor and that monitor is at `target_scale`.
 ///
-/// The Windows two-phase cross-DPI restore (`CompensateSizeOnly`) normally waits for winit's
-/// `WindowScaleFactorChanged` to confirm the DPI crossing before applying the exact size. But
-/// the restore window is hidden until it completes, and winit does not emit that event for a
-/// hidden window (the same reason the no-saved-position branch of [`begin_cross_dpi_restore`]
-/// skips the wait). The monitor association — updated from the OS monitor the window actually
-/// landed on — is an equivalent "the cross-DPI move landed on the target scale" signal that does
-/// not require revealing the window, so the reveal still happens once, at the final geometry.
+/// This is the backstop for a `WindowScaleFactorChanged` that never arrives. The window cannot
+/// already be at `target_scale` on entry — `Platform::scale_strategy` returns `ApplyUnchanged`
+/// when the starting and target scales are within `SCALE_FACTOR_EPSILON`, so reaching
+/// `WaitingForScaleChange` means a real DPI crossing is expected. What is not guaranteed is the
+/// event: Windows delivers `WM_DPICHANGED` to a hidden window only because `windows_dpi_fix`
+/// forwards it, and a target that matches no live monitor produces no crossing at all.
+///
+/// The monitor index is checked as well as the scale. Several monitors commonly share one scale,
+/// so scale alone accepts a window that drifted onto a *different* display — after which settling
+/// compares the window against the target monitor's geometry while it sits somewhere else, and
+/// reports a mismatch whose cause is invisible.
 fn current_monitor_reached_target_scale(
     current_monitor: Option<&CurrentMonitor>,
     target_scale: f64,
+    target_monitor_index: usize,
 ) -> bool {
-    current_monitor.is_some_and(|current| {
-        (current.monitor_info.scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
+    current_monitor.is_some_and(|current_monitor| {
+        current_monitor.index == target_monitor_index
+            && (current_monitor.monitor_info.scale - target_scale).abs() <= SCALE_FACTOR_EPSILON
     })
 }
 
@@ -322,6 +329,10 @@ fn begin_cross_dpi_restore(
     }
 
     apply_initial_move(target_position, window);
+    target_position.scale_change_wait = Some(Timer::from_seconds(
+        SCALE_CHANGE_WAIT_TIMEOUT_SECS,
+        TimerMode::Once,
+    ));
     target_position.monitor_scale_strategy = match target_position.monitor_scale_strategy {
         MonitorScaleStrategy::HigherToLower(_) => {
             MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange {
@@ -445,14 +456,19 @@ pub(crate) fn restore_windows(
     >,
     platform: Res<Platform>,
     scale_inputs: Res<ObservedScaleInputs>,
+    time: Option<Res<Time>>,
     registrations: Option<Res<RecoveryRegistrations>>,
     monitors: Option<Res<Monitors>>,
     revision: Option<Res<MonitorTopologyRevision>>,
     #[cfg(test)] injected_windows: Option<Res<InjectedWinitWindows>>,
 ) {
+    let delta = time.as_deref().map_or(Duration::ZERO, Time::delta);
     for (entity, restore_preparation, mut target_position, mut window, current_monitor) in
         &mut windows
     {
+        if let Some(scale_change_wait) = target_position.scale_change_wait.as_mut() {
+            scale_change_wait.tick(delta);
+        }
         if let (Some(restore_attempt), Some(registrations), Some(monitors), Some(revision)) = (
             restore_preparation.recovery_attempt(),
             &registrations,
@@ -501,10 +517,19 @@ pub(crate) fn restore_windows(
     }
 }
 
-/// Advance a cross-DPI restore out of `WaitingForScaleChange` once the scale change is
-/// confirmed — either by winit's `WindowScaleFactorChanged` ([`matching_scale_change`]) or, for
-/// the Windows `CompensateSizeOnly` path whose hidden window never receives that event, by the
-/// monitor association reaching the target scale ([`current_monitor_reached_target_scale`]).
+/// Advance a cross-DPI restore out of `WaitingForScaleChange`.
+///
+/// Three signals can end the wait, in decreasing order of authority:
+///
+/// 1. winit's `WindowScaleFactorChanged` ([`matching_scale_change`]) confirms the DPI crossing. On
+///    Windows the hidden restore window receives it because `windows_dpi_fix` forwards
+///    `WM_DPICHANGED` while the window is hidden.
+/// 2. `CurrentMonitor` reports the window on the target monitor at `target_scale`
+///    ([`current_monitor_reached_target_scale`]). Arrival is observable even when the event is not
+///    delivered, so this covers a lost `WM_DPICHANGED`.
+/// 3. [`SCALE_CHANGE_WAIT_TIMEOUT_SECS`] elapses. A target that matches no live monitor never
+///    arrives at all; applying the final size anyway reveals the window and lets settle report the
+///    mismatch, rather than waiting forever with the window hidden.
 fn advance_scale_change_wait(
     entity: Entity,
     restore_preparation: &RestorePreparation,
@@ -513,44 +538,58 @@ fn advance_scale_change_wait(
     scale_inputs: &ObservedScaleInputs,
     current_monitor: Option<&CurrentMonitor>,
 ) {
-    match target_position.monitor_scale_strategy {
-        MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange {
-            attempt_id,
-        }) if matching_scale_change(
-            entity,
-            restore_preparation.attempt_id(),
-            attempt_id,
-            target_position.target_scale,
-            f64::from(window.resolution.base_scale_factor()),
-            scale_inputs,
-        ) =>
-        {
-            debug!(
-                "[Restore] ScaleChanged received, transitioning to WindowRestoreState::ApplySize"
-            );
-            target_position.monitor_scale_strategy =
-                MonitorScaleStrategy::HigherToLower(WindowRestoreState::ApplySize);
-        },
-        MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange {
-            attempt_id,
-        }) if matching_scale_change(
-            entity,
-            restore_preparation.attempt_id(),
-            attempt_id,
-            target_position.target_scale,
-            f64::from(window.resolution.base_scale_factor()),
-            scale_inputs,
-        ) || current_monitor_reached_target_scale(
-            current_monitor,
-            target_position.target_scale,
-        ) =>
-        {
-            debug!("[Restore] CompensateSizeOnly: transitioning to ApplySize");
-            target_position.monitor_scale_strategy =
-                MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize);
-        },
-        _ => {},
+    let (MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange {
+        attempt_id,
+    })
+    | MonitorScaleStrategy::HigherToLower(WindowRestoreState::WaitingForScaleChange {
+        attempt_id,
+    })) = target_position.monitor_scale_strategy
+    else {
+        return;
+    };
+
+    let scale_observed = matching_scale_change(
+        entity,
+        restore_preparation.attempt_id(),
+        attempt_id,
+        target_position.target_scale,
+        f64::from(window.resolution.base_scale_factor()),
+        scale_inputs,
+    );
+    // Arrival only settles the Windows path: macOS and X11 reposition a `HigherToLower` window in
+    // stages, so the target monitor can be reported before the move has finished.
+    let arrived_at_target_scale = matches!(
+        target_position.monitor_scale_strategy,
+        MonitorScaleStrategy::CompensateSizeOnly(_)
+    ) && current_monitor_reached_target_scale(
+        current_monitor,
+        target_position.target_scale,
+        target_position.monitor_index,
+    );
+    let wait_expired = target_position
+        .scale_change_wait
+        .as_ref()
+        .is_some_and(Timer::is_finished);
+
+    if !(scale_observed || arrived_at_target_scale || wait_expired) {
+        return;
     }
+    if !(scale_observed || arrived_at_target_scale) {
+        warn!(
+            "[Restore] entity {entity:?} saw no scale change within {SCALE_CHANGE_WAIT_TIMEOUT_SECS}s \
+             (target_scale={}); applying the final size so the window is not left hidden",
+            target_position.target_scale
+        );
+    }
+
+    debug!("[Restore] Leaving WaitingForScaleChange for ApplySize");
+    target_position.scale_change_wait = None;
+    target_position.monitor_scale_strategy = match target_position.monitor_scale_strategy {
+        MonitorScaleStrategy::HigherToLower(_) => {
+            MonitorScaleStrategy::HigherToLower(WindowRestoreState::ApplySize)
+        },
+        _ => MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize),
+    };
 }
 
 fn restore_window(
@@ -815,6 +854,158 @@ fn try_apply_restore(
     RestoreStatus::Complete
 }
 
+#[cfg(test)]
+mod scale_change_wait_tests {
+    use super::*;
+    use crate::MonitorInfo;
+    use crate::WindowKey;
+    use crate::monitors::MonitorIdentity;
+
+    const MONITOR_INDEX: usize = 1;
+    const STARTING_SCALE: f64 = 1.75;
+    const TARGET_SCALE: f64 = 1.5;
+
+    fn waiting_target(scale_change_wait: Option<Timer>) -> TargetPosition {
+        TargetPosition {
+            physical_position: Some(IVec2::new(1_631, 2_880)),
+            logical_position: Some(IVec2::new(1_087, 1_920)),
+            physical_size: UVec2::new(1_350, 900),
+            logical_size: UVec2::new(900, 600),
+            target_scale: TARGET_SCALE,
+            starting_scale: STARTING_SCALE,
+            monitor_scale_strategy: MonitorScaleStrategy::CompensateSizeOnly(
+                WindowRestoreState::WaitingForScaleChange { attempt_id: None },
+            ),
+            saved_window_mode: SavedWindowMode::Windowed,
+            monitor_index: MONITOR_INDEX,
+            fullscreen_restore_state: None,
+            scale_change_wait,
+            settle_state: None,
+        }
+    }
+
+    fn monitor_at_scale(scale: f64) -> CurrentMonitor {
+        CurrentMonitor {
+            monitor_info:          MonitorInfo {
+                identity: MonitorIdentity::Unverified,
+                index: MONITOR_INDEX,
+                scale,
+                physical_position: IVec2::new(1_631, 2_880),
+                physical_size: UVec2::new(3_456, 2_168),
+            },
+            effective_window_mode: WindowMode::Windowed,
+        }
+    }
+
+    fn expired_wait() -> Timer {
+        let mut timer = Timer::from_seconds(SCALE_CHANGE_WAIT_TIMEOUT_SECS, TimerMode::Once);
+        timer.tick(Duration::from_secs_f32(SCALE_CHANGE_WAIT_TIMEOUT_SECS));
+        timer
+    }
+
+    fn advance(target_position: &mut TargetPosition, current_monitor: Option<&CurrentMonitor>) {
+        advance_scale_change_wait(
+            Entity::from_bits(1),
+            &RestorePreparation::startup(WindowKey::Primary),
+            target_position,
+            &Window::default(),
+            &ObservedScaleInputs::default(),
+            current_monitor,
+        );
+    }
+
+    fn other_monitor_at_scale(scale: f64) -> CurrentMonitor {
+        CurrentMonitor {
+            monitor_info:          MonitorInfo {
+                identity: MonitorIdentity::Unverified,
+                index: MONITOR_INDEX + 1,
+                scale,
+                physical_position: IVec2::new(-3_456, 0),
+                physical_size: UVec2::new(3_456, 2_168),
+            },
+            effective_window_mode: WindowMode::Windowed,
+        }
+    }
+
+    /// Arriving on the target monitor ends the wait even when no `WindowScaleFactorChanged` is
+    /// delivered — which happens on Windows whenever `WM_DPICHANGED` does not reach the hidden
+    /// restore window.
+    #[test]
+    fn arrival_at_target_scale_completes_the_wait_without_a_scale_message() {
+        let mut target_position = waiting_target(Some(Timer::from_seconds(
+            SCALE_CHANGE_WAIT_TIMEOUT_SECS,
+            TimerMode::Once,
+        )));
+
+        advance(&mut target_position, Some(&monitor_at_scale(TARGET_SCALE)));
+
+        assert_eq!(
+            target_position.monitor_scale_strategy,
+            MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize)
+        );
+        assert!(target_position.scale_change_wait.is_none());
+    }
+
+    /// Several monitors commonly run at the same scale, so a matching scale on the *wrong*
+    /// monitor is not arrival. Accepting it would apply the size and hand the window to settling,
+    /// which then compares it against the target monitor's geometry while it sits elsewhere and
+    /// reports a mismatch with no indication why.
+    #[test]
+    fn a_matching_scale_on_a_different_monitor_does_not_complete_the_wait() {
+        let mut target_position = waiting_target(Some(Timer::from_seconds(
+            SCALE_CHANGE_WAIT_TIMEOUT_SECS,
+            TimerMode::Once,
+        )));
+
+        advance(
+            &mut target_position,
+            Some(&other_monitor_at_scale(TARGET_SCALE)),
+        );
+
+        assert_eq!(
+            target_position.monitor_scale_strategy,
+            MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange {
+                attempt_id: None,
+            })
+        );
+        assert!(target_position.scale_change_wait.is_some());
+    }
+
+    /// A target matching no live monitor never arrives and never changes scale. The deadline has
+    /// to end the wait, otherwise the window stays hidden for the life of the process.
+    #[test]
+    fn expired_wait_applies_size_when_no_signal_ever_arrives() {
+        let mut target_position = waiting_target(Some(expired_wait()));
+
+        advance(&mut target_position, None);
+
+        assert_eq!(
+            target_position.monitor_scale_strategy,
+            MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::ApplySize)
+        );
+    }
+
+    #[test]
+    fn wait_continues_while_the_deadline_is_unexpired_and_no_signal_arrives() {
+        let mut target_position = waiting_target(Some(Timer::from_seconds(
+            SCALE_CHANGE_WAIT_TIMEOUT_SECS,
+            TimerMode::Once,
+        )));
+
+        advance(
+            &mut target_position,
+            Some(&monitor_at_scale(STARTING_SCALE)),
+        );
+
+        assert_eq!(
+            target_position.monitor_scale_strategy,
+            MonitorScaleStrategy::CompensateSizeOnly(WindowRestoreState::WaitingForScaleChange {
+                attempt_id: None,
+            })
+        );
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 #[allow(
     clippy::expect_used,
@@ -855,6 +1046,7 @@ mod tests {
             saved_window_mode:        SavedWindowMode::BorderlessFullscreen,
             monitor_index:            TARGET_MONITOR_INDEX,
             fullscreen_restore_state: Some(FullscreenRestoreState::LeaveFullscreen),
+            scale_change_wait:        None,
             settle_state:             None,
         }
     }

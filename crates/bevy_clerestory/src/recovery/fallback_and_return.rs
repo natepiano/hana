@@ -971,6 +971,8 @@ mod tests {
     use crate::WindowRestored;
     use crate::managed;
     use crate::managed::ManagedWindowRegistry;
+    use crate::monitors::MonitorIdentityRegistry;
+    use crate::monitors::PanelIdentity;
     use crate::persistence;
     use crate::persistence::CapturedPlacement;
     use crate::persistence::PersistencePlugin;
@@ -1053,11 +1055,11 @@ mod tests {
         saved_window_mode: SavedWindowMode,
     ) -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity: PanelIdentity::Anonymous,
             monitor_snapshot,
             position,
             logical_size: LOGICAL_SIZE,
             saved_window_mode,
-            captured_scale: monitor_snapshot.scale,
         }
     }
 
@@ -1132,6 +1134,8 @@ mod tests {
             app.insert_resource(RestoreWindowConfig {
                 path: state_file.to_path_buf(),
             })
+            // `MonitorPlugin` supplies this in a real app; these tests build a partial world.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_plugins(PersistencePlugin);
             app.world_mut()
                 .resource_mut::<CapturedWindowStates>()

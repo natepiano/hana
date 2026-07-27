@@ -28,6 +28,7 @@ use windows::Win32::Foundation::WPARAM;
 use windows::Win32::UI::Shell::DefSubclassProc;
 use windows::Win32::UI::Shell::RemoveWindowSubclass;
 use windows::Win32::UI::Shell::SetWindowSubclass;
+use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
 use windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE;
 use windows::Win32::UI::WindowsAndMessaging::SWP_NOZORDER;
 use windows::Win32::UI::WindowsAndMessaging::SetWindowPos;
@@ -131,6 +132,14 @@ fn handle_dpi_changed(hwnd: HWND, lparam: LPARAM) -> LRESULT {
     LRESULT(DPI_CHANGE_HANDLED_RESULT)
 }
 
+/// Whether the window is currently shown. A restore hides the window while it moves it across
+/// the DPI boundary, so an invisible window here means a restore is in progress rather than a
+/// user drag.
+fn window_is_visible(hwnd: HWND) -> bool {
+    // SAFETY: `IsWindowVisible` is safe to call with a valid `HWND`.
+    unsafe { IsWindowVisible(hwnd).as_bool() }
+}
+
 /// Subclass window procedure that intercepts `WM_DPICHANGED`.
 ///
 /// # Safety
@@ -145,6 +154,16 @@ unsafe extern "system" fn subclass_proc(
     _: usize,
 ) -> LRESULT {
     if msg == WM_DPICHANGED {
+        if !window_is_visible(hwnd) {
+            // A hidden window is the cross-DPI restore moving itself across the DPI boundary.
+            // Let winit process `WM_DPICHANGED` so it emits `WindowScaleFactorChanged`, the
+            // signal the restore's scale-wait completes on. winit's mixed-DPI repositioning bug
+            // is invisible on a hidden window, and the restore's `ApplySize` sets the final
+            // geometry — so the drag workaround only needs to guard visible windows.
+            debug!("[windows_dpi_fix] Forwarding WM_DPICHANGED to winit for a hidden window");
+            // SAFETY: `DefSubclassProc` is safe when called from a subclass proc.
+            return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+        }
         if APPLYING_SUGGESTED_RECT.get() {
             // Re-entrant `WM_DPICHANGED` from our own `SetWindowPos`; the window already sits
             // on the suggested rect. Report it handled without repositioning again so the

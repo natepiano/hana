@@ -81,8 +81,13 @@ pub struct WindowRestored {
     pub window_key:        WindowKey,
     /// Target position in physical pixels (None on Wayland).
     pub physical_position: Option<IVec2>,
-    /// Target position in logical pixels (pre-scale, from the saved state).
-    /// None on Wayland or when the saved state had no position.
+    /// Target position in logical pixels, as the desktop numbers it at the target monitor's
+    /// live scale.
+    ///
+    /// `None` on Wayland, when the saved state held no position, or when the saved position was
+    /// a pre-v3 absolute coordinate that no longer describes anywhere on its monitor and was
+    /// discarded. The three are indistinguishable here; the discard is logged with a warning
+    /// naming the window and the coordinate.
     pub logical_position:  Option<IVec2>,
     /// Target physical size that was applied (content area).
     pub physical_size:     UVec2,
@@ -143,7 +148,8 @@ pub struct WindowRestoreMismatch {
     pub expected_physical_position: Option<IVec2>,
     /// Actual physical position from `Window.position` (None on Wayland).
     pub actual_physical_position:   Option<IVec2>,
-    /// Target logical position from the saved state (None on Wayland or when unsaved).
+    /// Target logical position from the saved state. `None` on Wayland, when nothing was
+    /// saved, or when a pre-v3 saved coordinate was discarded as no longer plausible.
     pub expected_logical_position:  Option<IVec2>,
     /// Actual logical position, derived from `Window.position / actual_scale`.
     /// None on Wayland.

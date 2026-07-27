@@ -499,6 +499,8 @@ mod tests {
     use crate::WindowRecoveryAvailable;
     use crate::WindowRecoveryPending;
     use crate::managed;
+    #[cfg(feature = "monitor-probe")]
+    use crate::monitors::PanelIdentity;
     use crate::persistence;
     #[cfg(feature = "monitor-probe")]
     use crate::persistence::CapturedWindowPlacement;
@@ -941,13 +943,13 @@ mod tests {
                     WindowKey::Primary,
                     entity,
                     CapturedWindowPlacement {
+                        panel_identity:    PanelIdentity::Anonymous,
                         monitor_snapshot:  monitor,
                         position:          CapturedWindowPosition::Restorable {
                             logical_offset: IVec2::new(40, 60),
                         },
                         logical_size:      UVec2::new(800, 600),
                         saved_window_mode: SavedWindowMode::Windowed,
-                        captured_scale:    monitor.scale,
                     },
                 );
             app.update();
