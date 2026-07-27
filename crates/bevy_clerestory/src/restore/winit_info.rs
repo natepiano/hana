@@ -202,6 +202,7 @@ mod tests {
     use super::*;
     use crate::monitors::MonitorIdentity;
     use crate::monitors::MonitorInfo;
+    use crate::monitors::PanelIdentity;
     use crate::persistence::CapturedWindowPlacement;
     use crate::persistence::CapturedWindowPosition;
     use crate::persistence::SavedWindowMode;
@@ -209,6 +210,7 @@ mod tests {
     #[test]
     fn primary_startup_protects_saved_placement_when_restore_is_queued() {
         let original_placement = CapturedWindowPlacement {
+            panel_identity:    PanelIdentity::Anonymous,
             monitor_snapshot:  MonitorInfo {
                 identity:          MonitorIdentity::Unverified,
                 index:             0,
@@ -221,7 +223,6 @@ mod tests {
             },
             logical_size:      UVec2::new(800, 600),
             saved_window_mode: SavedWindowMode::Windowed,
-            captured_scale:    1.0,
         };
         let mut app = App::new();
         app.init_resource::<CapturedWindowStates>()
@@ -243,6 +244,7 @@ mod tests {
             WindowKey::Primary,
             entity,
             CapturedWindowPlacement {
+                panel_identity:    PanelIdentity::Anonymous,
                 monitor_snapshot:  MonitorInfo {
                     identity:          MonitorIdentity::Unverified,
                     index:             0,
@@ -253,7 +255,6 @@ mod tests {
                 position:          CapturedWindowPosition::CompositorControlled,
                 logical_size:      UVec2::new(1_024, 768),
                 saved_window_mode: SavedWindowMode::Windowed,
-                captured_scale:    1.0,
             },
         );
         assert_eq!(

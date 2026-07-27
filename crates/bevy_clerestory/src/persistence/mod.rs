@@ -24,8 +24,10 @@ pub(crate) use load::get_default_state_path;
 pub(crate) use load::get_state_path_for_app;
 #[cfg(test)]
 pub(crate) use save::InjectedWindowPositions;
+pub(crate) use window_state::PersistedPosition;
 pub(crate) use window_state::PersistedWindowState;
 pub(crate) use window_state::SavedWindowMode;
+pub(crate) use window_state::UnrebasedDesktopPosition;
 
 use crate::ClerestoryPreStartupSet;
 use crate::ClerestoryUpdateSet;
@@ -74,11 +76,14 @@ mod tests {
     use crate::ManagedWindowPersistence;
     use crate::Platform;
     use crate::monitors::MonitorIdentity;
+    use crate::monitors::MonitorIdentityRegistry;
     use crate::monitors::MonitorInfo;
+    use crate::monitors::PanelIdentity;
     use crate::restore_window_config::RestoreWindowConfig;
 
     fn placement() -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity:    PanelIdentity::Anonymous,
             monitor_snapshot:  MonitorInfo {
                 identity:          MonitorIdentity::Unverified,
                 index:             0,
@@ -91,7 +96,6 @@ mod tests {
             },
             logical_size:      UVec2::new(800, 600),
             saved_window_mode: SavedWindowMode::from(&WindowMode::Windowed),
-            captured_scale:    1.0,
         }
     }
 
@@ -117,6 +121,9 @@ mod tests {
                 path: file.path().to_path_buf(),
             })
             .insert_resource(states)
+            // `capture_changed_windows` reads this to recognise the panel a window sits on.
+            // `MonitorPlugin` supplies it in a real app; this test adds `PersistencePlugin` alone.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_plugins(PersistencePlugin);
 
         app.update();

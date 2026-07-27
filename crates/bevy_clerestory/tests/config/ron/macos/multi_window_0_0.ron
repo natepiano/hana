@@ -1,13 +1,12 @@
 (
-    version: 2,
+    version: 3,
     entries: [
         (
             key: Primary,
             state: (
-                logical_position: Some((100, 100)),
+                position: MonitorOffset((100, 100)),
                 logical_width: 600,
                 logical_height: 400,
-                monitor_scale: 2.0,
                 monitor_index: 0,
                 mode: Windowed,
                 app_name: "restore_window",
@@ -16,10 +15,9 @@
         (
             key: Managed("window-1"),
             state: (
-                logical_position: Some((400, 300)),
+                position: MonitorOffset((400, 300)),
                 logical_width: 600,
                 logical_height: 400,
-                monitor_scale: 2.0,
                 monitor_index: 0,
                 mode: Windowed,
                 app_name: "restore_window",

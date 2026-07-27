@@ -1,5 +1,5 @@
 (
-    version: 2,
+    version: 3,
     entries: [
         (
             key: Primary,
@@ -7,12 +7,11 @@
                 // Saved on the high-DPI monitor, launched from the low-DPI monitor.
                 // Target monitor is chosen by scale ROLE, so it may be any index.
                 // Tests CompensateSizeOnly (low->high) strategy.
-                logical_position: Some((${HIGH_SCALE_MONITOR_LOGICAL_POS_X+200}, ${HIGH_SCALE_MONITOR_LOGICAL_POS_Y+200})),
+                position: MonitorOffset((200, 200)),
                 // Kept modest so the software (WARP) swapchain stays small through the cross-DPI
                 // move (700x500 logical = 1400x1000 physical on the scale-2 high monitor).
                 logical_width: 700,
                 logical_height: 500,
-                monitor_scale: 1.0,
                 monitor_index: ${HIGH_SCALE_MONITOR_INDEX},
                 mode: Windowed,
                 app_name: "restore_window",

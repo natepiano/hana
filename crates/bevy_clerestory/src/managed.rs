@@ -271,11 +271,14 @@ mod tests {
     use crate::monitors::InjectedCurrentMonitorSource;
     use crate::monitors::MonitorId;
     use crate::monitors::MonitorIdentity;
+    use crate::monitors::MonitorIdentityRegistry;
     use crate::monitors::MonitorInfo;
     use crate::monitors::Monitors;
     use crate::monitors::NativeQueryActivity;
+    use crate::monitors::PanelIdentity;
     use crate::persistence::CapturedWindowPlacement;
     use crate::persistence::CapturedWindowPosition;
+    use crate::persistence::PersistedPosition;
     use crate::persistence::PersistedWindowState;
     use crate::persistence::SavedWindowMode;
     use crate::restore;
@@ -300,10 +303,10 @@ mod tests {
 
     fn persisted() -> PersistedWindowState {
         PersistedWindowState {
-            logical_position:  Some((10, 20)),
+            monitor_panel:     PanelIdentity::Anonymous,
+            position:          PersistedPosition::MonitorOffset(IVec2::new(10, 20)),
             logical_width:     800,
             logical_height:    600,
-            scale:             1.0,
             monitor:           0,
             saved_window_mode: SavedWindowMode::Windowed,
             app_name:          "test".to_string(),
@@ -373,11 +376,11 @@ mod tests {
         position: CapturedWindowPosition,
     ) -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity: PanelIdentity::Anonymous,
             monitor_snapshot: monitor(identity, index, scale, physical_position),
             position,
             logical_size: UVec2::new(800, 600),
             saved_window_mode: SavedWindowMode::Windowed,
-            captured_scale: scale,
         }
     }
 
@@ -398,6 +401,9 @@ mod tests {
             .insert_resource(WinitInfo::default())
             .insert_resource(Platform::Windows)
             .init_resource::<CapturedWindowStates>()
+            // `prepare_restore_targets` reads this to recognise saved panels. `MonitorPlugin`
+            // supplies it in a real app; this test builds its world by hand.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_observer(on_managed_window_load)
             .add_systems(Update, restore::prepare_restore_targets);
         let previous_entity = app.world_mut().spawn_empty().id();
@@ -658,6 +664,9 @@ mod tests {
         .init_resource::<CapturedWindowStates>()
         .init_resource::<InjectedCurrentMonitorSource>()
         .init_resource::<RestoreQueueActivity>()
+        // `prepare_restore_targets` reads this to recognise saved panels. `MonitorPlugin`
+        // supplies it in a real app; this test builds its world by hand.
+        .init_resource::<MonitorIdentityRegistry>()
         .add_observer(monitors::install_current_monitor_from_association)
         .add_observer(on_managed_window_load)
         .add_observer(count_restore_queue)
@@ -863,6 +872,7 @@ mod tests {
                 WindowKey::Primary,
                 entity,
                 CapturedWindowPlacement {
+                    panel_identity:    PanelIdentity::Anonymous,
                     monitor_snapshot:  MonitorInfo {
                         identity:          MonitorIdentity::Unverified,
                         index:             0,
@@ -875,7 +885,6 @@ mod tests {
                     },
                     logical_size:      UVec2::new(800, 600),
                     saved_window_mode: SavedWindowMode::Windowed,
-                    captured_scale:    1.0,
                 },
             );
         }

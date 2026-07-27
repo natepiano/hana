@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::env::current_exe;
 use std::fs::create_dir_all;
+use std::fs::rename;
 use std::fs::write;
 use std::path::Path;
 
@@ -19,11 +20,14 @@ use super::CapturedWindowPlacement;
 use super::CapturedWindowStates;
 use super::PersistedWindowState;
 use super::WindowKey;
+use super::constants::STATE_TEMPORARY_EXTENSION;
 use super::format;
 use crate::ManagedWindow;
 use crate::Platform;
 use crate::WindowRestored;
+use crate::monitors;
 use crate::monitors::CurrentMonitor;
+use crate::monitors::MonitorIdentityRegistry;
 use crate::restore_window_config::RestoreWindowConfig;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,12 +74,19 @@ pub(super) fn save_all_states(
             return StateFileWrite::Failed;
         },
     };
-    if let Err(error) = write(path, &contents) {
-        warn!("[save_all_states] Failed to write state file {path:?}: {error}");
-        StateFileWrite::Failed
-    } else {
-        StateFileWrite::Written
+    // Write to a sibling and rename over the target, so a crash or power loss mid-write leaves
+    // the previous file intact rather than a truncated one that the next launch cannot decode.
+    // `rename` replaces an existing destination on every platform this crate supports.
+    let temporary_path = path.with_extension(STATE_TEMPORARY_EXTENSION);
+    if let Err(error) = write(&temporary_path, &contents) {
+        warn!("[save_all_states] Failed to write state file {temporary_path:?}: {error}");
+        return StateFileWrite::Failed;
     }
+    if let Err(error) = rename(&temporary_path, path) {
+        warn!("[save_all_states] Failed to replace state file {path:?}: {error}");
+        return StateFileWrite::Failed;
+    }
+    StateFileWrite::Written
 }
 
 /// Capture changed primary and managed windows from their installed [`CurrentMonitor`].
@@ -94,6 +105,7 @@ pub(super) fn capture_changed_windows(
         ),
     >,
     platform: Res<Platform>,
+    identity_registry: Res<MonitorIdentityRegistry>,
     mut captured_window_states: ResMut<CapturedWindowStates>,
     #[cfg(test)] mut injected_positions: Option<ResMut<InjectedWindowPositions>>,
     _: NonSendMarker,
@@ -115,8 +127,15 @@ pub(super) fn capture_changed_windows(
             #[cfg(test)]
             injected_positions.as_deref_mut(),
         );
-        let placement =
-            CapturedWindowPlacement::capture(window, current_monitor, physical_position, *platform);
+        let panel_identity =
+            monitors::panel_identity(&identity_registry, current_monitor.monitor_info.identity);
+        let placement = CapturedWindowPlacement::capture(
+            window,
+            current_monitor,
+            panel_identity,
+            physical_position,
+            *platform,
+        );
         captured_window_states.capture(window_key, entity, placement);
     }
 }
@@ -126,6 +145,7 @@ pub(super) fn on_window_restored(
     restored: On<WindowRestored>,
     windows: Query<(&Window, &CurrentMonitor)>,
     platform: Res<Platform>,
+    identity_registry: Res<MonitorIdentityRegistry>,
     mut captured_window_states: ResMut<CapturedWindowStates>,
     #[cfg(test)] mut injected_positions: Option<ResMut<InjectedWindowPositions>>,
 ) {
@@ -139,8 +159,15 @@ pub(super) fn on_window_restored(
         #[cfg(test)]
         injected_positions.as_deref_mut(),
     );
-    let placement =
-        CapturedWindowPlacement::capture(window, current_monitor, physical_position, *platform);
+    let panel_identity =
+        monitors::panel_identity(&identity_registry, current_monitor.monitor_info.identity);
+    let placement = CapturedWindowPlacement::capture(
+        window,
+        current_monitor,
+        panel_identity,
+        physical_position,
+        *platform,
+    );
     captured_window_states.promote(restored.window_key.clone(), restored.entity, placement);
 }
 
@@ -238,11 +265,13 @@ mod tests {
     use super::*;
     use crate::monitors::MonitorIdentity;
     use crate::monitors::MonitorInfo;
+    use crate::monitors::PanelIdentity;
     use crate::persistence::CapturedWindowPosition;
     use crate::persistence::SavedWindowMode;
 
     fn placement() -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity:    PanelIdentity::Anonymous,
             monitor_snapshot:  MonitorInfo {
                 identity:          MonitorIdentity::Unverified,
                 index:             0,
@@ -255,7 +284,6 @@ mod tests {
             },
             logical_size:      UVec2::new(800, 600),
             saved_window_mode: SavedWindowMode::Windowed,
-            captured_scale:    1.0,
         }
     }
 

@@ -1,17 +1,7 @@
 #[cfg(target_os = "macos")]
-use std::collections::BTreeMap;
-#[cfg(target_os = "macos")]
-use std::hash::Hash;
-#[cfg(target_os = "macos")]
-use std::hash::Hasher;
+use std::ffi::c_void;
 #[cfg(target_os = "windows")]
 use std::mem::size_of;
-#[cfg(target_os = "macos")]
-use std::sync::Mutex;
-#[cfg(target_os = "macos")]
-use std::sync::OnceLock;
-#[cfg(target_os = "macos")]
-use std::sync::PoisonError;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Devices::DeviceAndDriverInstallation::DICS_FLAG_GLOBAL;
@@ -92,6 +82,8 @@ use windows::core::PCWSTR;
 #[cfg(target_os = "windows")]
 use windows::core::w;
 use winit::monitor::MonitorHandle;
+#[cfg(target_os = "macos")]
+use winit::platform::macos::MonitorHandleExtMacOS;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::MonitorHandleExtWindows;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -117,6 +109,8 @@ use super::edid::EdidEvidence;
 use crate::Platform;
 #[cfg(target_os = "windows")]
 use crate::constants::DISPLAY_CONFIG_ACQUISITION_ATTEMPTS;
+#[cfg(target_os = "macos")]
+use crate::constants::MACOS_DISPLAY_UUID_BYTES;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum QualifiedEvidence {
@@ -130,57 +124,87 @@ pub enum QualifiedEvidence {
     Synthetic(Vec<u8>),
 }
 
+/// The panel's `ColorSync` UUID: 16 bytes macOS derives from the display's own vendor, model and
+/// serial number, falling back to the physical port for panels that report no serial.
+///
+/// This replaced a per-process counter keyed by winit `MonitorHandle`. That counter was correct
+/// for telling two live monitors apart within one run, but it was a different number on the next
+/// launch and did not even survive a replug inside one run, so it could never have been written
+/// to a file.
 #[cfg(target_os = "macos")]
-#[derive(Clone, Debug)]
-pub struct MacOsDisplayUuid {
-    handle: MonitorHandle,
-    hash:   u64,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MacOsDisplayUuid([u8; MACOS_DISPLAY_UUID_BYTES]);
+
+#[cfg(target_os = "macos")]
+impl MacOsDisplayUuid {
+    pub(super) const fn as_bytes(&self) -> &[u8] { &self.0 }
+}
+
+/// `CFUUIDBytes` — sixteen bytes in declaration order, laid out as CoreFoundation defines it.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CoreFoundationUuidBytes {
+    bytes: [u8; MACOS_DISPLAY_UUID_BYTES],
 }
 
 #[cfg(target_os = "macos")]
-impl From<&MonitorHandle> for MacOsDisplayUuid {
-    fn from(handle: &MonitorHandle) -> Self {
-        static HASHES: OnceLock<Mutex<MacOsHandleHashes>> = OnceLock::new();
+#[link(name = "ColorSync", kind = "framework")]
+unsafe extern "C" {
+    /// Returns a retained `CFUUIDRef` for the panel behind a `CGDirectDisplayID`, or null.
+    fn CGDisplayCreateUUIDFromDisplayID(display_id: u32) -> *const c_void;
+}
 
-        let hash = {
-            let mut hashes = HASHES
-                .get_or_init(|| Mutex::new(MacOsHandleHashes::default()))
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            if let Some(hash) = hashes.by_handle.get(handle) {
-                *hash
-            } else {
-                let hash = hashes.next;
-                hashes.by_handle.insert(handle.clone(), hash);
-                hashes.next = hashes.next.saturating_add(1);
-                hash
-            }
-        };
-        Self {
-            handle: handle.clone(),
-            hash,
+#[cfg(target_os = "macos")]
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFUUIDGetUUIDBytes(uuid: *const c_void) -> CoreFoundationUuidBytes;
+    fn CFRelease(reference: *const c_void);
+}
+
+/// Read the `ColorSync` UUID for a monitor, or report that no stable identity is available.
+///
+/// `CGDisplayCreateUUIDFromDisplayID` is a Create function, so the reference is released before
+/// returning. A null result means the display ID no longer names a live display — which happens
+/// routinely while monitors are being connected — and is reported as unavailable rather than
+/// treated as an error worth retrying.
+#[cfg(target_os = "macos")]
+fn macos_panel_evidence(
+    handle: &MonitorHandle,
+) -> Result<MacOsDisplayUuid, MonitorIdentificationError> {
+    let display_id = handle.native_id();
+    // SAFETY: `display_id` comes from winit's own `CGDirectDisplayID`. The call returns either
+    // null or a retained CFUUIDRef; both are handled, and the reference is released exactly once
+    // on the non-null path before it goes out of scope.
+    let uuid_reference = unsafe { CGDisplayCreateUUIDFromDisplayID(display_id) };
+    if uuid_reference.is_null() {
+        return Err(MonitorIdentificationError::InvalidStableIdentity);
+    }
+    // SAFETY: `uuid_reference` is a non-null CFUUIDRef that this thread owns until `CFRelease`.
+    let uuid_bytes = unsafe { CFUUIDGetUUIDBytes(uuid_reference) };
+    // SAFETY: released once, immediately after the last read of the reference.
+    unsafe { CFRelease(uuid_reference) };
+    Ok(MacOsDisplayUuid(uuid_bytes.bytes))
+}
+
+impl QualifiedEvidence {
+    /// Bytes that identify the physical panel and nothing about this process or this boot.
+    ///
+    /// Everything hashed here comes from the display itself, so the result is the same on every
+    /// launch. Adding anything process-local (a handle address, a counter, an index) would make
+    /// the fingerprint useless for persistence while still looking correct within one run.
+    pub(super) fn stable_bytes(&self) -> &[u8] {
+        match self {
+            #[cfg(target_os = "macos")]
+            Self::MacOsDisplayUuid(uuid) => uuid.as_bytes(),
+            #[cfg(target_os = "windows")]
+            Self::WindowsEdid(edid) => edid,
+            #[cfg(all(unix, not(target_os = "macos")))]
+            Self::X11Edid(edid) => edid,
+            #[cfg(test)]
+            Self::Synthetic(bytes) => bytes,
         }
     }
-}
-
-#[cfg(target_os = "macos")]
-impl PartialEq for MacOsDisplayUuid {
-    fn eq(&self, other: &Self) -> bool { self.handle == other.handle }
-}
-
-#[cfg(target_os = "macos")]
-impl Eq for MacOsDisplayUuid {}
-
-#[cfg(target_os = "macos")]
-impl Hash for MacOsDisplayUuid {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.hash.hash(state); }
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Default)]
-struct MacOsHandleHashes {
-    by_handle: BTreeMap<MonitorHandle, u64>,
-    next:      u64,
 }
 
 pub fn qualified_evidence(
@@ -191,9 +215,7 @@ pub fn qualified_evidence(
         Platform::MacOs => {
             #[cfg(target_os = "macos")]
             {
-                Ok(QualifiedEvidence::MacOsDisplayUuid(MacOsDisplayUuid::from(
-                    handle,
-                )))
+                macos_panel_evidence(handle).map(QualifiedEvidence::MacOsDisplayUuid)
             }
             #[cfg(not(target_os = "macos"))]
             {

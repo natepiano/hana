@@ -6,6 +6,8 @@ use thiserror::Error;
 use super::MonitorConfigurationState;
 use super::MonitorId;
 use super::MonitorIdentity;
+use super::PanelFingerprint;
+use super::PanelIdentity;
 use super::configuration::MonitorConfigurationGeneration;
 use super::native::QualifiedEvidence;
 use crate::Platform;
@@ -61,7 +63,7 @@ impl From<Entity> for MonitorInstanceId {
 }
 
 #[derive(Debug, Resource)]
-pub struct MonitorIdentityRegistry {
+pub(crate) struct MonitorIdentityRegistry {
     configuration:    Option<MonitorConfigurationState>,
     evidence_indices: HashMap<QualifiedEvidence, usize>,
     evidence_records: Vec<EvidenceRecord>,
@@ -118,6 +120,28 @@ impl Default for MonitorIdentityRegistry {
 }
 
 impl MonitorIdentityRegistry {
+    /// Build a registry holding one verified panel per `(instance, evidence bytes)` pair, and
+    /// return the identity allocated to each, in order.
+    ///
+    /// Lets tests outside `monitors` exercise fingerprint-based resolution; the evidence types
+    /// and configuration states needed to drive `identity` directly are not visible to them.
+    #[cfg(test)]
+    pub fn from_test_panels(panels: &[(Entity, &[u8])]) -> (Self, Vec<MonitorIdentity>) {
+        let mut registry = Self::default();
+        let identities = panels
+            .iter()
+            .map(|(entity, evidence)| {
+                registry.identity(
+                    MonitorInstanceId::from(*entity),
+                    MonitorConfigurationState::Ready(0u64.into()),
+                    || Ok(QualifiedEvidence::Synthetic((*evidence).to_vec())),
+                    Platform::X11,
+                )
+            })
+            .collect();
+        (registry, identities)
+    }
+
     pub fn configuration_changed(&self, state: MonitorConfigurationState) -> bool {
         self.configuration != Some(state)
     }
@@ -128,6 +152,25 @@ impl MonitorIdentityRegistry {
 
     pub fn active_instances(&self) -> impl Iterator<Item = MonitorInstanceId> + '_ {
         self.instances.keys().copied()
+    }
+
+    /// Stable fingerprint of the panel behind a verified [`MonitorId`], for persistence.
+    ///
+    /// The registry already maps evidence to an id; this is the direction back. Only a
+    /// `Verified` record has one: an `Ambiguous` record covers two panels the operating system
+    /// cannot tell apart, and writing a fingerprint that matches both would anchor a saved
+    /// position to whichever one happened to enumerate first.
+    pub(super) fn panel_identity(&self, id: MonitorId) -> PanelIdentity {
+        self.evidence_records
+            .iter()
+            .find(|record| {
+                matches!(record.status, EvidenceStatus::Verified { id: record_id, .. } if record_id == id)
+            })
+            .map_or(PanelIdentity::Anonymous, |record| {
+                PanelIdentity::Fingerprinted(PanelFingerprint::from_evidence_bytes(
+                    record.evidence.stable_bytes(),
+                ))
+            })
     }
 
     pub(super) fn cached_identity(

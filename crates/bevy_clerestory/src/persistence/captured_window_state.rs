@@ -7,6 +7,7 @@ use bevy::window::PrimaryWindow;
 use bevy_kana::ToI32;
 use bevy_kana::ToU32;
 
+use super::PersistedPosition;
 use super::PersistedWindowState;
 use super::SavedWindowMode;
 use super::WindowKey;
@@ -15,6 +16,7 @@ use crate::ManagedWindowPersistence;
 use crate::Platform;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::MonitorInfo;
+use crate::monitors::PanelIdentity;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CapturedWindowPosition {
@@ -34,16 +36,23 @@ pub(crate) enum RebasedCapturedPosition {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CapturedWindowPlacement {
     pub(crate) monitor_snapshot:  MonitorInfo,
+    /// Whether the panel `monitor_snapshot` describes can be recognised in a later run.
+    ///
+    /// Resolved at capture time rather than carried on `MonitorInfo`, which is public: only the
+    /// persistence path needs this, and putting it on the public struct would widen the crate's
+    /// API for one crate-internal consumer. `MonitorInfo::identity` is a process-local token and
+    /// cannot be written to a file; this is the same panel in a form that survives a restart.
+    pub(crate) panel_identity:    PanelIdentity,
     pub(crate) position:          CapturedWindowPosition,
     pub(crate) logical_size:      UVec2,
     pub(crate) saved_window_mode: SavedWindowMode,
-    pub(crate) captured_scale:    f64,
 }
 
 impl CapturedWindowPlacement {
     pub(crate) fn capture(
         window: &Window,
         current_monitor: &CurrentMonitor,
+        panel_identity: PanelIdentity,
         physical_position: Option<IVec2>,
         platform: Platform,
     ) -> Self {
@@ -68,13 +77,13 @@ impl CapturedWindowPlacement {
 
         Self {
             monitor_snapshot,
+            panel_identity,
             position,
             logical_size: UVec2::new(
                 window.resolution.width().to_u32(),
                 window.resolution.height().to_u32(),
             ),
             saved_window_mode: (&current_monitor.effective_window_mode).into(),
-            captured_scale: monitor_snapshot.scale,
         }
     }
 
@@ -83,16 +92,7 @@ impl CapturedWindowPlacement {
         match self.position {
             CapturedWindowPosition::Restorable { logical_offset } => {
                 RebasedCapturedPosition::Restorable {
-                    physical_position: IVec2::new(
-                        live_monitor.physical_position.x
-                            + (f64::from(logical_offset.x) * live_monitor.scale)
-                                .round()
-                                .to_i32(),
-                        live_monitor.physical_position.y
-                            + (f64::from(logical_offset.y) * live_monitor.scale)
-                                .round()
-                                .to_i32(),
-                    ),
+                    physical_position: live_monitor.physical_from_logical_offset(logical_offset),
                     logical_position:  self.persisted_logical_position(logical_offset),
                 }
             },
@@ -114,32 +114,24 @@ impl CapturedWindowPlacement {
     }
 
     fn persisted_logical_position(&self, logical_offset: IVec2) -> IVec2 {
-        let logical_monitor_origin = IVec2::new(
-            (f64::from(self.monitor_snapshot.physical_position.x) / self.captured_scale)
-                .round()
-                .to_i32(),
-            (f64::from(self.monitor_snapshot.physical_position.y) / self.captured_scale)
-                .round()
-                .to_i32(),
-        );
-        logical_monitor_origin + logical_offset
+        self.monitor_snapshot
+            .logical_from_logical_offset(logical_offset)
     }
 
     pub(crate) fn project(&self, app_name: &str) -> PersistedWindowState {
-        let logical_position = match self.position {
+        let position = match self.position {
             CapturedWindowPosition::Restorable { logical_offset } => {
-                let adapter_position = self.persisted_logical_position(logical_offset);
-                Some((adapter_position.x, adapter_position.y))
+                PersistedPosition::MonitorOffset(logical_offset)
             },
-            CapturedWindowPosition::CompositorControlled => None,
+            CapturedWindowPosition::CompositorControlled => PersistedPosition::Unpositioned,
         };
 
         PersistedWindowState {
-            logical_position,
+            position,
             logical_width: self.logical_size.x,
             logical_height: self.logical_size.y,
-            scale: self.captured_scale,
             monitor: self.monitor_snapshot.index,
+            monitor_panel: self.panel_identity,
             saved_window_mode: self.saved_window_mode.clone(),
             app_name: app_name.to_string(),
         }
@@ -577,10 +569,10 @@ mod tests {
 
     fn persisted() -> PersistedWindowState {
         PersistedWindowState {
-            logical_position:  Some((-800, 100)),
+            monitor_panel:     PanelIdentity::Anonymous,
+            position:          PersistedPosition::MonitorOffset(IVec2::new(-800, 100)),
             logical_width:     800,
             logical_height:    600,
-            scale:             1.0,
             monitor:           1,
             saved_window_mode: SavedWindowMode::Windowed,
             app_name:          "test".to_string(),
@@ -589,11 +581,11 @@ mod tests {
 
     fn captured(monitor_snapshot: MonitorInfo, logical_offset: IVec2) -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity: PanelIdentity::Anonymous,
             monitor_snapshot,
             position: CapturedWindowPosition::Restorable { logical_offset },
             logical_size: UVec2::new(800, 600),
             saved_window_mode: SavedWindowMode::Windowed,
-            captured_scale: monitor_snapshot.scale,
         }
     }
 
@@ -802,27 +794,36 @@ mod tests {
     }
 
     #[test]
-    fn projection_adds_logical_offset_after_converting_fractional_scale_origin() {
+    fn projection_stores_the_logical_offset_without_folding_in_the_monitor_origin() {
         let placement = captured(monitor(1, 1.25, IVec2::new(2, -2)), IVec2::new(1, -1));
 
-        assert_eq!(placement.project("test").logical_position, Some((3, -3)));
+        // The offset is written as captured. Folding the monitor's logical origin in here is
+        // what made a saved position depend on the layout's scales; the origin is now applied
+        // at restore, against the live monitor. `MonitorInfo`'s tests cover that conversion.
+        assert_eq!(
+            placement.project("test").position,
+            PersistedPosition::MonitorOffset(IVec2::new(1, -1))
+        );
     }
 
     #[test]
     fn compositor_controlled_projection_has_no_position() {
         let placement = CapturedWindowPlacement {
+            panel_identity:    PanelIdentity::Anonymous,
             monitor_snapshot:  monitor(0, 2.0, IVec2::ZERO),
             position:          CapturedWindowPosition::CompositorControlled,
             logical_size:      UVec2::new(640, 480),
             saved_window_mode: SavedWindowMode::BorderlessFullscreen,
-            captured_scale:    2.0,
         };
 
         assert_eq!(
             placement.rebased_physical_position(&placement.monitor_snapshot),
             None
         );
-        assert_eq!(placement.project("wayland").logical_position, None);
+        assert_eq!(
+            placement.project("wayland").position,
+            PersistedPosition::Unpositioned
+        );
     }
 
     #[test]
@@ -838,6 +839,7 @@ mod tests {
         let placement = CapturedWindowPlacement::capture(
             &window,
             &current_monitor,
+            PanelIdentity::Anonymous,
             Some(IVec2::new(-1_760, 90)),
             Platform::X11,
         );
@@ -870,8 +872,8 @@ mod tests {
         let restore_state = states.restore_state(&key);
         assert!(restore_state.is_some());
         assert_eq!(
-            restore_state.and_then(|state| state.logical_position),
-            retained.project("").logical_position
+            restore_state.map(|state| state.position),
+            Some(retained.project("").position)
         );
 
         states.bind(&key, reopened_entity);
@@ -886,10 +888,8 @@ mod tests {
         );
         assert!(!states.is_dirty());
         assert_eq!(
-            states
-                .restore_state(&key)
-                .and_then(|state| state.logical_position),
-            retained.project("").logical_position
+            states.restore_state(&key).map(|state| state.position),
+            Some(retained.project("").position)
         );
     }
 

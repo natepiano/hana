@@ -10,6 +10,7 @@ use bevy::window::PrimaryWindow;
 use super::target_position;
 use super::target_position::MonitorResolutionSource;
 use super::target_position::PreparedWindowPosition;
+use super::target_position::ResolvedMonitor;
 use super::target_position::RestoreDiagnostics;
 use super::target_position::TargetPosition;
 use super::winit_info::WinitInfo;
@@ -26,6 +27,7 @@ use crate::managed::ManagedWindowRegistry;
 use crate::monitors;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::MonitorIdentity;
+use crate::monitors::MonitorIdentityRegistry;
 use crate::monitors::MonitorInfo;
 use crate::monitors::MonitorTopologyRevision;
 use crate::monitors::Monitors;
@@ -693,6 +695,7 @@ pub(crate) fn validate_runtime_restore_completion(
 struct RestoreTargetBuilder<'a> {
     source:              &'a CapturedPlacement,
     monitors:            &'a Monitors,
+    identity_registry:   &'a MonitorIdentityRegistry,
     recovery_monitor:    Option<&'a MonitorInfo>,
     physical_decoration: UVec2,
     starting_scale:      f64,
@@ -717,24 +720,17 @@ impl RestoreTargetBuilder<'_> {
     }
 
     fn build_persisted(&self, persisted_window_state: &PersistedWindowState) -> PreparedRestore {
-        let resolved_monitor = target_position::resolve_target_monitor_and_position(
-            persisted_window_state.monitor,
-            persisted_window_state.logical_position,
-            self.monitors,
-        );
-        let prepared_window_position = match (
-            resolved_monitor.monitor_resolution_source,
-            resolved_monitor.logical_position,
-        ) {
-            (MonitorResolutionSource::FallbackToPrimary, _) => {
-                PreparedWindowPosition::TargetUnavailable
-            },
-            (MonitorResolutionSource::Requested, Some((x, y))) => {
-                PreparedWindowPosition::PersistedCoordinate(IVec2::new(x, y))
-            },
-            (MonitorResolutionSource::Requested, None) => {
-                PreparedWindowPosition::PersistedWithoutCoordinate
-            },
+        let resolved_monitor = self.resolve_persisted_monitor(persisted_window_state);
+        let prepared_window_position = match resolved_monitor.monitor_resolution_source {
+            MonitorResolutionSource::FallbackToPrimary => PreparedWindowPosition::TargetUnavailable,
+            MonitorResolutionSource::Requested => target_position::prepare_persisted_position(
+                persisted_window_state.position,
+                UVec2::new(
+                    persisted_window_state.logical_width,
+                    persisted_window_state.logical_height,
+                ),
+                resolved_monitor.monitor_info,
+            ),
         };
         let target_position = target_position::compute_target_position(
             persisted_window_state,
@@ -790,6 +786,68 @@ impl RestoreTargetBuilder<'_> {
         }
     }
 
+    /// Resolve the monitor a persisted entry's offset is measured from.
+    ///
+    /// A recovery restore names its own monitor: the entry is being replayed onto a display that
+    /// just returned, and the saved index describes the layout from before it left.
+    /// `resolve_captured_monitor` has always deferred to it. Under v3 the resolved monitor is the
+    /// position *anchor* rather than only a scale hint and a fullscreen target, so a
+    /// persisted-only entry has to defer to it as well or the offset is measured from the wrong
+    /// corner and written back as if it were correct.
+    fn resolve_persisted_monitor<'a>(
+        &'a self,
+        persisted_window_state: &PersistedWindowState,
+    ) -> ResolvedMonitor<'a> {
+        if let Some(recovery_monitor) = self.recovery_monitor {
+            return ResolvedMonitor {
+                monitor_info:              recovery_monitor,
+                monitor_resolution_source: MonitorResolutionSource::Requested,
+            };
+        }
+        if let Some(monitor_info) = self.monitor_by_saved_panel(persisted_window_state) {
+            return ResolvedMonitor {
+                monitor_info,
+                monitor_resolution_source: MonitorResolutionSource::Requested,
+            };
+        }
+        target_position::resolve_target_monitor(persisted_window_state.monitor, self.monitors)
+    }
+
+    /// Find the live panel this entry's position was measured from, by fingerprint.
+    ///
+    /// Preferred over the saved index because the index is only meaningful within the display
+    /// enumeration that produced it: replugging a monitor, docking, or a driver update can
+    /// renumber displays, and an offset anchored to the wrong panel places the window some
+    /// distance into the wrong screen and is then saved back as though it were right.
+    ///
+    /// Returns `None` when the saved panel is `Anonymous` (migrated from v1/v2, or written on a
+    /// display that could not identify itself) or when no live panel matches — a monitor that is
+    /// simply not connected right now. Both fall back to the index, which is what the format did
+    /// before panel identities existed. `Anonymous` cannot match an anonymous live monitor:
+    /// [`PanelIdentity::is_same_panel`] rejects that pairing.
+    fn monitor_by_saved_panel(
+        &self,
+        persisted_window_state: &PersistedWindowState,
+    ) -> Option<&MonitorInfo> {
+        let saved_panel = persisted_window_state.monitor_panel;
+        let monitor_info = self
+            .monitors
+            .iter()
+            .map(|live_monitor| live_monitor.monitor_info)
+            .find(|monitor_info| {
+                monitors::panel_identity(self.identity_registry, monitor_info.identity)
+                    .is_same_panel(saved_panel)
+            })?;
+        if monitor_info.index != persisted_window_state.monitor {
+            debug!(
+                "[monitor_by_saved_panel] Saved panel is now monitor {} rather than {}; \
+                 anchoring the saved position to the panel it was measured from.",
+                monitor_info.index, persisted_window_state.monitor
+            );
+        }
+        Some(monitor_info)
+    }
+
     fn resolve_captured_monitor<'a>(
         &'a self,
         captured_window_placement: &CapturedWindowPlacement,
@@ -809,9 +867,8 @@ impl RestoreTargetBuilder<'_> {
                 |monitor_info| (monitor_info, MonitorResolutionSource::Requested),
             ),
             MonitorIdentity::Unverified => {
-                let resolved_monitor = target_position::resolve_target_monitor_and_position(
+                let resolved_monitor = target_position::resolve_target_monitor(
                     persisted_window_state.monitor,
-                    persisted_window_state.logical_position,
                     self.monitors,
                 );
                 (
@@ -836,6 +893,7 @@ pub(crate) fn prepare_restore_targets(
     monitors: Res<Monitors>,
     winit_info: Option<Res<WinitInfo>>,
     captured_window_states: Res<CapturedWindowStates>,
+    identity_registry: Res<MonitorIdentityRegistry>,
     platform: Res<Platform>,
 ) {
     let Some(winit_info) = winit_info else {
@@ -863,6 +921,7 @@ pub(crate) fn prepare_restore_targets(
             RestoreTargetBuilder {
                 source,
                 monitors: &monitors,
+                identity_registry: &identity_registry,
                 recovery_monitor,
                 physical_decoration: winit_info.physical_decoration(),
                 starting_scale: current_monitor.scale,
@@ -950,11 +1009,14 @@ mod tests {
     use crate::constants::SETTLE_STABILITY_SECS;
     use crate::managed;
     use crate::managed::ManagedWindowRegistry;
+    use crate::monitors;
     use crate::monitors::InjectedCurrentMonitorSource;
     use crate::monitors::MonitorId;
     use crate::monitors::MonitorTopologyRevision;
     use crate::monitors::NativeQueryActivity;
+    use crate::monitors::PanelIdentity;
     use crate::persistence::CapturedWindowPosition;
+    use crate::persistence::PersistedPosition;
     use crate::persistence::PersistencePlugin;
     use crate::persistence::SavedWindowMode;
     use crate::recovery;
@@ -1092,11 +1154,11 @@ mod tests {
         saved_window_mode: SavedWindowMode,
     ) -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity: PanelIdentity::Anonymous,
             monitor_snapshot: monitor(monitor_identity, monitor_index, 1.0, IVec2::new(-1_920, 0)),
             position,
             logical_size: UVec2::new(800, 600),
             saved_window_mode,
-            captured_scale: 1.0,
         }
     }
 
@@ -1105,6 +1167,7 @@ mod tests {
         monitors: &Monitors,
     ) -> TargetPosition {
         RestoreTargetBuilder {
+            identity_registry: &MonitorIdentityRegistry::default(),
             source: &CapturedPlacement::Captured(captured_window_placement.clone()),
             monitors,
             recovery_monitor: None,
@@ -1130,6 +1193,9 @@ mod tests {
             .insert_resource(Platform::Windows)
             .init_resource::<CapturedWindowStates>()
             .init_resource::<InjectedCurrentMonitorSource>()
+            // `prepare_restore_targets` reads this to recognise saved panels. `MonitorPlugin`
+            // supplies it in a real app; this test builds its world by hand.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_observer(monitors::install_current_monitor_from_association)
             .add_observer(mark_native_window_ready)
             .add_observer(clear_native_window_ready)
@@ -1217,13 +1283,13 @@ mod tests {
         );
         let fallback = monitor(MonitorIdentity::Unverified, 0, 1.0, IVec2::ZERO);
         let placement = CapturedWindowPlacement {
+            panel_identity:    PanelIdentity::Anonymous,
             monitor_snapshot:  target,
             position:          CapturedWindowPosition::Restorable {
                 logical_offset: CAPTURED_OFFSET,
             },
             logical_size:      UVec2::new(800, 600),
             saved_window_mode: SavedWindowMode::Windowed,
-            captured_scale:    target.scale,
         };
         app.insert_resource(Monitors::from_test_monitors([
             (fallback_entity, fallback),
@@ -1248,6 +1314,8 @@ mod tests {
             ..default()
         })
         .add_plugins(RecoveryPlugin)
+        // `MonitorPlugin` supplies this in a real app; these tests build a partial world.
+        .init_resource::<MonitorIdentityRegistry>()
         .add_plugins(PersistencePlugin)
         .add_plugins(RestorePlugin)
         .add_observer(crate::visibility::hide_window_on_creation)
@@ -3595,6 +3663,8 @@ mod tests {
             .insert_resource(WinitInfo::default())
             .insert_resource(Platform::X11)
             .init_resource::<CapturedWindowStates>()
+            // `MonitorPlugin` supplies this in a real app; these tests build a partial world.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_plugins(RestorePlugin);
         let entity = app
             .world_mut()
@@ -3631,10 +3701,10 @@ mod tests {
     #[test]
     fn persisted_adapter_fallback_is_coordinate_free() {
         let persisted_window_state = PersistedWindowState {
-            logical_position:  Some((1_000, 200)),
+            monitor_panel:     PanelIdentity::Anonymous,
+            position:          PersistedPosition::MonitorOffset(IVec2::new(1_000, 200)),
             logical_width:     800,
             logical_height:    600,
-            scale:             1.0,
             monitor:           4,
             saved_window_mode: SavedWindowMode::Windowed,
             app_name:          "test".to_string(),
@@ -3645,6 +3715,7 @@ mod tests {
         )]);
         let source = CapturedPlacement::PersistedOnly(persisted_window_state);
         let prepared_restore = RestoreTargetBuilder {
+            identity_registry:   &MonitorIdentityRegistry::default(),
             source:              &source,
             monitors:            &monitors,
             recovery_monitor:    None,
@@ -3668,10 +3739,10 @@ mod tests {
         captured_window_states.seed(HashMap::from([(
             WindowKey::Primary,
             PersistedWindowState {
-                logical_position:  Some((10, 20)),
+                monitor_panel:     PanelIdentity::Anonymous,
+                position:          PersistedPosition::MonitorOffset(IVec2::new(10, 20)),
                 logical_width:     800,
                 logical_height:    600,
-                scale:             1.0,
                 monitor:           0,
                 saved_window_mode: SavedWindowMode::Windowed,
                 app_name:          "test".to_string(),
@@ -3683,5 +3754,160 @@ mod tests {
             Some(CapturedPlacement::PersistedOnly(_))
         ));
         assert_eq!(captured_window_states.activity().file_reads, 0);
+    }
+
+    const PANEL_A_EVIDENCE: &[u8] = b"panel-a";
+    const PANEL_B_EVIDENCE: &[u8] = b"panel-b";
+
+    fn identified_monitor(
+        identity: MonitorIdentity,
+        index: usize,
+        physical_position: IVec2,
+    ) -> MonitorInfo {
+        MonitorInfo {
+            identity,
+            index,
+            scale: 1.0,
+            physical_position,
+            physical_size: UVec2::new(2_560, 1_440),
+        }
+    }
+
+    fn persisted_offset_state(logical_offset: IVec2, monitor: usize) -> PersistedWindowState {
+        PersistedWindowState {
+            position: PersistedPosition::MonitorOffset(logical_offset),
+            logical_width: 800,
+            logical_height: 600,
+            monitor,
+            monitor_panel: PanelIdentity::Anonymous,
+            saved_window_mode: SavedWindowMode::Windowed,
+            app_name: "test".to_string(),
+        }
+    }
+
+    /// A panel that has been renumbered still anchors its own saved position.
+    ///
+    /// Under v1/v2 a wrong index still placed the window at the saved absolute coordinate, so a
+    /// renumbering cost nothing. An offset has no such safety net, which is what makes the
+    /// fingerprint necessary rather than merely nice.
+    #[test]
+    fn a_saved_offset_follows_its_panel_when_monitors_are_renumbered() {
+        let (identity_registry, identities) = MonitorIdentityRegistry::from_test_panels(&[
+            (Entity::from_bits(1), PANEL_A_EVIDENCE),
+            (Entity::from_bits(2), PANEL_B_EVIDENCE),
+        ]);
+        let panel_a = identities[0];
+        let saved_panel = monitors::panel_identity(&identity_registry, panel_a);
+
+        let mut saved = persisted_offset_state(IVec2::new(120, 80), 1);
+        saved.monitor_panel = saved_panel;
+
+        // Panel A was monitor 1 when the position was saved; it now enumerates as monitor 0.
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                identified_monitor(panel_a, 0, IVec2::new(-6_880, 0)),
+            ),
+            (
+                Entity::from_bits(2),
+                identified_monitor(identities[1], 1, IVec2::ZERO),
+            ),
+        ]);
+        let source = CapturedPlacement::PersistedOnly(saved);
+        let prepared_restore = RestoreTargetBuilder {
+            source:              &source,
+            monitors:            &monitors,
+            identity_registry:   &identity_registry,
+            recovery_monitor:    None,
+            physical_decoration: UVec2::ZERO,
+            starting_scale:      1.0,
+            platform:            Platform::Windows,
+        }
+        .build();
+
+        assert_eq!(prepared_restore.target_position.monitor_index, 0);
+        assert_eq!(
+            prepared_restore.target_position.physical_position,
+            Some(IVec2::new(-6_760, 80)),
+            "the offset must be measured from the panel it was saved against"
+        );
+    }
+
+    /// With no fingerprint — a v1/v2 migration, or a display whose panel cannot be identified —
+    /// resolution falls back to the saved index, which is what the format did before.
+    #[test]
+    fn an_entry_without_a_fingerprint_falls_back_to_the_saved_index() {
+        let (identity_registry, identities) = MonitorIdentityRegistry::from_test_panels(&[
+            (Entity::from_bits(1), PANEL_A_EVIDENCE),
+            (Entity::from_bits(2), PANEL_B_EVIDENCE),
+        ]);
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                identified_monitor(identities[0], 0, IVec2::new(-6_880, 0)),
+            ),
+            (
+                Entity::from_bits(2),
+                identified_monitor(identities[1], 1, IVec2::ZERO),
+            ),
+        ]);
+        let source =
+            CapturedPlacement::PersistedOnly(persisted_offset_state(IVec2::new(120, 80), 1));
+        let prepared_restore = RestoreTargetBuilder {
+            source:              &source,
+            monitors:            &monitors,
+            identity_registry:   &identity_registry,
+            recovery_monitor:    None,
+            physical_decoration: UVec2::ZERO,
+            starting_scale:      1.0,
+            platform:            Platform::Windows,
+        }
+        .build();
+
+        assert_eq!(prepared_restore.target_position.monitor_index, 1);
+        assert_eq!(
+            prepared_restore.target_position.physical_position,
+            Some(IVec2::new(120, 80))
+        );
+    }
+
+    /// A fingerprint naming a panel that is not currently connected also falls back to the index,
+    /// rather than failing the restore outright.
+    #[test]
+    fn an_unmatched_fingerprint_falls_back_to_the_saved_index() {
+        let (absent_registry, absent_identities) =
+            MonitorIdentityRegistry::from_test_panels(&[(Entity::from_bits(9), b"unplugged")]);
+        let absent_panel = monitors::panel_identity(&absent_registry, absent_identities[0]);
+
+        let (identity_registry, identities) = MonitorIdentityRegistry::from_test_panels(&[
+            (Entity::from_bits(1), PANEL_A_EVIDENCE),
+            (Entity::from_bits(2), PANEL_B_EVIDENCE),
+        ]);
+        let mut saved = persisted_offset_state(IVec2::new(120, 80), 1);
+        saved.monitor_panel = absent_panel;
+
+        let monitors = Monitors::from_test_monitors([
+            (
+                Entity::from_bits(1),
+                identified_monitor(identities[0], 0, IVec2::new(-6_880, 0)),
+            ),
+            (
+                Entity::from_bits(2),
+                identified_monitor(identities[1], 1, IVec2::ZERO),
+            ),
+        ]);
+        let source = CapturedPlacement::PersistedOnly(saved);
+        let prepared_restore = RestoreTargetBuilder {
+            source:              &source,
+            monitors:            &monitors,
+            identity_registry:   &identity_registry,
+            recovery_monitor:    None,
+            physical_decoration: UVec2::ZERO,
+            starting_scale:      1.0,
+            platform:            Platform::Windows,
+        }
+        .build();
+
+        assert_eq!(prepared_restore.target_position.monitor_index, 1);
     }
 }

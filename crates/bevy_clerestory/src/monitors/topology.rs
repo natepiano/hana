@@ -81,6 +81,45 @@ pub struct MonitorInfo {
     pub physical_size:     UVec2,
 }
 
+impl MonitorInfo {
+    /// Logical desktop coordinate of this monitor's top-left corner, as the desktop would
+    /// number it at `scale`.
+    ///
+    /// The scale is a parameter and never read from `self` on purpose. A monitor's logical
+    /// origin is a function of the scale in force when the coordinate was written, so reading
+    /// `self.scale` here would silently reinterpret a stored coordinate under the live scale —
+    /// the exact defect the offset format exists to remove.
+    #[must_use]
+    pub(crate) fn logical_origin_at_scale(&self, scale: f64) -> IVec2 {
+        IVec2::new(
+            (f64::from(self.physical_position.x) / scale)
+                .round()
+                .to_i32(),
+            (f64::from(self.physical_position.y) / scale)
+                .round()
+                .to_i32(),
+        )
+    }
+
+    /// Physical desktop position of a window sitting `logical_offset` from this monitor's
+    /// top-left corner, at this monitor's live scale.
+    #[must_use]
+    pub(crate) fn physical_from_logical_offset(&self, logical_offset: IVec2) -> IVec2 {
+        self.physical_position
+            + IVec2::new(
+                (f64::from(logical_offset.x) * self.scale).round().to_i32(),
+                (f64::from(logical_offset.y) * self.scale).round().to_i32(),
+            )
+    }
+
+    /// Logical desktop position of a window sitting `logical_offset` from this monitor's
+    /// top-left corner, as the desktop numbers it at this monitor's live scale.
+    #[must_use]
+    pub(crate) fn logical_from_logical_offset(&self, logical_offset: IVec2) -> IVec2 {
+        self.logical_origin_at_scale(self.scale) + logical_offset
+    }
+}
+
 /// One current monitor entity and its entity-free metadata.
 #[derive(Clone, Copy, Debug)]
 pub struct LiveMonitor<'a> {
@@ -851,6 +890,7 @@ mod tests {
     use crate::persistence::CapturedWindowPlacement;
     use crate::persistence::CapturedWindowStates;
     use crate::persistence::InjectedWindowPositions;
+    use crate::persistence::PersistedPosition;
     use crate::persistence::PersistencePlugin;
     use crate::persistence::PersistenceWriteState;
     use crate::persistence::WindowKey;
@@ -1092,6 +1132,8 @@ mod tests {
                     .chain(),
             )
             .add_plugins(RecoveryPlugin)
+            // `MonitorPlugin` supplies this in a real app; these tests build a partial world.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_plugins(PersistencePlugin)
             .add_observer(managed::on_managed_window_added)
             .add_observer(managed::on_managed_window_load)
@@ -1294,7 +1336,7 @@ mod tests {
             .ok_or_else(|| "managed window should capture the initial fallback".to_string())?;
         assert_eq!(fallback.monitor_snapshot.index, 0);
         assert!((fallback.monitor_snapshot.scale - DEFAULT_SCALE).abs() < SCALE_FACTOR_EPSILON);
-        assert_persisted_monitor(state_file, 0, DEFAULT_SCALE)?;
+        assert_persisted_monitor(state_file, 0)?;
         assert_single_persistence_batch(app);
         assert_pending_registration(app);
         Ok(())
@@ -1338,8 +1380,11 @@ mod tests {
             .get(window_key)
             .ok_or_else(|| "managed window should be projected".to_string())?;
         assert_eq!(projected.monitor, 1);
-        assert!((projected.scale - LOW_DPI_SCALE).abs() < SCALE_FACTOR_EPSILON);
-        assert_persisted_monitor(state_file, 1, LOW_DPI_SCALE)?;
+        assert!(matches!(
+            projected.position,
+            PersistedPosition::MonitorOffset(_)
+        ));
+        assert_persisted_monitor(state_file, 1)?;
         assert_single_persistence_batch(app);
         assert_pending_registration(app);
         Ok(())
@@ -1585,10 +1630,19 @@ mod tests {
         Ok(fallback)
     }
 
-    fn assert_persisted_monitor(path: &Path, index: usize, scale: f64) -> Result<(), String> {
+    /// Assert the file anchors the window to `index` in the current offset form.
+    ///
+    /// v3 files carry no `monitor_scale`: a `MonitorOffset` is measured from the monitor's own
+    /// corner and is the same number at every scale. Callers assert the live scale against the
+    /// captured `monitor_snapshot` instead. Requiring `MonitorOffset` here also proves the entry
+    /// was projected from a live capture rather than left as a migrated legacy coordinate.
+    fn assert_persisted_monitor(path: &Path, index: usize) -> Result<(), String> {
         let persisted = fs::read_to_string(path).map_err(|error| error.to_string())?;
-        assert!(persisted.contains(&format!("monitor_scale: {scale:.1}")));
         assert!(persisted.contains(&format!("monitor_index: {index}")));
+        assert!(
+            persisted.contains("MonitorOffset("),
+            "expected a rebased offset in the persisted file, found: {persisted}"
+        );
         Ok(())
     }
 
@@ -2397,6 +2451,8 @@ mod tests {
                 path: state_file.path().to_path_buf(),
             })
             .init_resource::<InjectedWindowPositions>()
+            // `MonitorPlugin` supplies this in a real app; these tests build a partial world.
+            .init_resource::<MonitorIdentityRegistry>()
             .add_plugins(PersistencePlugin);
         let monitor_entity = spawn_monitor(
             &mut app,
@@ -2981,5 +3037,90 @@ mod tests {
             app.world().resource::<Monitors>().first().identity,
             MonitorIdentity::Unverified
         );
+    }
+
+    /// Monitor-geometry conversions used by both the capture and restore paths.
+    mod monitor_geometry {
+        use super::*;
+
+        fn monitor(scale: f64, physical_position: IVec2) -> MonitorInfo {
+            MonitorInfo {
+                identity: MonitorIdentity::Unverified,
+                index: 0,
+                scale,
+                physical_position,
+                physical_size: UVec2::new(2_560, 1_440),
+            }
+        }
+
+        /// The origin is a function of the scale passed in, never of the monitor's own scale.
+        /// Reading `self.scale` here is what let a stored coordinate be reinterpreted under a
+        /// live scale it was never written against.
+        #[test]
+        fn logical_origin_follows_the_scale_it_is_given_not_the_monitors_own() {
+            let monitor_info = monitor(2.0, IVec2::new(-6_880, 0));
+
+            assert_eq!(
+                monitor_info.logical_origin_at_scale(1.0),
+                IVec2::new(-6_880, 0)
+            );
+            assert_eq!(
+                monitor_info.logical_origin_at_scale(2.0),
+                IVec2::new(-3_440, 0)
+            );
+        }
+
+        /// A fractional scale rounds the origin rather than truncating it.
+        #[test]
+        fn logical_origin_rounds_at_a_fractional_scale() {
+            let monitor_info = monitor(1.25, IVec2::new(2, -2));
+
+            assert_eq!(
+                monitor_info.logical_origin_at_scale(1.25),
+                IVec2::new(2, -2)
+            );
+            assert_eq!(
+                monitor_info.logical_from_logical_offset(IVec2::new(1, -1)),
+                IVec2::new(3, -3)
+            );
+        }
+
+        /// An offset resolves against the monitor's live scale in physical space.
+        #[test]
+        fn physical_position_places_the_offset_at_the_live_scale() {
+            let monitor_info = monitor(1.5, IVec2::new(-6_880, 0));
+
+            assert_eq!(
+                monitor_info.physical_from_logical_offset(IVec2::new(120, 80)),
+                IVec2::new(-6_700, 120)
+            );
+        }
+
+        /// Capture and restore are inverses: an offset measured off a monitor resolves back to
+        /// the physical corner it came from, at every scale in use on the test hardware.
+        #[test]
+        fn measuring_an_offset_and_resolving_it_returns_the_original_corner() {
+            for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
+                let monitor_info = monitor(scale, IVec2::new(-6_880, 0));
+                for physical_corner in [
+                    IVec2::new(-6_880, 0),
+                    IVec2::new(-6_700, 120),
+                    IVec2::new(-4_500, 1_000),
+                ] {
+                    let physical_offset = physical_corner - monitor_info.physical_position;
+                    let logical_offset = IVec2::new(
+                        (f64::from(physical_offset.x) / scale).round().to_i32(),
+                        (f64::from(physical_offset.y) / scale).round().to_i32(),
+                    );
+
+                    let resolved = monitor_info.physical_from_logical_offset(logical_offset);
+                    let error = (resolved - physical_corner).abs().max_element();
+                    assert!(
+                        f64::from(error) <= scale,
+                        "scale {scale} corner {physical_corner} resolved to {resolved}"
+                    );
+                }
+            }
+        }
     }
 }

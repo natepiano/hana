@@ -1,14 +1,13 @@
 (
-    version: 2,
+    version: 3,
     entries: [
         (
             key: Primary,
             state: (
                 // Monitor 1 (HDMI)
-                logical_position: Some((${MONITOR_1_LOGICAL_POS_X+200}, ${MONITOR_1_LOGICAL_POS_Y+200})),
+                position: MonitorOffset((200, 200)),
                 logical_width: 800,
                 logical_height: 600,
-                monitor_scale: 1.0,
                 monitor_index: 1,
                 mode: Windowed,
                 app_name: "restore_window",
@@ -18,10 +17,9 @@
             key: Managed("window-1"),
             state: (
                 // Secondary window on Monitor 0 (eDP) — 200px offset
-                logical_position: Some((${MONITOR_0_LOGICAL_POS_X+200}, ${MONITOR_0_LOGICAL_POS_Y+200})),
+                position: MonitorOffset((200, 200)),
                 logical_width: 1200,
                 logical_height: 800,
-                monitor_scale: 1.0,
                 monitor_index: 0,
                 mode: Windowed,
                 app_name: "restore_window",

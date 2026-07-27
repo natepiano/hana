@@ -64,7 +64,8 @@ COMP_WINDOW: Final = "bevy_window::window::Window"
 COMP_PRIMARY: Final = "bevy_window::window::PrimaryWindow"
 COMP_MANAGED: Final = "bevy_clerestory::managed::ManagedWindow"
 COMP_CURRENT_MONITOR: Final = "bevy_clerestory::monitors::CurrentMonitor"
-COMP_LAUNCH_INFO: Final = "bevy_clerestory::restore::target_position::target::RestoreDiagnostics"
+COMP_LAUNCH_INFO: Final = "bevy_clerestory::restore::RestoreDiagnostics"
+COMP_TARGET_POSITION: Final = "bevy_clerestory::restore::TargetPosition"
 COMP_MONITOR: Final = "bevy_window::monitor::Monitor"
 COMP_PERSISTENCE: Final = "bevy_clerestory::managed::ManagedWindowPersistence"
 RES_RESTORED: Final = "restore_window::events::WindowRestoredReceived"
@@ -149,6 +150,10 @@ class PlatformConfig(TypedDict):
 class RonWindowValues(TypedDict, total=False):
     pos_x: str
     pos_y: str
+    # "offset"  -> pos_x/pos_y are logical pixels from the monitor's own top-left corner (v3).
+    # "desktop" -> pos_x/pos_y are an absolute logical desktop coordinate (v1/v2 templates).
+    pos_units: str
+    captured_scale: str
     width: str
     height: str
     monitor: str
@@ -370,8 +375,17 @@ def parse_ron_values(content: str) -> dict[str, RonWindowValues]:
     current_key = ""
 
     re_managed = re.compile(r'key: Managed\("([^"]+)"\)')
+    # v3: an offset from the window's own monitor. Scale-independent.
+    re_offset = re.compile(r"position: MonitorOffset\(\((-?\d+),\s*(-?\d+)\)\)")
+    # v3: a pre-v3 coordinate carried forward with the scale that wrote it.
+    re_unrebased = re.compile(
+        r"position: Unrebased\(\(logical: \((-?\d+),\s*(-?\d+)\),\s*captured_scale: ([0-9.]+)\)\)"
+    )
+    re_unpositioned = re.compile(r"position: Unpositioned")
+    # v1/v2: an absolute logical desktop coordinate.
     re_position = re.compile(r"logical_position: Some\(\((-?\d+),\s*(-?\d+)\)\)")
     re_position_none = re.compile(r"logical_position: None")
+    re_captured_scale = re.compile(r"monitor_scale: ([0-9.]+)")
     re_width = re.compile(r"logical_width: (\d+)")
     re_height = re.compile(r"logical_height: (\d+)")
     re_monitor = re.compile(r"monitor_index: (\d+)")
@@ -395,15 +409,43 @@ def parse_ron_values(content: str) -> dict[str, RonWindowValues]:
 
         entry = result[current_key]
 
+        m = re_offset.search(line)
+        if m:
+            entry["pos_x"] = m.group(1)
+            entry["pos_y"] = m.group(2)
+            entry["pos_units"] = "offset"
+            continue
+
+        m = re_unrebased.search(line)
+        if m:
+            entry["pos_x"] = m.group(1)
+            entry["pos_y"] = m.group(2)
+            entry["captured_scale"] = m.group(3)
+            entry["pos_units"] = "desktop"
+            continue
+
+        if re_unpositioned.search(line):
+            entry["pos_x"] = ""
+            entry["pos_y"] = ""
+            entry["pos_units"] = "offset"
+            continue
+
         m = re_position.search(line)
         if m:
             entry["pos_x"] = m.group(1)
             entry["pos_y"] = m.group(2)
+            entry["pos_units"] = "desktop"
             continue
 
         if re_position_none.search(line):
             entry["pos_x"] = ""
             entry["pos_y"] = ""
+            entry["pos_units"] = "desktop"
+            continue
+
+        m = re_captured_scale.search(line)
+        if m:
+            entry["captured_scale"] = m.group(1)
             continue
 
         m = re_width.search(line)
@@ -666,6 +708,31 @@ def _physical_to_logical_pos(physical: int, scale: float) -> int:
     return _rust_round(float(physical) / scale)
 
 
+def _monitor_origin(entity: JsonDict, env_vars: dict[str, str]) -> tuple[int, int] | None:
+    """Physical top-left corner of the monitor the window is currently on.
+
+    Returns None when discovery env vars are unavailable, in which case the caller falls back to
+    treating saved values as absolute desktop coordinates.
+    """
+    idx = json_str(extract_from_entity(entity, COMP_CURRENT_MONITOR, "monitor_info", "index"))
+    if not idx or f"MONITOR_{idx}_POS_X" not in env_vars:
+        return None
+    return int(env_vars[f"MONITOR_{idx}_POS_X"]), int(env_vars[f"MONITOR_{idx}_POS_Y"])
+
+
+def _physical_to_monitor_offset(physical: int, origin: int, scale: float) -> int:
+    """Invert the production placement: physical -> logical offset from the monitor corner.
+
+    Production computes `origin + round(offset * scale)`. Recomputing that here would mean a
+    formula error cancels on both sides and the assertion passes anyway, which is how the
+    original defect survived the suite. Inverting instead compares against the number actually
+    written to the file. The inversion is exact for every scale >= 1: the residue from
+    production's rounding is at most 0.5 physical pixels, so dividing by the scale leaves less
+    than half a logical pixel, and at scale 1.0 there is no residue at all.
+    """
+    return _rust_round(float(physical - origin) / scale)
+
+
 def _logical_to_physical_size(logical: int, scale: float) -> int:
     """Convert logical size to physical. Matches Rust: (logical * scale) as u32 (truncation)."""
     return int(float(logical) * scale)
@@ -757,16 +824,9 @@ def validate_window(
         if field == "position":
             if backend == "wayland":
                 continue
-            actual_x, actual_y = extract_position_at(entity, COMP_WINDOW)
-            scale = _monitor_scale(entity, env_vars or {})
-            logical_x = ron_values.get("pos_x", "")
-            logical_y = ron_values.get("pos_y", "")
-            if logical_x and position_readback_offset:
-                logical_x = str(int(logical_x) + position_readback_offset[0])
-                logical_y = str(int(logical_y) + position_readback_offset[1])
-            exp_x = str(_logical_to_physical_pos(int(logical_x), scale)) if logical_x else ""
-            exp_y = str(_logical_to_physical_pos(int(logical_y), scale)) if logical_y else ""
-            _check_field_pair(key, "position", exp_x, exp_y, actual_x, actual_y, prefix)
+            _check_position(
+                key, entity, ron_values, prefix, env_vars or {}, position_readback_offset
+            )
 
         elif field == "size":
             actual_w = json_str(extract_from_entity(entity, COMP_WINDOW, "resolution", "physical_width"))
@@ -791,6 +851,66 @@ def validate_window(
 
         elif field == "exit_code":
             pass  # handled separately
+
+
+def _check_position(
+    key: str,
+    entity: JsonDict,
+    ron_values: RonWindowValues,
+    prefix: str,
+    env_vars: dict[str, str],
+    position_readback_offset: list[int] | None,
+) -> None:
+    """Compare the window's live position against the saved one, in the saved value's own units.
+
+    A v3 offset is compared as an offset — the live physical position is converted back to a
+    monitor-relative logical offset and matched against the number in the file. A v1/v2 absolute
+    coordinate is compared the legacy way, because that is what those templates still mean.
+    """
+    actual_x, actual_y = extract_position_at(entity, COMP_WINDOW)
+    saved_x = ron_values.get("pos_x", "")
+    saved_y = ron_values.get("pos_y", "")
+    if not saved_x:
+        _check_field_pair(key, "position", "", "", actual_x, actual_y, prefix)
+        return
+
+    scale = _monitor_scale(entity, env_vars)
+    if position_readback_offset:
+        saved_x = str(int(saved_x) + position_readback_offset[0])
+        saved_y = str(int(saved_y) + position_readback_offset[1])
+
+    origin = _monitor_origin(entity, env_vars)
+    if origin is None:
+        # No discovery env: fall back to the pre-v3 comparison. Only reachable when running
+        # without a hardware profile, where position assertions are already approximate.
+        exp_x = str(_logical_to_physical_pos(int(saved_x), scale))
+        exp_y = str(_logical_to_physical_pos(int(saved_y), scale))
+        _check_field_pair(key, "position", exp_x, exp_y, actual_x, actual_y, prefix)
+        return
+
+    if ron_values.get("pos_units", "desktop") == "offset":
+        expected_offset_x, expected_offset_y = int(saved_x), int(saved_y)
+    else:
+        # A v1/v2 seed holds an absolute desktop coordinate. Convert it to an offset the same way
+        # the app's migration does — subtract the monitor's logical origin *at the scale that
+        # wrote the file*, not at the live scale. Comparing the absolute coordinate directly would
+        # reintroduce the very dependence on the desktop layout that v3 removes, and would be off
+        # by a pixel whenever the monitor's physical origin is odd.
+        captured_scale = float(ron_values.get("captured_scale", "") or scale)
+        expected_offset_x = int(saved_x) - _rust_round(origin[0] / captured_scale)
+        expected_offset_y = int(saved_y) - _rust_round(origin[1] / captured_scale)
+
+    actual_offset_x = _physical_to_monitor_offset(int(actual_x), origin[0], scale)
+    actual_offset_y = _physical_to_monitor_offset(int(actual_y), origin[1], scale)
+    _check_field_pair(
+        key,
+        "position",
+        str(expected_offset_x),
+        str(expected_offset_y),
+        str(actual_offset_x),
+        str(actual_offset_y),
+        prefix,
+    )
 
 
 def _strategy_name(raw: object) -> str:
@@ -1042,9 +1162,21 @@ def apply_mutations(
         primary_vals = ron_values.get("primary", RonWindowValues())
         logical_x = int(primary_vals.get("pos_x", "0") or "0")
         logical_y = int(primary_vals.get("pos_y", "0") or "0")
-        # Convert logical to physical, apply physical offset, set via BRP
-        physical_x = _logical_to_physical_pos(logical_x, scale) + offset[0]
-        physical_y = _logical_to_physical_pos(logical_y, scale) + offset[1]
+        # A v3 saved value is measured from the monitor's corner, so the physical target has to
+        # be anchored there too. Reading it as an absolute desktop coordinate would silently move
+        # the window to whatever monitor holds that coordinate — on monitor 0 at origin (0,0) the
+        # two agree, which is why this reads as harmless until a test runs on monitor 1.
+        monitor_origin = _monitor_origin(entity, env_vars or {})
+        if primary_vals.get("pos_units", "desktop") == "offset" and monitor_origin is not None:
+            anchor_x, anchor_y = monitor_origin
+        else:
+            anchor_x, anchor_y = 0, 0
+        physical_x = anchor_x + _logical_to_physical_pos(logical_x, scale) + offset[0]
+        physical_y = anchor_y + _logical_to_physical_pos(logical_y, scale) + offset[1]
+        # From here on the value is whatever the app will write, and the app only writes v3
+        # offsets — the seed's format stops mattering the moment it has been read.
+        store_x, store_y = monitor_origin if monitor_origin is not None else (0, 0)
+        primary_vals["pos_units"] = "offset" if monitor_origin is not None else "desktop"
 
         _ = brp.call("world.mutate_components", {
             "entity": entity_id,
@@ -1053,9 +1185,10 @@ def apply_mutations(
             "value": {"At": [physical_x, physical_y]},
         })
 
-        # Store logical values for relaunch validation
-        primary_vals["pos_x"] = str(_physical_to_logical_pos(physical_x, scale))
-        primary_vals["pos_y"] = str(_physical_to_logical_pos(physical_y, scale))
+        # Store the moved-to value back in the units the file uses, so the relaunch comparison
+        # and the saved entry stay in the same coordinate space.
+        primary_vals["pos_x"] = str(_physical_to_monitor_offset(physical_x, store_x, scale))
+        primary_vals["pos_y"] = str(_physical_to_monitor_offset(physical_y, store_y, scale))
         # Store physical values for immediate mutation verification
         primary_vals["mutation_physical_x"] = str(physical_x)
         primary_vals["mutation_physical_y"] = str(physical_y)
@@ -1122,10 +1255,24 @@ def verify_mutations(
         # Use stored physical values if available (avoids round-trip rounding errors)
         exp_px = primary_vals.get("mutation_physical_x", "")
         exp_py = primary_vals.get("mutation_physical_y", "")
+        readback_origin = _monitor_origin(primary_entity, env_vars or {})
+        if readback_origin is not None:
+            readback_anchor_x, readback_anchor_y = readback_origin
+            primary_vals["pos_units"] = "offset"
+        else:
+            readback_anchor_x, readback_anchor_y = 0, 0
         if not exp_px:
             logical_py = primary_vals.get("pos_y", "")
-            exp_px = str(_logical_to_physical_pos(int(logical_px), scale)) if logical_px else ""
-            exp_py = str(_logical_to_physical_pos(int(logical_py), scale)) if logical_py else ""
+            exp_px = (
+                str(readback_anchor_x + _logical_to_physical_pos(int(logical_px), scale))
+                if logical_px
+                else ""
+            )
+            exp_py = (
+                str(readback_anchor_y + _logical_to_physical_pos(int(logical_py), scale))
+                if logical_py
+                else ""
+            )
         if backend == "x11":
             # W6 bug: readback is offset by title bar — just record actual for
             # relaunch stability check, don't fail on mutation readback
@@ -1133,9 +1280,18 @@ def verify_mutations(
                       f"x11_readback=[{actual_x},{actual_y}] (W6 offset expected)")
         else:
             _check_field_pair("primary", "mutation_position", exp_px, exp_py, actual_x, actual_y)
-        # Update expected values to actual readback (converted to logical) for relaunch stability check
-        primary_vals["pos_x"] = str(_physical_to_logical_pos(int(actual_x), scale)) if actual_x else ""
-        primary_vals["pos_y"] = str(_physical_to_logical_pos(int(actual_y), scale)) if actual_y else ""
+        # Update expected values to the actual readback, in the file's own units, so the relaunch
+        # comparison checks stability rather than exact match against what we set.
+        primary_vals["pos_x"] = (
+            str(_physical_to_monitor_offset(int(actual_x), readback_anchor_x, scale))
+            if actual_x
+            else ""
+        )
+        primary_vals["pos_y"] = (
+            str(_physical_to_monitor_offset(int(actual_y), readback_anchor_y, scale))
+            if actual_y
+            else ""
+        )
 
 
 # =============================================================================

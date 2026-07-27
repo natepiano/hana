@@ -284,6 +284,7 @@ mod tests {
     use crate::monitors::MonitorId;
     use crate::monitors::MonitorIdentity;
     use crate::monitors::MonitorInfo;
+    use crate::monitors::PanelIdentity;
     use crate::persistence;
     use crate::persistence::CapturedWindowPlacement;
     use crate::persistence::CapturedWindowPosition;
@@ -341,11 +342,11 @@ mod tests {
         saved_window_mode: SavedWindowMode,
     ) -> CapturedWindowPlacement {
         CapturedWindowPlacement {
+            panel_identity: PanelIdentity::Anonymous,
             monitor_snapshot,
             position,
             logical_size: WINDOW_LOGICAL_SIZE,
             saved_window_mode,
-            captured_scale: monitor_snapshot.scale,
         }
     }
 

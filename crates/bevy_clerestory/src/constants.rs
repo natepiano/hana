@@ -5,6 +5,15 @@
 pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
 pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
 
+// monitor identity
+/// Length of a ColorSync display UUID, fixed by `CFUUIDBytes`.
+#[cfg(target_os = "macos")]
+pub(crate) const MACOS_DISPLAY_UUID_BYTES: usize = 16;
+/// FNV-1a 64-bit offset basis, fixed by the algorithm's specification.
+pub(crate) const FNV_1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+/// FNV-1a 64-bit prime, fixed by the algorithm's specification.
+pub(crate) const FNV_1A_PRIME: u64 = 0x0000_0100_0000_01b3;
+
 // monitor lookup
 pub(crate) const MONITOR_SOURCE_EXISTING: &str = "existing";
 pub(crate) const MONITOR_SOURCE_FALLBACK: &str = "fallback";
@@ -21,12 +30,13 @@ pub(crate) const RECOVERY_ACCEPTANCE_PRODUCER: &str = "Update::accept_eligible_r
 pub(crate) const RECOVERY_PROBE_TARGET: &str = "bevy_clerestory::recovery_probe";
 
 // persisted state
-pub(crate) const CURRENT_STATE_VERSION: u8 = 2;
+pub(crate) const CURRENT_STATE_VERSION: u8 = 3;
 pub(crate) const PRIMARY_WINDOW_KEY: &str = "primary";
 /// Header comment prepended to the RON file to document the coordinate contract.
 pub(crate) const RON_HEADER: &str = "\
-// All spatial values (position, size) are in logical pixels.
-// monitor_scale: scale factor at save time (informational, not used during restore).
+// Sizes are in logical pixels.
+// position: MonitorOffset is logical pixels from monitor_index's top-left corner.
+// position: Unrebased is a pre-v3 absolute desktop coordinate awaiting a live monitor layout.
 ";
 pub(crate) const STATE_FILE: &str = "windows.ron";
 
@@ -48,6 +58,15 @@ pub(crate) const DEFAULT_SCALE_FACTOR: f64 = 1.0;
 pub(crate) const SCALE_FACTOR_EPSILON: f64 = 0.01;
 
 // settling
+/// Maximum duration (in seconds) a cross-DPI restore waits for the scale change that moves it
+/// out of `WindowRestoreState::WaitingForScaleChange`.
+///
+/// Neither signal that ends the wait is guaranteed. `WM_DPICHANGED` reaches a hidden window only
+/// because `windows_dpi_fix` forwards it, and a target monitor that no longer matches any live
+/// display is never arrived at. Without a deadline such a restore waits forever with the window
+/// still hidden; on expiry it applies the final size and reveals the window instead, so settling
+/// can report the mismatch.
+pub(crate) const SCALE_CHANGE_WAIT_TIMEOUT_SECS: f32 = SETTLE_TIMEOUT_SECS;
 /// Duration (in seconds) that all values must remain stable before declaring success.
 pub(crate) const SETTLE_STABILITY_SECS: f32 = 0.2;
 /// Maximum total duration (in seconds) to wait for values to stabilize.
