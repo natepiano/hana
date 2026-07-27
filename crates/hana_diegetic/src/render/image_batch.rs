@@ -45,8 +45,10 @@ use super::draw_order::DrawOrderIndex;
 use super::draw_order::DrawZIndexRank;
 use super::image_material;
 use super::image_material::ImageExtendedMaterial;
+use super::material_table;
 use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
+use super::material_table::RetainedBatchBufferUploads;
 use super::precompose;
 use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
@@ -497,8 +499,8 @@ impl Plugin for ImageBatchPlugin {
             .add_systems(
                 PostUpdate,
                 commit_image_batch_buffers
-                    .after(batch_store::update_batch_bounds::<ImageMemberFamily>)
-                    .after(VisibilitySystems::CheckVisibility)
+                    .after(reconcile_image_batch_entities)
+                    .before(batch_store::update_batch_bounds::<ImageMemberFamily>)
                     .in_set(BatchResourcesReady),
             );
     }
@@ -707,14 +709,14 @@ fn reconcile_image_batch_entities(
 
 fn commit_image_batch_buffers(
     mut store: ResMut<ImageBatchStore>,
-    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut staged_uploads: ResMut<RetainedBatchBufferUploads>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     perf.image_breakdown.clear();
     for (key, batch) in store.batches_mut() {
         perf.image_breakdown
             .push(image_batch_summary(key, batch.record_count()));
-        let _ = commit_image_batch_records(batch, &mut storage_buffers);
+        let _ = commit_image_batch_records(batch, &mut staged_uploads);
     }
 }
 
@@ -838,7 +840,7 @@ pub(crate) fn grow_image_batch_resources(
 /// Uploads a dirty image record buffer with a fixed-capacity payload.
 pub(crate) fn commit_image_batch_records(
     batch: &mut ImageBatch,
-    storage_buffers: &mut Assets<ShaderBuffer>,
+    staged_uploads: &mut RetainedBatchBufferUploads,
 ) -> Option<usize> {
     if !batch.record_upload.is_set() {
         return None;
@@ -852,9 +854,11 @@ pub(crate) fn commit_image_batch_records(
     let byte_len = image_record_payload_bytes(gpu.capacity);
     let records = gpu.records.clone();
     batch.record_upload.clear();
-    storage_buffers
-        .get_mut(&records)
-        .map(|mut buffer| buffer.set_data(payload))?;
+    material_table::stage_retained_batch_buffer_upload(
+        staged_uploads,
+        &records,
+        ShaderBuffer::from(payload),
+    );
     Some(byte_len)
 }
 
@@ -1059,6 +1063,7 @@ mod tests {
         let mut meshes = Assets::<Mesh>::default();
         let mut materials = Assets::<ImageExtendedMaterial>::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let mut staged_uploads = RetainedBatchBufferUploads::default();
         store.upsert_record(key.clone(), test_record(0, Vec4::ONE));
 
         let entity = Entity::from_bits(TEST_BATCH_ENTITY_BITS);
@@ -1092,9 +1097,10 @@ mod tests {
             initial_records
         );
         assert_eq!(
-            commit_image_batch_records(batch, &mut storage_buffers),
+            commit_image_batch_records(batch, &mut staged_uploads),
             Some(image_record_payload_bytes(INITIAL_CAPACITY))
         );
+        assert!(staged_uploads.contains(&initial_records));
         assert_eq!(
             batch.gpu.as_ref().expect("commit keeps resources").records,
             initial_records

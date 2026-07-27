@@ -70,6 +70,7 @@ use super::material_table::MaterialSlotAppended;
 use super::material_table::MaterialSlotCandidate;
 use super::material_table::MaterialSlotInput;
 use super::material_table::MaterialTableAppendReady;
+use super::material_table::RetainedBatchBufferUploads;
 #[cfg(test)]
 use super::material_table::SdfDriverRunOrder;
 use super::material_table::SdfPaintMaterial;
@@ -1236,8 +1237,7 @@ impl Plugin for FillBatchPlugin {
                 PostUpdate,
                 commit_sdf_batch_buffers
                     .after(material_table::register_sdf_batch_materials::<DiegeticSdfFillBatch>)
-                    .after(update_sdf_batch_bounds)
-                    .after(VisibilitySystems::CheckVisibility)
+                    .before(update_sdf_batch_bounds)
                     .in_set(BatchResourcesReady),
             );
     }
@@ -1641,7 +1641,7 @@ pub(crate) fn update_sdf_batch_bounds(
 pub(crate) fn commit_sdf_batch_buffers(
     #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
     mut store: ResMut<SdfBatchStore>,
-    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut staged_uploads: ResMut<RetainedBatchBufferUploads>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut diagnostics: ResMut<SdfRecordDiagnostics>,
 ) {
@@ -1697,10 +1697,12 @@ pub(crate) fn commit_sdf_batch_buffers(
             gpu.capacity,
         );
         batch.record_upload.clear();
-        if let Some(mut buffer) = storage_buffers.get_mut(&gpu.records) {
-            buffer.set_data(payload);
-            uploads += 1;
-        }
+        material_table::stage_retained_batch_buffer_upload(
+            &mut staged_uploads,
+            &gpu.records,
+            ShaderBuffer::from(payload),
+        );
+        uploads += 1;
     }
     perf.panel_geometry.sdf_batches = batches;
     perf.panel_geometry.sdf_records = records;
@@ -2386,6 +2388,17 @@ mod tests {
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
                 .background(color),
+        )
+        .build()
+    }
+
+    fn rounded_surface_tree(color: Color) -> LayoutTree {
+        LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(color)
+                .corner_radius(4.0),
         )
         .build()
     }
@@ -3513,6 +3526,42 @@ mod tests {
         assert_eq!(modified_asset_events::<SdfExtendedMaterial>(&app), 0);
         assert_eq!(modified_asset_events::<PathExtendedMaterial>(&app), 0);
         assert_eq!(modified_asset_events::<ShaderBuffer>(&app), 0);
+    }
+
+    #[test]
+    fn same_capacity_sdf_edit_stages_gpu_update_in_the_same_frame() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::WHITE),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let identity = sdf_batch_gpu_identity_for_panel(&app, panel);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&identity.records),
+            "an unchanged frame should leave no staged SDF upload",
+        );
+
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, rounded_surface_tree(Color::WHITE))
+                .is_ok()
+        );
+        app.update();
+
+        let after = sdf_batch_gpu_identity_for_panel(&app, panel);
+        assert_eq!(after.records, identity.records);
+        assert!(
+            app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&identity.records),
+            "the retained SDF edit should stage a direct same-frame GPU write",
+        );
     }
 
     #[test]
@@ -5366,17 +5415,6 @@ mod tests {
         buffers[0].clone()
     }
 
-    /// Drains both retained `AssetEvent<ShaderBuffer>` buffers: the message
-    /// update system moves events written during `app.update()` into the
-    /// previous buffer, which `iter_current_update_messages` does not visit.
-    fn image_record_buffer_uploads(app: &mut App, records: &Handle<ShaderBuffer>) -> usize {
-        app.world_mut()
-            .resource_mut::<Messages<AssetEvent<ShaderBuffer>>>()
-            .drain()
-            .filter(|event| matches!(event, AssetEvent::Modified { id } if *id == records.id()))
-            .count()
-    }
-
     #[test]
     fn tint_override_patches_only_the_referenced_image_record() {
         let (mut app, panel) = slotted_image_fixture();
@@ -5388,9 +5426,9 @@ mod tests {
         );
 
         let widget = styled_widget(&mut app);
+        app.update();
         let snapshot = widget_geometry_snapshot(&app, panel, widget);
         let record_buffer = image_record_buffer(&app);
-        clear_asset_events::<ShaderBuffer>(&mut app);
         set_slot_override(
             &mut app,
             widget,
@@ -5405,14 +5443,11 @@ mod tests {
             app.world().resource::<ImageBatchStore>().batches().count(),
             1,
         );
-        // This fixture leaves `commit_image_batch_buffers` after
-        // `AssetEventSystems`; the next update publishes the buffer's
-        // `AssetEvent::Modified` message.
-        app.update();
-        assert_eq!(
-            image_record_buffer_uploads(&mut app, &record_buffer),
-            1,
-            "the changed tint uploads the image record buffer once",
+        assert!(
+            app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&record_buffer),
+            "the changed image record should stage a direct same-frame GPU write",
         );
         assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
 
@@ -5420,7 +5455,6 @@ mod tests {
         // equal record, so no retained record changes and the record buffer
         // does not re-upload.
         let records_after = image_records(&app);
-        clear_asset_events::<ShaderBuffer>(&mut app);
         set_slot_override(
             &mut app,
             widget,
@@ -5428,11 +5462,11 @@ mod tests {
         );
         app.update();
         assert_eq!(image_records(&app), records_after);
-        app.update();
-        assert_eq!(
-            image_record_buffer_uploads(&mut app, &record_buffer),
-            0,
-            "a repeated identical override is a no-op",
+        assert!(
+            !app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&record_buffer),
+            "a repeated identical override should stage no GPU write",
         );
         assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
     }

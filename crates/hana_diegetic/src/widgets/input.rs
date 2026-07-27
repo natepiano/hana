@@ -632,7 +632,7 @@ fn emit_widget_input(
 /// Requests one operation from the widget currently associated with a window.
 ///
 /// `WidgetInput` is buffered so every producer feeds one ordered stream that
-/// [`route_semantic_input`] processes after [`ImeSystemSet::PublishInputBlockers`].
+/// `route_semantic_input` processes after [`ImeSystemSet::PublishInputBlockers`].
 /// Applications may write these requests directly or add [`WidgetInputPlugin`]
 /// to translate configured Bevy Enhanced Input bindings into them.
 #[derive(Clone, Copy, Debug, Message)]

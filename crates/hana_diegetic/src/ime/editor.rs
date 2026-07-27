@@ -1348,6 +1348,7 @@ mod tests {
     use super::pointer_command;
     use super::screen_field_record_rect;
     use super::text_hit_at_x;
+    use crate::AlignX;
     use crate::BoundingBox;
     use crate::DiegeticPanel;
     use crate::DiegeticTextMeasurer;
@@ -1382,6 +1383,7 @@ mod tests {
     use crate::ime::ImePlugin;
     use crate::ime::buffer::ImeEditCommand;
     use crate::layout::LayoutTreeChange;
+    use crate::panel::PanelFieldPresentation;
 
     #[derive(Default, Resource)]
     struct PropagatedPanelClicks(Vec<bool>);
@@ -1739,8 +1741,8 @@ mod tests {
             display_text:  "abcd".to_owned(),
             element_index: 0,
             duplicate_id:  false,
-            presentation:  crate::panel::PanelFieldPresentation {
-                align_x: crate::AlignX::Center,
+            presentation:  PanelFieldPresentation {
+                align_x: AlignX::Center,
                 text_style: Some(text_style),
                 ..default()
             },

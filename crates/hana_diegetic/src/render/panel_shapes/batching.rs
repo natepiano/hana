@@ -83,6 +83,7 @@ use crate::render::material_table::FrameMaterialTableBuilder;
 use crate::render::material_table::MaterialSlotAppend;
 use crate::render::material_table::MaterialSlotCandidate;
 use crate::render::material_table::MaterialSlotInput;
+use crate::render::material_table::RetainedBatchBufferUploads;
 use crate::render::material_table::SdfPaintMaterial;
 use crate::widgets::VisualOverrideIndex;
 use crate::widgets::VisualSlotOverride;
@@ -1434,7 +1435,7 @@ pub(super) fn update_panel_line_batch_bounds(
 
 pub(super) fn commit_panel_line_batch_buffers(
     mut store: ResMut<ShapeBatchStore>,
-    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut staged_uploads: ResMut<RetainedBatchBufferUploads>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     let mut batches = 0_usize;
@@ -1470,16 +1471,22 @@ pub(super) fn commit_panel_line_batch_buffers(
         let Some(gpu) = &batch.gpu else {
             continue;
         };
-        if let Some(instances) = instances
-            && let Some(mut buffer) = storage_buffers.get_mut(&gpu.instances)
-        {
-            buffer.set_data(instances);
+        if let Some(instances) = instances {
+            let handle = gpu.instances.clone();
+            material_table::stage_retained_batch_buffer_upload(
+                &mut staged_uploads,
+                &handle,
+                ShaderBuffer::from(instances),
+            );
             uploads += 1;
         }
-        if let Some(run_records) = run_records
-            && let Some(mut buffer) = storage_buffers.get_mut(&gpu.run_table)
-        {
-            buffer.set_data(run_records);
+        if let Some(run_records) = run_records {
+            let handle = gpu.run_table.clone();
+            material_table::stage_retained_batch_buffer_upload(
+                &mut staged_uploads,
+                &handle,
+                ShaderBuffer::from(run_records),
+            );
             uploads += 1;
         }
     }

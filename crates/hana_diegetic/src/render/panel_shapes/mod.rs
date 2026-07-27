@@ -33,8 +33,8 @@ impl Plugin for PanelShapePlugin {
                 (
                     reconcile_panel_line_batches.in_set(BatchAssetWrites),
                     material_table::register_path_batch_materials::<DiegeticPanelShapeBatch>,
-                    update_panel_line_batch_bounds,
                     commit_panel_line_batch_buffers,
+                    update_panel_line_batch_bounds,
                 )
                     .chain()
                     .in_set(PanelChildSystems::Build)

@@ -60,11 +60,13 @@ use crate::render::batch_key;
 use crate::render::batch_key::PipelineCompatibility;
 use crate::render::batch_key::ResourceCompatibility;
 use crate::render::draw_order::DrawOrderIndex;
+use crate::render::material_table;
 use crate::render::material_table::FrameMaterialSlotAppend;
 use crate::render::material_table::FrameMaterialTableBuild;
 use crate::render::material_table::FrameMaterialTableBuilder;
 use crate::render::material_table::MaterialSlotCandidate;
 use crate::render::material_table::MaterialSlotId;
+use crate::render::material_table::RetainedBatchBufferUploads;
 use crate::render::material_table::SdfPaintMaterial;
 use crate::render::world_text::TextContent;
 use crate::text;
@@ -868,12 +870,13 @@ pub(super) fn update_batch_bounds(
 /// nothing.
 ///
 /// Every payload is padded to the buffer's capacity so its byte length never
-/// changes between growths — a constant-length `set_data` writes the existing
-/// wgpu buffer in place, which the material's bind group observes without a
-/// re-prepare (see [`PathBatchResources`](crate::render::PathBatchResources)).
+/// changes between growths. The shared retained-upload queue writes those bytes
+/// into the existing wgpu buffer in the render world, so the material's bind
+/// group remains valid without asset replacement or re-preparation (see
+/// [`PathBatchResources`](crate::render::PathBatchResources)).
 pub(super) fn commit_batch_buffers(
     mut backend: ResMut<GlyphCache>,
-    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut staged_uploads: ResMut<RetainedBatchBufferUploads>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     let mut batches = 0_usize;
@@ -910,16 +913,22 @@ pub(super) fn commit_batch_buffers(
         let Some(gpu) = &batch.gpu else {
             continue;
         };
-        if let Some(data) = instances_payload
-            && let Some(mut buffer) = storage_buffers.get_mut(&gpu.instances)
-        {
-            buffer.set_data(data);
+        if let Some(data) = instances_payload {
+            let handle = gpu.instances.clone();
+            material_table::stage_retained_batch_buffer_upload(
+                &mut staged_uploads,
+                &handle,
+                ShaderBuffer::from(data),
+            );
             instance_uploads += 1;
         }
-        if let Some(data) = run_table_payload
-            && let Some(mut buffer) = storage_buffers.get_mut(&gpu.run_table)
-        {
-            buffer.set_data(data);
+        if let Some(data) = run_table_payload {
+            let handle = gpu.run_table.clone();
+            material_table::stage_retained_batch_buffer_upload(
+                &mut staged_uploads,
+                &handle,
+                ShaderBuffer::from(data),
+            );
             run_table_uploads += 1;
         }
     }
@@ -1336,6 +1345,7 @@ mod tests {
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants;
+    use crate::render::material_table::BatchAssetWrites;
     use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableAppendReady;
     use crate::render::material_table::MaterialTablePlugin;
@@ -1412,6 +1422,7 @@ mod tests {
                     update_panel_text_batches
                         .after(shaping::shape_panel_text_children)
                         .after(MaterialTableAppendReady)
+                        .in_set(BatchAssetWrites)
                         .before(TransformSystems::Propagate),
                     write_batch_run_transforms.after(TransformSystems::Propagate),
                     update_batch_bounds.after(write_batch_run_transforms),
@@ -1503,6 +1514,17 @@ mod tests {
             .map(|(_, batch)| batch.path_record_count().to_usize())
             .sum();
         (batches, runs, glyphs)
+    }
+
+    fn text_instance_buffer(app: &App) -> Handle<ShaderBuffer> {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (_, batch) = store.batches().next().expect("one text batch should exist");
+        batch
+            .gpu
+            .as_ref()
+            .expect("the settled text batch should own GPU assets")
+            .instances
+            .clone()
     }
 
     fn frame_material_row_count(app: &App) -> usize {
@@ -1816,6 +1838,41 @@ mod tests {
             entity_before,
             "a text edit reuses the batch entity"
         );
+    }
+
+    #[test]
+    fn same_capacity_text_edit_stages_gpu_update_in_the_same_frame() {
+        let mut app = pipeline_app();
+        let panel = spawn_panel(&mut app, two_text_tree());
+        settle(&mut app);
+        let instance_buffer = text_instance_buffer(&app);
+        let buffer_data_before = app
+            .world()
+            .resource::<Assets<ShaderBuffer>>()
+            .get(&instance_buffer)
+            .expect("the text instance buffer should exist")
+            .data
+            .clone();
+        app.update();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(("Alphas", TextStyle::new(10.0)));
+        builder.text(("Beta", TextStyle::new(10.0)));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, builder.build())
+                .is_ok()
+        );
+        app.world_mut().flush();
+        app.update();
+
+        assert_eq!(store_stats(&app), (1, 2, 10));
+        assert_eq!(text_instance_buffer(&app), instance_buffer);
+        let staged = app.world().resource::<RetainedBatchBufferUploads>();
+        let staged_data = staged
+            .data(&instance_buffer)
+            .expect("the retained text edit should stage a same-frame GPU write");
+        assert_ne!(Some(staged_data), buffer_data_before.as_deref());
     }
 
     #[test]

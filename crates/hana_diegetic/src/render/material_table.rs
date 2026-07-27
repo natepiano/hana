@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use bevy::asset::AssetEventSystems;
 use bevy::color::Color;
+use bevy::log::warn_once;
 use bevy::pbr::MeshMaterial3d;
 use bevy::pbr::StandardMaterial;
 use bevy::pbr::StandardMaterialUniform;
@@ -88,8 +89,8 @@ pub(crate) const SDF_DRIVER_RUN_ORDER: [&str; 6] = [
     SDF_DRIVER_WORLD_TRANSFORMS,
     SDF_DRIVER_RECONCILE_SPAWN,
     SDF_DRIVER_REGISTER,
-    SDF_DRIVER_BOUNDS,
     SDF_DRIVER_COMMIT,
+    SDF_DRIVER_BOUNDS,
 ];
 
 #[cfg(test)]
@@ -1022,7 +1023,12 @@ impl BatchMaterialTableRegistry {
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BatchResourcesReady;
 
-/// Hana `PostUpdate` systems that create or replace retained batch assets.
+/// Systems that create or replace retained batch assets.
+///
+/// Allocation and capacity growth run before Bevy's [`AssetEventSystems`] so
+/// new meshes, buffers, and materials can enter extraction in the same frame.
+/// Fixed-capacity record edits do not replace assets; their commit systems
+/// stage direct writes through [`RetainedBatchBufferUploads`] instead.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BatchAssetWrites;
 
@@ -1034,9 +1040,72 @@ pub(crate) struct MaterialTableUpdatedToCurrent;
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct MaterialTableAppendReady;
 
-/// Hana render set containing `upload_extracted_material_table`.
+/// Render-world queue writes for retained diegetic GPU buffers.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct MaterialTableGpuUpload;
+struct DirectGpuBufferUploads;
+
+#[derive(Clone, Debug)]
+struct RetainedBatchBufferUpload {
+    handle: Handle<ShaderBuffer>,
+    data:   Vec<u8>,
+}
+
+/// Same-frame GPU writes staged by retained batch commit systems.
+#[derive(Debug, Default, Resource)]
+pub(crate) struct RetainedBatchBufferUploads {
+    uploads: Vec<RetainedBatchBufferUpload>,
+}
+
+impl RetainedBatchBufferUploads {
+    fn clear(&mut self) { self.uploads.clear(); }
+
+    fn stage(&mut self, handle: &Handle<ShaderBuffer>, data: Vec<u8>) {
+        if let Some(upload) = self
+            .uploads
+            .iter_mut()
+            .find(|upload| upload.handle.id() == handle.id())
+        {
+            upload.data = data;
+            return;
+        }
+        self.uploads.push(RetainedBatchBufferUpload {
+            handle: handle.clone(),
+            data,
+        });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn contains(&self, handle: &Handle<ShaderBuffer>) -> bool {
+        self.uploads
+            .iter()
+            .any(|upload| upload.handle.id() == handle.id())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn data(&self, handle: &Handle<ShaderBuffer>) -> Option<&[u8]> {
+        self.uploads
+            .iter()
+            .find(|upload| upload.handle.id() == handle.id())
+            .map(|upload| upload.data.as_slice())
+    }
+}
+
+/// Stages encoded fixed-capacity bytes for a retained batch's existing buffer.
+pub(crate) fn stage_retained_batch_buffer_upload(
+    uploads: &mut RetainedBatchBufferUploads,
+    handle: &Handle<ShaderBuffer>,
+    encoded: ShaderBuffer,
+) {
+    let Some(data) = encoded.data else {
+        return;
+    };
+    uploads.stage(handle, data);
+}
+
+#[derive(Clone, Debug, Default, Resource)]
+struct ExtractedRetainedBatchBufferUploads {
+    uploads: Vec<RetainedBatchBufferUpload>,
+}
 
 /// Plugin that wires the frame material table into main-world and render-world schedules.
 pub(crate) struct MaterialTablePlugin;
@@ -1048,6 +1117,7 @@ impl Plugin for MaterialTablePlugin {
         app.init_resource::<FrameMaterialTableBuild>()
             .init_resource::<MaterialTableBuffer>()
             .init_resource::<BatchMaterialTableRegistry>()
+            .init_resource::<RetainedBatchBufferUploads>()
             .init_resource::<DiegeticPerfStats>()
             .configure_sets(
                 PostUpdate,
@@ -1063,6 +1133,7 @@ impl Plugin for MaterialTablePlugin {
                 (
                     activate_prepared_material_table_buffer,
                     clear_frame_material_table,
+                    clear_retained_batch_buffer_uploads,
                 )
                     .chain()
                     .in_set(MaterialTableAppendReady),
@@ -1088,11 +1159,21 @@ impl Plugin for MaterialTablePlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ExtractedFrameMaterialTable>()
-                .add_systems(ExtractSchedule, extract_frame_material_table)
+                .init_resource::<ExtractedRetainedBatchBufferUploads>()
+                .add_systems(
+                    ExtractSchedule,
+                    (
+                        extract_frame_material_table,
+                        extract_retained_batch_buffer_uploads,
+                    ),
+                )
                 .add_systems(
                     Render,
-                    upload_extracted_material_table
-                        .in_set(MaterialTableGpuUpload)
+                    (
+                        upload_extracted_material_table,
+                        upload_extracted_retained_batch_buffers,
+                    )
+                        .in_set(DirectGpuBufferUploads)
                         .in_set(RenderSystems::PrepareAssets),
                 );
         }
@@ -1104,7 +1185,7 @@ impl Plugin for MaterialTablePlugin {
         };
         render_app.configure_sets(
             Render,
-            MaterialTableGpuUpload
+            DirectGpuBufferUploads
                 .after(prepare_assets::<GpuShaderBuffer>)
                 .before(prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>)
                 .before(prepare_erased_assets::<MeshMaterial3d<ImageExtendedMaterial>>)
@@ -1138,6 +1219,10 @@ pub(crate) fn clear_frame_material_table(
     } else {
         build.clear();
     }
+}
+
+fn clear_retained_batch_buffer_uploads(mut uploads: ResMut<RetainedBatchBufferUploads>) {
+    uploads.clear();
 }
 
 fn freeze_frame_material_table(mut build: ResMut<FrameMaterialTableBuild>) {
@@ -1351,6 +1436,15 @@ fn extract_frame_material_table(
     });
 }
 
+fn extract_retained_batch_buffer_uploads(
+    mut commands: Commands,
+    uploads: Extract<Res<RetainedBatchBufferUploads>>,
+) {
+    commands.insert_resource(ExtractedRetainedBatchBufferUploads {
+        uploads: uploads.uploads.clone(),
+    });
+}
+
 fn upload_extracted_material_table(
     extracted: Res<ExtractedFrameMaterialTable>,
     gpu_buffers: Res<RenderAssets<GpuShaderBuffer>>,
@@ -1366,6 +1460,28 @@ fn upload_extracted_material_table(
         return;
     }
     render_queue.write_buffer(&gpu_buffer.buffer, 0, &extracted.data);
+}
+
+fn upload_extracted_retained_batch_buffers(
+    extracted: Res<ExtractedRetainedBatchBufferUploads>,
+    gpu_buffers: Res<RenderAssets<GpuShaderBuffer>>,
+    render_queue: Res<RenderQueue>,
+) {
+    for upload in &extracted.uploads {
+        let Some(gpu_buffer) = gpu_buffers.get(&upload.handle) else {
+            continue;
+        };
+        if upload.data.len() as u64 != gpu_buffer.buffer_descriptor.size {
+            warn_once!(
+                "retained batch upload size {} did not match GPU buffer size {} for {:?}",
+                upload.data.len(),
+                gpu_buffer.buffer_descriptor.size,
+                upload.handle.id(),
+            );
+            continue;
+        }
+        render_queue.write_buffer(&gpu_buffer.buffer, 0, &upload.data);
+    }
 }
 
 fn debug_assert_binding_numbers_are_unique() {
@@ -1768,24 +1884,149 @@ mod tests {
         result
     }
 
-    fn assert_batch_asset_write_systems(schedule: &Schedule) {
+    struct BatchScheduleSnapshot {
+        resources:    Vec<String>,
+        asset_writes: Vec<String>,
+    }
+
+    fn inspect_batch_schedule(schedule: &Schedule) -> BatchScheduleSnapshot {
+        let update_text = schedule
+            .systems()
+            .expect("PostUpdate schedule should be initialized")
+            .find_map(|(system_key, system)| {
+                system
+                    .name()
+                    .contains("update_panel_text_batches")
+                    .then_some(system_key)
+            })
+            .expect("update_panel_text_batches should be present in PostUpdate");
         let graph = schedule.graph();
+        let batch_set = graph
+            .system_sets
+            .get_key(BatchResourcesReady.intern())
+            .expect("BatchResourcesReady set should exist");
+        let material_set = graph
+            .system_sets
+            .get_key(MaterialTableUpdatedToCurrent.intern())
+            .expect("MaterialTableUpdatedToCurrent set should exist");
+        let asset_event_set = graph
+            .system_sets
+            .get_key(AssetEventSystems.intern())
+            .expect("AssetEventSystems set should exist");
+        let asset_write_set = graph
+            .system_sets
+            .get_key(BatchAssetWrites.intern())
+            .expect("BatchAssetWrites set should exist");
+        assert!(
+            graph
+                .dependency()
+                .contains_edge(NodeId::Set(batch_set), NodeId::Set(material_set))
+        );
+        assert!(
+            graph
+                .dependency()
+                .contains_edge(NodeId::System(update_text), NodeId::Set(batch_set))
+        );
+        assert!(
+            graph
+                .dependency()
+                .contains_edge(NodeId::Set(asset_write_set), NodeId::Set(asset_event_set)),
+            "retained batch asset writes must run before Bevy AssetEventSystems"
+        );
+        let batch_systems = graph
+            .systems_in_set(BatchResourcesReady.intern())
+            .expect("BatchResourcesReady systems should resolve");
         let asset_write_systems = graph
             .systems_in_set(BatchAssetWrites.intern())
             .expect("BatchAssetWrites systems should resolve");
-        for required in [
-            "update_panel_text_batches",
-            "reconcile_panel_line_batches",
-            "reconcile_sdf_batch_entities",
-            "reconcile_image_batch_entities",
-        ] {
-            let is_member = schedule
-                .systems()
-                .expect("PostUpdate schedule should be initialized")
-                .any(|(system_key, system)| {
-                    system.name().contains(required) && asset_write_systems.contains(&system_key)
-                });
-            assert!(is_member, "{required} should be inside BatchAssetWrites");
+        let resources = schedule
+            .systems()
+            .expect("PostUpdate schedule should be initialized")
+            .filter(|(system_key, _)| batch_systems.contains(system_key))
+            .map(|(_, system)| system.name().to_string())
+            .collect();
+        let asset_writes = schedule
+            .systems()
+            .expect("PostUpdate schedule should be initialized")
+            .filter(|(system_key, _)| asset_write_systems.contains(system_key))
+            .map(|(_, system)| system.name().to_string())
+            .collect();
+        BatchScheduleSnapshot {
+            resources,
+            asset_writes,
+        }
+    }
+
+    struct DirectUploadScheduleSnapshot {
+        systems:                     Vec<String>,
+        all_in_set:                  bool,
+        after_buffer_preparation:    bool,
+        before_material_preparation: bool,
+    }
+
+    fn inspect_direct_upload_schedule(schedule: &Schedule) -> DirectUploadScheduleSnapshot {
+        let graph = schedule.graph();
+        let buffer_set = graph
+            .system_sets
+            .get_key(prepare_assets::<GpuShaderBuffer>.into_system_set().intern())
+            .expect("GpuShaderBuffer preparation should exist");
+        let upload_set = graph
+            .system_sets
+            .get_key(DirectGpuBufferUploads.intern())
+            .expect("DirectGpuBufferUploads set should exist");
+        let uploads = schedule
+            .systems()
+            .expect("the Render schedule should be initialized")
+            .filter_map(|(system_key, system)| {
+                (system.name().contains("upload_extracted_material_table")
+                    || system
+                        .name()
+                        .contains("upload_extracted_retained_batch_buffers"))
+                .then_some((system_key, system.name().to_string()))
+            })
+            .collect::<Vec<_>>();
+        let material_sets = [
+            graph
+                .system_sets
+                .get_key(
+                    prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>
+                        .into_system_set()
+                        .intern(),
+                )
+                .expect("SDF material preparation should exist"),
+            graph
+                .system_sets
+                .get_key(
+                    prepare_erased_assets::<MeshMaterial3d<ImageExtendedMaterial>>
+                        .into_system_set()
+                        .intern(),
+                )
+                .expect("image material preparation should exist"),
+            graph
+                .system_sets
+                .get_key(
+                    prepare_erased_assets::<MeshMaterial3d<PathExtendedMaterial>>
+                        .into_system_set()
+                        .intern(),
+                )
+                .expect("path material preparation should exist"),
+        ];
+        let upload_systems = graph
+            .systems_in_set(DirectGpuBufferUploads.intern())
+            .expect("DirectGpuBufferUploads systems should resolve");
+        DirectUploadScheduleSnapshot {
+            systems:                     uploads.iter().map(|(_, name)| name.clone()).collect(),
+            all_in_set:                  uploads
+                .iter()
+                .all(|(system, _)| upload_systems.contains(system)),
+            after_buffer_preparation:    graph
+                .dependency()
+                .contains_edge(NodeId::Set(buffer_set), NodeId::Set(upload_set)),
+            before_material_preparation: material_sets.iter().all(|material_set| {
+                graph
+                    .dependency()
+                    .contains_edge(NodeId::Set(upload_set), NodeId::Set(*material_set))
+            }),
         }
     }
 
@@ -2337,7 +2578,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_growth_systems_resolve_before_asset_events() {
+    fn retained_batch_asset_allocation_finishes_before_asset_events() {
         let mut app = App::new();
         app.add_plugins(AssetPlugin::default());
         app.add_plugins(VisibilityPlugin);
@@ -2348,61 +2589,7 @@ mod tests {
             FillBatchPlugin,
             ImageBatchPlugin,
         ));
-        let batch_system_names = with_initialized_post_update(&mut app, |schedule| {
-            let update_text = schedule
-                .systems()
-                .expect("PostUpdate schedule should be initialized")
-                .find_map(|(system_key, system)| {
-                    system
-                        .name()
-                        .contains("update_panel_text_batches")
-                        .then_some(system_key)
-                })
-                .expect("update_panel_text_batches should be present in PostUpdate");
-            let graph = schedule.graph();
-            let batch_set = graph
-                .system_sets
-                .get_key(BatchResourcesReady.intern())
-                .expect("BatchResourcesReady set should exist");
-            let material_set = graph
-                .system_sets
-                .get_key(MaterialTableUpdatedToCurrent.intern())
-                .expect("MaterialTableUpdatedToCurrent set should exist");
-            let asset_event_set = graph
-                .system_sets
-                .get_key(AssetEventSystems.intern())
-                .expect("AssetEventSystems set should exist");
-            let asset_write_set = graph
-                .system_sets
-                .get_key(BatchAssetWrites.intern())
-                .expect("BatchAssetWrites set should exist");
-            assert!(
-                graph
-                    .dependency()
-                    .contains_edge(NodeId::Set(batch_set), NodeId::Set(material_set))
-            );
-            assert!(
-                graph
-                    .dependency()
-                    .contains_edge(NodeId::System(update_text), NodeId::Set(batch_set))
-            );
-            assert!(
-                graph
-                    .dependency()
-                    .contains_edge(NodeId::Set(asset_write_set), NodeId::Set(asset_event_set)),
-                "BatchAssetWrites should run before Bevy AssetEventSystems"
-            );
-            assert_batch_asset_write_systems(schedule);
-            let batch_systems = graph
-                .systems_in_set(BatchResourcesReady.intern())
-                .expect("BatchResourcesReady systems should resolve");
-            schedule
-                .systems()
-                .expect("PostUpdate schedule should be initialized")
-                .filter(|(system_key, _)| batch_systems.contains(system_key))
-                .map(|(_, system)| system.name().to_string())
-                .collect::<Vec<_>>()
-        });
+        let snapshot = with_initialized_post_update(&mut app, inspect_batch_schedule);
 
         for required in [
             "register_path_batch_materials",
@@ -2416,16 +2603,32 @@ mod tests {
             "commit_image_batch_buffers",
         ] {
             assert!(
-                batch_system_names
+                snapshot
+                    .resources
                     .iter()
                     .any(|name| name.contains(required)),
                 "{required} should be inside BatchResourcesReady"
             );
         }
+
+        for required in [
+            "update_panel_text_batches",
+            "reconcile_panel_line_batches",
+            "reconcile_sdf_batch_entities",
+            "reconcile_image_batch_entities",
+        ] {
+            assert!(
+                snapshot
+                    .asset_writes
+                    .iter()
+                    .any(|name| name.contains(required)),
+                "{required} should be inside BatchAssetWrites"
+            );
+        }
     }
 
     #[test]
-    fn retained_batch_material_preparation_waits_for_gpu_buffers() {
+    fn retained_gpu_writes_run_between_buffer_and_material_preparation() {
         let mut app = App::new();
         app.add_plugins(AssetPlugin::default());
         app.insert_sub_app(RenderApp, SubApp::new());
@@ -2437,90 +2640,25 @@ mod tests {
         ));
         app.finish();
 
-        let result = with_initialized_render(&mut app, |schedule| {
-            let graph = schedule.graph();
-            let buffer_set = graph
-                .system_sets
-                .get_key(prepare_assets::<GpuShaderBuffer>.into_system_set().intern())
-                .expect("GpuShaderBuffer preparation should exist");
-            let upload_set = graph
-                .system_sets
-                .get_key(MaterialTableGpuUpload.intern())
-                .expect("MaterialTableGpuUpload set should exist");
-            let upload_system = schedule
-                .systems()
-                .expect("the Render schedule should be initialized")
-                .find_map(|(system_key, system)| {
-                    system
-                        .name()
-                        .contains("upload_extracted_material_table")
-                        .then_some(system_key)
-                })
-                .expect("upload_extracted_material_table should exist");
-            let material_sets = [
-                (
-                    "SDF",
-                    graph
-                        .system_sets
-                        .get_key(
-                            prepare_erased_assets::<MeshMaterial3d<SdfExtendedMaterial>>
-                                .into_system_set()
-                                .intern(),
-                        )
-                        .expect("SDF material preparation should exist"),
-                ),
-                (
-                    "image",
-                    graph
-                        .system_sets
-                        .get_key(
-                            prepare_erased_assets::<MeshMaterial3d<ImageExtendedMaterial>>
-                                .into_system_set()
-                                .intern(),
-                        )
-                        .expect("image material preparation should exist"),
-                ),
-                (
-                    "path",
-                    graph
-                        .system_sets
-                        .get_key(
-                            prepare_erased_assets::<MeshMaterial3d<PathExtendedMaterial>>
-                                .into_system_set()
-                                .intern(),
-                        )
-                        .expect("path material preparation should exist"),
-                ),
-            ];
-            let upload_systems = graph
-                .systems_in_set(MaterialTableGpuUpload.intern())
-                .expect("MaterialTableGpuUpload systems should resolve");
-            let buffer_precedes_upload = graph
-                .dependency()
-                .contains_edge(NodeId::Set(buffer_set), NodeId::Set(upload_set));
-            let materials_follow_upload = material_sets.iter().all(|(_, material_set)| {
-                graph
-                    .dependency()
-                    .contains_edge(NodeId::Set(upload_set), NodeId::Set(*material_set))
-            });
-            (
-                upload_systems.contains(&upload_system),
-                buffer_precedes_upload,
-                materials_follow_upload,
-            )
-        });
+        let snapshot = with_initialized_render(&mut app, inspect_direct_upload_schedule);
 
         assert!(
-            result.0,
-            "upload_extracted_material_table should be inside MaterialTableGpuUpload"
+            snapshot.all_in_set,
+            "every direct upload system should be inside DirectGpuBufferUploads: {:?}",
+            snapshot.systems,
         );
         assert!(
-            result.1,
-            "Bevy GPU buffer preparation must precede MaterialTableGpuUpload"
+            snapshot.systems.len() == 2,
+            "both direct upload systems should exist: {:?}",
+            snapshot.systems,
         );
         assert!(
-            result.2,
-            "Bevy retained material preparation must follow MaterialTableGpuUpload"
+            snapshot.after_buffer_preparation,
+            "Bevy GPU buffer preparation must precede DirectGpuBufferUploads"
+        );
+        assert!(
+            snapshot.before_material_preparation,
+            "Bevy retained material preparation must follow DirectGpuBufferUploads"
         );
     }
 
