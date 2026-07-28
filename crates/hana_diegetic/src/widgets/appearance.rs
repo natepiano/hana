@@ -34,23 +34,6 @@ pub(crate) enum VisualChange<T> {
 impl<T> VisualChange<T> {
     /// Whether this layer authors a replacement.
     pub(crate) const fn is_authored(&self) -> bool { matches!(self, Self::To(_)) }
-
-    /// Consumes the layer and returns its replacement value.
-    fn into_value(self) -> Option<T> {
-        match self {
-            Self::Unchanged => None,
-            Self::To(value) => Some(value),
-        }
-    }
-}
-
-impl<T: Clone> VisualChange<T> {
-    /// Overwrites `resolved` when this layer authors a replacement.
-    fn layer_onto(&self, resolved: &mut Self) {
-        if let Self::To(value) = self {
-            *resolved = Self::To(value.clone());
-        }
-    }
 }
 
 /// The visual properties a widget state replaces.
@@ -166,30 +149,6 @@ impl Appearance {
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
         self.material = VisualChange::To(material);
         self
-    }
-
-    /// Applies every property this layer authors over `resolved`.
-    fn layer_onto(&self, resolved: &mut Self) {
-        self.background.layer_onto(&mut resolved.background);
-        self.border_color.layer_onto(&mut resolved.border_color);
-        self.border_width.layer_onto(&mut resolved.border_width);
-        self.material.layer_onto(&mut resolved.material);
-    }
-
-    /// Converts a fully layered appearance into its retained-slot override.
-    fn into_slot_override(self, panel: Option<&DiegeticPanel>) -> VisualSlotOverride {
-        let border_widths = self
-            .border_width
-            .into_value()
-            .zip(panel)
-            .and_then(|(width, panel)| render_border_widths(width, panel));
-        VisualSlotOverride {
-            fill_color: self.background.into_value(),
-            border_color: self.border_color.into_value(),
-            border_widths,
-            material: self.material.into_value(),
-            ..VisualSlotOverride::default()
-        }
     }
 }
 
@@ -369,15 +328,38 @@ impl<'a> WidgetStateCascades<'a> {
         active: &[Option<WidgetState>],
         panel: Option<&DiegeticPanel>,
     ) -> VisualSlotOverride {
-        let mut resolved = Appearance::default();
+        let mut background = None;
+        let mut border_color = None;
+        let mut border_width = None;
+        let mut material = None;
         for state in WidgetState::LAYER_ORDER {
             if active.contains(&Some(state))
                 && let Some(layer) = self.layer(state)
             {
-                layer.layer_onto(&mut resolved);
+                if let VisualChange::To(value) = &layer.background {
+                    background = Some(value);
+                }
+                if let VisualChange::To(value) = &layer.border_color {
+                    border_color = Some(value);
+                }
+                if let VisualChange::To(value) = &layer.border_width {
+                    border_width = Some(value);
+                }
+                if let VisualChange::To(value) = &layer.material {
+                    material = Some(value);
+                }
             }
         }
-        resolved.into_slot_override(panel)
+        let border_widths = border_width
+            .zip(panel)
+            .and_then(|(width, panel)| render_border_widths(*width, panel));
+        VisualSlotOverride {
+            fill_color: background.copied(),
+            border_color: border_color.copied(),
+            border_widths,
+            material: material.cloned(),
+            ..VisualSlotOverride::default()
+        }
     }
 }
 

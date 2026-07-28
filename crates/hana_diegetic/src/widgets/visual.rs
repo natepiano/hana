@@ -25,6 +25,7 @@ use super::PanelWidget;
 use super::StateAppearance;
 use super::VisualElementCapabilities;
 use super::WidgetOf;
+use crate::DiegeticPanel;
 use crate::layout::BoundingBox;
 
 /// Stable private id for one widget-owned visual slot.
@@ -33,8 +34,8 @@ pub(crate) struct VisualSlotId(u32);
 
 impl VisualSlotId {
     /// Root-surface slot authored by [`El::button`](crate::El::button) on the
-    /// element carrying the widget. Button state presentation writes only this
-    /// slot.
+    /// element carrying the widget. Button state presentation writes this slot
+    /// and resolved part-element overrides for owned descendant visual recipients.
     pub(crate) const BUTTON_ROOT: Self = Self(u32::MAX);
     /// Root slot authored by [`El::slider`](crate::El::slider) on the element
     /// carrying the widget. Pointer projection reads its solved content box.
@@ -45,7 +46,8 @@ impl VisualSlotId {
     /// the slot's panel-local translation.
     pub(crate) const SLIDER_THUMB: Self = Self(u32::MAX - 2);
     /// Root-surface slot authored by [`El::editable_field`](crate::El::editable_field).
-    /// Visible keyboard focus presentation writes only this slot.
+    /// Visible keyboard-focus presentation writes this slot and resolved part-element
+    /// overrides for owned descendant visual recipients.
     pub(crate) const EDITABLE_ROOT: Self = Self(u32::MAX - 3);
 
     /// Creates a slot id from a test-chosen stable value in renderer tests.
@@ -116,7 +118,6 @@ impl WidgetVisualSlots {
     pub(crate) fn elements(&self) -> &[(usize, VisualElementCapabilities)] { &self.elements }
 
     /// Returns every descendant with an explicitly authored state appearance.
-    #[cfg(test)]
     #[must_use]
     pub(crate) fn part_appearances(&self) -> &[(usize, StateAppearance)] { &self.part_appearances }
 
@@ -202,6 +203,14 @@ impl VisualSlotOverride {
             self.texture.clone_from(&overlay.texture);
         }
     }
+
+    fn apply_element(&mut self, overlay: &Self) {
+        let offset = self.offset;
+        self.apply(overlay);
+        if offset.is_some() {
+            self.offset = offset;
+        }
+    }
 }
 
 /// Fluent construction helpers for retained-renderer tests.
@@ -254,7 +263,8 @@ impl VisualSlotOverride {
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct WidgetVisualOverrides {
     subtree_color: Option<Color>,
-    overrides:     Vec<(VisualSlotId, VisualSlotOverride)>,
+    slots:         Vec<(VisualSlotId, VisualSlotOverride)>,
+    elements:      Vec<(usize, VisualSlotOverride)>,
 }
 
 impl WidgetVisualOverrides {
@@ -267,9 +277,10 @@ impl WidgetVisualOverrides {
     const fn subtree_color(&self) -> Option<Color> { self.subtree_color }
 
     /// Returns the stored override for `slot`.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn get(&self, slot: VisualSlotId) -> Option<&VisualSlotOverride> {
-        self.overrides
+        self.slots
             .iter()
             .find(|(id, _)| *id == slot)
             .map(|(_, value)| value)
@@ -284,28 +295,81 @@ impl WidgetVisualOverrides {
     /// widget's index entries. The repeated-identical no-op guarantee lives
     /// at the retained renderer level — every route rebuilds the same record
     /// values and the batch stores compare before dirtying, so no GPU buffer
-    /// re-uploads. Production writers go through [`write_slot_override`] or
-    /// [`write_widget_overrides`], which compare immutably before taking a
-    /// mutable component reference, keeping unchanged frames out of
-    /// `Changed<WidgetVisualOverrides>` entirely.
+    /// re-uploads. Production writers go through [`write_widget_overrides`],
+    /// which compares immutably before taking a mutable component reference,
+    /// keeping unchanged frames out of `Changed<WidgetVisualOverrides>`
+    /// entirely.
     pub(crate) fn set(&mut self, slot: VisualSlotId, value: VisualSlotOverride) {
-        match self.overrides.iter_mut().find(|(id, _)| *id == slot) {
+        match self.slots.iter_mut().find(|(id, _)| *id == slot) {
             Some((_, current)) => {
                 if *current != value {
                     *current = value;
                 }
             },
-            None => self.overrides.push((slot, value)),
+            None => self.slots.push((slot, value)),
         }
     }
 
     /// Removes the override for `slot`, restoring authored presentation.
-    pub(crate) fn clear(&mut self, slot: VisualSlotId) {
-        self.overrides.retain(|(id, _)| *id != slot);
+    #[cfg(test)]
+    pub(crate) fn clear(&mut self, slot: VisualSlotId) { self.slots.retain(|(id, _)| *id != slot); }
+
+    /// Sets or replaces an element override while preserving element-index order.
+    pub(crate) fn set_element(&mut self, element_index: usize, value: VisualSlotOverride) {
+        let insertion_index = self
+            .elements
+            .partition_point(|(existing_index, _)| *existing_index < element_index);
+        match self.elements.get_mut(insertion_index) {
+            Some((existing_index, current)) if *existing_index == element_index => {
+                if *current != value {
+                    *current = value;
+                }
+            },
+            Some(_) | None => self
+                .elements
+                .insert(insertion_index, (element_index, value)),
+        }
     }
 
-    fn iter(&self) -> impl Iterator<Item = (VisualSlotId, &VisualSlotOverride)> {
-        self.overrides.iter().map(|(slot, value)| (*slot, value))
+    fn slot_overrides(&self) -> impl Iterator<Item = (VisualSlotId, &VisualSlotOverride)> {
+        self.slots.iter().map(|(slot, value)| (*slot, value))
+    }
+
+    fn element_overrides(&self) -> &[(usize, VisualSlotOverride)] { &self.elements }
+}
+
+/// Resolves sparse part appearances onto their retained-record recipients.
+///
+/// `WidgetVisualSlots::elements` and `WidgetVisualSlots::part_appearances`
+/// are both ordered by element index. Advancing the part cursor only as each
+/// recipient passes it visits the two lists in linear time and avoids a
+/// per-recipient lookup.
+pub(crate) fn resolve_part_overrides(
+    desired: &mut WidgetVisualOverrides,
+    slots: &WidgetVisualSlots,
+    active: &[Option<super::WidgetState>],
+    panel: Option<&DiegeticPanel>,
+) {
+    let part_appearances = slots.part_appearances();
+    let mut part_cursor = 0;
+    for &(element_index, _) in slots.elements() {
+        while part_appearances
+            .get(part_cursor)
+            .is_some_and(|(part_index, _)| *part_index < element_index)
+        {
+            part_cursor += 1;
+        }
+        let Some((part_index, appearance)) = part_appearances.get(part_cursor) else {
+            continue;
+        };
+        if *part_index != element_index {
+            continue;
+        }
+        part_cursor += 1;
+        let resolved = appearance.cascades().resolve(active, panel);
+        if resolved != VisualSlotOverride::default() {
+            desired.set_element(element_index, resolved);
+        }
     }
 }
 
@@ -334,49 +398,6 @@ pub(crate) fn write_widget_overrides(
         return;
     };
     *current = desired;
-}
-
-/// Writes one widget slot's desired override, touching mutable state only for
-/// a real change.
-///
-/// A `desired` equal to [`VisualSlotOverride::default`] clears the slot. The
-/// current component is read immutably first: an equal stored value (or an
-/// absent value when clearing) returns before any `Mut` borrow, so unchanged
-/// frames never enter `Changed<WidgetVisualOverrides>`. The first insertion
-/// on a widget without the component is queued through `commands` and becomes
-/// visible after `WidgetSystems::PresentationCommandsApplied`.
-pub(crate) fn write_slot_override(
-    widget: Entity,
-    slot: VisualSlotId,
-    desired: VisualSlotOverride,
-    overrides: &mut Query<&mut WidgetVisualOverrides>,
-    commands: &mut Commands<'_, '_>,
-) {
-    let clear = desired == VisualSlotOverride::default();
-    let Ok(current) = overrides.get(widget) else {
-        if clear {
-            return;
-        }
-        let mut component = WidgetVisualOverrides::default();
-        component.set(slot, desired);
-        commands.entity(widget).insert(component);
-        return;
-    };
-    let unchanged = match current.get(slot) {
-        Some(existing) => !clear && *existing == desired,
-        None => clear,
-    };
-    if unchanged {
-        return;
-    }
-    let Ok(mut current) = overrides.get_mut(widget) else {
-        return;
-    };
-    if clear {
-        current.clear(slot);
-    } else {
-        current.set(slot, desired);
-    }
 }
 
 /// Converts a widget slot's layout-frame translation delta into the
@@ -500,13 +521,19 @@ pub(crate) fn dispatch_visual_overrides(
                     );
                 }
             }
-            for (slot, value) in overrides.iter() {
+            for (slot, value) in overrides.slot_overrides() {
                 let Some(element_index) = slots.element_index(slot) else {
                     continue;
                 };
                 by_element
                     .entry(element_index)
                     .and_modify(|existing| existing.apply(value))
+                    .or_insert_with(|| value.clone());
+            }
+            for &(element_index, ref value) in overrides.element_overrides() {
+                by_element
+                    .entry(element_index)
+                    .and_modify(|existing| existing.apply_element(value))
                     .or_insert_with(|| value.clone());
             }
             by_element
@@ -524,24 +551,44 @@ pub(crate) fn dispatch_visual_overrides(
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::picking::hover::PickingInteraction;
     use bevy::prelude::*;
 
     use super::ComputedVisualSlot;
+    use super::StateAppearance;
+    use super::VisualElementCapabilities;
     use super::VisualOverrideIndex;
     use super::VisualSlotId;
     use super::VisualSlotOverride;
     use super::WidgetVisualOverrides;
     use super::WidgetVisualSlots;
+    use crate::Appearance;
+    use crate::DiegeticPanel;
+    use crate::DiegeticPanelCommands;
+    use crate::El;
+    use crate::HeadlessLayoutPlugin;
+    use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeEditableFieldSpec;
+    use crate::LayoutBuilder;
+    use crate::Mm;
     use crate::PanelElementId;
+    use crate::PanelWidgetReader;
+    use crate::WidgetHoveredAppearance;
+    use crate::cascade::Cascade;
     use crate::layout::BoundingBox;
+    use crate::text::DiegeticTextMeasurer;
     use crate::widgets::PanelWidget;
+    use crate::widgets::Slider;
     use crate::widgets::WidgetOf;
+    use crate::widgets::WidgetsPlugin;
 
     const SLOT: VisualSlotId = VisualSlotId::new(7);
     const SLOT_ELEMENT_INDEX: usize = 3;
     const OVERRIDE_COLOR: Color = Color::srgb(0.9, 0.1, 0.2);
     const PEER_ELEMENT_INDEX: usize = 5;
     const PEER_OVERRIDE_COLOR: Color = Color::srgb(0.2, 0.8, 0.9);
+    const PART_HOVER_FILL: Color = Color::srgb(0.3, 0.7, 0.2);
 
     fn computed_slot(slot: VisualSlotId, element_index: usize) -> ComputedVisualSlot {
         ComputedVisualSlot {
@@ -557,6 +604,80 @@ mod tests {
         app.init_resource::<VisualOverrideIndex>()
             .add_systems(Update, super::dispatch_visual_overrides);
         app
+    }
+
+    fn widgets_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin));
+        app
+    }
+
+    fn spawn_widget_panel(app: &mut App, tree: crate::LayoutTree) -> Entity {
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(tree)
+            .build()
+            .expect("widget panel should build");
+        app.world_mut().spawn(panel).id()
+    }
+
+    fn resolve_widget(app: &mut App, panel: Entity, id: &'static str) -> Entity {
+        app.world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named(id))
+            })
+            .ok()
+            .flatten()
+            .expect("widget should reify")
+    }
+
+    fn reauthor_tree(app: &mut App, panel: Entity, tree: crate::LayoutTree) {
+        app.world_mut()
+            .commands()
+            .set_tree(panel, tree)
+            .expect("replacement tree should be accepted");
+        app.update();
+        app.update();
+    }
+
+    fn indexed_fill(app: &App, panel: Entity, element_index: usize) -> Option<Color> {
+        app.world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, element_index)
+            .and_then(|override_value| override_value.fill_color)
+    }
+
+    fn assert_no_unowned_slider_part_overrides(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        styled_unauthored_index: usize,
+        structural_container_index: usize,
+    ) {
+        let visual_override_index = app.world().resource::<VisualOverrideIndex>();
+        assert!(
+            visual_override_index
+                .get(panel, styled_unauthored_index)
+                .is_none(),
+            "a visual recipient without an authored state appearance receives no element override",
+        );
+        assert!(
+            visual_override_index
+                .get(panel, structural_container_index)
+                .is_none(),
+            "a pure slider layout container creates no visual override index entry",
+        );
+        assert!(
+            !app.world()
+                .get::<WidgetVisualSlots>(widget)
+                .expect("slider widget visual slots")
+                .elements()
+                .iter()
+                .any(|(element_index, _)| *element_index == structural_container_index),
+            "a pure slider layout container is not a retained-record recipient",
+        );
     }
 
     fn spawn_slotted_widget(app: &mut App, panel: Entity) -> Entity {
@@ -597,6 +718,306 @@ mod tests {
             .resource::<VisualOverrideIndex>()
             .get(panel, element_index)
             .and_then(|value| value.color)
+    }
+
+    fn hovered_part_appearance() -> StateAppearance {
+        StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                Appearance::new().background(PART_HOVER_FILL),
+            )),
+            ..StateAppearance::default()
+        }
+    }
+
+    fn button_part_tree(stateful_part: bool, prepended_part: bool) -> (crate::LayoutTree, usize) {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().background(Color::WHITE).button("button"),
+            |children| {
+                if prepended_part {
+                    children.with(El::new().background(Color::WHITE), |_| {});
+                }
+                children.with(El::new().background(Color::WHITE), |_| {});
+            },
+        );
+        let mut tree = builder.build();
+        let part_index = tree.len() - 1;
+        if stateful_part {
+            assert!(tree.set_element_state_appearance(part_index, hovered_part_appearance()));
+        }
+        (tree, part_index)
+    }
+
+    fn editable_part_tree(stateful_part: bool, prepended_part: bool) -> (crate::LayoutTree, usize) {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+        builder.with(
+            El::new()
+                .background(Color::WHITE)
+                .editable_field("editable", field),
+            |children| {
+                if prepended_part {
+                    children.with(El::new().background(Color::WHITE), |_| {});
+                }
+                children.with(El::new().background(Color::WHITE), |_| {});
+            },
+        );
+        let mut tree = builder.build();
+        let part_index = tree.len() - 1;
+        if stateful_part {
+            assert!(tree.set_element_state_appearance(part_index, hovered_part_appearance()));
+        }
+        (tree, part_index)
+    }
+
+    fn slider_part_tree(
+        stateful_part: bool,
+        prepended_part: bool,
+    ) -> (crate::LayoutTree, usize, usize, usize) {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::overlay()
+                .size(40.0, 16.0)
+                .background(Color::WHITE)
+                .widget("slider", Slider::new(0.0..=1.0)),
+            |children| {
+                if prepended_part {
+                    children.with(El::new().background(Color::WHITE), |_| {});
+                }
+                children.with(El::new().background(Color::WHITE), |_| {});
+                children.with(El::new().background(Color::WHITE), |_| {});
+                children.with(El::new(), |_| {});
+            },
+        );
+        let mut tree = builder.build();
+        let structural_container_index = tree.len() - 1;
+        let styled_unauthored_index = structural_container_index - 1;
+        let part_index = styled_unauthored_index - 1;
+        if stateful_part {
+            assert!(tree.set_element_state_appearance(part_index, hovered_part_appearance()));
+        }
+        (
+            tree,
+            part_index,
+            styled_unauthored_index,
+            structural_container_index,
+        )
+    }
+
+    #[test]
+    fn element_override_composes_over_a_slot_without_replacing_its_offset() {
+        let mut app = dispatch_app();
+        let panel = app.world_mut().spawn_empty().id();
+        let slots =
+            WidgetVisualSlots::new(vec![computed_slot(SLOT, SLOT_ELEMENT_INDEX)]).with_elements(
+                vec![(SLOT_ELEMENT_INDEX, VisualElementCapabilities::default())],
+            );
+        let mut overrides = WidgetVisualOverrides::default();
+        let offset = Vec2::new(2.0, -3.0);
+        overrides.set(SLOT, VisualSlotOverride::default().with_offset(offset));
+        overrides.set_element(
+            SLOT_ELEMENT_INDEX,
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
+        );
+        app.world_mut().spawn((
+            PanelWidget::new(PanelElementId::named("styled")),
+            WidgetOf::new(panel),
+            slots,
+            overrides,
+        ));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<VisualOverrideIndex>()
+                .get(panel, SLOT_ELEMENT_INDEX),
+            Some(&VisualSlotOverride {
+                fill_color: Some(OVERRIDE_COLOR),
+                offset: Some(offset),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn non_root_part_appearance_reaches_its_owned_element() {
+        let mut app = widgets_test_app();
+        let (tree, part_index) = button_part_tree(true, false);
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(indexed_fill(&app, panel, part_index), Some(PART_HOVER_FILL));
+    }
+
+    #[test]
+    fn button_part_reauthoring_clears_and_moves_element_overrides() {
+        let mut app = widgets_test_app();
+        let (tree, original_part_index) = button_part_tree(true, false);
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_eq!(
+            indexed_fill(&app, panel, original_part_index),
+            Some(PART_HOVER_FILL)
+        );
+
+        let (tree, moved_part_index) = button_part_tree(true, true);
+        assert_ne!(moved_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(resolve_widget(&mut app, panel, "button"), widget);
+        assert_eq!(
+            indexed_fill(&app, panel, moved_part_index),
+            Some(PART_HOVER_FILL)
+        );
+        assert_eq!(indexed_fill(&app, panel, original_part_index), None);
+
+        let (tree, restored_part_index) = button_part_tree(true, false);
+        assert_eq!(restored_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(
+            indexed_fill(&app, panel, original_part_index),
+            Some(PART_HOVER_FILL)
+        );
+
+        let (tree, cleared_part_index) = button_part_tree(false, false);
+        assert_eq!(cleared_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(indexed_fill(&app, panel, original_part_index), None);
+    }
+
+    #[test]
+    fn editable_part_reauthoring_clears_and_moves_element_overrides() {
+        let mut app = widgets_test_app();
+        let (tree, original_part_index) = editable_part_tree(true, false);
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "editable");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_eq!(
+            indexed_fill(&app, panel, original_part_index),
+            Some(PART_HOVER_FILL)
+        );
+
+        let (tree, moved_part_index) = editable_part_tree(true, true);
+        assert_ne!(moved_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(resolve_widget(&mut app, panel, "editable"), widget);
+        assert_eq!(
+            indexed_fill(&app, panel, moved_part_index),
+            Some(PART_HOVER_FILL)
+        );
+        assert_eq!(indexed_fill(&app, panel, original_part_index), None);
+
+        let (tree, restored_part_index) = editable_part_tree(true, false);
+        assert_eq!(restored_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(
+            indexed_fill(&app, panel, original_part_index),
+            Some(PART_HOVER_FILL)
+        );
+
+        let (tree, cleared_part_index) = editable_part_tree(false, false);
+        assert_eq!(cleared_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(indexed_fill(&app, panel, original_part_index), None);
+    }
+
+    #[test]
+    fn slider_part_reauthoring_clears_and_moves_only_part_element_overrides() {
+        let mut app = widgets_test_app();
+        let (tree, original_part_index, styled_unauthored_index, structural_container_index) =
+            slider_part_tree(true, false);
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "slider");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_eq!(
+            indexed_fill(&app, panel, original_part_index),
+            Some(PART_HOVER_FILL)
+        );
+        assert_no_unowned_slider_part_overrides(
+            &app,
+            panel,
+            widget,
+            styled_unauthored_index,
+            structural_container_index,
+        );
+
+        let (
+            tree,
+            moved_part_index,
+            moved_styled_unauthored_index,
+            moved_structural_container_index,
+        ) = slider_part_tree(true, true);
+        assert_ne!(moved_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(
+            indexed_fill(&app, panel, moved_part_index),
+            Some(PART_HOVER_FILL)
+        );
+        assert_eq!(indexed_fill(&app, panel, original_part_index), None);
+        assert_no_unowned_slider_part_overrides(
+            &app,
+            panel,
+            widget,
+            moved_styled_unauthored_index,
+            moved_structural_container_index,
+        );
+
+        let (
+            tree,
+            restored_part_index,
+            restored_styled_unauthored_index,
+            restored_structural_container_index,
+        ) = slider_part_tree(true, false);
+        assert_eq!(restored_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(
+            indexed_fill(&app, panel, original_part_index),
+            Some(PART_HOVER_FILL)
+        );
+        assert_no_unowned_slider_part_overrides(
+            &app,
+            panel,
+            widget,
+            restored_styled_unauthored_index,
+            restored_structural_container_index,
+        );
+
+        let (
+            tree,
+            cleared_part_index,
+            cleared_styled_unauthored_index,
+            cleared_structural_container_index,
+        ) = slider_part_tree(false, false);
+        assert_eq!(cleared_part_index, original_part_index);
+        reauthor_tree(&mut app, panel, tree);
+        assert_eq!(resolve_widget(&mut app, panel, "slider"), widget);
+        assert_eq!(indexed_fill(&app, panel, original_part_index), None);
+        assert_no_unowned_slider_part_overrides(
+            &app,
+            panel,
+            widget,
+            cleared_styled_unauthored_index,
+            cleared_structural_container_index,
+        );
     }
 
     #[test]

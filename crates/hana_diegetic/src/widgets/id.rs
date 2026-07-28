@@ -210,7 +210,11 @@ impl ComputedWidgetRecord {
         element_index: usize,
         capabilities: VisualElementCapabilities,
     ) {
-        self.visual_elements.push((element_index, capabilities));
+        let insertion_index = self
+            .visual_elements
+            .partition_point(|(existing_index, _)| *existing_index < element_index);
+        self.visual_elements
+            .insert(insertion_index, (element_index, capabilities));
     }
 
     pub(crate) fn part_appearances(&self) -> &[(usize, StateAppearance)] { &self.part_appearances }

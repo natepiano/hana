@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use bevy::prelude::*;
 use super::PanelWidget;
 use super::SemanticWidgetIntent;
 use super::VisualSlotId;
+use super::VisualSlotOverride;
 use super::WidgetDisabled;
 use super::WidgetFocusVisible;
 use super::WidgetKind;
@@ -121,19 +123,22 @@ impl Button {
     pub(crate) const fn callback(&self) -> Option<&ButtonCallback> { self.callback.as_ref() }
 }
 
-/// Run condition for [`present_button_state`]: reports whether any authored
-/// presentation or presented state input changed since the last run.
+/// Maps each changed button's live state onto its retained visual overrides.
 ///
-/// The four `Changed<Cascade<Widget*Appearance>>` terms and
-/// `Changed<WidgetVisualSlots>` cover reify and re-authoring,
-/// `Changed<PickingInteraction>` covers the hover/pressed aggregate, and
-/// `Changed` on [`WidgetFocusVisible`], [`WidgetDisabled`], and [`ButtonPress`]
-/// covers marker insertion. The [`RemovedComponents`] streams report the edges
-/// back to normal; every stream is drained each run so a consumed removal
-/// cannot re-trigger a later quiet frame.
-pub(super) fn presentation_inputs_changed(
+/// Runs after `WidgetSystems::FocusCommandsApplied`, so application and
+/// keyboard-traversal indicator commands, as well as pointer-driven indicator
+/// removal, are visible in the same frame. Each `Changed` query and
+/// [`RemovedComponents`] stream is consumed here, so a quiet frame never walks
+/// the live buttons.
+/// Hover reads the all-pointer [`PickingInteraction`] aggregate and pressed
+/// reads the private [`ButtonPress`] marker; [`WidgetCaptures`] and
+/// [`ButtonCaptures`] stay lifecycle authority and are never consulted for
+/// presentation. Writes go
+/// through [`visual::write_widget_overrides`], which compares immutably first,
+/// so an unchanged state never marks [`WidgetVisualOverrides`] changed.
+pub(super) fn present_button_state(
     changed: Query<
-        (),
+        (Entity, &WidgetKind),
         (
             With<WidgetOf>,
             Or<(
@@ -149,40 +154,9 @@ pub(super) fn presentation_inputs_changed(
             )>,
         ),
     >,
-    mut removed_interactions: RemovedComponents<PickingInteraction>,
-    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
-    mut removed_disabled: RemovedComponents<WidgetDisabled>,
-    mut removed_presses: RemovedComponents<ButtonPress>,
-) -> bool {
-    let removed = !removed_interactions.is_empty()
-        || !removed_focus.is_empty()
-        || !removed_disabled.is_empty()
-        || !removed_presses.is_empty();
-    removed_interactions.clear();
-    removed_focus.clear();
-    removed_disabled.clear();
-    removed_presses.clear();
-    removed || !changed.is_empty()
-}
-
-/// Maps each button's live state onto its root visual-slot override.
-///
-/// Runs after `WidgetSystems::FocusCommandsApplied`, so application and
-/// keyboard-traversal indicator commands, as well as pointer-driven indicator
-/// removal, are visible in the same frame. It runs only when
-/// [`presentation_inputs_changed`] reports a relevant authored or state edge,
-/// so a quiet frame never walks the live buttons.
-/// Hover reads the all-pointer [`PickingInteraction`] aggregate and pressed
-/// reads the private [`ButtonPress`] marker; [`WidgetCaptures`] and
-/// [`ButtonCaptures`] stay lifecycle authority and are never consulted for
-/// presentation. Writes go
-/// through [`visual::write_slot_override`], which compares immutably first,
-/// so an unchanged state never marks [`WidgetVisualOverrides`] changed.
-pub(super) fn present_button_state(
     buttons: Query<
         (
             Entity,
-            &WidgetKind,
             &Cascade<super::WidgetHoveredAppearance>,
             &Cascade<super::WidgetPressedAppearance>,
             &Cascade<super::WidgetFocusedAppearance>,
@@ -196,31 +170,44 @@ pub(super) fn present_button_state(
         ),
         With<WidgetOf>,
     >,
+    kinds: Query<&WidgetKind, With<WidgetOf>>,
     panels: Query<&DiegeticPanel>,
+    mut removed_interactions: RemovedComponents<PickingInteraction>,
+    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
+    mut removed_disabled: RemovedComponents<WidgetDisabled>,
+    mut removed_presses: RemovedComponents<ButtonPress>,
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (
-        entity,
-        kind,
-        hovered,
-        pressed_appearance,
-        focused_appearance,
-        disabled_appearance,
-        widget_of,
-        slots,
-        interaction,
-        disabled,
-        focused,
-        pressed,
-    ) in &buttons
-    {
-        if *kind != WidgetKind::Button {
+    let mut dirty: HashSet<Entity> = changed
+        .iter()
+        .filter_map(|(entity, kind)| (*kind == WidgetKind::Button).then_some(entity))
+        .collect();
+    dirty.extend(
+        removed_interactions
+            .read()
+            .chain(removed_focus.read())
+            .chain(removed_disabled.read())
+            .chain(removed_presses.read())
+            .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::Button))),
+    );
+    for entity in dirty {
+        let Ok((
+            entity,
+            hovered,
+            pressed_appearance,
+            focused_appearance,
+            disabled_appearance,
+            widget_of,
+            slots,
+            interaction,
+            disabled,
+            focused,
+            pressed,
+        )) = buttons.get(entity)
+        else {
             continue;
-        }
-        if slots.element_index(VisualSlotId::BUTTON_ROOT).is_none() {
-            continue;
-        }
+        };
         let active = [
             focused.then_some(WidgetState::Focused),
             matches!(
@@ -238,13 +225,15 @@ pub(super) fn present_button_state(
             focused_appearance,
             disabled_appearance,
         );
-        visual::write_slot_override(
-            entity,
-            VisualSlotId::BUTTON_ROOT,
-            appearance.resolve(&active, panel),
-            &mut overrides,
-            &mut commands,
-        );
+        let mut desired = WidgetVisualOverrides::default();
+        if slots.element_index(VisualSlotId::BUTTON_ROOT).is_some() {
+            let root_override = appearance.resolve(&active, panel);
+            if root_override != VisualSlotOverride::default() {
+                desired.set(VisualSlotId::BUTTON_ROOT, root_override);
+            }
+        }
+        visual::resolve_part_overrides(&mut desired, slots, &active, panel);
+        visual::write_widget_overrides(entity, desired, &mut overrides, &mut commands);
     }
 }
 
@@ -3031,6 +3020,22 @@ mod tests {
             .map(|computed| computed.last_changed())
     }
 
+    fn override_tick(app: &App, widget: Entity) -> Option<Tick> {
+        app.world()
+            .entity(widget)
+            .get_ref::<WidgetVisualOverrides>()
+            .map(|overrides| overrides.last_changed())
+    }
+
+    fn assert_override_quiet(app: &mut App, widget: Entity, tick: Option<Tick>) {
+        app.update();
+        assert_eq!(
+            override_tick(app, widget),
+            tick,
+            "a quiet frame must not write the button override component",
+        );
+    }
+
     #[test]
     fn hovered_background_patches_only_the_fill_and_reaches_dispatch_same_frame() {
         let mut app = integrated_test_app();
@@ -3792,87 +3797,113 @@ mod tests {
         );
     }
 
-    fn presentation_gate(app: &mut App) -> Option<bool> {
-        app.world_mut()
-            .run_system_cached(super::presentation_inputs_changed)
-            .ok()
-    }
-
     #[test]
-    fn quiet_frames_skip_the_presentation_walk() {
+    fn button_state_edges_update_overrides_once_then_leave_quiet_frames_unchanged() {
         let mut app = integrated_test_app();
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
             button_tree_with(BUTTON_ID, |element| {
-                element.hovered(Appearance::new().background(HOVER_FILL))
+                element
+                    .hovered(Appearance::new().background(HOVER_FILL))
+                    .pressed(Appearance::new().background(PRESS_FILL))
+                    .focused(Appearance::new().background(FOCUS_FILL))
+                    .disabled(Appearance::new().background(DISABLED_FILL))
             }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
 
-        // The first probe consumes the reify-time authored changes; a frame
-        // with no relevant input change must then skip the walk.
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(
-            presentation_gate(&mut app),
-            Some(false),
-            "a quiet frame must not run the all-button presentation walk",
-        );
-
-        // Hover aggregate insertion, change, and removal each re-arm the gate
-        // exactly once.
+        // Hover insertion writes the authored hovered layer, then the next
+        // frame remains quiet.
         app.world_mut()
             .entity_mut(widget)
             .insert(PickingInteraction::Hovered);
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.update();
+        let hovered_tick = override_tick(&app, widget);
+        assert!(hovered_tick.is_some());
+        assert_override_quiet(&mut app, widget, hovered_tick);
+
+        // Both aggregate values mean hovered in the state resolver, so this
+        // input-value edge legitimately preserves the resolved override.
         app.world_mut()
             .entity_mut(widget)
             .insert(PickingInteraction::Pressed);
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.update();
+        assert_eq!(override_tick(&app, widget), hovered_tick);
+        assert_override_quiet(&mut app, widget, hovered_tick);
+
+        // The private press marker supplies the distinct pressed appearance.
+        app.world_mut().entity_mut(widget).insert(ButtonPress);
+        app.update();
+        let pressed_tick = override_tick(&app, widget);
+        assert!(pressed_tick.is_some());
+        assert_eq!(
+            root_override(&app, widget).and_then(|override_value| override_value.fill_color),
+            Some(PRESS_FILL),
+        );
+        assert_ne!(pressed_tick, hovered_tick);
+        assert_override_quiet(&mut app, widget, pressed_tick);
+
+        app.world_mut().entity_mut(widget).remove::<ButtonPress>();
+        app.update();
+        let restored_hover_tick = override_tick(&app, widget);
+        assert_eq!(
+            root_override(&app, widget).and_then(|override_value| override_value.fill_color),
+            Some(HOVER_FILL),
+        );
+        assert_ne!(restored_hover_tick, pressed_tick);
+        assert_override_quiet(&mut app, widget, restored_hover_tick);
+
         app.world_mut()
             .entity_mut(widget)
             .remove::<PickingInteraction>();
-        assert_eq!(
-            presentation_gate(&mut app),
-            Some(true),
-            "removal must re-arm the gate so the edge back to normal presents",
-        );
-        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.update();
+        assert_eq!(override_tick(&app, widget), None);
+        assert_override_quiet(&mut app, widget, None);
 
-        // The private press marker re-arms on insertion and removal.
-        app.world_mut().entity_mut(widget).insert(ButtonPress);
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
-        app.world_mut().entity_mut(widget).remove::<ButtonPress>();
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
-
-        // Focus request and clear re-arm through their marker commands.
         app.world_mut()
             .trigger(RequestWidgetFocus { window, widget });
         app.world_mut().flush();
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
+        app.update();
+        let focused_tick = override_tick(&app, widget);
+        assert!(focused_tick.is_some());
+        assert_eq!(
+            root_override(&app, widget).and_then(|override_value| override_value.fill_color),
+            Some(FOCUS_FILL),
+        );
+        assert_override_quiet(&mut app, widget, focused_tick);
+
         app.world_mut().trigger(ClearWidgetFocus { window });
         app.world_mut().flush();
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
-
-        // A widget-local interactivity edit inserts `WidgetDisabled` during
-        // the update; the marker and authored changes re-arm the gate.
-        let result = app
-            .world_mut()
-            .run_system_once(move |mut writer: PanelWidgetWriter| {
-                writer.override_interactivity(widget, WidgetInteractivity::Disabled)
-            });
-        assert_eq!(result.ok(), Some(true));
         app.update();
-        assert!(app.world().get::<WidgetDisabled>(widget).is_some());
-        assert_eq!(presentation_gate(&mut app), Some(true));
-        assert_eq!(presentation_gate(&mut app), Some(false));
+        assert_eq!(override_tick(&app, widget), None);
+        assert_override_quiet(&mut app, widget, None);
+
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .override_widget_interactivity(WidgetInteractivity::Disabled);
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        let disabled_tick = override_tick(&app, widget);
+        assert!(disabled_tick.is_some());
+        assert_eq!(
+            root_override(&app, widget).and_then(|override_value| override_value.fill_color),
+            Some(DISABLED_FILL),
+        );
+        assert_override_quiet(&mut app, widget, disabled_tick);
+
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .inherit_widget_interactivity();
+        app.world_mut().flush();
+        app.update();
+        app.update();
+        assert_eq!(override_tick(&app, widget), None);
+        assert_override_quiet(&mut app, widget, None);
     }
 
     #[test]
@@ -3930,6 +3961,49 @@ mod tests {
         let first_index = root_element_index(&app, first);
         let second_index = root_element_index(&app, second);
         assert_ne!(first_index, second_index);
+    }
+
+    #[test]
+    fn state_edges_do_not_rebuild_same_kind_peer_overrides() {
+        let mut app = integrated_test_app();
+        let panel = spawn_panel(
+            &mut app,
+            two_styled_buttons_tree(HOVER_FILL, PEER_HOVER_FILL),
+        );
+        app.update();
+        let first = widget_by_id(&mut app, panel, "first");
+        let second = widget_by_id(&mut app, panel, "second");
+
+        app.world_mut()
+            .entity_mut(first)
+            .insert(PickingInteraction::Hovered);
+        app.world_mut()
+            .entity_mut(second)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(app.world().get::<WidgetVisualOverrides>(first).is_some());
+        assert!(app.world().get::<WidgetVisualOverrides>(second).is_some());
+
+        app.world_mut()
+            .entity_mut(second)
+            .remove::<WidgetVisualOverrides>();
+        app.world_mut()
+            .entity_mut(first)
+            .insert(PickingInteraction::Pressed);
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(second).is_none(),
+            "a changed interaction on one button must not rebuild its peer override",
+        );
+
+        app.world_mut()
+            .entity_mut(first)
+            .remove::<PickingInteraction>();
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(second).is_none(),
+            "an interaction removal on one button must not rebuild its peer override",
+        );
     }
 
     #[test]

@@ -297,15 +297,12 @@ impl Plugin for WidgetsPlugin {
                     input::route_semantic_input.in_set(WidgetSystems::SemanticInput),
                     ApplyDeferred.in_set(WidgetSystems::FocusCommandsApplied),
                     button::present_button_state
-                        .run_if(button::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),
                     editable::present_editable_state
-                        .run_if(editable::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),
                     slider::present_slider_state
-                        .run_if(slider::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),
                     ApplyDeferred.in_set(WidgetSystems::PresentationCommandsApplied),

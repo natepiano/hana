@@ -1,10 +1,11 @@
 //! Editable-field widget presentation.
 
+use std::collections::HashSet;
+
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
 
 use super::VisualSlotId;
-#[cfg(test)]
 use super::VisualSlotOverride;
 use super::WidgetDisabled;
 use super::WidgetFocusVisible;
@@ -18,17 +19,17 @@ use super::visual;
 use crate::DiegeticPanel;
 use crate::cascade::Cascade;
 
-/// Reports whether an editable field's authored presentation or presented state
-/// changed since the last run.
+/// Maps each changed editable field's live state onto its retained visual overrides.
 ///
-/// The changed query filters to [`WidgetKind::EditableField`] so an unrelated
-/// button or slider change never wakes the all-field walk. Each
-/// [`RemovedComponents`] stream is drained every run and its removals are kept
-/// only for entities still live as editable fields, reporting the edges back to
-/// normal.
-pub(super) fn presentation_inputs_changed(
+/// Focus reads [`WidgetFocusVisible`], hover reads the all-pointer
+/// [`PickingInteraction`] aggregate, and disabled reads [`WidgetDisabled`]. A
+/// field has no press, so [`WidgetState::Pressed`] never applies and its
+/// element does not offer [`crate::El::pressed`]. Each `Changed` query and
+/// [`RemovedComponents`] stream is consumed here, so a quiet frame never walks
+/// the live fields.
+pub(super) fn present_editable_state(
     changed: Query<
-        &WidgetKind,
+        (Entity, &WidgetKind),
         (
             With<WidgetOf>,
             Or<(
@@ -43,30 +44,6 @@ pub(super) fn presentation_inputs_changed(
             )>,
         ),
     >,
-    kinds: Query<&WidgetKind, With<WidgetOf>>,
-    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
-    mut removed_interactions: RemovedComponents<PickingInteraction>,
-    mut removed_disabled: RemovedComponents<WidgetDisabled>,
-) -> bool {
-    let field_removals = removed_focus
-        .read()
-        .chain(removed_interactions.read())
-        .chain(removed_disabled.read())
-        .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::EditableField)))
-        .count();
-    field_removals > 0
-        || changed
-            .iter()
-            .any(|kind| *kind == WidgetKind::EditableField)
-}
-
-/// Maps each editable field's live state onto its retained root visual slot.
-///
-/// Focus reads [`WidgetFocusVisible`], hover reads the all-pointer
-/// [`PickingInteraction`] aggregate, and disabled reads [`WidgetDisabled`]. A
-/// field has no press, so [`WidgetState::Pressed`] never applies and its
-/// element does not offer [`crate::El::pressed`].
-pub(super) fn present_editable_state(
     fields: Query<
         (
             Entity,
@@ -83,28 +60,43 @@ pub(super) fn present_editable_state(
         ),
         With<WidgetOf>,
     >,
+    kinds: Query<&WidgetKind, With<WidgetOf>>,
     panels: Query<&DiegeticPanel>,
+    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
+    mut removed_interactions: RemovedComponents<PickingInteraction>,
+    mut removed_disabled: RemovedComponents<WidgetDisabled>,
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (
-        entity,
-        kind,
-        hovered,
-        pressed,
-        focused_appearance,
-        disabled_appearance,
-        widget_of,
-        slots,
-        interaction,
-        disabled,
-        focused,
-    ) in &fields
-    {
-        if *kind != WidgetKind::EditableField {
+    let mut dirty: HashSet<Entity> = changed
+        .iter()
+        .filter_map(|(entity, kind)| (*kind == WidgetKind::EditableField).then_some(entity))
+        .collect();
+    dirty.extend(
+        removed_focus
+            .read()
+            .chain(removed_interactions.read())
+            .chain(removed_disabled.read())
+            .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::EditableField))),
+    );
+    for entity in dirty {
+        let Ok((
+            entity,
+            kind,
+            hovered,
+            pressed,
+            focused_appearance,
+            disabled_appearance,
+            widget_of,
+            slots,
+            interaction,
+            disabled,
+            focused,
+        )) = fields.get(entity)
+        else {
             continue;
-        }
-        if slots.element_index(VisualSlotId::EDITABLE_ROOT).is_none() {
+        };
+        if *kind != WidgetKind::EditableField {
             continue;
         }
         let active = [
@@ -118,14 +110,16 @@ pub(super) fn present_editable_state(
         ];
         let appearance =
             WidgetStateCascades::new(hovered, pressed, focused_appearance, disabled_appearance);
-        let desired = appearance.resolve(&active, panels.get(widget_of.panel()).ok());
-        visual::write_slot_override(
-            entity,
-            VisualSlotId::EDITABLE_ROOT,
-            desired,
-            &mut overrides,
-            &mut commands,
-        );
+        let panel = panels.get(widget_of.panel()).ok();
+        let mut desired = WidgetVisualOverrides::default();
+        if slots.element_index(VisualSlotId::EDITABLE_ROOT).is_some() {
+            let root_override = appearance.resolve(&active, panel);
+            if root_override != VisualSlotOverride::default() {
+                desired.set(VisualSlotId::EDITABLE_ROOT, root_override);
+            }
+        }
+        visual::resolve_part_overrides(&mut desired, slots, &active, panel);
+        visual::write_widget_overrides(entity, desired, &mut overrides, &mut commands);
     }
 }
 
@@ -199,9 +193,27 @@ mod tests {
         builder.build()
     }
 
+    fn two_state_layered_field_tree() -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        for id in ["first", "second"] {
+            let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+            builder.with(
+                El::new()
+                    .background(NORMAL_FILL)
+                    .border(Border::all(1.0, NORMAL_BORDER))
+                    .editable_field(id, field)
+                    .focused(Appearance::new().border_color(FOCUS_BORDER))
+                    .hovered(Appearance::new().background(HOVER_FILL))
+                    .disabled(Appearance::new().border_color(DISABLED_BORDER)),
+                |_| {},
+            );
+        }
+        builder.build()
+    }
+
     fn spawn_field(app: &mut App) -> Entity { spawn_field_tree(app, field_tree()) }
 
-    fn spawn_field_tree(app: &mut App, tree: crate::LayoutTree) -> Entity {
+    fn spawn_field_panel(app: &mut App, tree: crate::LayoutTree) -> Entity {
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .with_tree(tree)
@@ -211,13 +223,22 @@ mod tests {
             app.world_mut().spawn(panel).id()
         });
         app.update();
+        panel
+    }
+
+    fn field_by_id(app: &mut App, panel: Entity, id: &'static str) -> Entity {
         let result = app
             .world_mut()
             .run_system_once(move |reader: PanelWidgetReader| {
-                reader.entity(panel, &PanelElementId::named(FIELD_ID))
+                reader.entity(panel, &PanelElementId::named(id))
             });
         assert!(result.is_ok());
         result.ok().flatten().unwrap_or(Entity::PLACEHOLDER)
+    }
+
+    fn spawn_field_tree(app: &mut App, tree: crate::LayoutTree) -> Entity {
+        let panel = spawn_field_panel(app, tree);
+        field_by_id(app, panel, FIELD_ID)
     }
 
     fn root_override(app: &App, widget: Entity) -> Option<VisualSlotOverride> {
@@ -311,6 +332,45 @@ mod tests {
         app.update();
 
         assert_eq!(root_override(&app, field), None);
+    }
+
+    #[test]
+    fn state_edges_do_not_rebuild_same_kind_peer_overrides() {
+        let mut app = test_app();
+        let panel = spawn_field_panel(&mut app, two_state_layered_field_tree());
+        let first = field_by_id(&mut app, panel, "first");
+        let second = field_by_id(&mut app, panel, "second");
+
+        app.world_mut()
+            .entity_mut(first)
+            .insert(PickingInteraction::Hovered);
+        app.world_mut()
+            .entity_mut(second)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(app.world().get::<WidgetVisualOverrides>(first).is_some());
+        assert!(app.world().get::<WidgetVisualOverrides>(second).is_some());
+
+        app.world_mut()
+            .entity_mut(second)
+            .remove::<WidgetVisualOverrides>();
+        app.world_mut()
+            .entity_mut(first)
+            .insert(PickingInteraction::Pressed);
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(second).is_none(),
+            "a changed interaction on one field must not rebuild its peer override",
+        );
+
+        app.world_mut()
+            .entity_mut(first)
+            .remove::<PickingInteraction>();
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(second).is_none(),
+            "an interaction removal on one field must not rebuild its peer override",
+        );
     }
 
     #[test]

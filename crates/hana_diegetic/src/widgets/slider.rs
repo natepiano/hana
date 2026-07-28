@@ -1,5 +1,6 @@
 use core::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::RangeInclusive;
 
 use bevy::camera::NormalizedRenderTarget;
@@ -1122,22 +1123,24 @@ fn thumb_translation(slots: &WidgetVisualSlots, state: &SliderState) -> Option<V
     })
 }
 
-/// Run condition for [`present_slider_state`]: reports whether any authored
-/// presentation or presented state input changed on a live slider since the
-/// last run.
+/// Maps each changed slider's state onto its retained visual overrides.
 ///
-/// The changed query filters to [`WidgetKind::Slider`] so an unrelated button
-/// change never wakes the all-slider walk. `Changed<WidgetSpec>`, the four
-/// `Changed<Cascade<Widget*Appearance>>` terms, and
-/// `Changed<WidgetVisualSlots>` cover reify and re-authoring,
-/// `Changed<SliderState>` covers the applied value, `Changed<PickingInteraction>`
-/// covers the hover/pressed aggregate, and `Changed` on [`WidgetFocusVisible`],
-/// [`WidgetDisabled`], and [`SliderDrag`] covers marker insertion. Each
-/// [`RemovedComponents`] stream is drained every run and its removals are kept
-/// only for entities still live as sliders, reporting the edges back to normal.
-pub(super) fn presentation_inputs_changed(
+/// Runs after `WidgetSystems::FocusCommandsApplied`, so application and
+/// keyboard-traversal indicator commands, as well as pointer-driven indicator
+/// removal, are visible in the same frame. Each `Changed` query and
+/// [`RemovedComponents`] stream is consumed here, so a quiet frame never walks
+/// the live sliders. Hover reads the all-pointer
+/// [`PickingInteraction`] aggregate and pressed reads the private [`SliderDrag`]
+/// marker; [`SliderCaptures`] stays lifecycle authority and is never consulted
+/// for presentation. Writes go through [`visual::write_widget_overrides`],
+/// which compares immutably first, so an unchanged state never marks
+/// [`WidgetVisualOverrides`] changed. The thumb slot combines its value-derived
+/// translation with the authored focus border color. `Slider::disabled_color`
+/// recolors every element owned by the slider, while the disabled state removes
+/// the focused thumb border so the complete control uses that one color.
+pub(super) fn present_slider_state(
     changed: Query<
-        &WidgetKind,
+        (Entity, &WidgetKind),
         (
             With<WidgetOf>,
             Or<(
@@ -1155,43 +1158,6 @@ pub(super) fn presentation_inputs_changed(
             )>,
         ),
     >,
-    kinds: Query<&WidgetKind, With<WidgetOf>>,
-    mut removed_interactions: RemovedComponents<PickingInteraction>,
-    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
-    mut removed_disabled: RemovedComponents<WidgetDisabled>,
-    mut removed_drags: RemovedComponents<SliderDrag>,
-) -> bool {
-    // `count` drains every stream so a consumed removal cannot re-trigger a
-    // later quiet frame, and each removal counts only for an entity still live
-    // as a slider — `WidgetKind::Slider` with `With<WidgetOf>`, matching the
-    // writer — so an unrelated button removal or a widget whose panel role
-    // ended never wakes the walk.
-    let slider_removals = removed_interactions
-        .read()
-        .chain(removed_focus.read())
-        .chain(removed_disabled.read())
-        .chain(removed_drags.read())
-        .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::Slider)))
-        .count();
-    slider_removals > 0 || changed.iter().any(|kind| *kind == WidgetKind::Slider)
-}
-
-/// Maps each live slider's state onto its root and thumb visual-slot overrides.
-///
-/// Runs after `WidgetSystems::FocusCommandsApplied`, so application and
-/// keyboard-traversal indicator commands, as well as pointer-driven indicator
-/// removal, are visible in the same frame. It runs only when
-/// [`presentation_inputs_changed`] reports a relevant slider edge, so a quiet
-/// frame never walks the live sliders. Hover reads the all-pointer
-/// [`PickingInteraction`] aggregate and pressed reads the private [`SliderDrag`]
-/// marker; [`SliderCaptures`] stays lifecycle authority and is never consulted
-/// for presentation. Writes go through [`visual::write_widget_overrides`],
-/// which compares immutably first, so an unchanged state never marks
-/// [`WidgetVisualOverrides`] changed. The thumb slot combines its value-derived
-/// translation with the authored focus border color. `Slider::disabled_color`
-/// recolors every element owned by the slider, while the disabled state removes
-/// the focused thumb border so the complete control uses that one color.
-pub(super) fn present_slider_state(
     sliders: Query<
         (
             Entity,
@@ -1211,27 +1177,47 @@ pub(super) fn present_slider_state(
         ),
         With<WidgetOf>,
     >,
+    kinds: Query<&WidgetKind, With<WidgetOf>>,
     panels: Query<&DiegeticPanel>,
+    mut removed_interactions: RemovedComponents<PickingInteraction>,
+    mut removed_focus: RemovedComponents<WidgetFocusVisible>,
+    mut removed_disabled: RemovedComponents<WidgetDisabled>,
+    mut removed_drags: RemovedComponents<SliderDrag>,
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (
-        entity,
-        authored,
-        hovered,
-        pressed_appearance,
-        focused_appearance,
-        disabled_appearance,
-        kind,
-        widget_of,
-        state,
-        slots,
-        interaction,
-        disabled,
-        focused,
-        dragging,
-    ) in &sliders
-    {
+    let mut dirty: HashSet<Entity> = changed
+        .iter()
+        .filter_map(|(entity, kind)| (*kind == WidgetKind::Slider).then_some(entity))
+        .collect();
+    dirty.extend(
+        removed_interactions
+            .read()
+            .chain(removed_focus.read())
+            .chain(removed_disabled.read())
+            .chain(removed_drags.read())
+            .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::Slider))),
+    );
+    for entity in dirty {
+        let Ok((
+            entity,
+            authored,
+            hovered,
+            pressed_appearance,
+            focused_appearance,
+            disabled_appearance,
+            kind,
+            widget_of,
+            state,
+            slots,
+            interaction,
+            disabled,
+            focused,
+            dragging,
+        )) = sliders.get(entity)
+        else {
+            continue;
+        };
         if *kind != WidgetKind::Slider {
             continue;
         }
@@ -1240,28 +1226,30 @@ pub(super) fn present_slider_state(
         };
         let mut desired = WidgetVisualOverrides::default();
         desired.set_subtree_color(disabled.then_some(slider.disabled_color).flatten());
+        let active = [
+            focused.then_some(WidgetState::Focused),
+            matches!(
+                interaction,
+                Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
+            )
+            .then_some(WidgetState::Hovered),
+            dragging.then_some(WidgetState::Pressed),
+            disabled.then_some(WidgetState::Disabled),
+        ];
+        let panel = panels.get(widget_of.panel()).ok();
+        let appearance = WidgetStateCascades::new(
+            hovered,
+            pressed_appearance,
+            focused_appearance,
+            disabled_appearance,
+        );
         if slots.element_index(VisualSlotId::SLIDER_ROOT).is_some() {
-            let active = [
-                focused.then_some(WidgetState::Focused),
-                matches!(
-                    interaction,
-                    Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
-                )
-                .then_some(WidgetState::Hovered),
-                dragging.then_some(WidgetState::Pressed),
-                disabled.then_some(WidgetState::Disabled),
-            ];
-            let appearance = WidgetStateCascades::new(
-                hovered,
-                pressed_appearance,
-                focused_appearance,
-                disabled_appearance,
-            );
-            let root_override = appearance.resolve(&active, panels.get(widget_of.panel()).ok());
+            let root_override = appearance.resolve(&active, panel);
             if root_override != VisualSlotOverride::default() {
                 desired.set(VisualSlotId::SLIDER_ROOT, root_override);
             }
         }
+        visual::resolve_part_overrides(&mut desired, slots, &active, panel);
         // Always resolve the thumb slot so a same-id slider re-authored from a
         // marked thumb to no thumb clears its stale translation through the
         // shared `write_widget_overrides` replacement path. The layout-frame
@@ -1271,8 +1259,9 @@ pub(super) fn present_slider_state(
         // override, which the immutable-before-mutable writer treats as a
         // clear rather than a manufactured offset.
         let render_offset = thumb_translation(slots, state).and_then(|layout_delta| {
-            let panel = panels.get(widget_of.panel()).ok()?;
-            visual::layout_delta_to_render_offset(layout_delta, panel.points_to_world())
+            panel.and_then(|panel| {
+                visual::layout_delta_to_render_offset(layout_delta, panel.points_to_world())
+            })
         });
         let mut thumb_override =
             render_offset.map_or_else(VisualSlotOverride::default, |offset| VisualSlotOverride {
@@ -2034,6 +2023,7 @@ mod tests {
     use crate::ButtonClicked;
     use crate::ButtonPressed;
     use crate::ButtonReleased;
+    use crate::ClearWidgetFocus;
     use crate::ComputedDiegeticPanel;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
@@ -2048,12 +2038,16 @@ mod tests {
     use crate::Px;
     use crate::RequestWidgetFocus;
     use crate::TextStyle;
+    use crate::WidgetHoveredAppearance;
     use crate::WidgetInputPlugin;
     use crate::WidgetInteractivity;
+    use crate::WidgetPressedAppearance;
+    use crate::cascade::Cascade;
     use crate::layout::BoundingBox;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::ButtonPress;
     use crate::widgets::SemanticWidgetIntent;
+    use crate::widgets::StateAppearance;
     use crate::widgets::VisualOverrideIndex;
     use crate::widgets::VisualSlotId;
     use crate::widgets::VisualSlotOverride;
@@ -3992,7 +3986,15 @@ mod tests {
 
     fn button_and_slider_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().size(20.0, 10.0).button("act"), |_| {});
+        builder.with(
+            El::new()
+                .size(20.0, 10.0)
+                .background(Color::WHITE)
+                .button("act")
+                .hovered(Appearance::new().background(STATE_HOVER_FILL))
+                .pressed(Appearance::new().background(STATE_PRESS_FILL)),
+            |_| {},
+        );
         // The slider's state layers override background and border color, so the
         // element authors both a normal background and a normal border for the
         // surface those overrides patch.
@@ -4006,7 +4008,56 @@ mod tests {
             ),
             |_| {},
         );
+        builder.with(
+            apply_state_appearance(
+                El::new()
+                    .size(20.0, 10.0)
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::WHITE))
+                    .widget("peer", slider0()),
+            ),
+            |_| {},
+        );
         builder.build()
+    }
+
+    fn button_press_isolation_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .size(20.0, 10.0)
+                .background(Color::WHITE)
+                .button("act")
+                .pressed(Appearance::new().background(STATE_PRESS_FILL)),
+            |_| {},
+        );
+        builder.with(
+            apply_state_appearance(
+                El::new()
+                    .size(20.0, 10.0)
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::WHITE))
+                    .widget("level", slider0()),
+            ),
+            |children| {
+                children.with(El::new().background(Color::WHITE), |_| {});
+            },
+        );
+        let mut tree = builder.build();
+        let pressed_part_index = tree.len() - 1;
+        assert!(tree.set_element_state_appearance(
+            pressed_part_index,
+            StateAppearance {
+                hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                    Appearance::new().background(STATE_HOVER_FILL),
+                )),
+                pressed: Cascade::Override(WidgetPressedAppearance::new(
+                    Appearance::new().background(STATE_PRESS_FILL),
+                )),
+                ..StateAppearance::default()
+            },
+        ));
+        tree
     }
 
     /// The same unrelated button paired with a state-layered slider that marks
@@ -5224,6 +5275,56 @@ mod tests {
     }
 
     #[test]
+    fn thumb_element_hover_fill_composes_with_the_value_derived_offset() {
+        let mut app = test_app();
+        let mut tree = thumb_slider_tree_with("level", plain_slider(0.25), 8.0, |element| element);
+        let authored_thumb_index = tree.len() - 1;
+        assert!(tree.set_element_state_appearance(
+            authored_thumb_index,
+            StateAppearance {
+                hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                    Appearance::new().background(STATE_HOVER_FILL),
+                )),
+                ..StateAppearance::default()
+            },
+        ));
+        let panel = spawn_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "level");
+        let thumb_index = slots_of(&app, widget)
+            .element_index(VisualSlotId::SLIDER_THUMB)
+            .expect("thumb element index");
+        assert_eq!(thumb_index, authored_thumb_index);
+        let initial_offset = thumb_offset(&app, widget).expect("initial thumb slot offset");
+        assert_ne!(
+            initial_offset,
+            Vec2::ZERO,
+            "the authored initial slider value must move the thumb",
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        let hovered = indexed_root(&app, panel, thumb_index).expect("hovered thumb index entry");
+        assert_eq!(hovered.offset, Some(initial_offset));
+        assert_eq!(hovered.fill_color, Some(STATE_HOVER_FILL));
+
+        set_slider_value(&mut app, widget, 0.75);
+        app.update();
+
+        let moved_offset = thumb_offset(&app, widget).expect("moved thumb slot offset");
+        assert_ne!(
+            moved_offset, initial_offset,
+            "changing the applied slider value must move the thumb offset",
+        );
+        let moved = indexed_root(&app, panel, thumb_index).expect("moved thumb index entry");
+        assert_eq!(moved.offset, Some(moved_offset));
+        assert_eq!(moved.fill_color, Some(STATE_HOVER_FILL));
+    }
+
+    #[test]
     fn thumb_hit_bounds_follow_the_presented_thumb_on_both_axes() {
         let mut app = test_app();
         let panel = spawn_panel(&mut app, thumb_slider_tree("level", plain_slider(0.5), 8.0));
@@ -5261,6 +5362,17 @@ mod tests {
         let focused = thumb_override(&app, widget).expect("focused thumb override present");
         assert_eq!(focused.offset, idle.offset);
         assert_eq!(focused.border_color, Some(STATE_THUMB_FOCUS_BORDER));
+
+        app.world_mut().trigger(ClearWidgetFocus { window });
+        app.world_mut().flush();
+        app.update();
+
+        let unfocused = thumb_override(&app, widget).expect("unfocused thumb override present");
+        assert_eq!(unfocused.offset, idle.offset);
+        assert_eq!(
+            unfocused.border_color, None,
+            "clearing keyboard focus must drop the focused thumb border",
+        );
     }
 
     #[test]
@@ -5722,6 +5834,22 @@ mod tests {
             .map(|computed| computed.last_changed())
     }
 
+    fn override_tick(app: &App, widget: Entity) -> Option<Tick> {
+        app.world()
+            .entity(widget)
+            .get_ref::<WidgetVisualOverrides>()
+            .map(|overrides| overrides.last_changed())
+    }
+
+    fn assert_override_quiet(app: &mut App, widget: Entity, tick: Option<Tick>) {
+        app.update();
+        assert_eq!(
+            override_tick(app, widget),
+            tick,
+            "a quiet frame must not write the slider override component",
+        );
+    }
+
     const ALL_DIRECTIONS: [SliderDirection; 4] = [
         SliderDirection::LeftToRight,
         SliderDirection::RightToLeft,
@@ -5965,7 +6093,7 @@ mod tests {
 
         // Re-author the same id slider without a marked thumb; the widget is
         // retained and its stale thumb translation is cleared through the shared
-        // `write_slot_override` clear path.
+        // `write_widget_overrides` replacement path.
         app.world_mut()
             .commands()
             .set_tree(panel, headless_slider_tree("level", plain_slider(0.5)))
@@ -6001,153 +6129,203 @@ mod tests {
         );
     }
 
-    fn slider_gate(app: &mut App) -> Option<bool> {
-        app.world_mut()
-            .run_system_cached(super::presentation_inputs_changed)
-            .ok()
-    }
-
-    fn assert_interactivity_rearms_slider_gate(app: &mut App, slider: Entity) {
-        const MAX_REMOVAL_UPDATES: usize = 8;
-
-        // A widget-local interactivity edit inserts `WidgetDisabled`; the marker
-        // re-arms the gate.
-        let result =
-            app.world_mut()
-                .run_system_once(move |mut writer: crate::PanelWidgetWriter| {
-                    writer.override_interactivity(slider, WidgetInteractivity::Disabled)
-                });
-        assert_eq!(result.ok(), Some(true));
+    #[test]
+    fn slider_value_changes_and_drags_do_not_rebuild_peer_overrides() {
+        let mut app = test_app();
+        let panel = spawn_panel(&mut app, button_and_slider_tree());
         app.update();
-        assert!(app.world().get::<WidgetDisabled>(slider).is_some());
-        assert_eq!(slider_gate(app), Some(true));
-        assert_eq!(slider_gate(app), Some(false));
+        let slider = resolve_widget(&mut app, panel, "level");
+        let peer_slider = resolve_widget(&mut app, panel, "peer");
+        let button = resolve_widget(&mut app, panel, "act");
 
-        // Restoring inherited interactivity removes `WidgetDisabled`; the marker
-        // removal re-arms the gate exactly once, then a quiet frame returns false.
-        let result =
-            app.world_mut()
-                .run_system_once(move |mut writer: crate::PanelWidgetWriter| {
-                    writer.inherit_interactivity(slider)
-                });
-        assert_eq!(result.ok(), Some(true));
-        // The removal lands within a small bounded number of updates; stop on
-        // that update so the next `slider_gate` read observes the removal edge.
-        let disabled_removed = (0..MAX_REMOVAL_UPDATES).any(|_| {
-            app.update();
-            app.world().get::<WidgetDisabled>(slider).is_none()
-        });
+        // Both peers receive distinct non-default overrides before removal.
+        // Removing them exposes any cross-widget presenter wake-up because
+        // neither peer can restore its override without becoming dirty.
+        app.world_mut()
+            .entity_mut(button)
+            .insert(PickingInteraction::Hovered);
+        app.world_mut()
+            .entity_mut(peer_slider)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        app.update();
+        assert!(app.world().get::<WidgetVisualOverrides>(button).is_some());
         assert!(
-            disabled_removed,
-            "inherited interactivity must remove the disabled marker",
+            app.world()
+                .get::<WidgetVisualOverrides>(peer_slider)
+                .is_some()
         );
-        assert_eq!(
-            slider_gate(app),
-            Some(true),
-            "removing the disabled marker re-arms the slider walk",
+
+        app.world_mut()
+            .entity_mut(button)
+            .remove::<WidgetVisualOverrides>();
+        app.world_mut()
+            .entity_mut(peer_slider)
+            .remove::<WidgetVisualOverrides>();
+        set_slider_value(&mut app, slider, 0.75);
+        app.update();
+
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(button).is_none(),
+            "a slider value change must not rebuild the peer button override",
         );
-        assert_eq!(slider_gate(app), Some(false));
+        assert!(
+            app.world()
+                .get::<WidgetVisualOverrides>(peer_slider)
+                .is_none(),
+            "a slider value change must not rebuild the peer slider override",
+        );
+
+        app.world_mut().entity_mut(slider).insert(SliderDrag);
+        app.update();
+
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(button).is_none(),
+            "a slider drag must not rebuild the peer button override",
+        );
+        assert!(
+            app.world()
+                .get::<WidgetVisualOverrides>(peer_slider)
+                .is_none(),
+            "a slider drag must not rebuild the peer slider override",
+        );
     }
 
     #[test]
-    fn slider_quiet_frames_skip_the_presentation_walk() {
+    fn button_edges_and_slider_drags_do_not_rebuild_cross_kind_overrides() {
         let mut app = test_app();
-        let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(&mut app, button_and_slider_tree());
         app.update();
         let slider = resolve_widget(&mut app, panel, "level");
         let button = resolve_widget(&mut app, panel, "act");
 
-        // The first probe consumes the reify-time authored changes; a quiet
-        // frame then skips the all-slider walk.
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(
-            slider_gate(&mut app),
-            Some(false),
-            "a quiet frame must not run the all-slider presentation walk",
-        );
-
-        // Hover aggregate insertion, change, and removal each re-arm once.
-        app.world_mut()
-            .entity_mut(slider)
-            .insert(PickingInteraction::Hovered);
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-        app.world_mut()
-            .entity_mut(slider)
-            .insert(PickingInteraction::Pressed);
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-        app.world_mut()
-            .entity_mut(slider)
-            .remove::<PickingInteraction>();
-        assert_eq!(
-            slider_gate(&mut app),
-            Some(true),
-            "an aggregate removal re-arms the edge back to normal",
-        );
-        assert_eq!(slider_gate(&mut app), Some(false));
-
-        // The private drag marker re-arms on insertion and removal.
         app.world_mut().entity_mut(slider).insert(SliderDrag);
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-        app.world_mut().entity_mut(slider).remove::<SliderDrag>();
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
+        app.update();
+        assert!(app.world().get::<WidgetVisualOverrides>(slider).is_some());
 
-        // An applied-value change re-arms.
-        set_slider_value(&mut app, slider, 0.75);
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-
-        // Re-authoring the widget spec or the visual slots re-arms.
-        let spec = app
-            .world()
-            .get::<crate::widgets::WidgetSpec>(slider)
-            .cloned()
-            .expect("slider spec");
-        app.world_mut().entity_mut(slider).insert(spec);
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-        let visual_slots = slots_of(&app, slider);
-        app.world_mut().entity_mut(slider).insert(visual_slots);
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-
-        // Focus request and clear re-arm through their marker commands.
-        app.world_mut().trigger(RequestWidgetFocus {
-            window,
-            widget: slider,
-        });
-        app.world_mut().flush();
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-        app.world_mut().trigger(crate::ClearWidgetFocus { window });
-        app.world_mut().flush();
-        assert_eq!(slider_gate(&mut app), Some(true));
-        assert_eq!(slider_gate(&mut app), Some(false));
-
-        assert_interactivity_rearms_slider_gate(&mut app, slider);
-
-        // An unrelated live button change or removal does not wake the slider
-        // walk.
+        app.world_mut()
+            .entity_mut(slider)
+            .remove::<WidgetVisualOverrides>();
         app.world_mut()
             .entity_mut(button)
             .insert(PickingInteraction::Hovered);
-        assert_eq!(
-            slider_gate(&mut app),
-            Some(false),
-            "an unrelated button change must not wake the slider walk",
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(slider).is_none(),
+            "a button interaction change must not rebuild a live slider override",
         );
+
         app.world_mut()
             .entity_mut(button)
             .remove::<PickingInteraction>();
-        assert_eq!(
-            slider_gate(&mut app),
-            Some(false),
-            "an unrelated button removal must not wake the slider walk",
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(slider).is_none(),
+            "a button interaction removal must not rebuild a live slider override",
         );
+
+        app.world_mut()
+            .entity_mut(button)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(app.world().get::<WidgetVisualOverrides>(button).is_some());
+
+        app.world_mut()
+            .entity_mut(button)
+            .remove::<WidgetVisualOverrides>();
+        app.world_mut().entity_mut(slider).remove::<SliderDrag>();
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(button).is_none(),
+            "a slider drag removal must not rebuild a live button override",
+        );
+
+        app.world_mut().entity_mut(slider).insert(SliderDrag);
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(button).is_none(),
+            "a slider drag insertion must not rebuild a live button override",
+        );
+    }
+
+    #[test]
+    fn button_press_edges_do_not_rebuild_slider_overrides() {
+        let mut app = test_app();
+        let panel = spawn_panel(&mut app, button_press_isolation_tree());
+        app.update();
+        let slider = resolve_widget(&mut app, panel, "level");
+        let button = resolve_widget(&mut app, panel, "act");
+        assert!(app.world().get::<WidgetVisualOverrides>(slider).is_none());
+
+        app.world_mut()
+            .entity_mut(slider)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert!(app.world().get::<WidgetVisualOverrides>(slider).is_some());
+        app.world_mut()
+            .entity_mut(slider)
+            .remove::<WidgetVisualOverrides>();
+
+        app.world_mut().entity_mut(button).insert(ButtonPress);
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(button).is_some(),
+            "a real button press proves the button presenter ran",
+        );
+
+        app.world_mut().entity_mut(slider).insert(ButtonPress);
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(slider).is_none(),
+            "a slider ButtonPress must not build a button-presenter override",
+        );
+
+        app.world_mut().entity_mut(slider).remove::<ButtonPress>();
+        app.update();
+        assert!(
+            app.world().get::<WidgetVisualOverrides>(slider).is_none(),
+            "removing a slider ButtonPress must not build a button-presenter override",
+        );
+    }
+
+    #[test]
+    fn slider_drag_and_value_edges_update_overrides_once_then_leave_quiet_frames_unchanged() {
+        let mut app = test_app();
+        let panel = spawn_panel(
+            &mut app,
+            thumb_slider_tree_with("level", plain_slider(0.5), 8.0, apply_state_appearance),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "level");
+        let idle_tick = override_tick(&app, widget);
+        assert!(idle_tick.is_some());
+        assert_override_quiet(&mut app, widget, idle_tick);
+
+        app.world_mut().entity_mut(widget).insert(SliderDrag);
+        app.update();
+        let drag_tick = override_tick(&app, widget);
+        assert!(drag_tick.is_some());
+        assert_ne!(drag_tick, idle_tick);
+        assert_eq!(
+            root_override(&app, widget).and_then(|override_value| override_value.fill_color),
+            Some(STATE_PRESS_FILL),
+        );
+        assert_override_quiet(&mut app, widget, drag_tick);
+
+        app.world_mut().entity_mut(widget).remove::<SliderDrag>();
+        app.update();
+        let released_tick = override_tick(&app, widget);
+        assert!(released_tick.is_some());
+        assert_ne!(released_tick, drag_tick);
+        assert_eq!(root_override(&app, widget), None);
+        assert_override_quiet(&mut app, widget, released_tick);
+
+        set_slider_value(&mut app, widget, 0.75);
+        app.update();
+        let changed_value_tick = override_tick(&app, widget);
+        assert!(changed_value_tick.is_some());
+        assert_ne!(changed_value_tick, released_tick);
+        assert_override_quiet(&mut app, widget, changed_value_tick);
     }
 
     #[test]
