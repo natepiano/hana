@@ -151,6 +151,31 @@ fn mutate_window(
     )
 }
 
+/// Marks a window the probe asked to close, so the despawn lands in `Update` instead of here.
+///
+/// `apply_probe_command` runs from a remote request, and `bevy_remote` processes those in
+/// `RemoteLast` — after `Last`, where `bevy_winit`'s `despawn_windows` destroys the OS window.
+/// Despawning inline therefore ends the frame with a live OS window that Bevy no longer owns.
+/// On Windows that window is still in `bevy_winit`'s map, so Bevy keeps calling
+/// `request_redraw` on it and then declines to paint it; Win32 re-posts the paint request
+/// faster than the event queue can drain, no further frame ever starts, and the process
+/// livelocks. Deferring one schedule puts the despawn back before `Last`.
+#[derive(Component)]
+pub(super) struct CloseRequested;
+
+/// Despawns windows marked by [`CloseRequested`], early enough for `despawn_windows` to see it.
+///
+/// This is deliberately a polled system rather than an observer: the whole point is to land in
+/// a specific schedule slot, which is the timing exception in `prefer-observers-over-polling`.
+pub(super) fn despawn_requested_windows(
+    mut commands: Commands,
+    requested: Query<Entity, With<CloseRequested>>,
+) {
+    for entity in requested.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
 pub(super) fn apply_probe_command(
     event: On<ProbeCommandIntent>,
     mut commands: Commands,
@@ -225,7 +250,7 @@ pub(super) fn apply_probe_command(
                 if let Some(window_key) = window_key {
                     commands.trigger(CancelWindowRecovery { window: window_key });
                 }
-                commands.entity(entity).despawn();
+                commands.entity(entity).insert(CloseRequested);
                 Ok("window close requested")
             },
         ),

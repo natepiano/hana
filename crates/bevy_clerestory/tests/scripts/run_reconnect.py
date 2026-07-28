@@ -137,7 +137,15 @@ class ProbeProcess:
         )
         return session, client
 
-    def start(self) -> dict[str, object]:
+    def start(self, *, pin_verified_identity: bool = True) -> dict[str, object]:
+        """Launch the probe and wait for its ready snapshot.
+
+        Pinning resolves the target monitor by verified id afterwards, which is what keeps a
+        reconnect case following the same panel once a disconnect renumbers the winit indices.
+        Cases that never re-resolve the target pass `pin_verified_identity=False` so a host
+        whose panels expose no EDID can still run them; the cases that do depend on identity
+        demand it themselves and still fail loudly when it is missing.
+        """
         self.artifact_directory.mkdir(parents=True, exist_ok=True)
         for attempt in range(1, 4):
             if attempt > 1:
@@ -153,8 +161,8 @@ class ProbeProcess:
                 if attempt < 3 and _is_bind_collision(stderr):
                     continue
                 raise
-            target = self.target_monitor(snapshot)
-            self.target_verified_id = verified_id(target)
+            if pin_verified_identity:
+                self.target_verified_id = verified_id(self.target_monitor(snapshot))
             self.save_snapshot("ready", snapshot)
             return snapshot
         raise RuntimeError("probe launch retries were exhausted")
@@ -820,7 +828,10 @@ def run_zero_window_case(
 ) -> CaseResult:
     probe = ProbeProcess(executable, artifact_directory, 0, "windowed", suite_run_id)
     try:
-        initial = probe.start()
+        # This case closes every window and asserts liveness, record retention, command
+        # idempotence, and reconstruction. None of that re-resolves the target monitor, so a
+        # host without EDID must not be blocked from running it.
+        initial = probe.start(pin_verified_identity=False)
         initial_cursor = _as_int(initial.get("record_cursor", 0))
         for selector in ("control", "application", "automatic", "primary"):
             receipt = probe.client.command(
