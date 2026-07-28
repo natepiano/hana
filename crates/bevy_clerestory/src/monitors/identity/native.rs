@@ -178,7 +178,7 @@ fn macos_panel_evidence(
     // on the non-null path before it goes out of scope.
     let uuid_reference = unsafe { CGDisplayCreateUUIDFromDisplayID(display_id) };
     if uuid_reference.is_null() {
-        return Err(MonitorIdentificationError::InvalidStableIdentity);
+        return Err(MonitorIdentificationError::StablePhysicalIdentityUnavailable);
     }
     // SAFETY: `uuid_reference` is a non-null CFUUIDRef that this thread owns until `CFRelease`.
     let uuid_bytes = unsafe { CFUUIDGetUUIDBytes(uuid_reference) };
