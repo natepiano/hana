@@ -11,7 +11,6 @@ use bevy::window::WindowPosition;
 use bevy::window::WindowScaleFactorChanged;
 use bevy::winit::WINIT_WINDOWS;
 use bevy_kana::ToI32;
-use bevy_kana::ToU32;
 
 use super::strategy::FullscreenRestoreState;
 use super::strategy::MonitorScaleStrategy;
@@ -286,8 +285,8 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
 /// triggers the final `ApplySize` phase at `target_scale`.
 ///
 /// With no saved position, we anchor the window on the saved monitor via
-/// `WindowPosition::Centered` and size at `starting_scale` (so the stored logical size
-/// resolves to `target.physical_size` once `WindowPosition::Centered` selects the target monitor).
+/// `WindowPosition::Centered` and size from `TargetPosition::physical_size`, which
+/// `compute_target_position` already derived at `target_scale`.
 /// The `WindowScaleFactorChanged` -> `WindowRestoreState::ApplySize` transition is
 /// skipped because macOS does not fire `WindowScaleFactorChanged` for windows that are
 /// still hidden; waiting for it would deadlock. Settle starts immediately and verifies
@@ -298,31 +297,22 @@ fn begin_cross_dpi_restore(
     attempt_id: Option<RestoreAttemptId>,
 ) {
     if target_position.physical_position.is_none() {
-        // Size at `starting_scale`: `set_physical_resolution` is interpreted at the
-        // window's current scale factor, which is `starting_scale` until the move
-        // completes. Storing logical = `starting_size / starting_scale = logical_size`
-        // means the post-move physical size resolves to `logical_size * target_scale`,
-        // matching `target.physical_size` for settle.
-        let physical_width =
-            (f64::from(target_position.logical_size.x) * target_position.starting_scale).to_u32();
-        let physical_height =
-            (f64::from(target_position.logical_size.y) * target_position.starting_scale).to_u32();
+        let physical_size = target_position.physical_size;
         debug!(
             "[begin_cross_dpi_restore] no saved position, centering on monitor {} at \
-             starting_scale={} (physical {}x{} → logical {}x{} after move to target_scale={})",
+             target_scale={} (physical {}x{} = logical {}x{})",
             target_position.monitor_index,
-            target_position.starting_scale,
-            physical_width,
-            physical_height,
+            target_position.target_scale,
+            physical_size.x,
+            physical_size.y,
             target_position.logical_size.x,
-            target_position.logical_size.y,
-            target_position.target_scale
+            target_position.logical_size.y
         );
         window.position =
             WindowPosition::Centered(MonitorSelection::Index(target_position.monitor_index));
         window
             .resolution
-            .set_physical_resolution(physical_width, physical_height);
+            .set_physical_resolution(physical_size.x, physical_size.y);
         window.visible = true;
         target_position.settle_state = Some(SettleState::new());
         return;
@@ -1013,6 +1003,7 @@ mod scale_change_wait_tests {
 )]
 mod tests {
     use bevy::window::MonitorSelection;
+    use bevy::window::WindowResolution;
 
     use super::*;
     use crate::WindowKey;
@@ -1031,6 +1022,27 @@ mod tests {
                 physical_size: UVec2::new(3_440, 1_440),
             },
             effective_window_mode: WindowMode::BorderlessFullscreen(MonitorSelection::Index(index)),
+        }
+    }
+
+    /// Mirrors the `no_position_cross_dpi_restore` suite case: 800x600 logical saved with no
+    /// position, launched on a 2.0-scale monitor, restoring to a 1.0-scale monitor.
+    const fn unpositioned_cross_dpi_target() -> TargetPosition {
+        TargetPosition {
+            physical_position:        None,
+            logical_position:         None,
+            physical_size:            UVec2::new(800, 600),
+            logical_size:             UVec2::new(800, 600),
+            target_scale:             1.0,
+            starting_scale:           2.0,
+            monitor_scale_strategy:   MonitorScaleStrategy::HigherToLower(
+                WindowRestoreState::NeedInitialMove,
+            ),
+            saved_window_mode:        SavedWindowMode::Windowed,
+            monitor_index:            TARGET_MONITOR_INDEX,
+            fullscreen_restore_state: None,
+            scale_change_wait:        None,
+            settle_state:             None,
         }
     }
 
@@ -1068,6 +1080,40 @@ mod tests {
             Some(current_monitor),
             native_fullscreen,
         );
+    }
+
+    /// A window launched on a denser monitor is still sized by the monitor it restores *to*.
+    /// `set_physical_resolution` takes `TargetPosition::physical_size` directly; recomputing it
+    /// from `starting_scale` left the window at `logical_size * starting_scale` and settle never
+    /// reached the saved size.
+    #[test]
+    fn an_unpositioned_cross_dpi_restore_sizes_the_window_at_the_target_scale() {
+        let mut target = unpositioned_cross_dpi_target();
+        let mut resolution = WindowResolution::new(1_600, 1_200);
+        resolution.set_scale_factor(2.0);
+        let mut window = Window {
+            resolution,
+            ..default()
+        };
+
+        advance(
+            &mut target,
+            &mut window,
+            &current_monitor(FALLBACK_MONITOR_INDEX, 2.0),
+            NativeFullscreenState::Windowed,
+        );
+
+        assert_eq!(
+            window.resolution.physical_size(),
+            target.physical_size,
+            "the centered window is sized at target_scale, not starting_scale"
+        );
+        assert_eq!(
+            window.position,
+            WindowPosition::Centered(MonitorSelection::Index(TARGET_MONITOR_INDEX))
+        );
+        assert!(window.visible);
+        assert!(target.settle_state.is_some());
     }
 
     #[test]
