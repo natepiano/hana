@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::ecs::change_detection::Ref;
+use bevy::ecs::system::EntityCommands;
 use bevy::platform::collections::HashMap as BevyHashMap;
 use bevy::prelude::*;
 use hana_valence::AnchorId;
@@ -196,7 +197,10 @@ pub(super) fn reify_widgets(
         &PanelWidget,
         &WidgetKind,
         &WidgetSpec,
-        &StateAppearance,
+        &Cascade<super::WidgetHoveredAppearance>,
+        &Cascade<super::WidgetPressedAppearance>,
+        &Cascade<super::WidgetFocusedAppearance>,
+        &Cascade<super::WidgetDisabledAppearance>,
         &WidgetPreorder,
         &Transform,
         &WidgetAnchorRect,
@@ -228,7 +232,8 @@ pub(super) fn reify_widgets(
         for record in computed.widget_records() {
             let anchor_rect = WidgetAnchorRect::new(panel, record.rect());
             let visual_slots = WidgetVisualSlots::new(record.visual_slots().to_vec())
-                .with_elements(record.visual_elements().to_vec());
+                .with_elements(record.visual_elements().to_vec())
+                .with_part_appearances(record.part_appearances().to_vec());
             let entity = match existing_by_id.get(record.id()).copied() {
                 None => spawn_widget(
                     &mut commands,
@@ -308,6 +313,12 @@ fn spawn_widget(
         WidgetSpec::Slider(slider) => Some(slider.initial_state()),
         WidgetSpec::Button(_) | WidgetSpec::EditableField(_) => None,
     };
+    let StateAppearance {
+        hovered,
+        pressed,
+        focused,
+        disabled,
+    } = appearance;
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel).with_children(|children| {
         spawned = children
@@ -317,7 +328,7 @@ fn spawn_widget(
                 WidgetOf::new(panel),
                 kind,
                 authored,
-                appearance,
+                (hovered, pressed, focused, disabled),
                 WidgetPreorder(preorder),
                 transform,
                 global_transform,
@@ -353,7 +364,10 @@ fn update_widget(
         &PanelWidget,
         &WidgetKind,
         &WidgetSpec,
-        &StateAppearance,
+        &Cascade<super::WidgetHoveredAppearance>,
+        &Cascade<super::WidgetPressedAppearance>,
+        &Cascade<super::WidgetFocusedAppearance>,
+        &Cascade<super::WidgetDisabledAppearance>,
         &WidgetPreorder,
         &Transform,
         &WidgetAnchorRect,
@@ -369,7 +383,10 @@ fn update_widget(
         _,
         existing_kind,
         existing_authored,
-        existing_appearance,
+        existing_hovered,
+        existing_pressed,
+        existing_focused,
+        existing_disabled,
         existing_preorder,
         existing_transform,
         existing_anchor_rect,
@@ -407,9 +424,14 @@ fn update_widget(
     if existing_authored != authored {
         widget.insert(authored.clone());
     }
-    if existing_appearance != appearance {
-        widget.insert(appearance.clone());
-    }
+    update_widget_appearance(
+        &mut widget,
+        existing_hovered,
+        existing_pressed,
+        existing_focused,
+        existing_disabled,
+        appearance,
+    );
     if existing_preorder.0 != preorder {
         widget.insert(WidgetPreorder(preorder));
     }
@@ -454,6 +476,28 @@ fn update_widget(
                 commands.entity(entity).remove::<ButtonCallbackHandle>();
             },
         }
+    }
+}
+
+fn update_widget_appearance(
+    widget: &mut EntityCommands<'_>,
+    existing_hovered: &Cascade<super::WidgetHoveredAppearance>,
+    existing_pressed: &Cascade<super::WidgetPressedAppearance>,
+    existing_focused: &Cascade<super::WidgetFocusedAppearance>,
+    existing_disabled: &Cascade<super::WidgetDisabledAppearance>,
+    appearance: &StateAppearance,
+) {
+    if existing_hovered != &appearance.hovered {
+        widget.insert(appearance.hovered.clone());
+    }
+    if existing_pressed != &appearance.pressed {
+        widget.insert(appearance.pressed.clone());
+    }
+    if existing_focused != &appearance.focused {
+        widget.insert(appearance.focused.clone());
+    }
+    if existing_disabled != &appearance.disabled {
+        widget.insert(appearance.disabled.clone());
     }
 }
 
@@ -747,6 +791,8 @@ fn retire_anchor_geometry(commands: &mut Commands<'_, '_>, panel: Entity, widget
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use std::any::TypeId;
+
     use bevy::camera::NormalizedRenderTarget;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::ecs::system::SystemIdMarker;
@@ -763,8 +809,10 @@ mod tests {
     use hana_valence::ResolvedAnchorGeometry;
     use hana_valence::ResolvedAnchorOffset;
 
+    use super::StateAppearance;
     use super::WidgetPreorder;
     use crate::Anchor;
+    use crate::Appearance;
     use crate::Button;
     use crate::ButtonClicked;
     use crate::ComputedDiegeticPanel;
@@ -773,6 +821,8 @@ mod tests {
     use crate::El;
     use crate::Fit;
     use crate::HeadlessLayoutPlugin;
+    use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeEditableFieldSpec;
     use crate::LayoutBuilder;
     use crate::LayoutTree;
     use crate::Mm;
@@ -781,8 +831,13 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::PanelWidgets;
     use crate::Slider;
+    use crate::TextStyle;
+    use crate::WidgetDisabledAppearance;
+    use crate::WidgetFocusedAppearance;
+    use crate::WidgetHoveredAppearance;
     use crate::WidgetInteractivity;
     use crate::WidgetOf;
+    use crate::WidgetPressedAppearance;
     use crate::cascade::Cascade;
     use crate::cascade::CascadeFrom;
     use crate::panel::PanelAttachmentAuthored;
@@ -869,6 +924,72 @@ mod tests {
             builder.with(El::new().button(*id), |_| {});
         }
         builder.build()
+    }
+
+    fn appearance_tree(color: Color) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered(Appearance::new().background(color)),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn hovered_empty_appearance() -> StateAppearance {
+        StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(Appearance::new())),
+            ..StateAppearance::default()
+        }
+    }
+
+    fn part_appearance_tree(include_leading_sibling: bool) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("action"), |builder| {
+            if include_leading_sibling {
+                builder.with(El::new(), |_| {});
+            }
+            builder.with(El::new(), |_| {});
+        });
+        let mut tree = builder.build();
+        let part = tree.len() - 1;
+        assert!(tree.set_element_state_appearance(part, hovered_empty_appearance()));
+        tree
+    }
+
+    fn editable_display_tree() -> LayoutTree {
+        let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().editable_field("gain", field), |builder| {
+            builder.text(("display", TextStyle::new(10.0)));
+            builder.with(El::new(), |_| {});
+        });
+        let mut tree = builder.build();
+        let part = tree.len() - 1;
+        assert!(tree.set_element_state_appearance(part, hovered_empty_appearance()));
+        tree
+    }
+
+    fn inline_editor_content_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::with_root(El::new());
+        builder.with(El::new(), |_| {});
+        builder.with(El::new(), |_| {});
+        let mut tree = builder.build();
+        let part = tree.len() - 1;
+        assert!(tree.set_element_state_appearance(part, hovered_empty_appearance()));
+        tree
+    }
+
+    fn part_appearance_keys(app: &App, widget: Entity) -> Option<Vec<usize>> {
+        app.world().get::<WidgetVisualSlots>(widget).map(|slots| {
+            slots
+                .part_appearances()
+                .iter()
+                .map(|(element_index, _)| *element_index)
+                .collect()
+        })
     }
 
     fn offset_widget_tree(width: f32) -> LayoutTree {
@@ -1747,6 +1868,186 @@ mod tests {
                 .zip(app.world().get::<WidgetPreorder>(first))
                 .is_some_and(|(second_order, first_order)| second_order.0 < first_order.0)
         );
+    }
+
+    #[test]
+    fn reified_widget_carries_four_appearance_cascades_without_state_appearance() {
+        let mut app = test_app();
+        let Some(panel) = spawn_panel(&mut app, appearance_tree(Color::srgb(1.0, 0.0, 0.0))) else {
+            return;
+        };
+        app.update();
+        let Some(widget) = resolve_widget(&mut app, panel, PanelElementId::named("action")) else {
+            return;
+        };
+        let entity = app.world().entity(widget);
+
+        assert!(matches!(
+            entity.get::<Cascade<WidgetHoveredAppearance>>(),
+            Some(Cascade::Override(_))
+        ));
+        assert!(matches!(
+            entity.get::<Cascade<WidgetPressedAppearance>>(),
+            Some(Cascade::Inherit)
+        ));
+        assert!(matches!(
+            entity.get::<Cascade<WidgetFocusedAppearance>>(),
+            Some(Cascade::Inherit)
+        ));
+        assert!(matches!(
+            entity.get::<Cascade<WidgetDisabledAppearance>>(),
+            Some(Cascade::Inherit)
+        ));
+        assert!(!entity.contains_type_id(TypeId::of::<StateAppearance>()));
+    }
+
+    #[test]
+    fn reauthoring_one_state_reinserts_only_its_cascade_channel() {
+        let mut app = test_app();
+        let Some(panel) = spawn_panel(&mut app, appearance_tree(Color::srgb(1.0, 0.0, 0.0))) else {
+            return;
+        };
+        app.update();
+        let Some(widget) = resolve_widget(&mut app, panel, PanelElementId::named("action")) else {
+            return;
+        };
+        let before = (
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetHoveredAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetPressedAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetFocusedAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetDisabledAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+        );
+        let (
+            Some(before_hovered),
+            Some(before_pressed),
+            Some(before_focused),
+            Some(before_disabled),
+        ) = before
+        else {
+            return;
+        };
+
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, appearance_tree(Color::srgb(0.0, 0.0, 1.0)))
+                .is_ok()
+        );
+        app.update();
+
+        let after = (
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetHoveredAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetPressedAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetFocusedAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Cascade<WidgetDisabledAppearance>>()
+                .map(|cascade| cascade.last_changed()),
+        );
+        let (Some(after_hovered), Some(after_pressed), Some(after_focused), Some(after_disabled)) =
+            after
+        else {
+            return;
+        };
+
+        assert_ne!(after_hovered, before_hovered);
+        assert_eq!(after_pressed, before_pressed);
+        assert_eq!(after_focused, before_focused);
+        assert_eq!(after_disabled, before_disabled);
+    }
+
+    #[test]
+    fn reifying_structure_changes_replaces_part_appearance_indices() {
+        let mut app = test_app();
+        let tree = part_appearance_tree(false);
+        let panel = spawn_panel(&mut app, tree).expect("panel should build");
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("action"))
+            .expect("widget should be reified");
+        let before = part_appearance_keys(&app, widget)
+            .expect("widget should carry reified part appearances");
+        assert_eq!(before.len(), 1);
+
+        let tree = part_appearance_tree(true);
+        assert!(app.world_mut().commands().set_tree(panel, tree).is_ok());
+        app.update();
+
+        let after = part_appearance_keys(&app, widget)
+            .expect("widget should replace its reified part appearances");
+        assert_eq!(after.len(), 1);
+        assert_ne!(after, before);
+        assert!(before.iter().all(|index| !after.contains(index)));
+    }
+
+    #[test]
+    fn inline_editor_round_trip_replaces_part_appearance_indices() {
+        let mut app = test_app();
+        let mut authoritative_tree = editable_display_tree();
+        let panel = spawn_panel(&mut app, authoritative_tree.clone()).expect("panel should build");
+        app.update();
+        let widget = resolve_widget(&mut app, panel, PanelElementId::named("gain"))
+            .expect("field should be reified");
+        let display_before = part_appearance_keys(&app, widget)
+            .expect("field should carry reified part appearances");
+        assert_eq!(display_before.len(), 1);
+
+        let editor_content = inline_editor_content_tree();
+        let mut editor_tree = authoritative_tree.clone();
+        assert_eq!(
+            editor_tree.set_field_editing_content(&PanelElementId::named("gain"), &editor_content),
+            crate::layout::FieldDisplayTextUpdate::Updated,
+        );
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, editor_tree)
+                .is_ok()
+        );
+        app.update();
+
+        let editor = part_appearance_keys(&app, widget)
+            .expect("field should replace its reified part appearances");
+        assert_eq!(editor.len(), 1);
+        assert_ne!(editor, display_before);
+        assert!(display_before.iter().all(|index| !editor.contains(index)));
+
+        assert_eq!(
+            authoritative_tree.set_field_display_text(&PanelElementId::named("gain"), "edited"),
+            crate::layout::FieldDisplayTextUpdate::Updated,
+        );
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, authoritative_tree)
+                .is_ok()
+        );
+        app.update();
+
+        let display_after = part_appearance_keys(&app, widget)
+            .expect("field should restore its reified part appearances");
+        assert_eq!(display_after, display_before);
+        assert!(editor.iter().all(|index| !display_after.contains(index)));
     }
 
     #[test]

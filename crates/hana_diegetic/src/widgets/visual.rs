@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use super::PanelWidget;
+use super::StateAppearance;
+use super::VisualElementCapabilities;
 use super::WidgetOf;
 use crate::layout::BoundingBox;
 
@@ -76,8 +78,9 @@ pub(crate) struct ComputedVisualSlot {
 /// Reified slot-to-record references owned by one widget entity.
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct WidgetVisualSlots {
-    slots:    Vec<ComputedVisualSlot>,
-    elements: Vec<usize>,
+    slots:            Vec<ComputedVisualSlot>,
+    elements:         Vec<(usize, VisualElementCapabilities)>,
+    part_appearances: Vec<(usize, StateAppearance)>,
 }
 
 impl WidgetVisualSlots {
@@ -86,18 +89,36 @@ impl WidgetVisualSlots {
         Self {
             slots,
             elements: Vec::new(),
+            part_appearances: Vec::new(),
         }
     }
 
     #[must_use]
-    pub(crate) fn with_elements(mut self, elements: Vec<usize>) -> Self {
+    pub(crate) fn with_elements(
+        mut self,
+        elements: Vec<(usize, VisualElementCapabilities)>,
+    ) -> Self {
         self.elements = elements;
         self
     }
 
-    /// Returns every `LayoutTree` element owned by the widget declaration.
     #[must_use]
-    pub(crate) fn elements(&self) -> &[usize] { &self.elements }
+    pub(crate) fn with_part_appearances(
+        mut self,
+        part_appearances: Vec<(usize, StateAppearance)>,
+    ) -> Self {
+        self.part_appearances = part_appearances;
+        self
+    }
+
+    /// Returns every retained-record recipient owned by the widget declaration.
+    #[must_use]
+    pub(crate) fn elements(&self) -> &[(usize, VisualElementCapabilities)] { &self.elements }
+
+    /// Returns every descendant with an explicitly authored state appearance.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn part_appearances(&self) -> &[(usize, StateAppearance)] { &self.part_appearances }
 
     /// Resolves a stable slot id to its current `LayoutTree` element index.
     #[must_use]
@@ -469,7 +490,7 @@ pub(crate) fn dispatch_visual_overrides(
         let entries = overrides.map_or_else(Vec::new, |overrides| {
             let mut by_element = HashMap::<usize, VisualSlotOverride>::new();
             if let Some(color) = overrides.subtree_color() {
-                for &element_index in slots.elements() {
+                for &(element_index, _) in slots.elements() {
                     by_element.insert(
                         element_index,
                         VisualSlotOverride {

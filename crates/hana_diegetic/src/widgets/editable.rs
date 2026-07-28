@@ -3,7 +3,6 @@
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
 
-use super::StateAppearance;
 use super::VisualSlotId;
 #[cfg(test)]
 use super::VisualSlotOverride;
@@ -12,10 +11,12 @@ use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetState;
+use super::WidgetStateCascades;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
 use super::visual;
 use crate::DiegeticPanel;
+use crate::cascade::Cascade;
 
 /// Reports whether an editable field's authored presentation or presented state
 /// changed since the last run.
@@ -31,7 +32,10 @@ pub(super) fn presentation_inputs_changed(
         (
             With<WidgetOf>,
             Or<(
-                Changed<StateAppearance>,
+                Changed<Cascade<super::WidgetHoveredAppearance>>,
+                Changed<Cascade<super::WidgetPressedAppearance>>,
+                Changed<Cascade<super::WidgetFocusedAppearance>>,
+                Changed<Cascade<super::WidgetDisabledAppearance>>,
                 Changed<WidgetVisualSlots>,
                 Changed<WidgetFocusVisible>,
                 Changed<PickingInteraction>,
@@ -67,7 +71,10 @@ pub(super) fn present_editable_state(
         (
             Entity,
             &WidgetKind,
-            &StateAppearance,
+            &Cascade<super::WidgetHoveredAppearance>,
+            &Cascade<super::WidgetPressedAppearance>,
+            &Cascade<super::WidgetFocusedAppearance>,
+            &Cascade<super::WidgetDisabledAppearance>,
             &WidgetOf,
             &WidgetVisualSlots,
             Option<&PickingInteraction>,
@@ -80,7 +87,20 @@ pub(super) fn present_editable_state(
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (entity, kind, appearance, widget_of, slots, interaction, disabled, focused) in &fields {
+    for (
+        entity,
+        kind,
+        hovered,
+        pressed,
+        focused_appearance,
+        disabled_appearance,
+        widget_of,
+        slots,
+        interaction,
+        disabled,
+        focused,
+    ) in &fields
+    {
         if *kind != WidgetKind::EditableField {
             continue;
         }
@@ -96,6 +116,8 @@ pub(super) fn present_editable_state(
             .then_some(WidgetState::Hovered),
             disabled.then_some(WidgetState::Disabled),
         ];
+        let appearance =
+            WidgetStateCascades::new(hovered, pressed, focused_appearance, disabled_appearance);
         let desired = appearance.resolve(&active, panels.get(widget_of.panel()).ok());
         visual::write_slot_override(
             entity,

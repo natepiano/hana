@@ -23,17 +23,17 @@
   - `crates/hana_diegetic/tests/` — `headless_widgets.rs` (external-client integration test), `trybuild.rs` (driver), `trybuild/{pass,fail}/` (fixtures).
   - `crates/bevy_kana/src/` — `cascade.rs` (generic `Cascade<T>`, `CascadeAttribute`, propagation).
 
-- **Key files** (line refs re-verified after Phase 1; files Phase 1 did not touch still carry `HEAD` = `64f8bdc0` refs):
+- **Key files** (line refs re-verified after Phase 2; files neither Phase 1 nor Phase 2 touched still carry `HEAD` = `64f8bdc0` refs):
   - `src/layout/builder.rs` (1332 lines) — `El<L, Role>`; sealed `ElementRole` (`:104`), `Widget` (`:114`), `HasPressedState` (`:158`); `WidgetDeclaration` (`:129`), `WidgetRootSlot` (`:135`); `El::background` (`:602`), `El::border` (`:608`); `El::editable_field` (`:715`); the four state verbs `hovered` (`:791`), `focused` (`:801`), `disabled` (`:811`) on `El<L, WidgetElement<W>>` and `pressed` (`:830`) on the `HasPressedState` block; `El::disabled_color` (`:886`); `LayoutBuilder::with_root` (`:1153`), `with` (`:1185`), `text` (`:1215`), `image` (`:1247`); `Text::layout` (`:265`).
-  - `src/layout/element.rs` (2480 lines) — `CommonEl`/`Element`, `appearance` field (`:147`); `WidgetContainsInteractiveDescendant` (`:773`); `computed_widget_records` (`:823`) and its owning-record walk / `push_visual_element` call (`:879`); `set_field_editing_content` (`:1001`); `validated_element_widget_owner` (`:1242`); `validated_element_appearance` (`:1283`).
+  - `src/layout/element.rs` — `CommonEl`/`Element`, `appearance` field (`:148`); `WidgetContainsInteractiveDescendant` (`:788`); `validate_tree`'s stack walk (`:785-836`), the **only** appearance-reachable walk that returns `Result<_, PanelBuildError>`, calling `validated_element_widget_owner` at `:820`; `computed_widget_records` (`:838`, returns `Vec<ComputedWidgetRecord>` — **no `Result`**) and its owning-record walk (`:895`) calling `record_owned_widget_element` (`:1356`) and `element_visual_capabilities` (`:1332`); `set_field_editing_content` (`:1022`); `validated_element_widget_owner` (`:1263`); `validated_element_appearance` (`:1304`) with the four `any` calls (`:1311-1326`); `set_element_state_appearance` (`:461`, `#[cfg(test)]`).
   - `src/layout/draw.rs:11` — `PanelDraw`. `src/layout/line.rs:42` — `PanelShape` enum; `PanelCircle` struct at `:64`.
   - `src/ime/editor.rs` (1968 lines) — `inline_editor_content_tree` **definition at `:1132`** (the earlier `:665` / later `:1184` sites are callers/helpers, not the def).
-  - `src/widgets/appearance.rs` (485 lines) — `VisualChange<T>` (`:26`) with `VisualChange::layer_onto` (`:49`), `Appearance` (`:113`) with `Appearance::layer_onto` (`:172`), the four `Widget*Appearance` wrappers and their size assertions (`:214` region), `StateAppearance` (`:279`) with `layer` (`:287-306`) and `any` (`:309`), `resolve` (`:324`), `WidgetState` (`:343`), `LAYER_ORDER` (`:357`).
-  - `src/widgets/visual.rs` (799 lines) — `VisualSlotOverride` (`:147`), `WidgetVisualOverrides` (`:234`), `subtree_color` field (`:235`) / `set_subtree_color` (`:241`) / getter (`:246`), `write_widget_overrides` (`:293`), `write_slot_override` (`:327`), `VisualOverrideIndex` (`:392`), `dispatch_visual_overrides` (`:442`) with the subtree seeding loop at `:471`.
-  - `src/widgets/button.rs`, `src/widgets/slider.rs` (`presentation_inputs_changed` run condition `:1137`, `present_slider_state` `:1190` — it takes `&StateAppearance` at `:1193`, subtree seeding `:1232`, `disabled_color` field `:171` / default `:190` / builder `:232` / crate-internal setter `:253`, test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` `:5251`), `src/widgets/editable.rs` — the three presentation systems.
-  - `src/widgets/id.rs` (306 lines) — `WidgetKind` (`:98`), `ComputedWidgetRecord` (`:122`), `push_visual_element` (`:188`).
-  - `src/widgets/reify.rs` (2141 lines) — `reify_widgets` (`:183`), `spawn_widget` (`:291`), `update_widget` (`:341`).
-  - `src/widgets/mod.rs` — `WidgetSystems` enum (`:141`), ordering `Reify → ReifyCommandsApplied → ResolveInteractivity → InteractivityCommandsApplied → Focus → SemanticInput → FocusCommandsApplied → PresentationCommandsApplied`; `WidgetsPlugin` (`impl Plugin` `:221`) with the `cascade::cascade_plugin::<WidgetInteractivity>()` registration at `:232`; `mod appearance;` stays **private** (`:1`) — the public surface comes from the `pub use appearance::…` re-exports, so no phase needs `pub mod` here.
+  - `src/widgets/appearance.rs` — `VisualChange<T>` (`:26`) with `VisualChange::layer_onto` (`:49`), `Appearance` (`:113`) with `Appearance::layer_onto` (`:172`), the four `Widget*Appearance` wrappers and their size assertions (`:214` region), `StateAppearance` (`:284`, **not a `Component`**) with `cascades()` (`:293`); `WidgetStateCascades<'a>` (`:299`) with `new` (`:308`), `any_overridden` (`:323`), `layer` (`:330`), `any` (`:352`), `resolve` (`:367`); `WidgetState` (`:386`), `LAYER_ORDER` (`:400`). **`layer`/`any`/`resolve` live on `WidgetStateCascades`, not on `StateAppearance`.**
+  - `src/widgets/visual.rs` — `VisualSlotOverride` (`:168`) with the generic `color` field (`:170`), `WidgetVisualSlots.elements` / `.part_appearances` (`:83`) with `with_elements` (`:97`) / `with_part_appearances` (`:106`) / `elements()` (`:116`) / `part_appearances()` (`:119`, **`#[cfg(test)]`**), `WidgetVisualOverrides` (`:255`), `subtree_color` field (`:256`) / `set_subtree_color` (`:262`) / getter (`:267`), `write_widget_overrides` (`:314`, replaces the whole component), `write_slot_override` (`:348`, one slot only), `VisualOverrideIndex` (`:413`), `dispatch_visual_overrides` (`:463`) with its widget filter (`:471`), existing `HashMap<usize, VisualSlotOverride>` (`:491`), and the subtree seeding loop (`:492`).
+  - `src/widgets/button.rs` (`presentation_inputs_changed` `:134` — **filters `With<WidgetOf>` only, no `WidgetKind` filter, and its removal drains are unfiltered**; `present_button_state` writes one slot via `write_slot_override` `:241`), `src/widgets/slider.rs` (`presentation_inputs_changed` `:1138` — filters `WidgetKind::Slider`; `present_slider_state` `:1194`, writes the whole component via `write_widget_overrides` `:1288`, subtree seeding `:1242`, `disabled_color` field `:172` / default `:191` / builder `:233` / crate-internal setter `:255`, test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` `:5267`), `src/widgets/editable.rs` (`presentation_inputs_changed` `:29` — filters `WidgetKind::EditableField` on both the changed query and the removal drains; `present_editable_state` writes one slot via `write_slot_override` `:122`).
+  - `src/widgets/id.rs` — `WidgetKind` (`:98`), `VisualElementCapabilities` bitflags (`:115`, one `CONTENT` bit covering text **and** image **and** non-empty `PanelDraw` together), `ComputedWidgetRecord` (`:138`) with `appearance` field (`:143`) and `part_appearances` (`:144`), `appearance()` (`:188`), `push_visual_element` (`:208`), `part_appearances()` (`:216`), `push_part_appearance` (`:218`).
+  - `src/widgets/reify.rs` — `reify_widgets` (`:184`, gated on `Changed<ComputedDiegeticPanel>` at `:194`), its existing-widget query (`:196-211`), `spawn_widget` (`:296`), `update_widget` (`:352`) with the `WidgetVisualSlots` inequality guard (`:445`), `update_widget_appearance` (`:482`).
+  - `src/widgets/mod.rs` — `WidgetSystems` enum (`:143`), ordering `Reify → ReifyCommandsApplied → ResolveInteractivity → InteractivityCommandsApplied → Focus → SemanticInput → FocusCommandsApplied → PresentationCommandsApplied`; `WidgetsPlugin` (`impl Plugin` `:223`) with `add_plugins` (`:233-237`) including `cascade::cascade_plugin::<WidgetInteractivity>()` (`:234`), `configure_sets` (`:238-267`), `add_systems` (`:299-313`) where the three presenters attach their run conditions (`:300` button, `:304` editable, `:308` slider); `mod appearance;` stays **private** (`:1`) — the public surface comes from the `pub use appearance::…` re-exports, so no phase needs `pub mod` here.
   - `src/cascade/mod.rs:44` — `cascade_plugin<A: CascadeRoot>()`.
   - `src/widgets/interactivity.rs` (529 lines) — `Cascade<WidgetInteractivity>`, the pattern every cascade step mirrors.
   - `src/cascade/attributes.rs` (353 lines) — `CascadeEntityCommandsExt` (`:30`), `resolved_*` fns (`:223-322`), `apply_cascade_override` (`:326`), `remove_cascade_override` (`:336`), `resolved_cascade` (`:345`). `src/cascade/constants.rs:7` — `CASCADE_ATTRIBUTE_BYTES: usize = 32`. `src/cascade/resolved.rs` (177 lines) — `cascade_attribute!` (`:20`), `SdfMaterial`/`TextMaterial`/`ShapeMaterial` (`:112`/`:125`/`:138`) with their per-attribute size assertions at `:118`/`:131`/`:144`, `CascadeRoot` (`:175`).
@@ -66,11 +66,11 @@
   - **Public opaque types, not leaked private ones.** A `pub` trait whose methods mention `pub(crate)` types trips `private_interfaces` even when the methods live on a sealed trait in a private module; E0446 additionally forbids a public trait exposing a private associated type. Every type reachable from a public associated type — `WidgetBuilder`, `WidgetPart`, `EditableField`, the scope token — is a public opaque type with private fields.
   - **Presentation must not dirty `WidgetVisualOverrides` when resolved values are unchanged.** Compare through an immutable query and take `get_mut` only on inequality; comparing inside a method already reached through `Mut<_>` is too late.
   - **Workspace lints, inherited by both packages** (`[lints] workspace = true` in each `Cargo.toml`): `[lints.rust] missing_docs = "deny"` — every new public item needs a doc comment. `[lints.clippy]` denies the `all` / `cargo` / `nursery` / `pedantic` groups (`priority = -1`) plus `allow_attributes_without_reason`, `expect_used`, `panic`, `self_named_module_files`, `unreachable`, `unwrap_used`. No `.unwrap()` / `.expect()` / `panic!` in non-test code, and any `#[allow(...)]` needs a `reason = "…"`.
-  - **Headless only.** No phase needs a GPU, a window, or a screenshot. Assertions are on resolved `VisualSlotOverride` values, `VisualOverrideIndex` membership, batch-key identity, and entity counts — never on rendered color. Harnesses: `HeadlessLayoutPlugin` (`panel/mod.rs:194`) for layout / reification / cascade resolution; a plain `App` with no render device for retained batching (precedent: `fill_batch.rs` 59 tests, `panel_text/batching.rs` 33, `panel_shapes/batching.rs` 31, `material_table.rs` 31); `trybuild` for typestate boundaries. Baseline: `verify.sh test hana_diegetic` reports **1100 passed / 2 skipped** at Phase 1 completion, against 1103 `#[test]` items in `crates/hana_diegetic/src` (one is feature-gated out of the default run). Measure with that command, not by counting the workspace — a phase's gate covers this package only. **No phase may land with a lower test count than it inherited.**
+  - **Headless only.** No phase needs a GPU, a window, or a screenshot. Assertions are on resolved `VisualSlotOverride` values, `VisualOverrideIndex` membership, batch-key identity, and entity counts — never on rendered color. Harnesses: `HeadlessLayoutPlugin` (`panel/mod.rs:194`) for layout / reification / cascade resolution; a plain `App` with no render device for retained batching (precedent: `fill_batch.rs` 59 tests, `panel_text/batching.rs` 33, `panel_shapes/batching.rs` 31, `material_table.rs` 31); `trybuild` for typestate boundaries. Baseline: `verify.sh test hana_diegetic` reports **1107 passed / 2 skipped** at Phase 2 completion, against 1110 `#[test]` items in `crates/hana_diegetic/src` (one is feature-gated out of the default run). Measure with that command, not by counting the workspace — a phase's gate covers this package only. **No phase may land with a lower test count than it inherited.**
 
 ## Phases
 
-### Phase 1 — `Appearance` bundle replaces the flat state builders · status: done
+### Phase 1 — `Appearance` bundle replaces the flat state builders · status: done (`3560036b`)
 
 #### Work Order
 
@@ -157,7 +157,7 @@ Update `examples/widgets.rs`, the library tests, and the trybuild fail fixture w
 ### Phase 1 Review
 
 - **Phase 2** re-scoped: the four root `Cascade` values it listed as work already exist as `ComputedWidgetRecord.appearance` (`id.rs:127`), populated by the ownership walk. Phase 2 now adds only the sparse part map.
-- **Phase 2** carries a `**Pending decision:**` on how the four widget-level bundles sit on the widget entity — one aggregate component or four standalone ones. Phase 1 inserts one aggregate (`reify.rs:322`), but `propagate_cascade` only sees standalone `Cascade<A>` components and strips `Resolved<A>` without them, so Phases 9 and 10 cannot work as written. Raised at Phase 2 rather than Phase 9 because Phase 3 rewrites all three presenters against whichever shape wins.
+- **Phase 2** inherited a `**Pending decision:**` on how the four widget-level bundles sit on the widget entity — one aggregate component or four standalone ones. Phase 1 inserts one aggregate (`reify.rs:322`), but `propagate_cascade` only sees standalone `Cascade<A>` components and strips `Resolved<A>` without them, so Phases 9 and 10 could not work as written. Raised at Phase 2 rather than Phase 9 because Phase 3 rewrites all three presenters against whichever shape wins. **Resolved 2026-07-28: dissolve the aggregate** — `StateAppearance` loses its `Component` derive and the entity carries the four channels exclusively, landed in Phase 2. Phase 10's entity-shape bullet moved here with it.
 - **Phase 3** now points at the Phase 2 decision before rewriting the presenters, and its `presentation_inputs_changed` reference moved to `slider.rs:1137`.
 - **Phase 4** must now list `tests/trybuild.rs` in its Files: the driver's globs are what make a fixture reachable, none of them matches Phase 4's four new fail fixtures, and its compile-pass additions sit behind an `#[ignore]`d test — so four of its acceptance-gate lines would have passed while compiling nothing.
 - **Phase 4** and **Phase 11** gained the replacement-not-accumulation constraint: a state verb replaces the whole bundle, so chained single-property calls silently drop all but the last.
@@ -168,7 +168,7 @@ Update `examples/widgets.rs`, the library tests, and the trybuild fail fixture w
 - **Delegation Context** gained a **Docs** entry: `verify.sh` has no rustdoc or doctest verb and `cargo nextest run` does not execute doctests, so a public item linking a crate-private type passes every gate. Phase 1 shipped exactly that defect. Phases 4, 5, 7, 9, and 11 now carry an orchestrator-run docs gate line.
 - **Delegation Context** corrections: three claims were false after Phase 1 (no `Appearance` re-export; the trybuild fixture naming `pressed_background`; the sixteen flat builders at `builder.rs:786-939`), and line references into `builder.rs`, `appearance.rs`, `widgets/mod.rs`, `cascade/mod.rs`, `lib.rs`, and `slider.rs` were re-verified and updated across every remaining phase.
 
-### Phase 2 — Per-element appearance storage · status: todo
+### Phase 2 — Per-element appearance storage · status: done
 
 #### Work Order
 
@@ -188,34 +188,40 @@ The map is **scoped to the current computed tree revision** and replaced togethe
 
 At this point only the widget's own element can author a bundle, so nothing changes on screen and no presenter reads the map.
 
+**Widget entity shape — decided, not open.** `StateAppearance` **stops being a `Component`**. It remains the authoring-time and computed-record struct (`layout/builder.rs:395`, `layout/element.rs:147`, `widgets/id.rs:127`); the widget *entity* carries the four values as four standalone components instead, exactly as `Cascade<WidgetInteractivity>` already does two lines away.
+
+The reason is mechanical: `propagate_cascade` queries `Query<&Cascade<A>>` and *removes* `Resolved<A>` from any entity lacking a standalone `Cascade<A>` (`crates/bevy_kana/src/cascade.rs:361-400`). A value one field deep inside a `StateAppearance` component is invisible to it, so Phase 9's four channels and Phase 10's resolution would see no widget-level override on any widget. Landing the shape here — before Phase 3 rewrites all three presenters against it — avoids writing that work twice.
+
+Concretely:
+
+- Drop `Component` from `StateAppearance`'s derive (`widgets/appearance.rs:279`). Every other derive stays.
+- Add a crate-private borrowed view over the four cascades, and move the runtime read path onto it so there is one implementation, no per-frame clone, and no lifetime threading at the call sites:
+  ```rust
+  pub(crate) struct WidgetStateCascades<'a> {
+      hovered:  &'a Cascade<WidgetHoveredAppearance>,
+      pressed:  &'a Cascade<WidgetPressedAppearance>,
+      focused:  &'a Cascade<WidgetFocusedAppearance>,
+      disabled: &'a Cascade<WidgetDisabledAppearance>,
+  }
+  ```
+  It owns `layer`, `any`, and `resolve` (today `appearance.rs:287` / `:309` / `:324`); `StateAppearance` keeps a `cascades(&self) -> WidgetStateCascades<'_>` accessor plus a `WidgetStateCascades::new(&, &, &, &)` constructor for query terms. Build-time validation (`layout/element.rs:1290-1301`, four `appearance.any(…)` calls) goes through the accessor.
+- `spawn_widget` (`reify.rs:291`) inserts **all four**, `Cascade::Inherit` included — a missing component is the case that makes `propagate_cascade` strip `Resolved`. `update_widget` (`reify.rs:341`) compares and inserts **per channel**, replacing the single `existing_appearance != appearance` check (`:410`); the reify query at `:199` takes the four components in place of `&StateAppearance`.
+- The three presenters take the four components in their queries (`button.rs:181`, `slider.rs:1195`, `editable.rs:70`) and build a `WidgetStateCascades` to call `resolve`. Their run conditions replace `Changed<StateAppearance>` with the four `Changed<Cascade<Widget*Appearance>>` terms (`button.rs:138`, `slider.rs:1144`, `editable.rs:34`).
+
+This is a shape change only — no resolution behavior moves in this phase, and the presentation tests must pass unchanged.
+
 **Files:**
 - `src/widgets/id.rs:122` — add the sparse part map to `ComputedWidgetRecord`; the four root `Cascade` values are already there as `appearance` (`:127`) and need no change. `push_visual_element` (`:188`) gains the capability mask and the container filter.
-- `src/layout/element.rs:868` — the owning-record walk fills the map from authored entries; `:823` `computed_widget_records` propagates it.
+- `src/layout/element.rs:868` — the owning-record walk fills the map from authored entries; `:823` `computed_widget_records` propagates it. `:1290-1301` — the four `any` calls move to the borrowed-view accessor.
 - `src/widgets/visual.rs:234` — `WidgetVisualOverrides` retires prior keys on computed-panel update, alongside `WidgetVisualSlots`.
+- `src/widgets/appearance.rs:279` — drop the `Component` derive; add `WidgetStateCascades<'a>` with `layer` / `any` / `resolve` and the `StateAppearance::cascades` accessor.
+- `src/widgets/reify.rs` — query (`:199`), `spawn_widget` (`:291`, insert all four), `update_widget` (`:341`, per-channel comparison replacing `:410`).
+- `src/widgets/button.rs` (`:138`, `:181`), `src/widgets/slider.rs` (`:1144`, `:1195`), `src/widgets/editable.rs` (`:34`, `:70`) — four query terms and four `Changed` terms in place of one.
 
 **Constraints from prior phases:**
 - **Phase 1** made `Appearance` public with a fluent builder and re-exported it plus `WidgetHoveredAppearance` / `WidgetPressedAppearance` / `WidgetFocusedAppearance` / `WidgetDisabledAppearance` from the crate root. Each wrapper is `Arc<Appearance>` with hand-written `PartialEq` (`Arc::ptr_eq` then content equality) and its own `size_of` assertion against `CASCADE_ATTRIBUTE_BYTES`.
 - **Phase 1** reshaped `StateAppearance` to four `Cascade<Widget*Appearance>` fields, so per-state *authored presence* is already recorded and must be carried through the map, not flattened.
 - Only `El<L, WidgetElement<W>>` can author a bundle after Phase 1; parts arrive in Phase 4. Tests here reach non-root elements through a crate-internal path.
-
-**Pending decision:** how the four widget-level bundles are stored on the widget *entity* — one aggregate component or four standalone ones.
-
-Actual problem:
-Phase 1 put the four `Cascade` values inside a single `StateAppearance` struct, and `spawn_widget` inserts that one struct as one component (`widgets/reify.rs:322`). The cascade machinery this plan is built on does not look for it there: `propagate_cascade` queries `Query<&Cascade<A>>` and *removes* `Resolved<A>` from any entity that has no standalone `Cascade<A>` component (`crates/bevy_kana/src/cascade.rs:361-400`). Phase 9 registers four such channels and Phase 10 resolves through them; as things stand both would see no widget-level override on any widget.
-
-What exists now:
-- `ComputedWidgetRecord.appearance: StateAppearance` — the four `Cascade` values as one field (`widgets/id.rs:127`).
-- `spawn_widget` inserts `appearance` as a single component (`reify.rs:322`), while the working precedent right beside it, `Cascade<WidgetInteractivity>`, is inserted standalone (`reify.rs:330`).
-- `update_widget` compares `existing_appearance != appearance` as one unit (`reify.rs:410`).
-
-What should change — two viable directions:
-- **Unpack at spawn.** Keep `StateAppearance` as the computed-record shape, and have `spawn_widget` / `update_widget` insert its four values as four standalone components (always all four, `Cascade::Inherit` included, so `propagate_cascade` never strips a `Resolved`). Smallest edit; costs one extra source of truth, since the aggregate and the four components must not drift.
-- **Dissolve the aggregate as a component.** `StateAppearance` stays a computed-record/authoring-time struct only, and the entity carries the four components exclusively. No drift; more churn in `update_widget`'s change comparison, which becomes four comparisons.
-
-Recommendation:
-Dissolve the aggregate as a component, decided here in Phase 2 rather than at Phase 9. Phase 3 rewrites all three presentation systems against whatever shape the widget entity has (`present_slider_state` takes `&StateAppearance` at `slider.rs:1193`, and `button.rs` / `editable.rs` mirror it); if the shape changes at Phase 9 or 10, Phase 3's work is rewritten twice. Deciding it before Phase 3 dispatches costs nothing extra now.
-
-Approve this direction, or modify it?
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
@@ -225,6 +231,44 @@ Approve this direction, or modify it?
 - A test asserts the map holds only authored entries, sorted by element index.
 - **The example slider's structural containers produce no map entry** — 8 owned elements, 3 recipients.
 - Structural reordering and an editable display → editor → display transition retarget the map correctly and retire old indices.
+- A reified widget carries all four `Cascade<Widget*Appearance>` components — including the ones left `Cascade::Inherit` — and carries **no** `StateAppearance` component.
+- Re-authoring exactly one state re-inserts only that channel; the other three are untouched.
+
+### Retrospective
+
+**What worked:**
+- The entity-shape decision landed exactly as specified. `StateAppearance` lost its `Component` derive (`appearance.rs:284`), `WidgetStateCascades<'a>` (`:299`) took over `any` / `resolve`, and `spawn_widget` now inserts the four channels as a nested tuple — which Bevy treats as a `Bundle`, so four separate components reach the entity. Presentation tests passed unchanged, confirming this was a shape change only.
+- Deciding the shape here rather than at Phase 9 paid off immediately: Phase 3 rewrites all three presenters, and they now already query the four channels and build the borrowed view.
+- The capability mask (`VisualElementCapabilities`, `id.rs:115`) derives cleanly from the ordinary roles an element declared, and the container filter drops the example slider from 8 owned elements to 3 recipients as predicted.
+
+**What deviated from the plan:**
+- The part map lives inside `WidgetVisualSlots` (`visual.rs:83`) rather than in its own component. The plan said "replaced together with `WidgetVisualSlots`"; sharing the component achieves that for free but couples the two — see Implications.
+- `WidgetVisualSlots::part_appearances()` shipped `#[cfg(test)]` (`visual.rs:119`) because nothing outside tests reads it yet. `ComputedWidgetRecord::part_appearances()` (`id.rs:216`) is not gated.
+- `computed_widget_records` crossed the 100-line clippy limit once the part-appearance push and capability filter were added; the ownership-walk body was extracted to `record_owned_widget_element` (`element.rs:1356`).
+
+**Surprises:**
+- **Admission must key on override presence, not property authorship.** The first implementation admitted a part only when some inner `Appearance` named a concrete property, which made `.hovered(Appearance::new())` indistinguishable from never authoring hovered at all — destroying exactly the information Phase 8's deferred empty-bundle decision needs. Corrected to `WidgetStateCascades::any_overridden()` (`appearance.rs:323`), which tests for `Cascade::Override`.
+- **A retained-record recipient is not the same as "declares a draw."** `PanelDraw::shapes([])` and `lines([])` are public and produce a draw that emits nothing (`positioning.rs:328` returns early on an empty shape list), so the CONTENT capability bit is gated on a non-empty shape list, not on the presence of a `PanelDraw`.
+- **A stale-index test must drive the component that actually gets replaced.** Two tests written against `LayoutTree::computed_widget_records` could not fail on a retained stale index — one recomputed from an untouched tree, the other reordered before its only compute. Real coverage required app-level tests in `reify.rs` that push a structural change and an editor round trip through the widget entity's `WidgetVisualSlots`.
+
+**Implications for remaining phases:**
+- **Phase 3 must un-gate `WidgetVisualSlots::part_appearances()`** — it is `#[cfg(test)]` today and Phase 3 is its first non-test reader.
+- **Part appearance and slot geometry share one change-detection signal, and the coupling runs one way only.** Both live in `WidgetVisualSlots`, but a slider drag does *not* dirty it: `reify_widgets` runs only under `Changed<ComputedDiegeticPanel>` (`reify.rs:194`), `update_widget` re-inserts the component only on inequality (`reify.rs:445`), and a drag changes `SliderState` without relayout (proven by `thumb_translation_tracks_applied_value_without_relayout`, `slider.rs:5182`). The real cost is the other direction: re-authoring any part dirties `WidgetVisualSlots`, which additionally wakes `dispatch_visual_overrides` (`visual.rs:463`) into a full remove-and-rebuild of that widget's `VisualOverrideIndex` entries. Phase 3 should design against that direction; if it bites, splitting the map into its own component is the fix.
+- Phase 8 can still make the empty-bundle decision either way: the authored-vs-inherited distinction survives storage intact.
+
+### Phase 2 Review
+
+- **Phase 5** retargeted: its Spec, Files, and Phase 2 constraint all aimed validation at the ownership walk, which is `computed_widget_records` — it returns `Vec<ComputedWidgetRecord>` with no `Result` and runs on every compute, so it cannot raise a build error. Validation moves to `validate_tree`'s stack walk (`element.rs:785-836`), the only appearance-reachable walk that both knows the owner and returns `Result<_, PanelBuildError>`, and calls `element_visual_capabilities` (`:1332`) directly instead of reading a mask off a record that does not exist yet at build time.
+- **Phase 4** gained a gate line closing an invariant breach it would otherwise open: Phase 2 admits a part appearance with no capability gate, and `validated_element_appearance` is still reached only from the widget and editable branches — so opening authoring to every `El` would let a bundle on a structural container compile, store, and never present for the whole interval until Phase 5 lands. Phase 4 now rejects a bundle on a zero-capability element outright; Phase 5 refines it to per-property with part-naming locations.
+- **Phase 3** gained the write-path requirement: `WidgetVisualOverrides` is slot-keyed and index-free today (which is why Phase 2 correctly changed nothing in it), so Phase 3's element-index channel is the first index-keyed data on it and the first to inherit the renumbering hazard. All three presenters must build a complete desired set through `write_widget_overrides`; the button and editable presenters write one slot today and cannot drop an orphaned key.
+- **Phase 3** also gained: the two `#[cfg(test)]` accessors it must un-gate, the note that only the button presenter still lacks a widget-kind filter, the existing override map at `visual.rs:491` to merge into rather than duplicate, and two gate lines covering stale-index retirement and button wake-up.
+- **Phase 7** widened: its acceptance already demands material reach text and draw while image-only elements stay rejected, which a single `CONTENT` bit cannot express. It now splits the mask into `TEXT` / `IMAGE` / `DRAW` and widens the `SDF_MATERIAL` derivation, rather than "extending" the mask.
+- **Phase 10** gained the two-view requirement: `WidgetStateCascades` is defined over `&Cascade<…>`, but this phase reads `Resolved<…>`, which is not a `Cascade` — and build-time validation still needs the authored view. Two views sharing one `LAYER_ORDER` fold, plus the `appearance.rs` Files entry the Work Order lacked.
+- **Phase 6** shrank: re-keying across the editor transition is free, since the part map is re-derived from the tree every compute and replaced wholesale. Its re-keying gate line is dropped as already covered by a Phase 2 test.
+- **Phase 9** narrowed: the four attribute types are already exported from the crate root (Phase 1), so only the panel-builder methods and the eight commands need export work.
+- **Phase 8**'s pending empty-bundle decision gained a second consequence — Phase 2 keyed part-map admission on override presence, so an empty bundle creates a map entry that can never change a pixel under the no-op reading. The decision block now also asks whether admission stays override-keyed, with a recommendation to keep it.
+- **Delegation Context** and every remaining phase had their file/line references re-verified against the post-Phase-2 tree; the test-count floor moved from 1100 to **1107 passed / 2 skipped**.
+- **Retrospective corrected:** the claim that a slider drag marks part appearance changed was wrong. Reification is gated on `Changed<ComputedDiegeticPanel>` and re-inserts slots only on inequality, and a drag does not relayout. The coupling runs the other way — re-authoring dirties the slots component and wakes a full index rebuild.
 
 ### Phase 3 — Element override channel and dirty-entity presentation · status: todo
 
@@ -234,26 +278,35 @@ Approve this direction, or modify it?
 
 **Spec:**
 
-`WidgetVisualOverrides` (`widgets/visual.rs:234`) gains an **element-index-keyed channel** alongside the slot-keyed one, merged in `dispatch_visual_overrides` (`:442`) where `by_element` is already built. Store element overrides sorted so dispatch merges them with slot overlays **without a second temporary `HashMap`**.
+`WidgetVisualOverrides` (`widgets/visual.rs:255`) gains an **element-index-keyed channel** alongside the slot-keyed one, merged in `dispatch_visual_overrides` (`:463`) into the map already built at `:491`. Store element overrides sorted so dispatch merges them with slot overlays into that existing map rather than allocating a second one.
 
 **Slot-versus-element precedence is fixed here:** presentation-owned computed slot values (the slider thumb's `offset`) are preserved unconditionally; the resolved element override composes on top of the authored slot baseline.
 
-All three presentation systems (`button.rs`, `slider.rs` `present_slider_state` `:1190`, `editable.rs`) resolve **every recipient** rather than the root slot alone, by merge-walking Phase 2's sparse authored list against the ordered recipient list — `O(recipients + authored)`, no linear `find` per element.
+All three presentation systems (`button.rs`, `slider.rs` `present_slider_state` `:1194`, `editable.rs`) resolve **every recipient** rather than the root slot alone, by merge-walking Phase 2's sparse authored list against the ordered recipient list — `O(recipients + authored)`, no linear `find` per element.
 
-Each presenter processes **only dirty entities**: the `Changed<…>` queries and kind-filtered `RemovedComponents` drains that today live in the run condition (`slider.rs:1137` `presentation_inputs_changed`) move into the writer, which then uses `Query::get`. **The presenter owns those drains outright** — a run condition that consumes a removal stream before the writer sees it is the failure mode to avoid. Without this, one dragging slider (a drag changes `SliderState` every frame) wakes a system that re-resolves every recipient of every live slider on every drag frame.
+**All three must write through `write_widget_overrides` (`visual.rs:314`), building a complete desired set.** `present_slider_state` already does (`slider.rs:1288`); `present_button_state` (`button.rs:241`) and `present_editable_state` (`editable.rs:122`) write a single slot through `write_slot_override` (`visual.rs:348`), which cannot drop an orphaned key. This matters now and did not before: `WidgetVisualOverrides` is slot-keyed today and therefore index-free, so Phase 2 correctly changed nothing in it — this phase's element-index-keyed channel is the **first** index-keyed data on that component and is the first to inherit the renumbering hazard. A per-slot write would strand overrides on element indices that no longer exist.
 
-Resolution borrows the highest-precedence authored value per property and clones the winning material handle **exactly once** when constructing `VisualSlotOverride`; it does not clone intermediate `Appearance` layers. Dispatch then clones the finished override into `VisualOverrideIndex` (`visual.rs:392`) — one further handle clone, unavoidable.
+Each presenter processes **only dirty entities**: the `Changed<…>` queries and kind-filtered `RemovedComponents` drains that today live in the run condition (`slider.rs:1138` `presentation_inputs_changed`) move into the writer, which then uses `Query::get`. **The presenter owns those drains outright** — a run condition that consumes a removal stream before the writer sees it is the failure mode to avoid. Without this, one dragging slider (a drag changes `SliderState` every frame) wakes a system that re-resolves every recipient of every live slider on every drag frame.
+
+**The kind filter must be *added* for the button presenter, not merely moved.** `slider::presentation_inputs_changed` (`slider.rs:1138`) filters `WidgetKind::Slider` and `editable::presentation_inputs_changed` (`editable.rs:29`) filters `WidgetKind::EditableField` on both its changed query and its removal drains, but `button::presentation_inputs_changed` (`button.rs:134`) filters `With<WidgetOf>` alone and drains removals unfiltered — so it currently wakes on every widget kind.
+
+Resolution borrows the highest-precedence authored value per property and clones the winning material handle **exactly once** when constructing `VisualSlotOverride`; it does not clone intermediate `Appearance` layers. Dispatch then clones the finished override into `VisualOverrideIndex` (`visual.rs:413`) — one further handle clone, unavoidable.
+
+`dispatch_visual_overrides` already builds a `HashMap<usize, VisualSlotOverride>` (`visual.rs:491`) — the one Phase 11 deletes along with `subtree_color`. The element channel **merges into that existing map**; do not introduce a second one.
 
 At this point only the widget's own element can author a bundle, so nothing changes on screen.
 
 **Files:**
-- `src/widgets/visual.rs` — element-index-keyed channel on `WidgetVisualOverrides` (`:234`); merge + precedence in `dispatch_visual_overrides` (`:442`).
-- `src/widgets/button.rs`, `src/widgets/slider.rs` (`:1137`, `:1190`), `src/widgets/editable.rs` — merge-walk every recipient; move `Changed<…>` / `RemovedComponents` from run conditions into the writers.
+- `src/widgets/visual.rs` — element-index-keyed channel on `WidgetVisualOverrides` (`:255`); merge + precedence in `dispatch_visual_overrides` (`:463`) into the existing map at `:491`; un-gate `part_appearances()` (`:119`, currently `#[cfg(test)]`).
+- `src/widgets/button.rs` (`:134`, `:241`), `src/widgets/slider.rs` (`:1138`, `:1194`, `:1288`), `src/widgets/editable.rs` (`:29`, `:122`) — merge-walk every recipient; move `Changed<…>` / `RemovedComponents` from run conditions into the writers; route all three through `write_widget_overrides`; add the kind filter to button.
+- `src/widgets/mod.rs:299-313` — the three `.run_if(...)` attachments this phase removes live at `:300` (button), `:304` (editable), `:308` (slider).
 
 **Constraints from prior phases:**
 - **Phase 1:** four `Cascade<Widget*Appearance>` fields on `StateAppearance`; `Appearance` public with `background` / `border_color` / `border_width` / `material`; `resolve` still resolves against `Appearance::default()`.
-- **Phase 2:** `ComputedWidgetRecord` carries a sorted sparse `Vec<(element_index, …)>` of authored part appearance **plus separately** the four root `Cascade` values (the latter already existed as `id.rs:127` before Phase 2 began); each recipient index carries a property-capability mask and pure structural containers are excluded. The map is revision-scoped and prior keys are retired on every computed-panel update. Merge-walk against this ordering — do not re-sort or build a lookup map.
-- **Phase 2 settled how the four widget-level bundles sit on the widget entity** — one aggregate component or four standalone ones. Read that resolved decision before rewriting the presenters: all three take `&StateAppearance` today (`slider.rs:1193` and its `button.rs` / `editable.rs` mirrors), and this phase must query whatever shape Phase 2 landed on, not the pre-Phase-2 shape.
+- **Phase 2:** `ComputedWidgetRecord` (`id.rs:138`) carries a sorted sparse `part_appearances` (`:144`, read via `:216`) **plus separately** the four root `Cascade` values in `appearance` (`:143`, read via `:188`); each recipient index in `visual_elements` carries a `VisualElementCapabilities` mask (`:115`) and pure structural containers are excluded. The map is re-derived and replaced wholesale on every computed-panel update. Merge-walk against this ordering — do not re-sort or build a lookup map.
+- **Phase 2 settled the widget entity's shape:** `StateAppearance` is no longer a `Component`. The entity carries four standalone `Cascade<Widget*Appearance>` components, all four always present (`Cascade::Inherit` included), and the three presenters already query them and build a `WidgetStateCascades<'_>` borrowed view to call `resolve` (`appearance.rs:367`). Their run conditions already carry the four `Changed<Cascade<Widget*Appearance>>` terms. Extend that shape — do not reintroduce an aggregate component.
+- **Phase 2:** two accessors this phase needs are `#[cfg(test)]` today and must be un-gated as it reaches them — `WidgetVisualSlots::part_appearances()` (`visual.rs:119`), whose first non-test reader is this phase, and `LayoutTree::set_element_state_appearance` (`element.rs:461`), which is the "crate-internal path" this phase's non-root authoring test uses (only `El<L, WidgetElement<W>>` can author until Phase 4, so a test cannot reach a non-root element through the public builder).
+- **Phase 2:** a slider drag does **not** dirty `WidgetVisualSlots` — `reify_widgets` is gated on `Changed<ComputedDiegeticPanel>` (`reify.rs:194`) and `update_widget` re-inserts only on inequality (`reify.rs:445`). The coupling to design against runs the other way: re-authoring a part dirties `WidgetVisualSlots`, which wakes `dispatch_visual_overrides` (`visual.rs:463`) into a full rebuild of that widget's index entries.
 - The **Presentation must not dirty `WidgetVisualOverrides`** invariant binds this phase directly: compare through an immutable query and take `get_mut` only on inequality.
 
 **Acceptance gate:**
@@ -265,7 +318,9 @@ At this point only the widget's own element can author a bundle, so nothing chan
 - Re-running presentation with identical active states leaves `Changed<WidgetVisualOverrides>` empty.
 - A test asserts the slider thumb's computed `offset` survives an element override that does not name `offset`.
 - A dragging slider does not wake resolution for a second, unrelated live slider.
+- A dragging slider does not wake the button presenter (its run condition gains the kind filter it lacks today).
 - The example slider's structural containers produce no `VisualOverrideIndex` entries.
+- A structural change that renumbers element indices leaves **no** override on a stale index, for a button and an editable field as well as a slider — the two per-slot writers now build a complete desired set.
 
 ### Phase 4 — Widget parts: the part role and the builder acceptance relation · status: todo
 
@@ -391,6 +446,7 @@ builder.with(
 - **Phase 1:** the four state verbs are `hovered` / `focused` / `disabled` / `pressed`, each taking `Appearance`; `pressed` is gated on `HasPressedState`. `Appearance` and the four `Widget*Appearance` wrappers are public at the crate root. **Each verb replaces the whole bundle for its state** — a second `hovered(…)` discards what the first authored, unlike the removed per-property builders, which accumulated into one layer. The four verbs added here on `El<L, LayoutOnly>` and `El<L, WidgetPart<W>>` must behave the same way and say so in their docs.
 - **Phase 2:** `ComputedWidgetRecord` already carries the sparse part map keyed by element index with capability masks, and the root's four `Cascade` values separately. Parts authored here populate that map through the existing ownership walk — no new storage is needed.
 - **Phase 3:** presentation already resolves every recipient and writes element-keyed overrides, so a part authored here presents without further presenter changes.
+- **Phase 2 left a gap this phase must not walk into.** `record_owned_widget_element` (`element.rs:1356`) admits a part appearance on `any_overridden()` alone, with **no capability gate** — while `push_visual_element` skips zero-capability elements. `validated_element_appearance` (`element.rs:1304`) is still reached only from the widget-declaring and editable-field branches (`:1276`, `:1289`). Opening authoring to every `El` inside a widget therefore lets a bundle on a pure structural container compile, store, and never present, breaching the **accepted option must reach the runtime** invariant for the whole interval until Phase 5 lands. This phase closes the window with a whole-bundle rejection (see the gate line below); Phase 5 refines it to per-property with proper error locations.
 - **Invariant:** every type reachable from a public associated type is a public opaque type with private fields (`private_interfaces` / E0446).
 
 **Acceptance gate:**
@@ -405,6 +461,7 @@ builder.with(
 - A `pressed` bundle on a part of an editable field fails to compile, with the message naming `EditableField: HasPressedState`.
 - Compile-pass coverage for: ordinary intermediate containers, text layouts, images, multiple nesting levels, extracted helpers (`&mut WidgetBuilder<'_, Slider>` and `&mut impl LayoutContentBuilder`), returned parts (`El<Row, WidgetPart<Slider>>`), and root widgets of all three kinds with styled descendants.
 - A nested widget fails to compile; the former runtime test is gone.
+- **No authored bundle is silently discarded.** A bundle on an element with an empty capability mask (a pure structural container) is a build error, not a stored-and-ignored entry. A whole-bundle rejection is sufficient here — Phase 5 replaces it with the per-property form and the part-naming error locations.
 
 ### Phase 5 — Part validation and appearance error locations · status: todo
 
@@ -414,9 +471,11 @@ builder.with(
 
 **Spec:**
 
-`validated_element_appearance` (`layout/element.rs:1283`) is called today only from the widget-declaring and editable-field branches, so merely permitting `appearance` on descendants would leave them **accepted and ignored** — a direct violation of the accepted-values-reach-runtime invariant.
+`validated_element_appearance` (`layout/element.rs:1304`) is called today only from the widget-declaring and editable-field branches (`:1276`, `:1289`), so merely permitting `appearance` on descendants would leave them **accepted and ignored** — a direct violation of the accepted-values-reach-runtime invariant.
 
-Validate every appearance-authoring element once its owner is known, **during the ownership walk** (`layout/element.rs:879`, reached from `computed_widget_records` `:823`), and **per property**: a bundle with a usable background and an unusable material rejects the material, rather than accepting the bundle because one property has a recipient.
+Validate every appearance-authoring element once its owner is known, and **per property**: a bundle with a usable background and an unusable material rejects the material, rather than accepting the bundle because one property has a recipient.
+
+**Validate in `validate_tree`'s stack walk (`layout/element.rs:785-836`), not in the ownership walk.** The ownership walk is now `record_owned_widget_element` (`:1356`), reached from `computed_widget_records` (`:838`) — which returns `Vec<ComputedWidgetRecord>` with **no `Result`** and runs on every compute rather than once at panel build, so it cannot raise `PanelBuildError`. `validate_tree`'s walk is the one that both threads the owner down (via `validated_element_widget_owner`, `:820`) and returns `Result<_, PanelBuildError>`. Compute the capability mask there by calling the free function `element_visual_capabilities` (`:1332`) directly; do not try to read a mask off `ComputedWidgetRecord`, which does not exist yet at build time.
 
 Errors need a location that is not the owner's id. Add a shared opaque `WidgetAppearanceLocation` carrying:
 - the owner widget id,
@@ -429,13 +488,13 @@ Formatted as `widget 'level' part 'thumb'` when the part is named, and `widget '
 This is part-local validation only. Per the scope limit on the accepted-values invariant, higher-level (global / panel / widget) properties with no compatible recipient at a given element are **dormant** there, not an error — that path arrives in Phase 10 and must not be routed through this validation.
 
 **Files:**
-- `src/layout/element.rs` — new `WidgetAppearanceLocation`; `validated_element_appearance` (`:1283`) becomes per-property and is reached from the ownership walk (`:879`); `validated_element_widget_owner` (`:1242`) supplies the owner.
+- `src/layout/element.rs` — new `WidgetAppearanceLocation`; `validated_element_appearance` (`:1304`) becomes per-property and is reached from `validate_tree`'s stack walk (`:785-836`); `validated_element_widget_owner` (`:1263`) supplies the owner; `element_visual_capabilities` (`:1332`) supplies the mask.
 - `src/panel/builder.rs:45` — `PanelBuildError` variants carry `WidgetAppearanceLocation`.
 - `src/lib.rs:339-403` — export `WidgetAppearanceLocation`.
 
 **Constraints from prior phases:**
-- **Phase 4:** any `El` inside a widget's children can now carry a bundle via `El<L, WidgetPart<W>>`; the owner kind `W` is known at the type level, and `WidgetOwner` covers `Button`, `Slider`, `EditableField`. Parts reach the ownership walk through Phase 2's map population.
-- **Phase 2:** the walk at `layout/element.rs:879` already visits every owned element and already computes a property-capability mask per recipient — validation reads that mask rather than recomputing which records an element emits.
+- **Phase 4:** any `El` inside a widget's children can now carry a bundle via `El<L, WidgetPart<W>>`; the owner kind `W` is known at the type level, and `WidgetOwner` covers `Button`, `Slider`, `EditableField`. Phase 4 already rejects a bundle on a zero-capability element as a whole; this phase replaces that whole-bundle check with the per-property form and the part-naming locations.
+- **Phase 2:** `element_visual_capabilities` (`layout/element.rs:1332`) is a free function that derives the property-capability mask from one `Element` — call it directly during validation rather than recomputing which records an element emits. Its `CONTENT` bit covers text, image, and non-empty `PanelDraw` **together**; Phase 7 splits it.
 - **Phase 1:** `Appearance`'s four properties are `background`, `border_color`, `border_width`, `material`. The fifth, `content_color`, arrives in Phase 7 and widens what this validation accepts — leave the per-property structure open to a fifth arm.
 - The existing `StateMaterialRequiresSurface` error still accepts only a background or border; Phase 7 widens it.
 
@@ -458,21 +517,21 @@ This is part-local validation only. Per the scope limit on the accepted-values i
 
 **Spec:**
 
-`inline_editor_content_tree` (`src/ime/editor.rs:1132`) builds the editor's text, selection, caret, and validation elements **internally**, and `set_field_editing_content` (`layout/element.rs:1001`) removes the authored display descendants while editing. Without a path in, "any element a widget owns" is false for a focused field — nobody can author an element that does not exist in the source tree.
+`inline_editor_content_tree` (`src/ime/editor.rs:1132`) builds the editor's text, selection, caret, and validation elements **internally**, and `set_field_editing_content` (`layout/element.rs:1022`) removes the authored display descendants while editing. Without a path in, "any element a widget owns" is false for a focused field — nobody can author an element that does not exist in the source tree.
 
 Define **stable authoring inputs** for those four generated parts and copy their bundles into the generated tree. The inputs are authored on the editable field's declaration (they have no `El` of their own to hang on) and are carried through the display↔editor transition so the generated parts receive resolved appearance in the frame they appear.
 
-Because the transition rebuilds a compact arena and renumbers element indices, the copied bundles must be re-keyed to the regenerated indices on every transition — Phase 2's revision scoping retires the old keys, and this phase must fill the new ones in the same update.
+Re-keying across the transition is **already free and needs no work here.** The part map is re-derived from `element.appearance` on every compute (`element.rs:895` → `record_owned_widget_element` `:1356`) and replaced wholesale inside `WidgetVisualSlots`; once a bundle is in the regenerated tree it is keyed correctly by construction. Phase 2's `editable_tree_replacement_rekeys_part_appearance_entries` already proves it. This phase's only job is getting the bundles *into* the generated tree.
 
 **Files:**
 - `src/ime/editor.rs:1132` — `inline_editor_content_tree` accepts and applies the four generated-part bundles.
 - `src/layout/builder.rs:715` — `El::editable_field` gains the four generated-part authoring inputs.
-- `src/layout/element.rs:1001` — `set_field_editing_content` carries the bundles across the transition and re-keys them.
+- `src/layout/element.rs:1022` — `set_field_editing_content` carries the bundles across the transition.
 
 **Constraints from prior phases:**
 - **Phase 4:** `EditableField` is the zero-sized owner marker, `El::editable_field` returns `El<L, WidgetElement<EditableField>>`, and `EditableField` implements `WidgetOwner` but **not** `Widget` — so `pressed` is unavailable on its parts by construction and must stay unavailable on the generated ones.
-- **Phase 5:** part appearance is validated per property during the ownership walk against a capability mask; the four generated parts are validated the same way once their bundles land in the tree.
-- **Phase 2:** the part map is revision-scoped and prior keys are retired on every computed-panel update; the display↔editor transition is the path that exercises renumbering.
+- **Phase 5:** part appearance is validated per property in `validate_tree`'s stack walk against a capability mask; the four generated parts are validated the same way once their bundles land in the tree.
+- **Phase 2:** the part map is re-derived from the tree on every compute and replaced wholesale, so renumbering across the display↔editor transition re-keys itself; `editable_tree_replacement_rekeys_part_appearance_entries` already covers it.
 - **Phase 3:** presentation resolves every recipient, so a generated part with a bundle presents with no presenter change.
 
 **Acceptance gate:**
@@ -480,7 +539,6 @@ Because the transition rebuilds a compact arena and renumbers element indices, t
 - `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
 - A display → editor → display transition asserts the **resolved appearance of each of the four generated editor parts**, in the frame the editor appears and again after it closes.
-- Re-keying is correct across the transition: no generated part inherits a stale index's override.
 - A disabled editable field dims its editor text.
 
 ### Phase 7 — Content color · status: todo
@@ -493,22 +551,25 @@ Because the transition rebuilds a compact arena and renumbers element indices, t
 
 Add a fifth property, `content_color`, to `Appearance`.
 
-It does **not** map to `VisualSlotOverride::color`. `apply_sdf_visual_override` (`render/fill_batch.rs:1359`) reads `fill_color.or(color)` and `border_color.or(color)` — the generic `color` field (`widgets/visual.rs:147`) is the **fallback for every color role**, so it drives fill and border together. That is the mechanism behind `Slider::disabled_color`. A text element that also authors a background would therefore have its fill recolored by a text-color change.
+It does **not** map to `VisualSlotOverride::color`. `apply_sdf_visual_override` (`render/fill_batch.rs:1359`) reads `fill_color.or(color)` and `border_color.or(color)` — the generic `color` field (`widgets/visual.rs:170`) is the **fallback for every color role**, so it drives fill and border together. That is the mechanism behind `Slider::disabled_color`. A text element that also authors a background would therefore have its fill recolored by a text-color change.
 
 Add a **distinct `content_color` override** consumed only by the text, image, and draw-primitive routes, leaving `fill_color` and `border_color` exclusive to SDF roles. `VisualSlotOverride` grows from 144 to 160 bytes for this phase; Phase 11 deletes the superseded generic `color` field and returns it to 144.
 
 Widen the material counterpart at the same time. `StateMaterialRequiresSurface` accepts only a background or border today, but the retained routes already apply `VisualSlotOverride::material` to SDF, text, and **every** `PanelDraw` record — lines *and* `PanelCircle` (`layout/draw.rs:11` for `PanelDraw`; `layout/line.rs:42` for the `PanelShape` enum, `:64` for `PanelCircle`; `render/panel_shapes/batching.rs:989`). The counterpart becomes any emitted SDF, text, or `PanelDraw` record; image-only elements stay rejected. Content color's counterpart is text, image, or `PanelDraw` content.
 
+**This requires splitting Phase 2's capability mask, not merely extending it.** `VisualElementCapabilities` (`widgets/id.rs:115`) ships one `CONTENT` bit covering text, image, and non-empty `PanelDraw` together, and sets `SDF_MATERIAL` only when a background or border exists (`element.rs:1340`). Material-accepts-text-and-draw-but-rejects-image-only is not expressible from a single bit, so replace `CONTENT` with `TEXT` / `IMAGE` / `DRAW` and widen the `SDF_MATERIAL` derivation in `element_visual_capabilities` (`element.rs:1332`) to any SDF, text, or `PanelDraw` record. Content color's capability is `TEXT | IMAGE | DRAW`; material's is everything except `IMAGE` alone.
+
 **Files:**
-- `src/widgets/appearance.rs:113` — fifth property on `Appearance` and its fluent setter; `resolve` (`:136`) composes it.
-- `src/widgets/visual.rs:147` — `content_color` on `VisualSlotOverride`.
+- `src/widgets/appearance.rs:113` — fifth property on `Appearance` and its fluent setter; `Appearance::layer_onto` (`:172`) and `WidgetStateCascades::resolve` (`:367`) compose it. Add it to the hand-written `PartialEq` content comparison as well as to the struct.
+- `src/widgets/visual.rs:168` — `content_color` on `VisualSlotOverride`.
 - `src/render/panel_text/batching.rs` (`:288`, `:435`), `src/render/panel_shapes/batching.rs:989`, `src/render/analytic_paths/batching.rs:314` — consume `content_color`; images likewise.
-- `src/layout/element.rs:1283` — widen `StateMaterialRequiresSurface`'s counterpart to any SDF/text/`PanelDraw` record; add the `content_color` counterpart arm.
+- `src/widgets/id.rs:115` — split `CONTENT` into `TEXT` / `IMAGE` / `DRAW`.
+- `src/layout/element.rs:1332` — widen the `SDF_MATERIAL` derivation and emit the three new content bits; `:1304` — widen `StateMaterialRequiresSurface`'s counterpart to any SDF/text/`PanelDraw` record and add the `content_color` counterpart arm.
 
 **Constraints from prior phases:**
 - **Phase 1:** `Appearance` is public with `background` / `border_color` / `border_width` / `material`, each a `VisualChange<T>`; adding a fifth field takes it from 80 to 96 bytes, which is why the cascade attributes carry `Arc<Appearance>` and each has its own `size_of` assertion against `CASCADE_ATTRIBUTE_BYTES = 32`. Do not add a `VisualChange` variant.
-- **Phase 2:** each recipient index carries a property-capability mask — extend it with the content-color capability so containers and non-content elements stay excluded.
-- **Phase 5:** appearance validation is already per property and reached from the ownership walk; the fifth property adds a fifth arm there, not a new call site.
+- **Phase 2:** each recipient index carries a property-capability mask (`VisualElementCapabilities`, `widgets/id.rs:115`) so containers and non-content elements stay excluded. Its one `CONTENT` bit conflates text, image, and draw, and `SDF_MATERIAL` is set only for background-or-border — both must change here, per the Spec.
+- **Phase 5:** appearance validation is already per property and reached from `validate_tree`'s stack walk; the fifth property adds a fifth arm there, not a new call site.
 - **Phase 6:** the four generated editor parts are recipients; editor text is the canonical `content_color` target.
 
 **Acceptance gate:**
@@ -631,13 +692,16 @@ The plan currently says both. The invariant at the top of this document says sil
 What exists now:
 - Phase 1 stores the distinction: `.hovered(Appearance::new())` is `Cascade::Override`, an un-authored state is `Cascade::Inherit`, both pinned by a test in `layout/builder.rs`.
 - Nothing consumes the distinction. Under the fold this phase adds, `Override(Appearance::new())` and `Inherit` produce byte-identical results, and this phase's own gate line asserts exactly that (`Appearance::new().merge_over(&x)` equals `x`).
+- **Phase 2 gave the distinction a second consumer.** Part-map admission keys on `WidgetStateCascades::any_overridden()` (`widgets/appearance.rs:323`), so `Override(Appearance::new())` creates a map entry, pinned by a Phase 2 test. Under the no-op reading that entry can only ever resolve to a default override — exactly the wasted resolution the capability mask was added to prevent.
 
 What should change — pick one and make the whole document say it:
 - **No-op (matches the invariant and both gates).** An empty bundle contributes nothing at any level. The stored `Override`/`Inherit` distinction stays inert — harmless, but it is not load-bearing and Phase 1's rationale for it should be corrected rather than left to mislead a later delegate.
 - **Suppression (matches Phase 1's archived Spec).** An explicit empty bundle clears whatever a higher level authored, giving authors a way to opt a widget out of an inherited look. This needs the fold to distinguish the two cases, a revised invariant, and revised gate lines here and in Phase 10.
 
+Whichever is chosen, this phase must also settle **part-map admission**: it stays override-keyed (required if suppression wins, since an empty bundle must reach resolution to suppress), or it reverts to property-authorship (cheaper under no-op, since an empty entry can never change a pixel). If admission changes, `layout/element.rs:1356` `record_owned_widget_element` joins this phase's **Files** and Phase 2's admission test is updated with it.
+
 Recommendation:
-Take the no-op reading — it is what the invariant, this phase's gate, and Phase 10's gate already specify, so only Phase 1's archived rationale is out of step. Record the correction as a note beneath Phase 1's Retrospective rather than editing the archived Work Order. If suppression is wanted later, it is a clean additive feature (an explicit "clear" value distinct from an empty bundle) rather than a reinterpretation of empty.
+Take the no-op reading — it is what the invariant, this phase's gate, and Phase 10's gate already specify, so only Phase 1's archived rationale is out of step. Record the correction as a note beneath Phase 1's Retrospective rather than editing the archived Work Order. If suppression is wanted later, it is a clean additive feature (an explicit "clear" value distinct from an empty bundle) rather than a reinterpretation of empty. Keep admission override-keyed regardless: the entry is rare, the capability mask already prevents the expensive part of the waste, and reverting admission would destroy the distinction a later suppression feature needs.
 
 Approve this direction, or modify it?
 
@@ -660,11 +724,11 @@ Approve this direction, or modify it?
 
 **Spec:**
 
-Register four `CascadePlugin` channels over the Phase 1 attribute types and build out the panel authoring surface. Every item below is a **mechanical repetition of the existing `WidgetInteractivity` pattern** — mirror it exactly (`src/widgets/interactivity.rs`, registered via `cascade::cascade_plugin::<WidgetInteractivity>()` at `src/widgets/mod.rs:232`):
+Register four `CascadePlugin` channels over the Phase 1 attribute types and build out the panel authoring surface. Every item below is a **mechanical repetition of the existing `WidgetInteractivity` pattern** — mirror it exactly (`src/widgets/interactivity.rs`, registered via `cascade::cascade_plugin::<WidgetInteractivity>()` at `src/widgets/mod.rs:234`):
 
 - Four `BuilderData` fields, builder methods, component seeds, and `build_panel` assignments (`src/panel/builder.rs:200`).
 - Four `seed_panel_value` calls in `seed_panel_overrides` (`src/panel/diegetic_panel.rs:1566`).
-- Four `CascadePlugin` registrations in `WidgetsPlugin` (`src/widgets/mod.rs:217`, alongside `:228`).
+- Four `CascadePlugin` registrations in `WidgetsPlugin`, in the `add_plugins` tuple (`src/widgets/mod.rs:233-237`).
 - Four typed `override_*` / `inherit_*` command pairs on `CascadeEntityCommandsExt` (`src/cascade/attributes.rs:30`).
 - Four `add_cascade_ownership_observers!` entries (`src/panel/lifecycle.rs:122`).
 - Four `teardown_owned_shared_state` entries (`src/panel/lifecycle.rs:775`).
@@ -674,8 +738,9 @@ Register four `CascadePlugin` channels over the Phase 1 attribute types and buil
 **Placement:** registration lives in `WidgetsPlugin`; panel ownership observers and construction seeding stay in `HeadlessLayoutPlugin` (`src/panel/mod.rs:194`), matching the current division. `HeadlessLayoutPlugin` registers the attribute cascades explicitly because `RenderPlugin` is absent, so the four new cascades must be registered there too or every headless test loses them.
 
 **Beyond the checklist:**
-- Crate-root exports for the four public attribute types (`src/lib.rs:339-403`).
 - Command documentation matching the existing `WidgetInteractivity` **durability boundary**: a command applied directly to a derived widget entity may be replaced by reification, so durable edits belong in the panel's authored tree.
+
+The four attribute types are **already exported** from the crate root — Phase 1 shipped them (`src/lib.rs:385`, `:390`, `:391`, `:401`). This phase's new public surface is the panel-builder methods and the eight commands, and only those need export work.
 
 **Public names** (final, all checked against the forbidden-words list):
 
@@ -690,17 +755,18 @@ The `widget_` prefix follows the existing `WidgetInteractivity` / `override_widg
 Presentation does not read `Resolved<…>` yet — that is Phase 10.
 
 **Files:**
-- `src/widgets/mod.rs:217` — four `CascadePlugin` registrations.
+- `src/widgets/mod.rs:233-237` — four `CascadePlugin` registrations in the `add_plugins` tuple.
 - `src/panel/mod.rs:194` — four registrations in `HeadlessLayoutPlugin`.
 - `src/panel/builder.rs:200` — four `BuilderData` fields + builder methods + seeds + `build_panel` assignments.
 - `src/panel/diegetic_panel.rs` — four `seed_panel_value` calls (`:1566`), four `replace_from_precompose_helper` assignments (`:451`).
 - `src/panel/lifecycle.rs` — four ownership-observer entries (`:122`), four teardown entries (`:775`).
 - `src/cascade/attributes.rs:30` — four typed command pairs, with durability documentation.
 - `src/cascade/defaults.rs` — four empty-`Appearance` `CascadeDefault` resources.
-- `src/lib.rs:339-403` — crate-root exports.
+- `src/lib.rs:339-403` — crate-root exports for the panel-builder methods and commands only; the four attribute types are already exported (`:385`, `:390`, `:391`, `:401`).
 
 **Constraints from prior phases:**
-- **Phase 1:** the four attribute types already exist as `Arc<Appearance>` newtypes with `Reflect`, hand-written `PartialEq`, and per-attribute size assertions — they satisfy `CascadeAttribute`'s bounds as-is.
+- **Phase 1:** the four attribute types already exist as `Arc<Appearance>` newtypes with `Reflect`, hand-written `PartialEq`, and per-attribute size assertions — they satisfy `CascadeAttribute`'s bounds as-is, and they are already re-exported from the crate root.
+- **Phase 2:** every widget entity already carries all four `Cascade<Widget*Appearance>` components, `Cascade::Inherit` included (`reify.rs` `spawn_widget` `:296`, synchronized per channel by `update_widget_appearance` `:482`). That is precisely what `propagate_cascade` (`bevy_kana/src/cascade.rs:361-400`) needs in order not to strip `Resolved<A>`, so these registrations work on existing entities with no reify change.
 - **Phase 8:** `CascadeRoot` (`src/cascade/resolved.rs:175`) carries a defaulted `combine` that replaces; the four appearance attributes override it with `Appearance::merge_over`. `cascade_plugin::<A>()` (`src/cascade/mod.rs:44`) already forwards `A::combine` to `CascadePlugin::with_combine`, so these four registrations merge per property with no extra wiring at the call site — register them exactly like `WidgetInteractivity`. `CascadeAttribute` is unchanged.
 - **Invariant:** `missing_docs = "deny"` — the four attribute types, four builder methods, and eight commands all need doc comments.
 
@@ -728,7 +794,9 @@ Resolution is **two-stage**, because `Cascade<T>` and `Resolved<T>` are per-enti
 1. `CascadePlugin` resolves **global → panel → widget** on the widget entity, over the four attribute types (already wired in Phase 9).
 2. Presentation resolves **part against widget** by reference: each sparse map entry is a part-local `Cascade<…>` resolved against the widget's `Resolved<…>`, through **one typed helper in `src/cascade/`** rather than precedence spelled out in each presenter.
 
-**Then, and only then,** layer the active states in `LAYER_ORDER` (`widgets/appearance.rs:357`, `[Focused, Hovered, Pressed, Disabled]`) and build the record override. The two axes must not be interleaved.
+**Then, and only then,** layer the active states in `LAYER_ORDER` (`widgets/appearance.rs:400`, `[Focused, Hovered, Pressed, Disabled]`) and build the record override. The two axes must not be interleaved.
+
+**This phase needs two state views, not one.** `WidgetStateCascades<'a>` (`widgets/appearance.rs:299`) holds `&'a Cascade<Widget*Appearance>` and its `layer` (`:330`) reads through `Cascade::as_override()`. Presentation here reads `Resolved<Widget*Appearance>`, which derefs to the attribute itself and is never a `Cascade` — so the resolved path needs its own view over four `&Appearance` (or four `&Widget*Appearance`). The authored view must stay: build-time validation still calls `any` through `StateAppearance::cascades()` (`:293`, from `element.rs:1311` and `:1368`). Factor the shared `LAYER_ORDER` fold so both views call one implementation rather than duplicating `layer`/`resolve`.
 
 Both hops use `Appearance::merge_over` from Phase 8. For one element in one state:
 
@@ -736,12 +804,11 @@ Both hops use `Appearance::merge_over` from Phase 8. For one element in one stat
 2. For each property: the part's value if the part names it, else the widget's resolved value, else the ordinary look.
 3. Record-specific render routes consume only the properties they can present; the rest are **dormant** at that element.
 
-**Reification.** Widgets already receive `CascadeFrom::new(panel)` on spawn (`bevy_kana/src/cascade.rs:197`) and `update_widget` (`reify.rs:341`) repairs a wrong relationship. The existing order is cycle-free: `CascadeSet::Propagate → PanelSystems::ComputeLayout → WidgetSystems::Reify → ReifyCommandsApplied → presentation`, with `ReifyCommandsApplied` flushing both the widget insertions and the `resolve_inserted_cascade` observer (`bevy_kana/src/cascade.rs:339`) that seeds `Resolved<A>` — the existing `disabled_widget_is_marked_in_its_reification_frame` test already proves same-frame behavior for `WidgetInteractivity`.
+**Reification.** Widgets already receive `CascadeFrom::new(panel)` on spawn (`bevy_kana/src/cascade.rs:197`) and `update_widget` (`reify.rs:352`) repairs a wrong relationship. The existing order is cycle-free: `CascadeSet::Propagate → PanelSystems::ComputeLayout → WidgetSystems::Reify → ReifyCommandsApplied → presentation`, with `ReifyCommandsApplied` flushing both the widget insertions and the `resolve_inserted_cascade` observer (`bevy_kana/src/cascade.rs:339`) that seeds `Resolved<A>` — the existing `disabled_widget_is_marked_in_its_reification_frame` test already proves same-frame behavior for `WidgetInteractivity`.
 
 This phase must additionally:
-- Carry the four root `Cascade` values through `ComputedWidgetRecord` (`widgets/id.rs:122`), `spawn_widget` (`reify.rs:291`), and `update_widget` (`reify.rs:341`), **inserting all four on spawn including `Cascade::Inherit`** and synchronizing them on update.
 - Keep `CascadeFrom::new(panel)` in the same deferred insertion.
-- Order presentation after **both** `CascadeSet::Propagate` and `WidgetSystems::ReifyCommandsApplied` (`widgets/mod.rs:137-153`).
+- Order presentation after **both** `CascadeSet::Propagate` and `WidgetSystems::ReifyCommandsApplied` — the set declarations are `widgets/mod.rs:143`, the `configure_sets` call is `:238-267`, and the presenters are added at `:299-313`.
 - Add the four `Changed<Resolved<…>>` filters and the part map to presentation's dirty inputs.
 - **Resolve the removal question explicitly:** either declare that a live widget never loses its four `Resolved` caches and omit their removal streams, or specify how a missing cache clears the prior override. A query requiring all four caches cannot process their removal.
 
@@ -749,17 +816,15 @@ This phase must additionally:
 
 **Files:**
 - `src/cascade/attributes.rs` — the typed part-against-widget resolution helper.
-- `src/widgets/id.rs:122` — four root `Cascade` values on `ComputedWidgetRecord`.
-- `src/widgets/reify.rs` — `spawn_widget` (`:291`) inserts all four including `Inherit`; `update_widget` (`:341`) synchronizes them.
-- `src/widgets/mod.rs:137-153` — presentation ordering after `Propagate` and `ReifyCommandsApplied`.
-- `src/widgets/button.rs`, `src/widgets/slider.rs:1190`, `src/widgets/editable.rs` — stage-2 resolution via the helper; four `Changed<Resolved<…>>` dirty inputs.
-- `src/widgets/appearance.rs:324` — `resolve` composes the merged bundles in `LAYER_ORDER` after level resolution, not during it. **This is a smaller change than it sounds:** `resolve` already layers in `LAYER_ORDER` against an `Appearance::default()` accumulator and already keeps the two axes separate. What changes is only where each layer comes from — the resolved bundles passed in, instead of `self.layer(state)` reading this record's own `Cascade`s (`:287-306`). Do not rewrite the layering algorithm.
+- `src/widgets/mod.rs:238-267` and `:299-313` — presentation ordering after `Propagate` and `ReifyCommandsApplied`.
+- `src/widgets/button.rs`, `src/widgets/slider.rs:1194`, `src/widgets/editable.rs` — stage-2 resolution via the helper; four `Changed<Resolved<…>>` dirty inputs.
+- `src/widgets/appearance.rs:293-383` — add the resolved-side state view alongside the authored `WidgetStateCascades<'a>` (`:299`) and share one `LAYER_ORDER` fold between them. `resolve` (`:367`) composes the merged bundles in `LAYER_ORDER` after level resolution, not during it. **This is a smaller change than it sounds:** `resolve` already layers in `LAYER_ORDER` against an `Appearance::default()` accumulator and already keeps the two axes separate. What changes is only where each layer comes from — the resolved bundles passed in, instead of `layer(state)` (`:330`) reading this record's own `Cascade`s. Do not rewrite the layering algorithm.
 - `docs/hana_diegetic/widgets-deferred.md` — the four documentation edits above.
 
 **Constraints from prior phases:**
 - **Phase 9:** the four `CascadePlugin` channels, `CascadeDefault` resources, panel builder methods, and typed commands all exist; `Resolved<Widget*Appearance>` is present on every widget entity. Registration is in `WidgetsPlugin`; observers and seeding are in `HeadlessLayoutPlugin`.
 - **Phase 8:** `Appearance::merge_over(&self, higher)` is the single merge used at both hops; `CascadeRoot::combine` already makes stage 1 merge per property, and the `CascadeDefault` root participates in that merge rather than acting as a fallback. Stage 2 calls `merge_over` directly — it is not a cascade hop and needs no `combine`.
-- **Phase 2:** the sparse part map is sorted by element index, capability-masked, revision-scoped, and stored **separately** from the four root `Cascade` values — the root's bundle is the widget's own override and must not be applied a second time as a part override.
+- **Phase 2:** the sparse part map is sorted by element index, capability-masked, revision-scoped, and stored **separately** from the four root `Cascade` values — the root's bundle is the widget's own override and must not be applied a second time as a part override. Phase 2 also landed the entity shape this phase resolves through: `StateAppearance` is not a `Component`, `spawn_widget` inserts all four `Cascade<Widget*Appearance>` channels including `Cascade::Inherit`, `update_widget` synchronizes them per channel, and `WidgetStateCascades<'_>` is the borrowed view the presenters already use.
 - **Phase 3:** presenters already merge-walk recipients and already own their `Changed`/`RemovedComponents` drains; this phase adds four more `Changed` filters to the drains they own, not to a run condition.
 - **Phase 5:** part-local authoring is validated per property at build. Higher-level properties with no compatible recipient are **dormant**, not errors — do not route them through `validated_element_appearance`.
 - **Phase 7:** `content_color` is the fifth property and the merge covers it.
@@ -796,9 +861,9 @@ This phase must additionally:
 
 **Spec:**
 
-Delete `Slider::disabled_color` — the field (`widgets/slider.rs:171`), its constructor default (`:190`), its builder method (`:232`), its `El` forward, and its test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` (`:5251`). Delete `WidgetVisualOverrides::subtree_color` (`widgets/visual.rs:235`), `set_subtree_color` (`:241`), the getter (`:246`), the seeding loop in `slider.rs:1232`, and its consumption in `dispatch_visual_overrides` (`visual.rs:471`).
+Delete `Slider::disabled_color` — the field (`widgets/slider.rs:172`), its constructor default (`:191`), its builder method (`:233`), its crate-internal setter (`:255`), its `El` forward, and its test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` (`:5267`). Delete `WidgetVisualOverrides::subtree_color` (`widgets/visual.rs:256`), `set_subtree_color` (`:262`), the getter (`:267`), the seeding loop in `slider.rs:1242`, and its consumption in `dispatch_visual_overrides` (`visual.rs:492`).
 
-With its only production producer gone, delete `VisualSlotOverride::color` (`visual.rs:147`), its overlay logic, and the `with_color` test helper; move the text, image, and draw-primitive consumers to `content_color`. `VisualSlotOverride` returns from 160 to 144 bytes.
+With its only production producer gone, delete `VisualSlotOverride::color` (`visual.rs:170`), its overlay logic, and the `with_color` test helper; move the text, image, and draw-primitive consumers to `content_color`. Delete the `HashMap<usize, VisualSlotOverride>` that fed subtree seeding (`visual.rs:491`) only if Phase 3's element channel did not take it over — check which before removing. `VisualSlotOverride` returns from 160 to 144 bytes.
 
 **Focus-border composition.** The thumb focus border cannot be suppressed by "a resolved disabled bundle exists" — under a cascade every state always resolves to something, so presence is always true, and a disabled bundle changing only a background would delete the focus border. Compose `Slider::focused_thumb_border_color` as a **focused-thumb layer before normal state composition**:
 - a disabled `border_color: To(…)` **replaces** it,

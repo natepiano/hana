@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bitflags::bitflags;
 
 use super::Button;
 use super::Slider;
@@ -108,6 +109,21 @@ pub(crate) enum WidgetSpec {
     Slider(Slider),
 }
 
+bitflags! {
+    /// Retained-record properties a layout element can present for a widget.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub(crate) struct VisualElementCapabilities: u8 {
+        /// A retained SDF fill record.
+        const SDF_FILL = 1 << 0;
+        /// A retained SDF border record.
+        const SDF_BORDER = 1 << 1;
+        /// A retained SDF material override.
+        const SDF_MATERIAL = 1 << 2;
+        /// Retained text, image, or panel-draw content.
+        const CONTENT = 1 << 3;
+    }
+}
+
 impl WidgetSpec {
     pub(crate) const fn kind(&self) -> WidgetKind {
         match self {
@@ -125,11 +141,12 @@ pub(crate) struct ComputedWidgetRecord {
     preorder:         usize,
     authored:         WidgetSpec,
     appearance:       StateAppearance,
+    part_appearances: Vec<(usize, StateAppearance)>,
     interactivity:    Cascade<super::WidgetInteractivity>,
     rect:             BoundingBox,
     clipped_rect:     Option<BoundingBox>,
     interaction_rank: usize,
-    visual_elements:  Vec<usize>,
+    visual_elements:  Vec<(usize, VisualElementCapabilities)>,
     visual_slots:     Vec<super::ComputedVisualSlot>,
 }
 
@@ -150,6 +167,7 @@ impl ComputedWidgetRecord {
             preorder,
             authored,
             appearance,
+            part_appearances: Vec::new(),
             interactivity,
             rect,
             clipped_rect,
@@ -183,10 +201,30 @@ impl ComputedWidgetRecord {
         self.interaction_rank = interaction_rank;
     }
 
-    pub(crate) fn visual_elements(&self) -> &[usize] { &self.visual_elements }
+    pub(crate) fn visual_elements(&self) -> &[(usize, VisualElementCapabilities)] {
+        &self.visual_elements
+    }
 
-    pub(crate) fn push_visual_element(&mut self, element_index: usize) {
-        self.visual_elements.push(element_index);
+    pub(crate) fn push_visual_element(
+        &mut self,
+        element_index: usize,
+        capabilities: VisualElementCapabilities,
+    ) {
+        self.visual_elements.push((element_index, capabilities));
+    }
+
+    pub(crate) fn part_appearances(&self) -> &[(usize, StateAppearance)] { &self.part_appearances }
+
+    pub(crate) fn push_part_appearance(
+        &mut self,
+        element_index: usize,
+        appearance: StateAppearance,
+    ) {
+        let insertion_index = self
+            .part_appearances
+            .partition_point(|(existing_index, _)| *existing_index < element_index);
+        self.part_appearances
+            .insert(insertion_index, (element_index, appearance));
     }
 
     pub(crate) fn visual_slots(&self) -> &[super::ComputedVisualSlot] { &self.visual_slots }

@@ -20,9 +20,9 @@ use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
+use super::WidgetStateCascades;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
-use super::appearance::StateAppearance;
 use super::appearance::WidgetState;
 use super::capture;
 use super::capture::WidgetCaptures;
@@ -31,6 +31,7 @@ use super::constants::THUMB_HIT_SLOP_POINTS;
 use super::visual;
 use crate::DiegeticPanel;
 use crate::PanelElementId;
+use crate::cascade::Cascade;
 use crate::layout::BoundingBox;
 use crate::render;
 use crate::render::CapturedCameraRay;
@@ -1126,9 +1127,9 @@ fn thumb_translation(slots: &WidgetVisualSlots, state: &SliderState) -> Option<V
 /// last run.
 ///
 /// The changed query filters to [`WidgetKind::Slider`] so an unrelated button
-/// change never wakes the all-slider walk. `Changed<WidgetSpec>` /
-/// `Changed<StateAppearance>` / `Changed<WidgetVisualSlots>` cover reify and
-/// re-authoring,
+/// change never wakes the all-slider walk. `Changed<WidgetSpec>`, the four
+/// `Changed<Cascade<Widget*Appearance>>` terms, and
+/// `Changed<WidgetVisualSlots>` cover reify and re-authoring,
 /// `Changed<SliderState>` covers the applied value, `Changed<PickingInteraction>`
 /// covers the hover/pressed aggregate, and `Changed` on [`WidgetFocusVisible`],
 /// [`WidgetDisabled`], and [`SliderDrag`] covers marker insertion. Each
@@ -1141,7 +1142,10 @@ pub(super) fn presentation_inputs_changed(
             With<WidgetOf>,
             Or<(
                 Changed<WidgetSpec>,
-                Changed<StateAppearance>,
+                Changed<Cascade<super::WidgetHoveredAppearance>>,
+                Changed<Cascade<super::WidgetPressedAppearance>>,
+                Changed<Cascade<super::WidgetFocusedAppearance>>,
+                Changed<Cascade<super::WidgetDisabledAppearance>>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
                 Changed<WidgetFocusVisible>,
@@ -1192,7 +1196,10 @@ pub(super) fn present_slider_state(
         (
             Entity,
             &WidgetSpec,
-            &StateAppearance,
+            &Cascade<super::WidgetHoveredAppearance>,
+            &Cascade<super::WidgetPressedAppearance>,
+            &Cascade<super::WidgetFocusedAppearance>,
+            &Cascade<super::WidgetDisabledAppearance>,
             &WidgetKind,
             &WidgetOf,
             &SliderState,
@@ -1211,7 +1218,10 @@ pub(super) fn present_slider_state(
     for (
         entity,
         authored,
-        appearance,
+        hovered,
+        pressed_appearance,
+        focused_appearance,
+        disabled_appearance,
         kind,
         widget_of,
         state,
@@ -1241,6 +1251,12 @@ pub(super) fn present_slider_state(
                 dragging.then_some(WidgetState::Pressed),
                 disabled.then_some(WidgetState::Disabled),
             ];
+            let appearance = WidgetStateCascades::new(
+                hovered,
+                pressed_appearance,
+                focused_appearance,
+                disabled_appearance,
+            );
             let root_override = appearance.resolve(&active, panels.get(widget_of.panel()).ok());
             if root_override != VisualSlotOverride::default() {
                 desired.set(VisualSlotId::SLIDER_ROOT, root_override);
@@ -5274,7 +5290,7 @@ mod tests {
         assert_eq!(disabled.border_color, None);
         {
             let index = app.world().resource::<VisualOverrideIndex>();
-            for &element_index in &elements {
+            for &(element_index, _) in &elements {
                 assert_eq!(
                     index
                         .get(panel, element_index)
@@ -5293,7 +5309,7 @@ mod tests {
         assert_eq!(enabled.offset, idle.offset);
         assert_eq!(enabled.border_color, Some(STATE_THUMB_FOCUS_BORDER));
         let index = app.world().resource::<VisualOverrideIndex>();
-        for element_index in elements {
+        for (element_index, _) in elements {
             assert_eq!(
                 index
                     .get(panel, element_index)

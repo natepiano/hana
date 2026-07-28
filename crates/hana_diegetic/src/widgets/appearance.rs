@@ -5,7 +5,7 @@
 //! and [`El::material`](crate::El::material). A widget element adds a
 //! [`StateAppearance`]: one [`Appearance`] per [`WidgetState`], naming only the
 //! properties that state replaces on the widget's root visual slot.
-//! [`StateAppearance::resolve`] layers the active states in
+//! [`WidgetStateCascades::resolve`] layers the active states in
 //! [`WidgetState::LAYER_ORDER`] and returns the [`VisualSlotOverride`] the
 //! retained routes apply, so state presentation patches records layout already
 //! emitted and never re-authors layout.
@@ -273,9 +273,14 @@ impl PartialEq for WidgetDisabledAppearance {
 
 const _: () = assert!(size_of::<WidgetDisabledAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
 
-/// One [`Appearance`] per [`WidgetState`], authored by the state builders on a
-/// widget element and carried to the widget entity for state presentation.
-#[derive(Clone, Component, Debug, Default, PartialEq)]
+/// Authored per-state [`Appearance`] bundles held on a layout element and in
+/// [`ComputedWidgetRecord`](super::ComputedWidgetRecord).
+///
+/// The four channels reach the widget entity as separate
+/// `Cascade<WidgetHoveredAppearance>`, `Cascade<WidgetPressedAppearance>`,
+/// `Cascade<WidgetFocusedAppearance>`, and `Cascade<WidgetDisabledAppearance>`
+/// components.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct StateAppearance {
     pub(crate) hovered:  Cascade<WidgetHoveredAppearance>,
     pub(crate) pressed:  Cascade<WidgetPressedAppearance>,
@@ -284,6 +289,44 @@ pub(crate) struct StateAppearance {
 }
 
 impl StateAppearance {
+    /// Borrows this appearance's four independently cascaded state layers.
+    pub(crate) const fn cascades(&self) -> WidgetStateCascades<'_> {
+        WidgetStateCascades::new(&self.hovered, &self.pressed, &self.focused, &self.disabled)
+    }
+}
+
+/// Borrowed state-appearance cascades read from a widget entity or layout element.
+pub(crate) struct WidgetStateCascades<'a> {
+    hovered:  &'a Cascade<WidgetHoveredAppearance>,
+    pressed:  &'a Cascade<WidgetPressedAppearance>,
+    focused:  &'a Cascade<WidgetFocusedAppearance>,
+    disabled: &'a Cascade<WidgetDisabledAppearance>,
+}
+
+impl<'a> WidgetStateCascades<'a> {
+    /// Borrows the four independently cascaded widget-state appearance layers.
+    pub(crate) const fn new(
+        hovered: &'a Cascade<WidgetHoveredAppearance>,
+        pressed: &'a Cascade<WidgetPressedAppearance>,
+        focused: &'a Cascade<WidgetFocusedAppearance>,
+        disabled: &'a Cascade<WidgetDisabledAppearance>,
+    ) -> Self {
+        Self {
+            hovered,
+            pressed,
+            focused,
+            disabled,
+        }
+    }
+
+    /// Whether any state channel explicitly uses [`Cascade::Override`].
+    pub(crate) const fn any_overridden(&self) -> bool {
+        self.hovered.as_override().is_some()
+            || self.pressed.as_override().is_some()
+            || self.focused.as_override().is_some()
+            || self.disabled.as_override().is_some()
+    }
+
     fn layer(&self, state: WidgetState) -> Option<&Appearance> {
         match state {
             WidgetState::Focused => self
@@ -352,7 +395,7 @@ pub(crate) enum WidgetState {
 }
 
 impl WidgetState {
-    /// Layering order for [`StateAppearance::resolve`]: a later state replaces
+    /// Layering order for [`WidgetStateCascades::resolve`]: a later state replaces
     /// the properties it authors over an earlier one.
     pub(crate) const LAYER_ORDER: [Self; 4] =
         [Self::Focused, Self::Hovered, Self::Pressed, Self::Disabled];
@@ -427,7 +470,8 @@ mod tests {
     fn properties_layer_independently() {
         // Focus authors only the border and hover only the fill, so both
         // survive when the two states are live together.
-        let resolved = state_appearance().resolve(
+        let state_appearance = state_appearance();
+        let resolved = state_appearance.cascades().resolve(
             &[Some(WidgetState::Focused), Some(WidgetState::Hovered)],
             None,
         );
@@ -439,7 +483,8 @@ mod tests {
     fn later_layers_replace_earlier_ones_regardless_of_active_order() {
         // Pressed sits after hovered in the layer order, so it wins the fill
         // even when the caller lists hovered last.
-        let resolved = state_appearance().resolve(
+        let state_appearance = state_appearance();
+        let resolved = state_appearance.cascades().resolve(
             &[Some(WidgetState::Pressed), Some(WidgetState::Hovered)],
             None,
         );
@@ -448,7 +493,10 @@ mod tests {
 
     #[test]
     fn inactive_states_author_nothing() {
-        let resolved = state_appearance().resolve(&[None, None, None, None], None);
+        let state_appearance = state_appearance();
+        let resolved = state_appearance
+            .cascades()
+            .resolve(&[None, None, None, None], None);
         assert_eq!(resolved.fill_color, None);
         assert_eq!(resolved.border_color, None);
         assert_eq!(resolved.border_widths, None);
@@ -457,7 +505,10 @@ mod tests {
     #[test]
     fn border_width_resolves_through_the_owning_panel_scale() {
         let panel = panel();
-        let resolved = state_appearance().resolve(&[Some(WidgetState::Focused)], Some(&panel));
+        let state_appearance = state_appearance();
+        let resolved = state_appearance
+            .cascades()
+            .resolve(&[Some(WidgetState::Focused)], Some(&panel));
         let widths = resolved
             .border_widths
             .expect("a focused width and a live panel resolve to render widths");
@@ -474,7 +525,10 @@ mod tests {
 
     #[test]
     fn border_width_without_a_panel_leaves_the_authored_width() {
-        let resolved = state_appearance().resolve(&[Some(WidgetState::Focused)], None);
+        let state_appearance = state_appearance();
+        let resolved = state_appearance
+            .cascades()
+            .resolve(&[Some(WidgetState::Focused)], None);
         assert_eq!(resolved.border_widths, None);
         assert_eq!(
             resolved.border_color,

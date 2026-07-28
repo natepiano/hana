@@ -27,15 +27,16 @@ use super::WidgetDisabled;
 use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
+use super::WidgetStateCascades;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
-use super::appearance::StateAppearance;
 use super::appearance::WidgetState;
 use super::capture;
 use super::capture::WidgetCaptures;
 use super::visual;
 use crate::DiegeticPanel;
 use crate::PanelElementId;
+use crate::cascade::Cascade;
 use crate::ime;
 use crate::ime::ImeBlurIntent;
 use crate::ime::ImeEditorState;
@@ -123,19 +124,23 @@ impl Button {
 /// Run condition for [`present_button_state`]: reports whether any authored
 /// presentation or presented state input changed since the last run.
 ///
-/// `Changed<StateAppearance>` / `Changed<WidgetVisualSlots>` cover reify and
-/// re-authoring, `Changed<PickingInteraction>` covers the hover/pressed
-/// aggregate, and `Changed` on [`WidgetFocusVisible`], [`WidgetDisabled`], and
-/// [`ButtonPress`] covers marker insertion. The [`RemovedComponents`] streams
-/// report the edges back to normal; every stream is drained each run so a
-/// consumed removal cannot re-trigger a later quiet frame.
+/// The four `Changed<Cascade<Widget*Appearance>>` terms and
+/// `Changed<WidgetVisualSlots>` cover reify and re-authoring,
+/// `Changed<PickingInteraction>` covers the hover/pressed aggregate, and
+/// `Changed` on [`WidgetFocusVisible`], [`WidgetDisabled`], and [`ButtonPress`]
+/// covers marker insertion. The [`RemovedComponents`] streams report the edges
+/// back to normal; every stream is drained each run so a consumed removal
+/// cannot re-trigger a later quiet frame.
 pub(super) fn presentation_inputs_changed(
     changed: Query<
         (),
         (
             With<WidgetOf>,
             Or<(
-                Changed<StateAppearance>,
+                Changed<Cascade<super::WidgetHoveredAppearance>>,
+                Changed<Cascade<super::WidgetPressedAppearance>>,
+                Changed<Cascade<super::WidgetFocusedAppearance>>,
+                Changed<Cascade<super::WidgetDisabledAppearance>>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
                 Changed<WidgetFocusVisible>,
@@ -178,7 +183,10 @@ pub(super) fn present_button_state(
         (
             Entity,
             &WidgetKind,
-            &StateAppearance,
+            &Cascade<super::WidgetHoveredAppearance>,
+            &Cascade<super::WidgetPressedAppearance>,
+            &Cascade<super::WidgetFocusedAppearance>,
+            &Cascade<super::WidgetDisabledAppearance>,
             &WidgetOf,
             &WidgetVisualSlots,
             Option<&PickingInteraction>,
@@ -192,8 +200,20 @@ pub(super) fn present_button_state(
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (entity, kind, appearance, widget_of, slots, interaction, disabled, focused, pressed) in
-        &buttons
+    for (
+        entity,
+        kind,
+        hovered,
+        pressed_appearance,
+        focused_appearance,
+        disabled_appearance,
+        widget_of,
+        slots,
+        interaction,
+        disabled,
+        focused,
+        pressed,
+    ) in &buttons
     {
         if *kind != WidgetKind::Button {
             continue;
@@ -212,6 +232,12 @@ pub(super) fn present_button_state(
             disabled.then_some(WidgetState::Disabled),
         ];
         let panel = panels.get(widget_of.panel()).ok();
+        let appearance = WidgetStateCascades::new(
+            hovered,
+            pressed_appearance,
+            focused_appearance,
+            disabled_appearance,
+        );
         visual::write_slot_override(
             entity,
             VisualSlotId::BUTTON_ROOT,

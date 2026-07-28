@@ -49,6 +49,7 @@ use crate::widgets::ComputedVisualSlot;
 use crate::widgets::ComputedWidgetRecord;
 use crate::widgets::StateAppearance;
 use crate::widgets::Tooltip;
+use crate::widgets::VisualElementCapabilities;
 use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetKind;
@@ -456,6 +457,20 @@ impl LayoutTree {
     #[must_use]
     pub const fn len(&self) -> usize { self.elements.len() }
 
+    /// Replaces one element's state appearance for a layout test fixture.
+    #[cfg(test)]
+    pub(crate) fn set_element_state_appearance(
+        &mut self,
+        index: usize,
+        appearance: StateAppearance,
+    ) -> bool {
+        let Some(element) = self.elements.get_mut(index) else {
+            return false;
+        };
+        element.appearance = Some(Box::new(appearance));
+        true
+    }
+
     /// Returns `true` if the tree has no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
@@ -858,6 +873,7 @@ impl LayoutTree {
                         )
                     })
                 });
+            let is_widget_root = widget_declaration.is_some();
             let owning_record = if let Some((id, widget)) = widget_declaration {
                 ranked_records.push((
                     element.z_index,
@@ -876,7 +892,12 @@ impl LayoutTree {
                 inherited_owner
             };
             if let Some(record_index) = owning_record {
-                ranked_records[record_index].1.push_visual_element(index);
+                record_owned_widget_element(
+                    &mut ranked_records[record_index].1,
+                    element,
+                    index,
+                    is_widget_root,
+                );
             }
             if let (Some(slot), Some(record_index)) = (element.visual_slot, owning_record) {
                 let border_box = computed.bounds;
@@ -1287,24 +1308,67 @@ fn validated_element_appearance(
     let Some(appearance) = element.appearance.as_deref() else {
         return Ok(());
     };
-    if appearance.any(|layer| layer.background.is_authored()) && element.background.is_none() {
+    let cascades = appearance.cascades();
+    if cascades.any(|layer| layer.background.is_authored()) && element.background.is_none() {
         return Err(PanelBuildError::StateBackgroundRequiresBackground(
             id.clone(),
         ));
     }
-    if appearance.any(|layer| layer.border_color.is_authored()) && element.border.is_none() {
+    if cascades.any(|layer| layer.border_color.is_authored()) && element.border.is_none() {
         return Err(PanelBuildError::StateBorderColorRequiresBorder(id.clone()));
     }
-    if appearance.any(|layer| layer.border_width.is_authored()) && element.border.is_none() {
+    if cascades.any(|layer| layer.border_width.is_authored()) && element.border.is_none() {
         return Err(PanelBuildError::StateBorderWidthRequiresBorder(id.clone()));
     }
-    if appearance.any(|layer| layer.material.is_authored())
+    if cascades.any(|layer| layer.material.is_authored())
         && element.background.is_none()
         && element.border.is_none()
     {
         return Err(PanelBuildError::StateMaterialRequiresSurface(id.clone()));
     }
     Ok(())
+}
+
+fn element_visual_capabilities(element: &Element) -> VisualElementCapabilities {
+    let mut capabilities = VisualElementCapabilities::empty();
+    if element.background.is_some() {
+        capabilities |= VisualElementCapabilities::SDF_FILL;
+    }
+    if element.border.is_some() {
+        capabilities |= VisualElementCapabilities::SDF_BORDER;
+    }
+    if element.background.is_some() || element.border.is_some() {
+        capabilities |= VisualElementCapabilities::SDF_MATERIAL;
+    }
+    if matches!(
+        element.content,
+        ElementContent::Text { .. } | ElementContent::Image { .. }
+    ) || element
+        .draw
+        .as_ref()
+        .is_some_and(|draw| !draw.shapes_ref().is_empty())
+    {
+        capabilities |= VisualElementCapabilities::CONTENT;
+    }
+    capabilities
+}
+
+fn record_owned_widget_element(
+    record: &mut ComputedWidgetRecord,
+    element: &Element,
+    element_index: usize,
+    is_widget_root: bool,
+) {
+    let visual_element_capabilities = element_visual_capabilities(element);
+    if !visual_element_capabilities.is_empty() {
+        record.push_visual_element(element_index, visual_element_capabilities);
+    }
+    if !is_widget_root
+        && let Some(appearance) = element.appearance.as_deref()
+        && appearance.cascades().any_overridden()
+    {
+        record.push_part_appearance(element_index, appearance.clone());
+    }
 }
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
@@ -1593,6 +1657,7 @@ mod tests {
     use crate::Mm;
     use crate::PanelElementId;
     use crate::Slider;
+    use crate::WidgetHoveredAppearance;
     use crate::WidgetInteractivity;
     use crate::cascade::Cascade;
     use crate::layout::AlignX;
@@ -1615,6 +1680,8 @@ mod tests {
     use crate::layout::TextStyle;
     use crate::layout::Unit;
     use crate::layout::child_layout::ChildLayout;
+    use crate::widgets::StateAppearance;
+    use crate::widgets::VisualElementCapabilities;
     use crate::widgets::VisualSlotId;
 
     const LARGE_CHILD_GAP: f32 = 2.0;
@@ -1678,6 +1745,15 @@ mod tests {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text(("child", TextStyle::new(10.0)));
         builder.build()
+    }
+
+    fn hovered_background(color: Color) -> StateAppearance {
+        StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                Appearance::new().background(color),
+            )),
+            ..default()
+        }
     }
 
     #[test]
@@ -2016,6 +2092,214 @@ mod tests {
             slots.iter().all(|slot| slot.slot != ORPHAN_SLOT),
             "slots outside a widget subtree belong to no widget",
         );
+    }
+
+    #[test]
+    fn computed_widget_part_appearances_are_sparse_sorted_and_exclude_the_root() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered(Appearance::new().background(Color::BLACK)),
+            |builder| {
+                builder.with(El::new(), |_| {});
+                builder.with(El::new(), |_| {});
+                builder.with(El::new(), |_| {});
+                builder.with(El::new(), |_| {});
+            },
+        );
+        let mut tree = builder.build();
+        let Some(root_index) = tree.root else {
+            return;
+        };
+        let Some(&widget_index) = tree.children_of(root_index).first() else {
+            return;
+        };
+        let owned = tree.children_of(widget_index).to_vec();
+        let Some(&first_child) = owned.first() else {
+            return;
+        };
+        let Some(&second_child) = owned.get(1) else {
+            return;
+        };
+        let Some(&empty_child) = owned.get(2) else {
+            return;
+        };
+        let Some(&overridden_empty_child) = owned.get(3) else {
+            return;
+        };
+        tree.elements[first_child].appearance =
+            Some(Box::new(hovered_background(Color::srgb(1.0, 0.0, 0.0))));
+        tree.elements[second_child].appearance =
+            Some(Box::new(hovered_background(Color::srgb(0.0, 0.0, 1.0))));
+        tree.elements[empty_child].appearance = Some(Box::new(StateAppearance::default()));
+        tree.elements[overridden_empty_child].appearance = Some(Box::new(StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(Appearance::new())),
+            ..default()
+        }));
+
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let before_result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let before_records = tree.computed_widget_records(&before_result);
+        assert_eq!(before_records.len(), 1);
+        let before_parts = before_records[0].part_appearances().to_vec();
+        if let ElementContent::Children(children) = &mut tree.elements[widget_index].content {
+            children.swap(0, 1);
+        } else {
+            return;
+        }
+
+        let after_result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&after_result);
+
+        assert_eq!(records.len(), 1);
+        let mut expected = vec![first_child, second_child, overridden_empty_child];
+        expected.sort_unstable();
+        let parts = records[0].part_appearances();
+        assert_eq!(parts, before_parts.as_slice());
+        assert_eq!(
+            parts
+                .iter()
+                .map(|(element_index, _)| *element_index)
+                .collect::<Vec<_>>(),
+            expected,
+        );
+        assert!(
+            parts
+                .iter()
+                .all(|(element_index, _)| *element_index != widget_index),
+            "the widget root remains in ComputedWidgetRecord::appearance",
+        );
+        assert!(
+            parts
+                .iter()
+                .all(|(element_index, _)| *element_index != empty_child),
+            "an appearance with four inherited channels has no sparse-map entry",
+        );
+        assert!(
+            parts
+                .iter()
+                .find(|(element_index, _)| *element_index == overridden_empty_child)
+                .is_some_and(|(_, appearance)| appearance.hovered.as_override().is_some()),
+            "an overridden empty appearance keeps its hovered cascade channel",
+        );
+    }
+
+    #[test]
+    fn computed_widget_recipients_exclude_example_slider_containers() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::column().widget("level", Slider::new(0.0..=1.0)),
+            |builder| {
+                builder.with(El::overlay(), |builder| {
+                    builder.text(("Level", TextStyle::new(10.0)));
+                });
+                builder.with(El::overlay(), |builder| {
+                    builder.with(El::overlay(), |builder| {
+                        builder.with(El::new().background(Color::WHITE), |_| {});
+                    });
+                    builder.with(El::overlay(), |builder| {
+                        builder.with(
+                            El::new()
+                                .background(Color::WHITE)
+                                .border(Border::all(1.0, Color::BLACK))
+                                .slider_thumb(),
+                            |_| {},
+                        );
+                    });
+                });
+            },
+        );
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(
+            tree.elements.len(),
+            9,
+            "one layout root plus eight slider nodes"
+        );
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].visual_elements().len(), 3);
+        assert_eq!(
+            records[0]
+                .visual_elements()
+                .iter()
+                .map(|(_, capabilities)| *capabilities)
+                .collect::<Vec<_>>(),
+            vec![
+                VisualElementCapabilities::CONTENT,
+                VisualElementCapabilities::SDF_FILL | VisualElementCapabilities::SDF_MATERIAL,
+                VisualElementCapabilities::SDF_FILL
+                    | VisualElementCapabilities::SDF_BORDER
+                    | VisualElementCapabilities::SDF_MATERIAL,
+            ],
+        );
+    }
+
+    #[test]
+    fn editable_tree_replacement_rekeys_part_appearance_entries() {
+        let mut display_builder = LayoutBuilder::new(100.0, 50.0);
+        display_builder.with(El::new().editable_field("gain", field_spec()), |builder| {
+            builder.with(El::new(), |_| {});
+        });
+        let mut display = display_builder.build();
+        let Some(display_index) = display
+            .elements
+            .iter()
+            .position(|element| matches!(element.content, ElementContent::Empty))
+            .filter(|index| *index != 0)
+        else {
+            return;
+        };
+        display.elements[display_index].appearance =
+            Some(Box::new(hovered_background(Color::srgb(1.0, 0.0, 0.0))));
+
+        let mut editor_builder = LayoutBuilder::with_root(El::new());
+        editor_builder.with(El::new(), |_| {});
+        let mut editor_content = editor_builder.build();
+        let Some(editor_root) = editor_content.root else {
+            return;
+        };
+        let Some(&editor_child) = editor_content.children_of(editor_root).first() else {
+            return;
+        };
+        editor_content.elements[editor_child].appearance =
+            Some(Box::new(hovered_background(Color::srgb(0.0, 0.0, 1.0))));
+
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let display_result = engine.compute(&display, 100.0, 50.0, 1.0);
+        let display_parts = display.computed_widget_records(&display_result)[0]
+            .part_appearances()
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect::<Vec<_>>();
+
+        let mut editor = display.clone();
+        assert_eq!(
+            editor.set_field_editing_content(&PanelElementId::named("gain"), &editor_content),
+            FieldDisplayTextUpdate::Updated,
+        );
+        let editor_result = engine.compute(&editor, 100.0, 50.0, 1.0);
+        let editor_parts = editor.computed_widget_records(&editor_result)[0]
+            .part_appearances()
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect::<Vec<_>>();
+
+        let display_again_result = engine.compute(&display, 100.0, 50.0, 1.0);
+        let display_again_parts = display.computed_widget_records(&display_again_result)[0]
+            .part_appearances()
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect::<Vec<_>>();
+
+        assert_eq!(display_parts, vec![display_index]);
+        assert_eq!(editor_parts.len(), 1);
+        assert_ne!(editor_parts, display_parts);
+        assert_eq!(display_again_parts, display_parts);
     }
 
     #[test]
