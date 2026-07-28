@@ -56,6 +56,7 @@ pub use builder::ChildLayoutState;
 pub use builder::Column;
 pub use builder::El;
 pub use builder::ElementRole;
+pub use builder::HasPressedState;
 pub use builder::LayoutBuilder;
 pub use builder::LayoutOnly;
 pub use builder::Overlay;

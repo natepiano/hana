@@ -294,7 +294,7 @@ impl Plugin for WidgetsPlugin {
                         .run_if(button::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),
-                    editable::present_focus
+                    editable::present_editable_state
                         .run_if(editable::presentation_inputs_changed)
                         .after(WidgetSystems::FocusCommandsApplied)
                         .before(WidgetSystems::PresentationCommandsApplied),

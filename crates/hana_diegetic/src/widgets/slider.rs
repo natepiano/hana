@@ -3980,7 +3980,7 @@ mod tests {
         // element authors both a normal background and a normal border for the
         // surface those overrides patch.
         builder.with(
-            state_styled(
+            apply_state_appearance(
                 El::new()
                     .size(20.0, 10.0)
                     .background(Color::WHITE)
@@ -3992,14 +3992,14 @@ mod tests {
         builder.build()
     }
 
-    /// The same unrelated button paired with a valid styled slider that marks
+    /// The same unrelated button paired with a state-layered slider that marks
     /// one thumb, so a peer test can watch both the slider's root and thumb
     /// records react while the button stays untouched.
     fn button_and_thumb_slider_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().size(20.0, 10.0).button("act"), |_| {});
         builder.with(
-            state_styled(
+            apply_state_appearance(
                 El::overlay()
                     .size(40.0, 16.0)
                     .background(Color::WHITE)
@@ -5064,10 +5064,10 @@ mod tests {
     }
 
     fn thumb_slider_tree(id: &str, slider: Slider, thumb_size: f32) -> LayoutTree {
-        styled_thumb_slider_tree(id, slider, thumb_size, |element| element)
+        thumb_slider_tree_with(id, slider, thumb_size, |element| element)
     }
 
-    fn styled_thumb_slider_tree(
+    fn thumb_slider_tree_with(
         id: &str,
         slider: Slider,
         thumb_size: f32,
@@ -5307,7 +5307,7 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+            thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
                 element
                     .hovered_background(STATE_HOVER_FILL)
                     .focused_border_color(STATE_FOCUS_BORDER)
@@ -5492,7 +5492,7 @@ mod tests {
     }
 
     /// Hover, press, and focus layers shared by the peer-isolation trees.
-    fn state_styled<L>(element: SliderElement<L>) -> SliderElement<L> {
+    fn apply_state_appearance<L>(element: SliderElement<L>) -> SliderElement<L> {
         element
             .hovered_background(STATE_HOVER_FILL)
             .pressed_background(STATE_PRESS_FILL)
@@ -5514,7 +5514,7 @@ mod tests {
 
     /// Every state layer a precedence test needs, authored on the slider
     /// element.
-    fn state_layered<L>(element: SliderElement<L>) -> SliderElement<L> {
+    fn apply_all_state_layers<L>(element: SliderElement<L>) -> SliderElement<L> {
         element
             .focused_background(STATE_FOCUS_FILL)
             .focused_border_color(STATE_FOCUS_BORDER)
@@ -5575,10 +5575,10 @@ mod tests {
     }
 
     fn headless_slider_tree(id: &str, slider: Slider) -> LayoutTree {
-        styled_headless_slider_tree(id, slider, |element| element)
+        headless_slider_tree_with(id, slider, |element| element)
     }
 
-    fn styled_headless_slider_tree(
+    fn headless_slider_tree_with(
         id: &str,
         slider: Slider,
         configure: impl FnOnce(SliderElement<Row>) -> SliderElement<Row>,
@@ -6205,7 +6205,7 @@ mod tests {
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
-            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, state_layered),
+            thumb_slider_tree_with("level", plain_slider(0.5), 8.0, apply_all_state_layers),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -6279,7 +6279,7 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+            thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
                 element.pressed_background(STATE_PRESS_FILL)
             }),
         );
@@ -6323,7 +6323,7 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+            thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
                 element
                     .hovered_background(STATE_HOVER_FILL)
                     .pressed_background(STATE_PRESS_FILL)
@@ -6373,7 +6373,7 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_headless_slider_tree("level", plain_slider(0.5), |element| {
+            headless_slider_tree_with("level", plain_slider(0.5), |element| {
                 element.hovered_background(STATE_HOVER_FILL)
             }),
         );
@@ -6409,7 +6409,7 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+            thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
                 element.hovered_background(STATE_HOVER_FILL)
             }),
         );

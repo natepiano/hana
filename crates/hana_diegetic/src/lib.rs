@@ -172,6 +172,7 @@ pub use layout::FontSlant;
 pub use layout::FontWeight;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
+pub use layout::HasPressedState;
 pub use layout::HasUnit;
 pub use layout::In;
 pub use layout::InvalidPanelScalar;

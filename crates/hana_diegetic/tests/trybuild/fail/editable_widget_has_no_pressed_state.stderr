@@ -1,0 +1,17 @@
+error[E0599]: the method `pressed_background` exists for struct `El<hana_diegetic::Row, WidgetElement<ImeEditableFieldSpec>>`, but its trait bounds were not satisfied
+  --> tests/trybuild/fail/editable_widget_has_no_pressed_state.rs:11:10
+   |
+ 8 |       let _ = El::new()
+   |  _____________-
+ 9 | |         .background(Color::WHITE)
+10 | |         .editable_field("editable", field)
+11 | |         .pressed_background(Color::BLACK);
+   | |_________-^^^^^^^^^^^^^^^^^^
+   |
+  ::: src/ime/field.rs
+   |
+   |   pub enum ImeEditableFieldSpec {
+   |   ----------------------------- doesn't satisfy `ImeEditableFieldSpec: HasPressedState`
+   |
+   = note: the following trait bounds were not satisfied:
+           `ImeEditableFieldSpec: HasPressedState`

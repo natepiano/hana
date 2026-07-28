@@ -1,0 +1,12 @@
+use bevy::color::Color;
+use hana_diegetic::El;
+use hana_diegetic::ImeAppOwnedFieldSpec;
+use hana_diegetic::ImeEditableFieldSpec;
+
+fn main() {
+    let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+    let _ = El::new()
+        .background(Color::WHITE)
+        .editable_field("editable", field)
+        .pressed_background(Color::BLACK);
+}

@@ -143,6 +143,21 @@ impl Widget for Slider {
     fn root_visual_slot() -> WidgetRootSlot { WidgetRootSlot(VisualSlotId::SLIDER_ROOT) }
 }
 
+/// A widget kind that can be held — a button press or a slider drag.
+///
+/// Only these elements carry the `pressed_*` state builders. Widgets that are
+/// never held have no pressed state to author: an input text box takes a caret
+/// and keystrokes, a read-only value readout is not grabbed at all, and a
+/// scrolling log is driven by its content rather than by a pointer hold. Those
+/// kinds still reach hover, focus, and disabled, and author only those layers;
+/// their elements do not expose `pressed_*` at all, so authoring a layer that
+/// would never present is a compile error rather than a silent no-op.
+pub trait HasPressedState: Widget {}
+
+impl HasPressedState for Button {}
+
+impl HasPressedState for Slider {}
+
 /// Text sizing and wrapping policy for a layout text leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TextSizing {
@@ -772,14 +787,6 @@ impl<L, W> El<L, WidgetElement<W>> {
         self.set_background(WidgetState::Hovered, color)
     }
 
-    /// Sets the root background color shown while this widget is held — a
-    /// button press or a slider drag.
-    ///
-    /// Requires an authored [`El::background`].
-    pub fn pressed_background(self, color: Color) -> Self {
-        self.set_background(WidgetState::Pressed, color)
-    }
-
     /// Sets the root background color shown while this widget's keyboard focus
     /// indicator is visible.
     ///
@@ -800,14 +807,6 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// Requires an authored [`El::border`]; border radii stay as authored.
     pub fn hovered_border_color(self, color: Color) -> Self {
         self.set_border_color(WidgetState::Hovered, color)
-    }
-
-    /// Sets the root border color shown while this widget is held — a button
-    /// press or a slider drag.
-    ///
-    /// Requires an authored [`El::border`]; border radii stay as authored.
-    pub fn pressed_border_color(self, color: Color) -> Self {
-        self.set_border_color(WidgetState::Pressed, color)
     }
 
     /// Sets the root border color shown while this widget's keyboard focus
@@ -832,16 +831,6 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// unchanged.
     pub fn hovered_border_width(self, width: impl Into<Dimension>) -> Self {
         self.set_border_width(WidgetState::Hovered, width.into())
-    }
-
-    /// Sets the root border width shown while this widget is held — a button
-    /// press or a slider drag.
-    ///
-    /// Applies to all four sides and requires an authored [`El::border`]. The
-    /// border grows inward, so the element's outer bounds and solved layout are
-    /// unchanged.
-    pub fn pressed_border_width(self, width: impl Into<Dimension>) -> Self {
-        self.set_border_width(WidgetState::Pressed, width.into())
     }
 
     /// Sets the root border width shown while this widget's keyboard focus
@@ -869,15 +858,6 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// surface — [`El::background`] or [`El::border`].
     pub fn hovered_material(self, material: Handle<StandardMaterial>) -> Self {
         self.set_material(WidgetState::Hovered, material)
-    }
-
-    /// Sets the root material shown while this widget is held — a button press
-    /// or a slider drag.
-    ///
-    /// Covers the authored fill and border, and requires an authored root
-    /// surface — [`El::background`] or [`El::border`].
-    pub fn pressed_material(self, material: Handle<StandardMaterial>) -> Self {
-        self.set_material(WidgetState::Pressed, material)
     }
 
     /// Sets the root material shown while this widget's keyboard focus
@@ -922,6 +902,43 @@ impl<L, W> El<L, WidgetElement<W>> {
     }
 
     const fn widget_mut(&mut self) -> Option<&mut WidgetSpec> { self.common.widget.as_mut() }
+}
+
+impl<L, W: HasPressedState> El<L, WidgetElement<W>> {
+    /// Sets the root background color shown while this widget is held — a
+    /// button press or a slider drag.
+    ///
+    /// Requires an authored [`El::background`].
+    pub fn pressed_background(self, color: Color) -> Self {
+        self.set_background(WidgetState::Pressed, color)
+    }
+
+    /// Sets the root border color shown while this widget is held — a button
+    /// press or a slider drag.
+    ///
+    /// Requires an authored [`El::border`]; border radii stay as authored.
+    pub fn pressed_border_color(self, color: Color) -> Self {
+        self.set_border_color(WidgetState::Pressed, color)
+    }
+
+    /// Sets the root border width shown while this widget is held — a button
+    /// press or a slider drag.
+    ///
+    /// Applies to all four sides and requires an authored [`El::border`]. The
+    /// border grows inward, so the element's outer bounds and solved layout are
+    /// unchanged.
+    pub fn pressed_border_width(self, width: impl Into<Dimension>) -> Self {
+        self.set_border_width(WidgetState::Pressed, width.into())
+    }
+
+    /// Sets the root material shown while this widget is held — a button press
+    /// or a slider drag.
+    ///
+    /// Covers the authored fill and border, and requires an authored root
+    /// surface — [`El::background`] or [`El::border`].
+    pub fn pressed_material(self, material: Handle<StandardMaterial>) -> Self {
+        self.set_material(WidgetState::Pressed, material)
+    }
 }
 
 impl<L> El<L, WidgetElement<Button>> {

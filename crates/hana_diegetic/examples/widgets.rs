@@ -1447,7 +1447,7 @@ type ButtonElement = El<Row, WidgetElement<Button>>;
 /// properties visibly layer independently. Focus thickens the border as well
 /// as recoloring it, which is what makes keyboard traversal readable at the
 /// distance the cube panel sits from the camera.
-fn state_styled(element: ButtonElement) -> ButtonElement {
+fn apply_state_appearance(element: ButtonElement) -> ButtonElement {
     element
         .hovered_background(BUTTON_FILL_HOVERED)
         .pressed_background(BUTTON_FILL_PRESSED)
@@ -1463,7 +1463,7 @@ fn add_button(
     tooltip: Option<Tooltip>,
     configure: impl FnOnce(ButtonElement) -> ButtonElement,
 ) {
-    let element = configure(state_styled(
+    let element = configure(apply_state_appearance(
         El::new()
             .size(width, BUTTON_HEIGHT)
             .padding(Padding::all(CONTROL_PADDING))
