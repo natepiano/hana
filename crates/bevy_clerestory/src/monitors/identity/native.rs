@@ -133,7 +133,7 @@ pub enum QualifiedEvidence {
 /// to a file.
 #[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct MacOsDisplayUuid([u8; MACOS_DISPLAY_UUID_BYTES]);
+pub struct MacOsDisplayUuid([u8; MACOS_DISPLAY_UUID_BYTES]);
 
 #[cfg(target_os = "macos")]
 impl MacOsDisplayUuid {
