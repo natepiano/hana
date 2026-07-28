@@ -1348,7 +1348,8 @@ fn route_sdf_batch_records(
 /// as authored data: a color patches every authored role's material row in
 /// place — an element authoring both a fill and a border recolors both,
 /// while the role-specific `fill_color`/`border_color` recolor one role and
-/// take precedence over `color` for it — an
+/// take precedence over `color` for it — replacement border widths restate
+/// the record's inward inset without moving its outer bounds, an
 /// offset translates only its `local_transform`, and a replacement material
 /// that changes `PipelineCompatibility`/`ResourceCompatibility` re-keys the
 /// record to its compatible destination batch. Authored registry surfaces
@@ -1369,6 +1370,11 @@ fn apply_sdf_visual_override<'a>(
         && border_authored
     {
         surface.border_material.color = Some(color);
+    }
+    if let Some(border_widths) = slot_override.border_widths
+        && border_authored
+    {
+        surface.border_widths = border_widths;
     }
     if let Some(material) = &slot_override.material {
         if fill_authored {
@@ -1744,7 +1750,6 @@ mod tests {
     use super::*;
     use crate::AlignX;
     use crate::AlignY;
-    use crate::Button;
     use crate::Mm;
     use crate::Padding;
     use crate::PanelElementId;
@@ -1753,7 +1758,6 @@ mod tests {
     use crate::Px;
     use crate::Slider;
     use crate::SliderDirection;
-    use crate::SliderRange;
     use crate::SliderState;
     use crate::Tooltip;
     use crate::TooltipPlacementPolicy;
@@ -1925,7 +1929,7 @@ mod tests {
             El::new()
                 .size(40.0, 20.0)
                 .background(WIDGET_FILL_COLOR)
-                .button("tooltip-target", Button::new())
+                .button("tooltip-target")
                 .tooltip(tooltip),
             |_| {},
         );
@@ -4641,7 +4645,7 @@ mod tests {
                         .width(Sizing::GROW)
                         .height(Sizing::GROW)
                         .background(WIDGET_FILL_COLOR)
-                        .button("styled", Button::new())
+                        .button("styled")
                         .visual_slot(TEST_SLOT),
                     |_| {},
                 );
@@ -4666,7 +4670,7 @@ mod tests {
                 .height(Sizing::GROW)
                 .background(WIDGET_FILL_COLOR)
                 .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR))
-                .button("styled", Button::new())
+                .button("styled")
                 .visual_slot(TEST_SLOT),
             |_| {},
         );
@@ -4680,7 +4684,7 @@ mod tests {
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
                 .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR))
-                .button("styled", Button::new())
+                .button("styled")
                 .visual_slot(TEST_SLOT),
             |_| {},
         );
@@ -5062,6 +5066,76 @@ mod tests {
     }
 
     #[test]
+    fn border_width_override_rewrites_widths_without_moving_outer_bounds() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_bordered_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        let authored_widths = records[0].border_widths.value;
+        let authored_half_size = records[0].half_size.value;
+        let widened = authored_widths * 3.0;
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_border_widths(widened.to_array()),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(records[0].border_widths.value, widened);
+        assert_eq!(
+            records[0].half_size.value, authored_half_size,
+            "the border grows inward, so the record's outer bounds stay solved",
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].border_widths.value, authored_widths,
+            "clearing the override restores the authored widths",
+        );
+    }
+
+    #[test]
+    fn border_width_override_never_authors_a_missing_border_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(0),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_border_widths([0.01; 4]),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].border_material,
+            SdfPaintMaterial::NotAuthored,
+            "a width override must not author a missing border role",
+        );
+        assert_eq!(
+            records[0].border_widths.value,
+            Vec4::ZERO,
+            "an unauthored border keeps its zero widths",
+        );
+    }
+
+    #[test]
     fn color_override_never_authors_a_missing_fill_role() {
         let mut app = widget_sdf_pipeline_app();
         spawn_sdf_panel(
@@ -5208,8 +5282,8 @@ mod tests {
     /// render-frame Y inversion, and the `Mm` world panel applies a non-unit
     /// world scale, so a raw layout-point offset renders at the wrong place.
     fn vertical_thumb_slider_tree() -> LayoutTree {
-        let slider = Slider::new(SliderRange::new(0.0, 1.0).expect("range validates"), 0.0)
-            .expect("slider validates")
+        let slider = Slider::new(0.0..=1.0)
+            .value(0.0)
             .direction(SliderDirection::BottomToTop);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
@@ -5218,7 +5292,7 @@ mod tests {
                 .background(WIDGET_FILL_COLOR)
                 .border(Border::all(1.0, IMAGE_BORDER_COLOR))
                 .alignment(AlignX::Center, AlignY::Center)
-                .slider("level", slider),
+                .widget("level", slider),
             |builder| {
                 builder.with(
                     El::new()
@@ -5379,7 +5453,7 @@ mod tests {
                     El::new()
                         .width(Sizing::GROW)
                         .height(Sizing::GROW)
-                        .button("styled", Button::new()),
+                        .button("styled"),
                     |builder| {
                         builder.image(
                             El::new()

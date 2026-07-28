@@ -98,7 +98,6 @@ mod tests {
 
     use super::AnchorResolveDiagnostics;
     use super::AnchorResolveSkip;
-    use crate::Button;
     use crate::DiegeticPanelCommands as _;
     use crate::El;
     use crate::Fit;
@@ -249,12 +248,7 @@ mod tests {
 
     fn widget_tree(width: f32) -> LayoutTree {
         let mut builder = LayoutBuilder::new(200.0, 100.0);
-        builder.with(
-            El::new()
-                .size(Px(width), Px(30.0))
-                .button("target", Button::new()),
-            |_| {},
-        );
+        builder.with(El::new().size(Px(width), Px(30.0)).button("target"), |_| {});
         builder.build()
     }
 

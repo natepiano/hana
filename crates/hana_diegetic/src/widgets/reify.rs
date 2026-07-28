@@ -18,6 +18,7 @@ use super::ScreenWidgetAnchoredHere;
 use super::SliderCancelCause;
 use super::SliderCaptures;
 use super::SliderState;
+use super::StateAppearance;
 use super::Tooltip;
 use super::TooltipControllerIndex;
 use super::TooltipFor;
@@ -195,6 +196,7 @@ pub(super) fn reify_widgets(
         &PanelWidget,
         &WidgetKind,
         &WidgetSpec,
+        &StateAppearance,
         &WidgetPreorder,
         &Transform,
         &WidgetAnchorRect,
@@ -235,6 +237,7 @@ pub(super) fn reify_widgets(
                     record.id().clone(),
                     record.kind(),
                     record.authored().clone(),
+                    record.appearance().clone(),
                     record.preorder(),
                     record.interactivity(),
                     anchor_rect,
@@ -246,6 +249,7 @@ pub(super) fn reify_widgets(
                         entity,
                         record.kind(),
                         record.authored(),
+                        record.appearance(),
                         record.preorder(),
                         record.interactivity(),
                         anchor_rect,
@@ -291,6 +295,7 @@ fn spawn_widget(
     id: PanelElementId,
     kind: WidgetKind,
     authored: WidgetSpec,
+    appearance: StateAppearance,
     preorder: usize,
     interactivity: Cascade<super::WidgetInteractivity>,
     anchor_rect: WidgetAnchorRect,
@@ -312,6 +317,7 @@ fn spawn_widget(
                 WidgetOf::new(panel),
                 kind,
                 authored,
+                appearance,
                 WidgetPreorder(preorder),
                 transform,
                 global_transform,
@@ -337,6 +343,7 @@ fn update_widget(
     entity: Entity,
     kind: WidgetKind,
     authored: &WidgetSpec,
+    appearance: &StateAppearance,
     preorder: usize,
     interactivity: Cascade<super::WidgetInteractivity>,
     anchor_rect: WidgetAnchorRect,
@@ -346,6 +353,7 @@ fn update_widget(
         &PanelWidget,
         &WidgetKind,
         &WidgetSpec,
+        &StateAppearance,
         &WidgetPreorder,
         &Transform,
         &WidgetAnchorRect,
@@ -361,6 +369,7 @@ fn update_widget(
         _,
         existing_kind,
         existing_authored,
+        existing_appearance,
         existing_preorder,
         existing_transform,
         existing_anchor_rect,
@@ -397,6 +406,9 @@ fn update_widget(
     let mut widget = commands.entity(entity);
     if existing_authored != authored {
         widget.insert(authored.clone());
+    }
+    if existing_appearance != appearance {
+        widget.insert(appearance.clone());
     }
     if existing_preorder.0 != preorder {
         widget.insert(WidgetPreorder(preorder));
@@ -769,7 +781,6 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::PanelWidgets;
     use crate::Slider;
-    use crate::SliderRange;
     use crate::WidgetInteractivity;
     use crate::WidgetOf;
     use crate::cascade::Cascade;
@@ -848,14 +859,14 @@ mod tests {
 
     fn callback_tree(button: Button) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().button("action", button), |_| {});
+        builder.with(El::new().widget("action", button), |_| {});
         builder.build()
     }
 
     fn widget_tree(ids: &[&str]) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         for id in ids {
-            builder.with(El::new().button(*id, Button::new()), |_| {});
+            builder.with(El::new().button(*id), |_| {});
         }
         builder.build()
     }
@@ -870,9 +881,7 @@ mod tests {
                     |_| {},
                 );
                 builder.with(
-                    El::new()
-                        .size(width, OFFSET_WIDGET_HEIGHT)
-                        .button("offset", Button::new()),
+                    El::new().size(width, OFFSET_WIDGET_HEIGHT).button("offset"),
                     |_| {},
                 );
             },
@@ -880,41 +889,30 @@ mod tests {
         builder.build()
     }
 
-    fn slider_tree(id: &str, initial_value: f32) -> Option<LayoutTree> {
-        let WidgetSpec::Slider(slider) = slider_spec(initial_value)? else {
-            return None;
-        };
+    fn slider_tree(id: &str, initial_value: f32) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().slider(id, slider), |_| {});
-        Some(builder.build())
+        builder.with(El::new().widget(id, slider(initial_value)), |_| {});
+        builder.build()
     }
 
-    fn ranked_slider_tree(initial_value: f32, z_index: i8) -> Option<LayoutTree> {
-        let WidgetSpec::Slider(slider) = slider_spec(initial_value)? else {
-            return None;
-        };
+    fn ranked_slider_tree(initial_value: f32, z_index: i8) -> LayoutTree {
+        let slider = slider(initial_value);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
             El::new()
                 .size(20.0, 10.0)
-                .slider("level", slider)
+                .widget("level", slider)
                 .widget_interactivity(WidgetInteractivity::Disabled)
                 .z_index(z_index),
             |_| {},
         );
-        builder.with(
-            El::new().size(20.0, 10.0).button("peer", Button::new()),
-            |_| {},
-        );
-        Some(builder.build())
+        builder.with(El::new().size(20.0, 10.0).button("peer"), |_| {});
+        builder.build()
     }
 
-    fn slider_spec(initial_value: f32) -> Option<WidgetSpec> {
-        let range = SliderRange::new(0.0, 10.0).ok()?;
-        Slider::new(range, initial_value)
-            .ok()
-            .map(WidgetSpec::Slider)
-    }
+    fn slider(initial_value: f32) -> Slider { Slider::new(0.0..=10.0).value(initial_value) }
+
+    fn slider_spec(initial_value: f32) -> WidgetSpec { WidgetSpec::Slider(slider(initial_value)) }
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -1151,10 +1149,7 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::row().size(100.0, 50.0), |builder| {
             builder.with(El::new().size(30.0, 10.0), |_| {});
-            builder.with(
-                El::new().size(20.0, 10.0).button("offset", Button::new()),
-                |_| {},
-            );
+            builder.with(El::new().size(20.0, 10.0).button("offset"), |_| {});
         });
         let mut app = test_app();
         let panel = spawn_panel(&mut app, builder.build()).expect("panel should build");
@@ -1199,10 +1194,7 @@ mod tests {
     #[test]
     fn centered_fit_panel_reifies_from_final_dimensions() {
         let mut tree = LayoutBuilder::with_root(El::column());
-        tree.with(
-            El::new().size(20.0, 10.0).button("centered", Button::new()),
-            |_| {},
-        );
+        tree.with(El::new().size(20.0, 10.0).button("centered"), |_| {});
         let panel = DiegeticPanel::world()
             .size(Fit, Fit)
             .anchor(Anchor::Center)
@@ -1241,7 +1233,7 @@ mod tests {
         tree.with(
             El::new()
                 .size(SCREEN_FIT_WIDGET_WIDTH, SCREEN_FIT_WIDGET_HEIGHT)
-                .button("screen-fit", Button::new()),
+                .button("screen-fit"),
             |_| {},
         );
         let panel = DiegeticPanel::screen()
@@ -1804,10 +1796,6 @@ mod tests {
             .get_ref::<CascadeFrom>()
             .map(|relationship| relationship.last_changed());
         let tree = slider_tree("control", 4.0);
-        assert!(tree.is_some());
-        let Some(tree) = tree else {
-            return;
-        };
         let expected_authored = slider_spec(4.0);
 
         let result = app.world_mut().commands().set_tree(panel, tree);
@@ -1825,9 +1813,9 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<WidgetSpec>(widget),
-            expected_authored.as_ref()
+            Some(&expected_authored)
         );
-        assert!(matches!(expected_authored, Some(WidgetSpec::Slider(_))));
+        assert!(matches!(expected_authored, WidgetSpec::Slider(_)));
         assert_eq!(
             app.world()
                 .entity(widget)
@@ -1847,17 +1835,12 @@ mod tests {
     #[test]
     fn visual_only_slider_edit_refreshes_snapshot_without_replacing_entity() {
         let mut app = test_app();
-        let Some(first_tree) = slider_tree("level", 2.0) else {
-            return;
-        };
-        let Some(panel) = spawn_panel(&mut app, first_tree) else {
+        let Some(panel) = spawn_panel(&mut app, slider_tree("level", 2.0)) else {
             return;
         };
         app.update();
         let before = resolve_widget(&mut app, panel, PanelElementId::named("level"));
-        let Some(next_tree) = slider_tree("level", 8.0) else {
-            return;
-        };
+        let next_tree = slider_tree("level", 8.0);
 
         let result = app.world_mut().commands().set_tree(panel, next_tree);
         assert!(result.is_ok());
@@ -1869,13 +1852,13 @@ mod tests {
             return;
         };
         let expected = slider_spec(8.0);
-        assert_eq!(app.world().get::<WidgetSpec>(widget), expected.as_ref());
+        assert_eq!(app.world().get::<WidgetSpec>(widget), Some(&expected));
     }
 
     #[test]
     fn visual_only_refresh_preserves_geometry_and_updates_rank_without_layout() {
         let mut app = test_app();
-        let first_tree = ranked_slider_tree(2.0, -1).expect("slider tree should build");
+        let first_tree = ranked_slider_tree(2.0, -1);
         let panel = spawn_panel(&mut app, first_tree).expect("panel should build");
         app.update();
         let before_entity = resolve_widget(&mut app, panel, PanelElementId::named("level"))
@@ -1898,7 +1881,7 @@ mod tests {
                 computed.layout_solves(),
             )
         };
-        let next_tree = ranked_slider_tree(8.0, 1).expect("slider tree should build");
+        let next_tree = ranked_slider_tree(8.0, 1);
 
         app.world_mut()
             .commands()
@@ -1909,7 +1892,7 @@ mod tests {
         let after_entity = resolve_widget(&mut app, panel, PanelElementId::named("level"))
             .expect("slider should remain reified");
         assert_eq!(after_entity, before_entity);
-        let expected = slider_spec(8.0).expect("slider specification should be valid");
+        let expected = slider_spec(8.0);
         let computed = app
             .world()
             .get::<ComputedDiegeticPanel>(panel)
@@ -2082,7 +2065,7 @@ mod tests {
             builder.with(
                 El::new()
                     .background(Color::WHITE)
-                    .button("action", button)
+                    .widget("action", button)
                     .visual_slot(TEST_SLOT),
                 |_| {},
             );

@@ -3,7 +3,6 @@ use bevy::color::Color;
 use bevy::ecs::system::Commands;
 use bevy::image::Image;
 use bevy::prelude::Entity;
-use hana_diegetic::Button;
 use hana_diegetic::ChildDivider;
 use hana_diegetic::El;
 use hana_diegetic::ImeAppOwnedFieldSpec;
@@ -33,9 +32,9 @@ impl TooltipTarget for ApplicationWorldTarget {
 fn associated_tooltips(slider: Slider) {
     let tooltip = Tooltip::new(El::new());
     let _ = El::new()
-        .button("button", Button::new())
+        .button("button")
         .tooltip(tooltip.clone());
-    let _ = El::new().slider("slider", slider).tooltip(tooltip);
+    let _ = El::new().widget("slider", slider).tooltip(tooltip);
     let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
     let _ = El::new()
         .editable_field("editable", field)
@@ -45,11 +44,11 @@ fn associated_tooltips(slider: Slider) {
 fn post_widget_row_and_column_builders(slider: Slider) {
     let divider = ChildDivider::new(1.0, Color::WHITE);
     let _ = El::row()
-        .button("row-button", Button::new())
+        .button("row-button")
         .gap(2.0)
         .child_divider(divider);
     let _ = El::column()
-        .slider("column-slider", slider)
+        .widget("column-slider", slider)
         .gap(3.0)
         .child_divider(divider);
 }
@@ -83,7 +82,7 @@ fn main() {
     let mut panel = LayoutBuilder::new(100.0, 50.0);
     panel.text(
         Text::new("button text", TextStyle::default())
-            .layout(El::new().button("text-button", Button::new())),
+            .layout(El::new().button("text-button")),
     );
 
     let _ = associated_tooltips;

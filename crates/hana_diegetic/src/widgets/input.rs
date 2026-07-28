@@ -893,7 +893,6 @@ mod tests {
     use super::WidgetInputDisabled;
     use super::WidgetInputMode;
     use super::WidgetInputPlugin;
-    use crate::Button;
     use crate::DiegeticPanel;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
@@ -1018,7 +1017,7 @@ mod tests {
     fn spawn_panel(app: &mut App, ids: &[&str]) -> Entity {
         let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
         for id in ids {
-            builder.with(El::new().button(*id, Button::new()), |_| {});
+            builder.with(El::new().button(*id), |_| {});
         }
         let result = DiegeticPanel::world()
             .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
@@ -1042,7 +1041,7 @@ mod tests {
                 builder.text("Initial text");
             },
         );
-        builder.with(El::new().button("next", Button::new()), |_| {});
+        builder.with(El::new().button("next"), |_| {});
         let result = DiegeticPanel::world()
             .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
             .with_tree(builder.build())
@@ -1065,7 +1064,7 @@ mod tests {
                 builder.text("Initial text");
             },
         );
-        builder.with(El::new().button("next", Button::new()), |_| {});
+        builder.with(El::new().button("next"), |_| {});
         let tree = builder.build();
         let result = DiegeticPanel::world()
             .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))

@@ -110,7 +110,6 @@ mod tests {
     use super::PanelWidgetWriter;
     use super::WidgetDisabled;
     use super::WidgetInteractivity;
-    use crate::Button;
     use crate::CascadeDefault;
     use crate::CascadeEntityCommandsExt as _;
     use crate::ComputedDiegeticPanel;
@@ -151,7 +150,7 @@ mod tests {
     }
 
     fn widget_tree(interactivity: Option<WidgetInteractivity>) -> LayoutTree {
-        let element = El::new().button("action", Button::new());
+        let element = El::new().button("action");
         let element = match interactivity {
             Some(value) => element.widget_interactivity(value),
             None => element,
@@ -164,10 +163,10 @@ mod tests {
     fn subtree_tree(parent: WidgetInteractivity) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::column().widget_interactivity(parent), |builder| {
-            builder.with(El::new().button("inherited", Button::new()), |_| {});
+            builder.with(El::new().button("inherited"), |_| {});
             builder.with(
                 El::new()
-                    .button("enabled", Button::new())
+                    .button("enabled")
                     .widget_interactivity(WidgetInteractivity::Enabled),
                 |_| {},
             );

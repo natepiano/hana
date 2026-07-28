@@ -888,7 +888,6 @@ mod tests {
     use super::write_owned_cascade;
     use super::write_owned_render_layers;
     use crate::ArrangedPanel;
-    use crate::Button;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands as _;
     use crate::El;
@@ -1737,10 +1736,7 @@ mod tests {
                 )])),
             |builder| {
                 builder.text(("live text", TextStyle::new(10.0)));
-                builder.with(
-                    El::new().size(20.0, 10.0).button("action", Button::new()),
-                    |_| {},
-                );
+                builder.with(El::new().size(20.0, 10.0).button("action"), |_| {});
             },
         );
         builder.build()
@@ -1757,10 +1753,7 @@ mod tests {
 
     fn anchor_teardown_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(
-            El::new().size(20.0, 10.0).button("target", Button::new()),
-            |_| {},
-        );
+        builder.with(El::new().size(20.0, 10.0).button("target"), |_| {});
         builder.build()
     }
 

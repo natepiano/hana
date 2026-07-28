@@ -27,9 +27,12 @@
 //! ```
 
 use std::marker::PhantomData;
+use std::ops::RangeInclusive;
 
 use bevy::asset::Handle;
 use bevy::color::Color;
+use bevy::ecs::system::In;
+use bevy::ecs::system::IntoSystem;
 use bevy::image::Image;
 use bevy::math::Vec2;
 use bevy::pbr::StandardMaterial;
@@ -62,11 +65,17 @@ use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::widgets::Button;
+use crate::widgets::ButtonClicked;
 use crate::widgets::Slider;
+use crate::widgets::SliderDirection;
+use crate::widgets::SliderResetBehavior;
+use crate::widgets::StateAppearance;
 use crate::widgets::Tooltip;
+use crate::widgets::VisualChange;
 use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetSpec;
+use crate::widgets::WidgetState;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -84,16 +93,55 @@ pub struct El<L = Row, Role = LayoutOnly> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LayoutOnly;
 
-/// Marker for an element that declares a panel widget.
+/// Marker for an element that declares a panel widget of kind `W`.
 #[derive(Clone, Copy, Debug)]
-pub struct WidgetElement;
+pub struct WidgetElement<W>(PhantomData<fn() -> W>);
 
 /// Public marker trait for element roles accepted by ordinary panel layout.
 pub trait ElementRole: private::RoleSealed {}
 
 impl ElementRole for LayoutOnly {}
 
-impl ElementRole for WidgetElement {}
+impl<W> ElementRole for WidgetElement<W> {}
+
+/// A pre-built widget declaration an element can adopt through [`El::widget`].
+///
+/// Implemented for [`Button`] and [`Slider`]. The trait is sealed: the element
+/// contract a widget converts into is private to this crate.
+pub trait Widget: private::WidgetSealed {
+    /// Converts this declaration into the opaque contract an element stores.
+    #[doc(hidden)]
+    fn into_declaration(self) -> WidgetDeclaration;
+
+    /// The opaque root visual slot this widget's element records carry.
+    #[doc(hidden)]
+    fn root_visual_slot() -> WidgetRootSlot;
+}
+
+/// Opaque element-side form of a widget declaration.
+///
+/// Produced by [`Widget::into_declaration`] and consumed by [`El::widget`];
+/// it carries no public structure.
+#[derive(Clone, Debug)]
+pub struct WidgetDeclaration(WidgetSpec);
+
+/// Opaque identity of a widget's root visual slot.
+///
+/// Produced by [`Widget::root_visual_slot`] and consumed by [`El::widget`].
+#[derive(Clone, Copy, Debug)]
+pub struct WidgetRootSlot(VisualSlotId);
+
+impl Widget for Button {
+    fn into_declaration(self) -> WidgetDeclaration { WidgetDeclaration(WidgetSpec::Button(self)) }
+
+    fn root_visual_slot() -> WidgetRootSlot { WidgetRootSlot(VisualSlotId::BUTTON_ROOT) }
+}
+
+impl Widget for Slider {
+    fn into_declaration(self) -> WidgetDeclaration { WidgetDeclaration(WidgetSpec::Slider(self)) }
+
+    fn root_visual_slot() -> WidgetRootSlot { WidgetRootSlot(VisualSlotId::SLIDER_ROOT) }
+}
 
 /// Text sizing and wrapping policy for a layout text leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -324,6 +372,9 @@ struct CommonEl {
     interactivity:   Cascade<WidgetInteractivity>,
     editable:        Option<ImePanelField>,
     widget:          Option<WidgetSpec>,
+    /// Boxed so the per-state appearance a widget element authors does not
+    /// widen every ordinary element declaration.
+    appearance:      Option<Box<StateAppearance>>,
     tooltip:         Option<Tooltip>,
     visual_slot:     Option<VisualSlotId>,
     draw:            Option<PanelDraw>,
@@ -354,6 +405,7 @@ impl Default for CommonEl {
             interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
+            appearance:      None,
             tooltip:         None,
             visual_slot:     None,
             draw:            None,
@@ -384,6 +436,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         interactivity: common.interactivity,
         editable: common.editable,
         widget: common.widget,
+        appearance: common.appearance,
         tooltip: common.tooltip,
         visual_slot: common.visual_slot,
         draw: common.draw,
@@ -645,38 +698,56 @@ impl<L> El<L, LayoutOnly> {
         mut self,
         field_id: impl Into<PanelElementId>,
         field_spec: ImeEditableFieldSpec,
-    ) -> El<L, WidgetElement> {
+    ) -> El<L, WidgetElement<ImeEditableFieldSpec>> {
         self.common.editable = Some(ImePanelField::new(field_id, field_spec));
         self.common.visual_slot = Some(VisualSlotId::EDITABLE_ROOT);
-        El {
-            common:       self.common,
-            child_layout: self.child_layout,
-            role:         PhantomData,
-        }
+        self.into_widget_element()
     }
 
     /// Marks this element as a button with panel-local semantic identity `id`.
-    pub fn button(mut self, id: impl Into<PanelElementId>, button: Button) -> El<L, WidgetElement> {
-        self.common.id = Some(id.into());
-        self.common.widget = Some(WidgetSpec::Button(button));
-        self.common.visual_slot = Some(VisualSlotId::BUTTON_ROOT);
-        El {
-            common:       self.common,
-            child_layout: self.child_layout,
-            role:         PhantomData,
-        }
+    ///
+    /// Click behavior is authored on the returned element with
+    /// [`El::on_click`]; the button's resting look stays on this element's
+    /// ordinary [`El::background`], [`El::border`], and [`El::material`]
+    /// declarations, and its per-state look on the state builders.
+    pub fn button(self, id: impl Into<PanelElementId>) -> El<L, WidgetElement<Button>> {
+        self.widget(id, Button::new())
     }
 
-    /// Marks this element as a slider with panel-local semantic identity `id`.
+    /// Marks this element as a slider over `range` with panel-local semantic
+    /// identity `id`.
     ///
-    /// The id and slider declaration are assigned together so a widget cannot
-    /// be authored without its identity. The element also receives the private
-    /// root visual slot whose solved content box slider pointer projection
-    /// reads.
-    pub fn slider(mut self, id: impl Into<PanelElementId>, slider: Slider) -> El<L, WidgetElement> {
+    /// The element also receives the private root visual slot whose solved
+    /// content box slider pointer projection reads. Range, value, and step are
+    /// stored as authored and validated when the owning panel builds, so the
+    /// declaration chain stays infallible.
+    pub fn slider(
+        self,
+        id: impl Into<PanelElementId>,
+        range: RangeInclusive<f32>,
+    ) -> El<L, WidgetElement<Slider>> {
+        self.widget(id, Slider::new(range))
+    }
+
+    /// Marks this element as the pre-built widget `widget` with panel-local
+    /// semantic identity `id`.
+    ///
+    /// This is the declaration path for a [`Button`] or [`Slider`] constructed
+    /// away from the layout chain; [`El::button`] and [`El::slider`] construct
+    /// one inline. The id and declaration are assigned together so a widget
+    /// cannot be authored without its identity.
+    pub fn widget<W: Widget>(
+        mut self,
+        id: impl Into<PanelElementId>,
+        widget: W,
+    ) -> El<L, WidgetElement<W>> {
         self.common.id = Some(id.into());
-        self.common.widget = Some(WidgetSpec::Slider(slider));
-        self.common.visual_slot = Some(VisualSlotId::SLIDER_ROOT);
+        self.common.visual_slot = Some(W::root_visual_slot().0);
+        self.common.widget = Some(widget.into_declaration().0);
+        self.into_widget_element()
+    }
+
+    fn into_widget_element<W>(self) -> El<L, WidgetElement<W>> {
         El {
             common:       self.common,
             child_layout: self.child_layout,
@@ -685,29 +756,232 @@ impl<L> El<L, LayoutOnly> {
     }
 }
 
-impl<L> El<L, WidgetElement> {
-    /// Sets the root border color shown while this widget's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::border`] on the widget element. For buttons
-    /// and sliders this is equivalent to setting the value on their direct
-    /// declaration; editable fields use this element builder because their
-    /// existing field spec describes editing behavior rather than appearance.
-    pub fn focused_border_color(mut self, color: Color) -> Self {
-        if let Some(field) = &mut self.common.editable {
-            field.set_focused_border_color(color);
-        }
-        if let Some(widget) = &mut self.common.widget {
-            widget.set_focused_border_color(color);
-        }
-        self
-    }
-
+impl<L, W> El<L, WidgetElement<W>> {
     /// Attaches a tooltip declaration to this widget element.
     ///
     /// A later call replaces the earlier declaration.
     pub fn tooltip(mut self, tooltip: Tooltip) -> Self {
         self.common.tooltip = Some(tooltip);
+        self
+    }
+
+    /// Sets the root background color shown while a pointer hovers this widget.
+    ///
+    /// Requires an authored [`El::background`].
+    pub fn hovered_background(self, color: Color) -> Self {
+        self.set_background(WidgetState::Hovered, color)
+    }
+
+    /// Sets the root background color shown while this widget is held — a
+    /// button press or a slider drag.
+    ///
+    /// Requires an authored [`El::background`].
+    pub fn pressed_background(self, color: Color) -> Self {
+        self.set_background(WidgetState::Pressed, color)
+    }
+
+    /// Sets the root background color shown while this widget's keyboard focus
+    /// indicator is visible.
+    ///
+    /// Requires an authored [`El::background`].
+    pub fn focused_background(self, color: Color) -> Self {
+        self.set_background(WidgetState::Focused, color)
+    }
+
+    /// Sets the root background color shown while this widget is disabled.
+    ///
+    /// Requires an authored [`El::background`].
+    pub fn disabled_background(self, color: Color) -> Self {
+        self.set_background(WidgetState::Disabled, color)
+    }
+
+    /// Sets the root border color shown while a pointer hovers this widget.
+    ///
+    /// Requires an authored [`El::border`]; border radii stay as authored.
+    pub fn hovered_border_color(self, color: Color) -> Self {
+        self.set_border_color(WidgetState::Hovered, color)
+    }
+
+    /// Sets the root border color shown while this widget is held — a button
+    /// press or a slider drag.
+    ///
+    /// Requires an authored [`El::border`]; border radii stay as authored.
+    pub fn pressed_border_color(self, color: Color) -> Self {
+        self.set_border_color(WidgetState::Pressed, color)
+    }
+
+    /// Sets the root border color shown while this widget's keyboard focus
+    /// indicator is visible.
+    ///
+    /// Requires an authored [`El::border`]; border radii stay as authored.
+    pub fn focused_border_color(self, color: Color) -> Self {
+        self.set_border_color(WidgetState::Focused, color)
+    }
+
+    /// Sets the root border color shown while this widget is disabled.
+    ///
+    /// Requires an authored [`El::border`]; border radii stay as authored.
+    pub fn disabled_border_color(self, color: Color) -> Self {
+        self.set_border_color(WidgetState::Disabled, color)
+    }
+
+    /// Sets the root border width shown while a pointer hovers this widget.
+    ///
+    /// Applies to all four sides and requires an authored [`El::border`]. The
+    /// border grows inward, so the element's outer bounds and solved layout are
+    /// unchanged.
+    pub fn hovered_border_width(self, width: impl Into<Dimension>) -> Self {
+        self.set_border_width(WidgetState::Hovered, width.into())
+    }
+
+    /// Sets the root border width shown while this widget is held — a button
+    /// press or a slider drag.
+    ///
+    /// Applies to all four sides and requires an authored [`El::border`]. The
+    /// border grows inward, so the element's outer bounds and solved layout are
+    /// unchanged.
+    pub fn pressed_border_width(self, width: impl Into<Dimension>) -> Self {
+        self.set_border_width(WidgetState::Pressed, width.into())
+    }
+
+    /// Sets the root border width shown while this widget's keyboard focus
+    /// indicator is visible.
+    ///
+    /// Applies to all four sides and requires an authored [`El::border`]. The
+    /// border grows inward, so the element's outer bounds and solved layout are
+    /// unchanged.
+    pub fn focused_border_width(self, width: impl Into<Dimension>) -> Self {
+        self.set_border_width(WidgetState::Focused, width.into())
+    }
+
+    /// Sets the root border width shown while this widget is disabled.
+    ///
+    /// Applies to all four sides and requires an authored [`El::border`]. The
+    /// border grows inward, so the element's outer bounds and solved layout are
+    /// unchanged.
+    pub fn disabled_border_width(self, width: impl Into<Dimension>) -> Self {
+        self.set_border_width(WidgetState::Disabled, width.into())
+    }
+
+    /// Sets the root material shown while a pointer hovers this widget.
+    ///
+    /// Covers the authored fill and border, and requires an authored root
+    /// surface — [`El::background`] or [`El::border`].
+    pub fn hovered_material(self, material: Handle<StandardMaterial>) -> Self {
+        self.set_material(WidgetState::Hovered, material)
+    }
+
+    /// Sets the root material shown while this widget is held — a button press
+    /// or a slider drag.
+    ///
+    /// Covers the authored fill and border, and requires an authored root
+    /// surface — [`El::background`] or [`El::border`].
+    pub fn pressed_material(self, material: Handle<StandardMaterial>) -> Self {
+        self.set_material(WidgetState::Pressed, material)
+    }
+
+    /// Sets the root material shown while this widget's keyboard focus
+    /// indicator is visible.
+    ///
+    /// Covers the authored fill and border, and requires an authored root
+    /// surface — [`El::background`] or [`El::border`].
+    pub fn focused_material(self, material: Handle<StandardMaterial>) -> Self {
+        self.set_material(WidgetState::Focused, material)
+    }
+
+    /// Sets the root material shown while this widget is disabled.
+    ///
+    /// Covers the authored fill and border, and requires an authored root
+    /// surface — [`El::background`] or [`El::border`].
+    pub fn disabled_material(self, material: Handle<StandardMaterial>) -> Self {
+        self.set_material(WidgetState::Disabled, material)
+    }
+
+    fn set_background(mut self, state: WidgetState, color: Color) -> Self {
+        self.appearance_mut().layer_mut(state).background = VisualChange::To(color);
+        self
+    }
+
+    fn set_border_color(mut self, state: WidgetState, color: Color) -> Self {
+        self.appearance_mut().layer_mut(state).border_color = VisualChange::To(color);
+        self
+    }
+
+    fn set_border_width(mut self, state: WidgetState, width: Dimension) -> Self {
+        self.appearance_mut().layer_mut(state).border_width = VisualChange::To(width);
+        self
+    }
+
+    fn set_material(mut self, state: WidgetState, material: Handle<StandardMaterial>) -> Self {
+        self.appearance_mut().layer_mut(state).material = VisualChange::To(material);
+        self
+    }
+
+    fn appearance_mut(&mut self) -> &mut StateAppearance {
+        self.common.appearance.get_or_insert_default()
+    }
+
+    const fn widget_mut(&mut self) -> Option<&mut WidgetSpec> { self.common.widget.as_mut() }
+}
+
+impl<L> El<L, WidgetElement<Button>> {
+    /// Runs `system` with each completed [`ButtonClicked`](crate::ButtonClicked)
+    /// for this button.
+    ///
+    /// See [`Button::on_click`] for the callback contract.
+    pub fn on_click<M>(mut self, system: impl IntoSystem<In<ButtonClicked>, (), M>) -> Self {
+        if let Some(WidgetSpec::Button(button)) = self.widget_mut() {
+            button.set_callback(system);
+        }
+        self
+    }
+}
+
+impl<L> El<L, WidgetElement<Slider>> {
+    /// Sets the slider's authored default value.
+    ///
+    /// See [`Slider::value`].
+    pub fn value(self, value: f32) -> Self {
+        self.configure_slider(|slider| slider.set_value(value))
+    }
+
+    /// Sets the slider's step interval.
+    ///
+    /// See [`Slider::step`].
+    pub fn step(self, step: f32) -> Self { self.configure_slider(|slider| slider.set_step(step)) }
+
+    /// Sets the direction in which slider values increase.
+    ///
+    /// See [`Slider::direction`].
+    pub fn direction(self, direction: SliderDirection) -> Self {
+        self.configure_slider(|slider| slider.set_direction(direction))
+    }
+
+    /// Sets the optional thumb gesture that proposes the authored default.
+    ///
+    /// See [`Slider::reset_behavior`].
+    pub fn reset_behavior(self, reset_behavior: SliderResetBehavior) -> Self {
+        self.configure_slider(|slider| slider.set_reset_behavior(reset_behavior))
+    }
+
+    /// Sets the marked thumb's border color while keyboard focus is visible.
+    ///
+    /// See [`Slider::focused_thumb_border_color`].
+    pub fn focused_thumb_border_color(self, color: Color) -> Self {
+        self.configure_slider(|slider| slider.set_focused_thumb_border_color(color))
+    }
+
+    /// Sets the color applied to every authored slider visual while disabled.
+    ///
+    /// See [`Slider::disabled_color`].
+    pub fn disabled_color(self, color: Color) -> Self {
+        self.configure_slider(|slider| slider.set_disabled_color(color))
+    }
+
+    fn configure_slider(mut self, configure: impl FnOnce(&mut Slider)) -> Self {
+        if let Some(WidgetSpec::Slider(slider)) = self.widget_mut() {
+            configure(slider);
+        }
         self
     }
 }
@@ -804,6 +1078,7 @@ impl<L, Role> El<L, Role> {
             interactivity: common.interactivity,
             editable: common.editable,
             widget: common.widget,
+            appearance: common.appearance,
             tooltip: common.tooltip,
             visual_slot: common.visual_slot,
             draw: common.draw,
@@ -820,10 +1095,12 @@ impl<L, Role> El<L, Role> {
 mod private {
     use super::AlignX;
     use super::AlignY;
+    use super::Button;
     use super::Column;
     use super::LayoutOnly;
     use super::Overlay;
     use super::Row;
+    use super::Slider;
     use super::WidgetElement;
     use crate::layout::child_layout::ChildLayout;
 
@@ -833,9 +1110,15 @@ mod private {
 
     pub trait RoleSealed {}
 
+    pub trait WidgetSealed {}
+
     impl RoleSealed for LayoutOnly {}
 
-    impl RoleSealed for WidgetElement {}
+    impl<W> RoleSealed for WidgetElement<W> {}
+
+    impl WidgetSealed for Button {}
+
+    impl WidgetSealed for Slider {}
 
     impl Sealed for Row {
         fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout {

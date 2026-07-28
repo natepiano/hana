@@ -3,7 +3,6 @@
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::render::RenderApp;
-use hana_diegetic::Button;
 use hana_diegetic::ButtonClicked;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticTextMeasurer;
@@ -24,7 +23,6 @@ use hana_diegetic::RequestWidgetFocus;
 use hana_diegetic::Slider;
 use hana_diegetic::SliderAdjustment;
 use hana_diegetic::SliderChangeRequested;
-use hana_diegetic::SliderRange;
 use hana_diegetic::WidgetInput;
 
 #[derive(Default, Resource)]
@@ -62,20 +60,11 @@ fn client_can_test_button_slider_and_ime_behavior_without_rendering() {
     assert!(app.is_plugin_added::<HeadlessLayoutPlugin>());
     assert!(app.get_sub_app(RenderApp).is_none());
 
-    let range = SliderRange::new(0.0, 1.0);
-    assert!(range.is_ok());
-    let Ok(range) = range else {
-        return;
-    };
-    let slider = Slider::new(range, 0.5);
-    assert!(slider.is_ok());
-    let Ok(slider) = slider else {
-        return;
-    };
+    let slider = Slider::new(0.0..=1.0).value(0.5);
 
     let mut builder = LayoutBuilder::new(100.0, 50.0);
-    builder.with(El::new().button("action", Button::new()), |_| {});
-    builder.with(El::new().slider("amount", slider), |_| {});
+    builder.with(El::new().button("action"), |_| {});
+    builder.with(El::new().widget("amount", slider), |_| {});
     let panel = DiegeticPanel::world()
         .size(Mm(100.0), Mm(50.0))
         .with_tree(builder.build())

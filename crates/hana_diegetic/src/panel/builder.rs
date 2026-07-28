@@ -20,6 +20,7 @@ use super::diegetic_panel::DiegeticPanel;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
 use crate::PanelElementId;
+use crate::SliderConfigError;
 use crate::cascade::Cascade;
 use crate::layout;
 use crate::layout::Anchor;
@@ -59,18 +60,20 @@ pub enum PanelBuildError {
     /// A widget is inside a subtree rendered through precomposition.
     #[error("widget `{0}` is inside a precomposed subtree")]
     WidgetInsidePrecomposedSubtree(PanelElementId),
-    /// A button authored a state background without a normal background.
-    #[error("button `{0}` state background requires an authored background")]
-    ButtonStateBackgroundRequiresBackground(PanelElementId),
-    /// A button authored a state border color without a normal border.
-    #[error("button `{0}` state border color requires an authored border")]
-    ButtonStateBorderColorRequiresBorder(PanelElementId),
-    /// A button authored a state material without a background or border.
-    #[error("button `{0}` state material requires an authored background or border")]
-    ButtonStateMaterialRequiresSurface(PanelElementId),
-    /// An editable field authored a focus border color without a normal border.
-    #[error("editable field `{0}` focus border color requires an authored border")]
-    EditableFieldFocusBorderColorRequiresBorder(PanelElementId),
+    /// A widget element authored a state background without a normal
+    /// background.
+    #[error("widget `{0}` state background requires an authored background")]
+    StateBackgroundRequiresBackground(PanelElementId),
+    /// A widget element authored a state border color without a normal border.
+    #[error("widget `{0}` state border color requires an authored border")]
+    StateBorderColorRequiresBorder(PanelElementId),
+    /// A widget element authored a state border width without a normal border.
+    #[error("widget `{0}` state border width requires an authored border")]
+    StateBorderWidthRequiresBorder(PanelElementId),
+    /// A widget element authored a state material without a background or
+    /// border.
+    #[error("widget `{0}` state material requires an authored background or border")]
+    StateMaterialRequiresSurface(PanelElementId),
     /// A slider-thumb marker sits outside every slider subtree.
     #[error("slider thumb `{0}` must be inside a slider subtree")]
     SliderThumbOutsideSlider(PanelElementId),
@@ -80,15 +83,9 @@ pub enum PanelBuildError {
     /// A slider authored a focused thumb border color without a bordered thumb.
     #[error("slider `{0}` focused thumb border color requires an authored thumb border")]
     SliderFocusedThumbBorderColorRequiresThumbBorder(PanelElementId),
-    /// A slider authored a state background without a normal background.
-    #[error("slider `{0}` state background requires an authored background")]
-    SliderStateBackgroundRequiresBackground(PanelElementId),
-    /// A slider authored a state border color without a normal border.
-    #[error("slider `{0}` state border color requires an authored border")]
-    SliderStateBorderColorRequiresBorder(PanelElementId),
-    /// A slider authored a state material without a background or border.
-    #[error("slider `{0}` state material requires an authored background or border")]
-    SliderStateMaterialRequiresSurface(PanelElementId),
+    /// A slider's authored range, value, or step failed validation.
+    #[error("slider `{0}`: {1}")]
+    SliderConfig(PanelElementId, #[source] SliderConfigError),
 }
 
 // ── Typestate marker types ──────────────────────────────────────────────────
@@ -970,7 +967,6 @@ mod tests {
 
     use super::PanelBuildError;
     use crate::Border;
-    use crate::Button;
     use crate::DiegeticPanel;
     use crate::El;
     use crate::Fit;
@@ -980,6 +976,7 @@ mod tests {
     use crate::InvalidSize;
     use crate::Mm;
     use crate::PanelElementId;
+    use crate::SliderConfigError;
     use crate::Text;
     use crate::TextStyle;
 
@@ -1018,28 +1015,20 @@ mod tests {
                 "widget `button` is inside a precomposed subtree",
             ),
             (
-                PanelBuildError::ButtonStateBackgroundRequiresBackground(PanelElementId::named(
-                    "action",
-                )),
-                "button `action` state background requires an authored background",
+                PanelBuildError::StateBackgroundRequiresBackground(PanelElementId::named("action")),
+                "widget `action` state background requires an authored background",
             ),
             (
-                PanelBuildError::ButtonStateBorderColorRequiresBorder(PanelElementId::named(
-                    "action",
-                )),
-                "button `action` state border color requires an authored border",
+                PanelBuildError::StateBorderColorRequiresBorder(PanelElementId::named("action")),
+                "widget `action` state border color requires an authored border",
             ),
             (
-                PanelBuildError::ButtonStateMaterialRequiresSurface(PanelElementId::named(
-                    "action",
-                )),
-                "button `action` state material requires an authored background or border",
+                PanelBuildError::StateBorderWidthRequiresBorder(PanelElementId::named("action")),
+                "widget `action` state border width requires an authored border",
             ),
             (
-                PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(
-                    PanelElementId::named("name"),
-                ),
-                "editable field `name` focus border color requires an authored border",
+                PanelBuildError::StateMaterialRequiresSurface(PanelElementId::named("action")),
+                "widget `action` state material requires an authored background or border",
             ),
             (
                 PanelBuildError::SliderThumbOutsideSlider(PanelElementId::named("thumb")),
@@ -1056,22 +1045,11 @@ mod tests {
                 "slider `volume` focused thumb border color requires an authored thumb border",
             ),
             (
-                PanelBuildError::SliderStateBackgroundRequiresBackground(PanelElementId::named(
-                    "volume",
-                )),
-                "slider `volume` state background requires an authored background",
-            ),
-            (
-                PanelBuildError::SliderStateBorderColorRequiresBorder(PanelElementId::named(
-                    "volume",
-                )),
-                "slider `volume` state border color requires an authored border",
-            ),
-            (
-                PanelBuildError::SliderStateMaterialRequiresSurface(PanelElementId::named(
-                    "volume",
-                )),
-                "slider `volume` state material requires an authored background or border",
+                PanelBuildError::SliderConfig(
+                    PanelElementId::named("volume"),
+                    SliderConfigError::UnorderedRange,
+                ),
+                "slider `volume`: slider range start must be less than its end",
             ),
         ];
 
@@ -1128,8 +1106,8 @@ mod tests {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.with(El::new().button("action", Button::new()), |_| {});
-                builder.with(El::new().button("action", Button::new()), |_| {});
+                builder.with(El::new().button("action"), |_| {});
+                builder.with(El::new().button("action"), |_| {});
             })
             .build();
 
@@ -1146,7 +1124,7 @@ mod tests {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.with(El::new().button(auto_id.clone(), Button::new()), |_| {});
+                builder.with(El::new().button(auto_id.clone()), |_| {});
             })
             .build();
 
@@ -1161,8 +1139,8 @@ mod tests {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.with(El::column().button("outer", Button::new()), |builder| {
-                    builder.with(El::new().button("inner", Button::new()), |_| {});
+                builder.with(El::column().button("outer"), |builder| {
+                    builder.with(El::new().button("inner"), |_| {});
                 });
             })
             .build();
@@ -1180,7 +1158,7 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
                 builder.with(El::column().precompose_ldr(), |builder| {
-                    builder.with(El::new().button("action", Button::new()), |_| {});
+                    builder.with(El::new().button("action"), |_| {});
                 });
             })
             .build();
@@ -1198,10 +1176,9 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
                 builder.with(
-                    El::new().button(
-                        "action",
-                        Button::new().hovered_background(Color::srgb(0.2, 0.4, 0.8)),
-                    ),
+                    El::new()
+                        .button("action")
+                        .hovered_background(Color::srgb(0.2, 0.4, 0.8)),
                     |_| {},
                 );
             })
@@ -1209,7 +1186,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id))
+            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
                 if id == PanelElementId::named("action")
         ));
     }
@@ -1220,10 +1197,10 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
                 builder.with(
-                    El::new().background(Color::srgb(0.1, 0.1, 0.1)).button(
-                        "action",
-                        Button::new().focused_border_color(Color::srgb(0.9, 0.8, 0.2)),
-                    ),
+                    El::new()
+                        .background(Color::srgb(0.1, 0.1, 0.1))
+                        .button("action")
+                        .focused_border_color(Color::srgb(0.9, 0.8, 0.2)),
                     |_| {},
                 );
             })
@@ -1231,7 +1208,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id))
+            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
                 if id == PanelElementId::named("action")
         ));
     }
@@ -1252,7 +1229,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(id))
+            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
                 if id == PanelElementId::named("name")
         ));
     }
@@ -1263,7 +1240,9 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
                 builder.with(
-                    El::new().button("action", Button::new().pressed_material(Handle::default())),
+                    El::new()
+                        .button("action")
+                        .pressed_material(Handle::default()),
                     |_| {},
                 );
             })
@@ -1271,7 +1250,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id))
+            Err(PanelBuildError::StateMaterialRequiresSurface(id))
                 if id == PanelElementId::named("action")
         ));
     }
@@ -1285,13 +1264,10 @@ mod tests {
                     El::new()
                         .background(Color::srgb(0.1, 0.1, 0.1))
                         .border(Border::all(1.0, Color::srgb(0.4, 0.4, 0.4)))
-                        .button(
-                            "action",
-                            Button::new()
-                                .hovered_background(Color::srgb(0.2, 0.4, 0.8))
-                                .focused_border_color(Color::srgb(0.9, 0.8, 0.2))
-                                .pressed_material(Handle::default()),
-                        ),
+                        .button("action")
+                        .hovered_background(Color::srgb(0.2, 0.4, 0.8))
+                        .focused_border_color(Color::srgb(0.9, 0.8, 0.2))
+                        .pressed_material(Handle::default()),
                     |_| {},
                 );
             })

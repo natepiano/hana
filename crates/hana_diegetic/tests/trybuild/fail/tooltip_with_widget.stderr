@@ -1,13 +1,13 @@
 error[E0308]: mismatched types
- --> tests/trybuild/fail/tooltip_with_widget.rs:7:18
+ --> tests/trybuild/fail/tooltip_with_widget.rs:6:18
   |
-7 |     tooltip.with(El::new().button("nested", Button::new()), |_| {});
-  |             ---- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `El<_>`, found `El<Row, WidgetElement>`
+6 |     tooltip.with(El::new().button("nested"), |_| {});
+  |             ---- ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `El<_>`, found `El<Row, WidgetElement<Button>>`
   |             |
   |             arguments to this method are incorrect
   |
   = note: expected struct `El<_, LayoutOnly>`
-             found struct `El<Row, WidgetElement>`
+             found struct `El<Row, WidgetElement<Button>>`
 note: method defined here
  --> src/widgets/tooltip.rs
   |

@@ -1325,7 +1325,6 @@ mod tests {
     use bevy_kana::ToF32;
 
     use super::*;
-    use crate::Button;
     use crate::Mm;
     use crate::PanelWidget;
     use crate::cascade;
@@ -2548,7 +2547,7 @@ mod tests {
 
     fn slotted_text_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().button("styled", Button::new()), |builder| {
+        builder.with(El::new().button("styled"), |builder| {
             builder.text(
                 Text::new("Alpha", TextStyle::new(10.0)).layout(El::new().visual_slot(TEXT_SLOT)),
             );

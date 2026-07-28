@@ -431,7 +431,7 @@ impl Tooltip {
     /// ```compile_fail
     /// use hana_diegetic::{Button, El, Tooltip};
     ///
-    /// let widget = El::new().button("nested", Button::new());
+    /// let widget = El::new().button("nested");
     /// let _ = Tooltip::new(widget);
     /// ```
     pub fn new<L>(root: El<L, LayoutOnly>) -> Self
@@ -460,7 +460,7 @@ impl Tooltip {
     /// use hana_diegetic::{Button, El, Tooltip};
     ///
     /// let mut tooltip = Tooltip::new(El::new());
-    /// tooltip.with(El::new().button("nested", Button::new()), |_| {});
+    /// tooltip.with(El::new().button("nested"), |_| {});
     /// ```
     pub fn with<L>(
         &mut self,
@@ -499,7 +499,7 @@ impl Tooltip {
     ///
     /// let mut tooltip = Tooltip::new(El::new());
     /// tooltip.image(
-    ///     El::new().button("nested", Button::new()),
+    ///     El::new().button("nested"),
     ///     Handle::<Image>::default(),
     ///     Color::WHITE,
     /// );
@@ -3564,7 +3564,6 @@ mod tests {
     use hana_valence::ResolvedAnchorOffset;
 
     use super::*;
-    use crate::Button;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::HeadlessLayoutPlugin;
@@ -3578,7 +3577,6 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::Pt;
     use crate::Slider;
-    use crate::SliderRange;
     use crate::TextStyle;
     use crate::TextWrap;
     use crate::WidgetOf;
@@ -3874,7 +3872,7 @@ mod tests {
 
     fn tooltip_tree(tooltip: Option<Tooltip>) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        let button = El::new().button("action", Button::new());
+        let button = El::new().button("action");
         match tooltip {
             Some(tooltip) => {
                 builder.with(button.tooltip(tooltip), |_| {});
@@ -3888,16 +3886,13 @@ mod tests {
 
     fn tooltip_target_tree() -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(
-            El::new().size(50.0, 20.0).button("action", Button::new()),
-            |_| {},
-        );
+        builder.with(El::new().size(50.0, 20.0).button("action"), |_| {});
         builder.build()
     }
 
     fn slider_tooltip_tree(slider: Slider, tooltip: Option<Tooltip>) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        let slider = El::new().slider("action", slider);
+        let slider = El::new().widget("action", slider);
         match tooltip {
             Some(tooltip) => builder.with(slider.tooltip(tooltip), |_| {}),
             None => builder.with(slider, |_| {}),
@@ -5024,12 +5019,7 @@ mod tests {
     #[test]
     fn attaching_a_tooltip_preserves_the_slider_declaration_and_identity() {
         let mut app = test_app();
-        let Ok(range) = SliderRange::new(0.0, 1.0) else {
-            return;
-        };
-        let Ok(slider) = Slider::new(range, 0.25) else {
-            return;
-        };
+        let slider = Slider::new(0.0..=1.0).value(0.25);
         let tree_without_tooltip = slider_tooltip_tree(slider.clone(), None);
         let tree = slider_tooltip_tree(slider.clone(), Some(Tooltip::new(El::new())));
         let declaration = WidgetSpec::Slider(slider);
@@ -5117,8 +5107,7 @@ mod tests {
         let mut app = test_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(
-            Text::new("action", crate::TextStyle::default())
-                .layout(El::new().button("action", Button::new())),
+            Text::new("action", crate::TextStyle::default()).layout(El::new().button("action")),
         );
         let panel = spawn_panel(&mut app, builder.build());
 

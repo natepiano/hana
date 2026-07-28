@@ -1623,7 +1623,6 @@ mod tests {
     use bevy::math::Vec4;
 
     use super::*;
-    use crate::Button;
     use crate::CalloutCap;
     use crate::El;
     use crate::Mm;
@@ -3094,7 +3093,7 @@ mod tests {
             El::new()
                 .size(40.0, 20.0)
                 .draw(PanelDraw::lines([horizontal_line()]))
-                .button("styled", Button::new())
+                .button("styled")
                 .visual_slot(SHAPE_SLOT),
         )
         .build();

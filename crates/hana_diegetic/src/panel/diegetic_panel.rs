@@ -1920,7 +1920,6 @@ mod tests {
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
-    use crate::Button;
     use crate::CascadeEntityCommandsExt as _;
     use crate::DiegeticTextMeasurer;
     use crate::El;
@@ -1947,17 +1946,14 @@ mod tests {
 
     fn auto_widget_tree() -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(
-            El::new().button(PanelElementId::auto(7), Button::new()),
-            |_| {},
-        );
+        builder.with(El::new().button(PanelElementId::auto(7)), |_| {});
         builder.build()
     }
 
     fn nested_widget_tree() -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::column().button("outer", Button::new()), |builder| {
-            builder.with(El::new().button("inner", Button::new()), |_| {});
+        builder.with(El::column().button("outer"), |builder| {
+            builder.with(El::new().button("inner"), |_| {});
         });
         builder.build()
     }
@@ -1965,7 +1961,7 @@ mod tests {
     fn precomposed_widget_tree() -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::column().precompose_ldr(), |builder| {
-            builder.with(El::new().button("action", Button::new()), |_| {});
+            builder.with(El::new().button("action"), |_| {});
         });
         builder.build()
     }

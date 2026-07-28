@@ -47,6 +47,7 @@ use crate::render::HairlineFade;
 use crate::widgets::ComputedTooltipRecord;
 use crate::widgets::ComputedVisualSlot;
 use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::StateAppearance;
 use crate::widgets::Tooltip;
 use crate::widgets::VisualSlotId;
 use crate::widgets::WidgetInteractivity;
@@ -140,6 +141,10 @@ pub(super) struct Element {
     pub(super) editable:        Option<ImePanelField>,
     /// Optional authored widget contract.
     pub(super) widget:          Option<WidgetSpec>,
+    /// Optional per-state appearance for this widget element's root visual
+    /// slot. Boxed so an ordinary element pays one pointer rather than four
+    /// appearance layers.
+    pub(super) appearance:      Option<Box<StateAppearance>>,
     /// Optional tooltip declaration associated with this widget.
     pub(super) tooltip:         Option<Tooltip>,
     /// Optional stable visual-slot id for widget-owned retained records.
@@ -220,6 +225,7 @@ impl Default for Element {
             interactivity:   Cascade::Inherit,
             editable:        None,
             widget:          None,
+            appearance:      None,
             tooltip:         None,
             visual_slot:     None,
             draw:            None,
@@ -859,6 +865,7 @@ impl LayoutTree {
                         id,
                         preorder,
                         widget,
+                        element.appearance.as_deref().cloned().unwrap_or_default(),
                         interactivity,
                         computed.bounds,
                         computed.bounds.intersect(&inherited_clip),
@@ -1245,50 +1252,59 @@ fn validated_element_widget_owner(
             .clone()
             .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
         let id = validated_widget_id(id, precompose)?;
-        match widget {
-            WidgetSpec::Button(button) => {
-                if button.has_state_background() && element.background.is_none() {
-                    return Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id));
-                }
-                if button.has_state_border_color() && element.border.is_none() {
-                    return Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id));
-                }
-                if button.has_state_material()
-                    && element.background.is_none()
-                    && element.border.is_none()
-                {
-                    return Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id));
-                }
-            },
-            WidgetSpec::EditableField(_) => {},
-            WidgetSpec::Slider(slider) => {
-                if slider.has_focused_thumb_border_color() {
-                    thumb_border_requirements.push(id.clone());
-                }
-                if slider.has_state_background() && element.background.is_none() {
-                    return Err(PanelBuildError::SliderStateBackgroundRequiresBackground(id));
-                }
-                if slider.has_state_border_color() && element.border.is_none() {
-                    return Err(PanelBuildError::SliderStateBorderColorRequiresBorder(id));
-                }
-                if slider.has_state_material()
-                    && element.background.is_none()
-                    && element.border.is_none()
-                {
-                    return Err(PanelBuildError::SliderStateMaterialRequiresSurface(id));
-                }
-            },
+        validated_element_appearance(element, &id)?;
+        if let WidgetSpec::Slider(slider) = widget {
+            slider
+                .validated()
+                .map_err(|error| PanelBuildError::SliderConfig(id.clone(), error))?;
+            if slider.has_focused_thumb_border_color() {
+                thumb_border_requirements.push(id.clone());
+            }
         }
         return Ok(Some((id, widget.kind())));
     }
     if let Some(field) = &element.editable {
         let id = validated_widget_id(field.field_id.clone(), precompose)?;
-        if field.focused_border_color().is_some() && element.border.is_none() {
-            return Err(PanelBuildError::EditableFieldFocusBorderColorRequiresBorder(id));
-        }
+        validated_element_appearance(element, &id)?;
         return Ok(Some((id, WidgetKind::EditableField)));
     }
     Ok(owning_widget)
+}
+
+/// Rejects a state appearance whose properties have no authored counterpart to
+/// replace.
+///
+/// A [`VisualSlotOverride`](crate::widgets::VisualSlotOverride) patches records
+/// layout already emitted; it never authors a missing one, so a state
+/// background without [`El::background`](crate::El::background) — or a state
+/// border without [`El::border`](crate::El::border) — would silently do
+/// nothing. `Border::all(Px(0.0), color)` is the borderless declaration a state
+/// width can still widen.
+fn validated_element_appearance(
+    element: &Element,
+    id: &PanelElementId,
+) -> Result<(), PanelBuildError> {
+    let Some(appearance) = element.appearance.as_deref() else {
+        return Ok(());
+    };
+    if appearance.any(|layer| layer.background.is_authored()) && element.background.is_none() {
+        return Err(PanelBuildError::StateBackgroundRequiresBackground(
+            id.clone(),
+        ));
+    }
+    if appearance.any(|layer| layer.border_color.is_authored()) && element.border.is_none() {
+        return Err(PanelBuildError::StateBorderColorRequiresBorder(id.clone()));
+    }
+    if appearance.any(|layer| layer.border_width.is_authored()) && element.border.is_none() {
+        return Err(PanelBuildError::StateBorderWidthRequiresBorder(id.clone()));
+    }
+    if appearance.any(|layer| layer.material.is_authored())
+        && element.background.is_none()
+        && element.border.is_none()
+    {
+        return Err(PanelBuildError::StateMaterialRequiresSurface(id.clone()));
+    }
+    Ok(())
 }
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
@@ -1309,6 +1325,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         interactivity,
         editable,
         widget,
+        appearance,
         tooltip,
         visual_slot,
         draw,
@@ -1336,6 +1353,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         interactivity: n_interactivity,
         editable: n_editable,
         widget: n_widget,
+        appearance: n_appearance,
         tooltip: n_tooltip,
         visual_slot: n_visual_slot,
         draw: n_draw,
@@ -1372,6 +1390,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     let mut change = border_change.combine(child_layout_change);
     if id != n_id
         || widget != n_widget
+        || appearance != n_appearance
         || tooltip != n_tooltip
         || visual_slot != n_visual_slot
         || interactivity != n_interactivity
@@ -1566,7 +1585,6 @@ mod tests {
     use super::LayoutTree;
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
-    use crate::Button;
     use crate::CalloutCap;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
@@ -1574,7 +1592,6 @@ mod tests {
     use crate::Mm;
     use crate::PanelElementId;
     use crate::Slider;
-    use crate::SliderRange;
     use crate::WidgetInteractivity;
     use crate::cascade::Cascade;
     use crate::layout::AlignX;
@@ -1893,7 +1910,7 @@ mod tests {
     #[test]
     fn button_record_add_remove_classifies_as_visual_only() {
         let tree = root_tree(El::new());
-        let next = root_tree(El::new().button("action", Button::new()));
+        let next = root_tree(El::new().button("action"));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
         assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
@@ -1901,27 +1918,20 @@ mod tests {
 
     #[test]
     fn slider_record_edit_classifies_as_visual_only() {
-        let Ok(range) = SliderRange::new(0.0, 10.0) else {
-            return;
-        };
-        let Ok(slider) = Slider::new(range, 2.0) else {
-            return;
-        };
-        let Ok(next_slider) = Slider::new(range, 8.0) else {
-            return;
-        };
-        let tree = root_tree(El::new().slider("level", slider));
-        let next = root_tree(El::new().slider("level", next_slider));
+        let slider = Slider::new(0.0..=10.0).value(2.0);
+        let next_slider = Slider::new(0.0..=10.0).value(8.0);
+        let tree = root_tree(El::new().widget("level", slider));
+        let next = root_tree(El::new().widget("level", next_slider));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
     }
 
     #[test]
     fn interactivity_only_classifies_as_visual_only() {
-        let tree = root_tree(El::new().button("action", Button::new()));
+        let tree = root_tree(El::new().button("action"));
         let next = root_tree(
             El::new()
-                .button("action", Button::new())
+                .button("action")
                 .widget_interactivity(WidgetInteractivity::Disabled),
         );
 
@@ -1930,12 +1940,8 @@ mod tests {
 
     #[test]
     fn visual_slot_add_remove_classifies_as_visual_only() {
-        let tree = root_tree(El::new().button("action", Button::new()));
-        let next = root_tree(
-            El::new()
-                .button("action", Button::new())
-                .visual_slot(VisualSlotId::new(1)),
-        );
+        let tree = root_tree(El::new().button("action"));
+        let next = root_tree(El::new().button("action").visual_slot(VisualSlotId::new(1)));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
         assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
@@ -1943,14 +1949,18 @@ mod tests {
 
     #[test]
     fn button_state_value_change_classifies_as_visual_only() {
-        let tree = root_tree(El::new().background(Color::WHITE).button(
-            "action",
-            Button::new().hovered_background(Color::srgb(0.2, 0.4, 0.8)),
-        ));
-        let next = root_tree(El::new().background(Color::WHITE).button(
-            "action",
-            Button::new().hovered_background(Color::srgb(0.8, 0.4, 0.2)),
-        ));
+        let tree = root_tree(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered_background(Color::srgb(0.2, 0.4, 0.8)),
+        );
+        let next = root_tree(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered_background(Color::srgb(0.8, 0.4, 0.2)),
+        );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
     }
@@ -1958,7 +1968,7 @@ mod tests {
     #[test]
     fn button_elements_carry_the_root_visual_slot() {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().button("action", Button::new()), |_| {});
+        builder.with(El::new().button("action"), |_| {});
         let tree = builder.build();
         let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
         let result = engine.compute(&tree, 100.0, 50.0, 1.0);
@@ -1978,9 +1988,7 @@ mod tests {
 
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::new()
-                .button("styled", Button::new())
-                .visual_slot(WIDGET_SLOT),
+            El::new().button("styled").visual_slot(WIDGET_SLOT),
             |builder| {
                 builder.with(El::new().visual_slot(CHILD_SLOT), |_| {});
             },
@@ -2015,16 +2023,16 @@ mod tests {
         builder.with(
             El::column().widget_interactivity(WidgetInteractivity::Disabled),
             |builder| {
-                builder.with(El::new().button("disabled", Button::new()), |_| {});
+                builder.with(El::new().button("disabled"), |_| {});
                 builder.with(
                     El::row().widget_interactivity(WidgetInteractivity::Enabled),
                     |builder| {
-                        builder.with(El::new().button("enabled", Button::new()), |_| {});
+                        builder.with(El::new().button("enabled"), |_| {});
                     },
                 );
             },
         );
-        builder.with(El::new().button("inherited", Button::new()), |_| {});
+        builder.with(El::new().button("inherited"), |_| {});
         let tree = builder.build();
         let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
         let result = engine.compute(&tree, 100.0, 50.0, 1.0);
@@ -2046,35 +2054,20 @@ mod tests {
     fn computed_widgets_store_clipped_rects_and_visual_interaction_rank() {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::row().size(20.0, 20.0).clip(), |builder| {
-            builder.with(
-                El::new().size(30.0, 10.0).button("partial", Button::new()),
-                |_| {},
-            );
-            builder.with(
-                El::new().size(10.0, 10.0).button("clipped", Button::new()),
-                |_| {},
-            );
+            builder.with(El::new().size(30.0, 10.0).button("partial"), |_| {});
+            builder.with(El::new().size(10.0, 10.0).button("clipped"), |_| {});
         });
         builder.with(El::overlay().size(20.0, 20.0), |builder| {
             builder.with(
-                El::new()
-                    .size(20.0, 20.0)
-                    .button("back", Button::new())
-                    .z_index(-1),
+                El::new().size(20.0, 20.0).button("back").z_index(-1),
                 |_| {},
             );
             builder.with(
-                El::new()
-                    .size(20.0, 20.0)
-                    .button("front-first", Button::new())
-                    .z_index(2),
+                El::new().size(20.0, 20.0).button("front-first").z_index(2),
                 |_| {},
             );
             builder.with(
-                El::new()
-                    .size(20.0, 20.0)
-                    .button("front-last", Button::new())
-                    .z_index(2),
+                El::new().size(20.0, 20.0).button("front-last").z_index(2),
                 |_| {},
             );
         });

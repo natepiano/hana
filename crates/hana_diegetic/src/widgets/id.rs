@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use super::Button;
 use super::Slider;
+use super::StateAppearance;
 use super::WidgetOf;
 use crate::ImePanelField;
 use crate::PanelBuildError;
@@ -115,14 +116,6 @@ impl WidgetSpec {
             Self::Slider(_) => WidgetKind::Slider,
         }
     }
-
-    pub(crate) fn set_focused_border_color(&mut self, color: Color) {
-        match self {
-            Self::Button(button) => button.set_focused_border_color(color),
-            Self::EditableField(field) => field.set_focused_border_color(color),
-            Self::Slider(slider) => slider.set_focused_border_color(color),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -131,6 +124,7 @@ pub(crate) struct ComputedWidgetRecord {
     kind:             WidgetKind,
     preorder:         usize,
     authored:         WidgetSpec,
+    appearance:       StateAppearance,
     interactivity:    Cascade<super::WidgetInteractivity>,
     rect:             BoundingBox,
     clipped_rect:     Option<BoundingBox>,
@@ -144,6 +138,7 @@ impl ComputedWidgetRecord {
         id: PanelElementId,
         preorder: usize,
         authored: WidgetSpec,
+        appearance: StateAppearance,
         interactivity: Cascade<super::WidgetInteractivity>,
         rect: BoundingBox,
         clipped_rect: Option<BoundingBox>,
@@ -154,6 +149,7 @@ impl ComputedWidgetRecord {
             kind,
             preorder,
             authored,
+            appearance,
             interactivity,
             rect,
             clipped_rect,
@@ -170,6 +166,8 @@ impl ComputedWidgetRecord {
     pub(crate) const fn preorder(&self) -> usize { self.preorder }
 
     pub(crate) const fn authored(&self) -> &WidgetSpec { &self.authored }
+
+    pub(crate) const fn appearance(&self) -> &StateAppearance { &self.appearance }
 
     pub(crate) const fn interactivity(&self) -> Cascade<super::WidgetInteractivity> {
         self.interactivity

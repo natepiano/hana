@@ -133,7 +133,9 @@ impl WidgetVisualSlots {
 /// panel-line records without changing batch routing. `fill_color` and
 /// `border_color` recolor only the slot's SDF fill or border role and take
 /// precedence over `color` for that role; image, text, and panel-line records
-/// never read them. `offset` translates
+/// never read them. `border_widths` replaces the slot's authored SDF border
+/// widths, which grow inward from the authored outer bounds and so change no
+/// geometry layout solved. `offset` translates
 /// the slot's SDF, image, text, and panel-line records in the panel-local
 /// render frame — panel world units with Y increasing upward — while
 /// preserving authored draw depth. `material`
@@ -144,21 +146,25 @@ impl WidgetVisualSlots {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct VisualSlotOverride {
     /// Replacement color for authored fill/tint/text/line color.
-    pub color:        Option<Color>,
+    pub color:         Option<Color>,
     /// Replacement color for the SDF fill role only.
-    pub fill_color:   Option<Color>,
+    pub fill_color:    Option<Color>,
     /// Replacement color for the SDF border role only.
-    pub border_color: Option<Color>,
+    pub border_color:  Option<Color>,
+    /// Replacement per-side SDF border widths [top, right, bottom, left] in
+    /// panel-local world units, the same frame and order
+    /// `ResolvedSdfSurface::border_widths` carries.
+    pub border_widths: Option<[f32; 4]>,
     /// Panel-local render-frame XY translation added to retained record
     /// transforms: panel world units with Y increasing upward, distinct from
     /// the layout-point frame (Y increasing downward) the widget slot boxes
     /// use. Produce it from a layout-frame delta with
     /// [`layout_delta_to_render_offset`].
-    pub offset:       Option<Vec2>,
+    pub offset:        Option<Vec2>,
     /// Replacement source material for SDF, text, and panel-line records.
-    pub material:     Option<Handle<StandardMaterial>>,
+    pub material:      Option<Handle<StandardMaterial>>,
     /// Replacement sampled texture for image records.
-    pub texture:      Option<Handle<Image>>,
+    pub texture:       Option<Handle<Image>>,
 }
 
 impl VisualSlotOverride {
@@ -166,6 +172,7 @@ impl VisualSlotOverride {
         self.color = overlay.color.or(self.color);
         self.fill_color = overlay.fill_color.or(self.fill_color);
         self.border_color = overlay.border_color.or(self.border_color);
+        self.border_widths = overlay.border_widths.or(self.border_widths);
         self.offset = overlay.offset.or(self.offset);
         if overlay.material.is_some() {
             self.material.clone_from(&overlay.material);
@@ -194,6 +201,12 @@ impl VisualSlotOverride {
     #[must_use]
     pub(crate) const fn with_border_color(mut self, color: Color) -> Self {
         self.border_color = Some(color);
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_border_widths(mut self, widths: [f32; 4]) -> Self {
+        self.border_widths = Some(widths);
         self
     }
 

@@ -1531,6 +1531,9 @@ mod tests {
             .add_plugins(AssetPlugin::default())
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
+            // `commit_image_batch_buffers` stages into the buffer-upload queue
+            // `MaterialTablePlugin` owns, which this app does not add.
+            .init_resource::<RetainedBatchBufferUploads>()
             .add_plugins(ImageBatchPlugin);
         app
     }

@@ -2,15 +2,18 @@
 
 use bevy::prelude::*;
 
+use super::StateAppearance;
 use super::VisualSlotId;
+#[cfg(test)]
 use super::VisualSlotOverride;
 use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
-use super::WidgetSpec;
+use super::WidgetState;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
 use super::visual;
+use crate::DiegeticPanel;
 
 /// Reports whether an editable field's authored focus presentation or visible
 /// focus state changed.
@@ -20,7 +23,7 @@ pub(super) fn presentation_inputs_changed(
         (
             With<WidgetOf>,
             Or<(
-                Changed<WidgetSpec>,
+                Changed<StateAppearance>,
                 Changed<WidgetVisualSlots>,
                 Changed<WidgetFocusVisible>,
             )>,
@@ -39,31 +42,32 @@ pub(super) fn presentation_inputs_changed(
             .any(|kind| *kind == WidgetKind::EditableField)
 }
 
-/// Maps visible keyboard focus onto each editable field's retained root border.
+/// Maps visible keyboard focus onto each editable field's retained root slot.
 pub(super) fn present_focus(
     fields: Query<
         (
             Entity,
-            &WidgetSpec,
+            &WidgetKind,
+            &StateAppearance,
+            &WidgetOf,
             &WidgetVisualSlots,
             Has<WidgetFocusVisible>,
         ),
         With<WidgetOf>,
     >,
+    panels: Query<&DiegeticPanel>,
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (entity, authored, slots, focused) in &fields {
-        let WidgetSpec::EditableField(field) = authored else {
+    for (entity, kind, appearance, widget_of, slots, focused) in &fields {
+        if *kind != WidgetKind::EditableField {
             continue;
-        };
+        }
         if slots.element_index(VisualSlotId::EDITABLE_ROOT).is_none() {
             continue;
         }
-        let desired = VisualSlotOverride {
-            border_color: focused.then(|| field.focused_border_color()).flatten(),
-            ..VisualSlotOverride::default()
-        };
+        let active = [focused.then_some(WidgetState::Focused)];
+        let desired = appearance.resolve(&active, panels.get(widget_of.panel()).ok());
         visual::write_slot_override(
             entity,
             VisualSlotId::EDITABLE_ROOT,

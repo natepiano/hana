@@ -23,17 +23,18 @@ use bevy::prelude::*;
 use super::PanelWidget;
 use super::SemanticWidgetIntent;
 use super::VisualSlotId;
-use super::VisualSlotOverride;
 use super::WidgetDisabled;
 use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
-use super::WidgetSpec;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
+use super::appearance::StateAppearance;
+use super::appearance::WidgetState;
 use super::capture;
 use super::capture::WidgetCaptures;
 use super::visual;
+use crate::DiegeticPanel;
 use crate::PanelElementId;
 use crate::ime;
 use crate::ime::ImeBlurIntent;
@@ -79,49 +80,24 @@ impl fmt::Debug for ButtonCallback {
     }
 }
 
-/// Per-state presentation values for one button state layer.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct ButtonStateValues {
-    background:   Option<Color>,
-    border_color: Option<Color>,
-    material:     Option<Handle<StandardMaterial>>,
-}
-
-/// One [`ButtonStateValues`] layer per widget state, authored by the direct
-/// `Button` state builders.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct ButtonStatePresentation {
-    hovered:  ButtonStateValues,
-    pressed:  ButtonStateValues,
-    focused:  ButtonStateValues,
-    disabled: ButtonStateValues,
-}
-
-/// Authored configuration for a panel button.
+/// Authored behavior for a panel button.
 ///
-/// Attach it to an element with [`El::button`](crate::El::button). The
-/// normal surface stays on the element's ordinary
+/// Declare one inline with [`El::button`](crate::El::button), or build one here
+/// and attach it with [`El::widget`](crate::El::widget). A button carries
+/// behavior only: its resting look stays on the element's ordinary
 /// [`El::background`](crate::El::background),
 /// [`El::border`](crate::El::border), and
-/// [`El::material`](crate::El::material) declarations; the state builders
-/// here patch only that root surface's retained records at runtime, layering
-/// normal → focused → hovered → pressed → disabled per property with missing
-/// values falling through to the prior layer.
+/// [`El::material`](crate::El::material) declarations, and its per-state look
+/// on the element's state builders.
 #[must_use]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Button {
     callback: Option<ButtonCallback>,
-    states:   Option<Box<ButtonStatePresentation>>,
 }
 
 impl Button {
     /// Creates a button declaration with default behavior.
-    pub const fn new() -> Self {
-        Self {
-            callback: None,
-            states:   None,
-        }
-    }
+    pub const fn new() -> Self { Self { callback: None } }
 
     /// Runs `system` with each completed [`ButtonClicked`] for this button.
     ///
@@ -133,209 +109,21 @@ impl Button {
     /// [`ButtonClicked`] observation — a global or entity-scoped observer
     /// reads the widget entity from the event target.
     pub fn on_click<M>(mut self, system: impl IntoSystem<In<ButtonClicked>, (), M>) -> Self {
+        self.set_callback(system);
+        self
+    }
+
+    pub(crate) fn set_callback<M>(&mut self, system: impl IntoSystem<In<ButtonClicked>, (), M>) {
         self.callback = Some(ButtonCallback::new(system));
-        self
-    }
-
-    /// Sets the root background color shown while a pointer hovers the button.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// button element.
-    pub fn hovered_background(mut self, color: Color) -> Self {
-        self.states_mut().hovered.background = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while the button is pressed.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// button element.
-    pub fn pressed_background(mut self, color: Color) -> Self {
-        self.states_mut().pressed.background = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while the button's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// button element.
-    pub fn focused_background(mut self, color: Color) -> Self {
-        self.states_mut().focused.background = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while the button is disabled.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// button element.
-    pub fn disabled_background(mut self, color: Color) -> Self {
-        self.states_mut().disabled.background = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while a pointer hovers the button.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the button
-    /// element; border widths and radii stay as authored.
-    pub fn hovered_border_color(mut self, color: Color) -> Self {
-        self.states_mut().hovered.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while the button is pressed.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the button
-    /// element; border widths and radii stay as authored.
-    pub fn pressed_border_color(mut self, color: Color) -> Self {
-        self.states_mut().pressed.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while the button's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the button
-    /// element; border widths and radii stay as authored.
-    pub fn focused_border_color(mut self, color: Color) -> Self {
-        self.states_mut().focused.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while the button is disabled.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the button
-    /// element; border widths and radii stay as authored.
-    pub fn disabled_border_color(mut self, color: Color) -> Self {
-        self.states_mut().disabled.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root surface material shown while a pointer hovers the
-    /// button.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored
-    /// root surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the button element.
-    pub fn hovered_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().hovered.material = Some(material);
-        self
-    }
-
-    /// Sets the root surface material shown while the button is pressed.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored
-    /// root surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the button element.
-    pub fn pressed_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().pressed.material = Some(material);
-        self
-    }
-
-    /// Sets the root surface material shown while the button's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored
-    /// root surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the button element.
-    pub fn focused_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().focused.material = Some(material);
-        self
-    }
-
-    /// Sets the root surface material shown while the button is disabled.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored
-    /// root surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the button element.
-    pub fn disabled_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().disabled.material = Some(material);
-        self
     }
 
     pub(crate) const fn callback(&self) -> Option<&ButtonCallback> { self.callback.as_ref() }
-
-    fn states_mut(&mut self) -> &mut ButtonStatePresentation {
-        self.states.get_or_insert_with(Default::default).as_mut()
-    }
-
-    pub(crate) fn set_focused_border_color(&mut self, color: Color) {
-        self.states_mut().focused.border_color = Some(color);
-    }
-
-    /// Whether any state layer authors a background color.
-    pub(crate) fn has_state_background(&self) -> bool {
-        self.states.as_deref().is_some_and(|states| {
-            states.focused.background.is_some()
-                || states.hovered.background.is_some()
-                || states.pressed.background.is_some()
-                || states.disabled.background.is_some()
-        })
-    }
-
-    /// Whether any state layer authors a border color.
-    pub(crate) fn has_state_border_color(&self) -> bool {
-        self.states.as_deref().is_some_and(|states| {
-            states.focused.border_color.is_some()
-                || states.hovered.border_color.is_some()
-                || states.pressed.border_color.is_some()
-                || states.disabled.border_color.is_some()
-        })
-    }
-
-    /// Whether any state layer authors a surface material.
-    pub(crate) fn has_state_material(&self) -> bool {
-        self.states.as_deref().is_some_and(|states| {
-            states.focused.material.is_some()
-                || states.hovered.material.is_some()
-                || states.pressed.material.is_some()
-                || states.disabled.material.is_some()
-        })
-    }
-
-    /// Composes the desired root-slot override for the active state set.
-    ///
-    /// Each property layers independently in the fixed order normal →
-    /// focused → hovered → pressed → disabled; a state without a value for a
-    /// property leaves the prior layer intact, and `None` means the authored
-    /// normal value.
-    fn state_override(&self, active: [bool; 4]) -> VisualSlotOverride {
-        let Some(states) = self.states.as_deref() else {
-            return VisualSlotOverride::default();
-        };
-        let mut layered = ButtonStateValues::default();
-        for (active, values) in active.into_iter().zip([
-            &states.focused,
-            &states.hovered,
-            &states.pressed,
-            &states.disabled,
-        ]) {
-            if !active {
-                continue;
-            }
-            if let Some(background) = values.background {
-                layered.background = Some(background);
-            }
-            if let Some(border_color) = values.border_color {
-                layered.border_color = Some(border_color);
-            }
-            if let Some(material) = &values.material {
-                layered.material = Some(material.clone());
-            }
-        }
-        VisualSlotOverride {
-            fill_color: layered.background,
-            border_color: layered.border_color,
-            material: layered.material,
-            ..VisualSlotOverride::default()
-        }
-    }
 }
 
 /// Run condition for [`present_button_state`]: reports whether any authored
 /// presentation or presented state input changed since the last run.
 ///
-/// `Changed<WidgetSpec>` / `Changed<WidgetVisualSlots>` cover reify and
+/// `Changed<StateAppearance>` / `Changed<WidgetVisualSlots>` cover reify and
 /// re-authoring, `Changed<PickingInteraction>` covers the hover/pressed
 /// aggregate, and `Changed` on [`WidgetFocusVisible`], [`WidgetDisabled`], and
 /// [`ButtonPress`] covers marker insertion. The [`RemovedComponents`] streams
@@ -347,7 +135,7 @@ pub(super) fn presentation_inputs_changed(
         (
             With<WidgetOf>,
             Or<(
-                Changed<WidgetSpec>,
+                Changed<StateAppearance>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
                 Changed<WidgetFocusVisible>,
@@ -389,7 +177,9 @@ pub(super) fn present_button_state(
     buttons: Query<
         (
             Entity,
-            &WidgetSpec,
+            &WidgetKind,
+            &StateAppearance,
+            &WidgetOf,
             &WidgetVisualSlots,
             Option<&PickingInteraction>,
             Has<WidgetDisabled>,
@@ -398,29 +188,34 @@ pub(super) fn present_button_state(
         ),
         With<WidgetOf>,
     >,
+    panels: Query<&DiegeticPanel>,
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    for (entity, authored, slots, interaction, disabled, focused, pressed) in &buttons {
-        let WidgetSpec::Button(button) = authored else {
+    for (entity, kind, appearance, widget_of, slots, interaction, disabled, focused, pressed) in
+        &buttons
+    {
+        if *kind != WidgetKind::Button {
             continue;
-        };
+        }
         if slots.element_index(VisualSlotId::BUTTON_ROOT).is_none() {
             continue;
         }
         let active = [
-            focused,
+            focused.then_some(WidgetState::Focused),
             matches!(
                 interaction,
                 Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
-            ),
-            pressed,
-            disabled,
+            )
+            .then_some(WidgetState::Hovered),
+            pressed.then_some(WidgetState::Pressed),
+            disabled.then_some(WidgetState::Disabled),
         ];
+        let panel = panels.get(widget_of.panel()).ok();
         visual::write_slot_override(
             entity,
             VisualSlotId::BUTTON_ROOT,
-            button.state_override(active),
+            appearance.resolve(&active, panel),
             &mut overrides,
             &mut commands,
         );
@@ -1110,10 +905,10 @@ mod tests {
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
     use crate::PanelWidgetWriter;
+    use crate::Px;
     use crate::RequestWidgetFocus;
     use crate::Sizing;
     use crate::Slider;
-    use crate::SliderRange;
     use crate::WidgetInput;
     use crate::WidgetInputPlugin;
     use crate::WidgetInteractivity;
@@ -1388,14 +1183,14 @@ mod tests {
 
     fn button_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().button(BUTTON_ID, Button::new()), |_| {});
+        builder.with(El::new().button(BUTTON_ID), |_| {});
         builder.build()
     }
 
     fn callback_button_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::new().button(BUTTON_ID, Button::new().on_click(record_callback_click)),
+            El::new().button(BUTTON_ID).on_click(record_callback_click),
             |_| {},
         );
         builder.build()
@@ -1408,7 +1203,7 @@ mod tests {
     fn button_and_field_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().editable_field(FIELD_ID, field_spec()), |_| {});
-        builder.with(El::new().button(BUTTON_ID, Button::new()), |_| {});
+        builder.with(El::new().button(BUTTON_ID), |_| {});
         builder.build()
     }
 
@@ -1426,18 +1221,19 @@ mod tests {
             El::new()
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
-                .button(BUTTON_ID, Button::new()),
+                .button(BUTTON_ID),
             |_| {},
         );
         builder.build()
     }
 
-    fn slider_tree() -> Option<LayoutTree> {
-        let range = SliderRange::new(0.0, 1.0).ok()?;
-        let slider = Slider::new(range, 0.5).ok()?;
+    fn slider_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().slider(BUTTON_ID, slider), |_| {});
-        Some(builder.build())
+        builder.with(
+            El::new().widget(BUTTON_ID, Slider::new(0.0..=1.0).value(0.5)),
+            |_| {},
+        );
+        builder.build()
     }
 
     fn empty_tree() -> LayoutTree { LayoutBuilder::new(100.0, 50.0).build() }
@@ -2964,10 +2760,7 @@ mod tests {
             .entity_mut(widget)
             .observe(observe_teardown_cancellation);
 
-        let Some(tree) = slider_tree() else {
-            return;
-        };
-        let result = app.world_mut().commands().set_tree(panel, tree);
+        let result = app.world_mut().commands().set_tree(panel, slider_tree());
         assert!(result.is_ok());
         app.update();
         assert_eq!(resolve_widget(&mut app, panel), widget);
@@ -3130,15 +2923,23 @@ mod tests {
     const DISABLED_FILL: Color = Color::srgb(0.12, 0.12, 0.14);
     const PEER_HOVER_FILL: Color = Color::srgb(0.10, 0.55, 0.25);
 
-    fn styled_button_tree(id: &'static str, button: Button) -> LayoutTree {
+    /// A button element in the default row layout.
+    type ButtonElement = El<crate::Row, crate::WidgetElement<Button>>;
+
+    fn styled_button_tree(
+        id: &'static str,
+        configure: impl FnOnce(ButtonElement) -> ButtonElement,
+    ) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .height(Sizing::GROW)
-                .background(NORMAL_FILL)
-                .border(Border::all(1.0, NORMAL_BORDER))
-                .button(id, button),
+            configure(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(NORMAL_FILL)
+                    .border(Border::all(1.0, NORMAL_BORDER))
+                    .button(id),
+            ),
             |_| {},
         );
         builder.build()
@@ -3153,7 +2954,8 @@ mod tests {
                     .height(Sizing::GROW)
                     .background(NORMAL_FILL)
                     .border(Border::all(1.0, NORMAL_BORDER))
-                    .button(id, Button::new().hovered_background(hover)),
+                    .button(id)
+                    .hovered_background(hover),
                 |_| {},
             );
         }
@@ -3207,7 +3009,7 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            styled_button_tree(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3243,12 +3045,11 @@ mod tests {
         let material: Handle<StandardMaterial> = Handle::default();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(
-                BUTTON_ID,
-                Button::new()
+            styled_button_tree(BUTTON_ID, |element| {
+                element
                     .hovered_border_color(FOCUS_BORDER)
-                    .pressed_material(material.clone()),
-            ),
+                    .pressed_material(material.clone())
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3280,20 +3081,92 @@ mod tests {
     }
 
     #[test]
+    fn zero_width_border_lets_a_borderless_button_grow_a_focus_border() {
+        let mut app = integrated_test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let mut tree = LayoutBuilder::new(100.0, 50.0);
+        tree.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(NORMAL_FILL)
+                .border(Border::all(Px(0.0), FOCUS_BORDER))
+                .button(BUTTON_ID)
+                .focused_border_width(Px(3.0)),
+            |_| {},
+        );
+        let panel = spawn_panel(&mut app, tree.build());
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+
+        app.world_mut()
+            .trigger(RequestWidgetFocus { window, widget });
+        app.world_mut().flush();
+        app.update();
+        assert!(
+            root_override(&app, widget)
+                .and_then(|value| value.border_widths)
+                .is_some_and(|widths| widths.iter().all(|width| *width > 0.0)),
+            "an authored zero-width border is a real record a focus width can widen",
+        );
+    }
+
+    #[test]
+    fn focused_border_width_resolves_against_the_owning_panel() {
+        let mut app = integrated_test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = spawn_panel(
+            &mut app,
+            styled_button_tree(BUTTON_ID, |element| element.focused_border_width(Px(3.0))),
+        );
+        app.update();
+        let widget = resolve_widget(&mut app, panel);
+        assert_eq!(root_override(&app, widget), None);
+
+        app.world_mut()
+            .trigger(RequestWidgetFocus { window, widget });
+        app.world_mut().flush();
+        app.update();
+
+        let points_to_world = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .map_or(0.0, DiegeticPanel::points_to_world);
+        // Three logical pixels resolve to points through the fixed 96 DPI
+        // convention, then scale to the owning panel's world units.
+        let expected = 3.0 * 0.75 * points_to_world;
+        assert_eq!(
+            root_override(&app, widget),
+            Some(VisualSlotOverride {
+                border_widths: Some([expected; 4]),
+                ..VisualSlotOverride::default()
+            }),
+        );
+
+        app.world_mut().trigger(ClearWidgetFocus { window });
+        app.world_mut().flush();
+        app.update();
+        assert_eq!(
+            root_override(&app, widget),
+            None,
+            "leaving focus restores the authored border width",
+        );
+    }
+
+    #[test]
     fn state_precedence_layers_independently_per_property() {
         let mut app = integrated_test_app();
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(
-                BUTTON_ID,
-                Button::new()
+            styled_button_tree(BUTTON_ID, |element| {
+                element
                     .focused_background(FOCUS_FILL)
                     .focused_border_color(FOCUS_BORDER)
                     .hovered_background(HOVER_FILL)
                     .pressed_background(PRESS_FILL)
-                    .disabled_border_color(DISABLED_BORDER),
-            ),
+                    .disabled_border_color(DISABLED_BORDER)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3359,13 +3232,13 @@ mod tests {
     #[test]
     fn set_tree_rejects_missing_state_targets_and_preserves_the_tree() {
         let mut app = integrated_test_app();
-        let panel = spawn_panel(&mut app, styled_button_tree(BUTTON_ID, Button::new()));
+        let panel = spawn_panel(&mut app, styled_button_tree(BUTTON_ID, |element| element));
         app.update();
         let widget = resolve_widget(&mut app, panel);
 
         let mut background_only = LayoutBuilder::new(100.0, 50.0);
         background_only.with(
-            El::new().button(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            El::new().button(BUTTON_ID).hovered_background(HOVER_FILL),
             |_| {},
         );
         let result = app
@@ -3374,7 +3247,7 @@ mod tests {
             .set_tree(panel, background_only.build());
         assert!(matches!(
             result,
-            Err(PanelBuildError::ButtonStateBackgroundRequiresBackground(id))
+            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
                 if id == PanelElementId::named(BUTTON_ID)
         ));
 
@@ -3382,7 +3255,8 @@ mod tests {
         border_only.with(
             El::new()
                 .background(NORMAL_FILL)
-                .button(BUTTON_ID, Button::new().hovered_border_color(FOCUS_BORDER)),
+                .button(BUTTON_ID)
+                .hovered_border_color(FOCUS_BORDER),
             |_| {},
         );
         let result = app
@@ -3391,16 +3265,33 @@ mod tests {
             .set_tree(panel, border_only.build());
         assert!(matches!(
             result,
-            Err(PanelBuildError::ButtonStateBorderColorRequiresBorder(id))
+            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
+                if id == PanelElementId::named(BUTTON_ID)
+        ));
+
+        let mut border_width_only = LayoutBuilder::new(100.0, 50.0);
+        border_width_only.with(
+            El::new()
+                .background(NORMAL_FILL)
+                .button(BUTTON_ID)
+                .focused_border_width(Px(2.0)),
+            |_| {},
+        );
+        let result = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, border_width_only.build());
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::StateBorderWidthRequiresBorder(id))
                 if id == PanelElementId::named(BUTTON_ID)
         ));
 
         let mut material_only = LayoutBuilder::new(100.0, 50.0);
         material_only.with(
-            El::new().button(
-                BUTTON_ID,
-                Button::new().disabled_material(Handle::default()),
-            ),
+            El::new()
+                .button(BUTTON_ID)
+                .disabled_material(Handle::default()),
             |_| {},
         );
         let result = app
@@ -3409,7 +3300,7 @@ mod tests {
             .set_tree(panel, material_only.build());
         assert!(matches!(
             result,
-            Err(PanelBuildError::ButtonStateMaterialRequiresSurface(id))
+            Err(PanelBuildError::StateMaterialRequiresSurface(id))
                 if id == PanelElementId::named(BUTTON_ID)
         ));
 
@@ -3464,7 +3355,7 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            styled_button_tree(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3477,7 +3368,7 @@ mod tests {
         let result = app
             .world_mut()
             .commands()
-            .set_tree(panel, styled_button_tree(BUTTON_ID, Button::new()));
+            .set_tree(panel, styled_button_tree(BUTTON_ID, |element| element));
         assert!(result.is_ok());
         app.update();
         app.update();
@@ -3493,7 +3384,7 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().pressed_background(PRESS_FILL)),
+            styled_button_tree(BUTTON_ID, |element| element.pressed_background(PRESS_FILL)),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3534,19 +3425,18 @@ mod tests {
         let mut app = integrated_test_app();
         let window = app.world_mut().spawn(Window::default()).id();
         let mut tree = LayoutBuilder::new(100.0, 50.0);
-        for (id, button) in [
-            ("first", Button::new()),
-            ("second", Button::new().focused_border_color(FOCUS_BORDER)),
-        ] {
-            tree.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .background(NORMAL_FILL)
-                    .border(Border::all(1.0, NORMAL_BORDER))
-                    .button(id, button),
-                |_| {},
-            );
+        for (id, focus_border) in [("first", None), ("second", Some(FOCUS_BORDER))] {
+            let element = El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(NORMAL_FILL)
+                .border(Border::all(1.0, NORMAL_BORDER))
+                .button(id);
+            let element = match focus_border {
+                Some(color) => element.focused_border_color(color),
+                None => element,
+            };
+            tree.with(element, |_| {});
         }
         let panel = spawn_panel(&mut app, tree.build());
         app.update();
@@ -3603,13 +3493,12 @@ mod tests {
         let camera = app.world_mut().spawn(Camera::default()).id();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(
-                BUTTON_ID,
-                Button::new()
+            styled_button_tree(BUTTON_ID, |element| {
+                element
                     .hovered_background(HOVER_FILL)
                     .pressed_background(PRESS_FILL)
-                    .focused_border_color(FOCUS_BORDER),
-            ),
+                    .focused_border_color(FOCUS_BORDER)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3718,7 +3607,9 @@ mod tests {
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().focused_border_color(FOCUS_BORDER)),
+            styled_button_tree(BUTTON_ID, |element| {
+                element.focused_border_color(FOCUS_BORDER)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3753,12 +3644,11 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(
-                BUTTON_ID,
-                Button::new()
+            styled_button_tree(BUTTON_ID, |element| {
+                element
                     .disabled_background(DISABLED_FILL)
-                    .disabled_border_color(DISABLED_BORDER),
-            ),
+                    .disabled_border_color(DISABLED_BORDER)
+            }),
         );
         app.update();
         app.update();
@@ -3831,7 +3721,7 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            styled_button_tree(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3870,7 +3760,7 @@ mod tests {
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            styled_button_tree(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3944,7 +3834,7 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(BUTTON_ID, Button::new().hovered_background(HOVER_FILL)),
+            styled_button_tree(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -4000,12 +3890,11 @@ mod tests {
         app.init_resource::<CallbackClicks>();
         let panel = spawn_panel(
             &mut app,
-            styled_button_tree(
-                BUTTON_ID,
-                Button::new()
+            styled_button_tree(BUTTON_ID, |element| {
+                element
                     .on_click(record_callback_click)
-                    .hovered_background(HOVER_FILL),
-            ),
+                    .hovered_background(HOVER_FILL)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);

@@ -1,3 +1,4 @@
+mod appearance;
 mod button;
 mod capture;
 mod constants;
@@ -13,6 +14,9 @@ mod slider;
 mod tooltip;
 mod visual;
 
+pub(crate) use appearance::StateAppearance;
+pub(crate) use appearance::VisualChange;
+pub(crate) use appearance::WidgetState;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::picking::PickingSettings;

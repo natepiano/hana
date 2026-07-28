@@ -82,6 +82,7 @@ use hana_diegetic::Pt;
 use hana_diegetic::Px;
 use hana_diegetic::RequestPanelFocus;
 use hana_diegetic::RequestSliderAdjustment;
+use hana_diegetic::Row;
 use hana_diegetic::ShadowCasting;
 use hana_diegetic::Sizing;
 use hana_diegetic::Slider;
@@ -89,14 +90,11 @@ use hana_diegetic::SliderAdjustment;
 use hana_diegetic::SliderCancelCause;
 use hana_diegetic::SliderCanceled;
 use hana_diegetic::SliderChangeRequested;
-use hana_diegetic::SliderConfigError;
 use hana_diegetic::SliderDirection;
 use hana_diegetic::SliderGrabbed;
-use hana_diegetic::SliderRange;
 use hana_diegetic::SliderReleased;
 use hana_diegetic::SliderResetBehavior;
 use hana_diegetic::SliderState;
-use hana_diegetic::SliderStep;
 use hana_diegetic::Text;
 use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
@@ -107,6 +105,7 @@ use hana_diegetic::TooltipHidden;
 use hana_diegetic::TooltipPlacementPolicy;
 use hana_diegetic::TooltipShown;
 use hana_diegetic::WidgetDisabled;
+use hana_diegetic::WidgetElement;
 use hana_diegetic::WidgetFocusChanged;
 use hana_diegetic::WidgetFocused;
 use hana_diegetic::WidgetInput;
@@ -124,6 +123,7 @@ const BUTTON_FILL_HOVERED: Color = Color::srgba(0.10, 0.26, 0.52, 0.95);
 const BUTTON_FILL_PRESSED: Color = Color::srgba(0.55, 0.30, 0.08, 0.98);
 const BUTTON_HEIGHT: Px = Px(42.0);
 const CONTROL_BORDER_WIDTH: Px = Px(1.0);
+const CONTROL_BORDER_WIDTH_FOCUSED: Px = Px(3.0);
 const CONTROL_GAP: Px = Px(8.0);
 const CONTROL_PADDING: Px = Px(8.0);
 const CONTROL_RADIUS: Px = Px(7.0);
@@ -988,13 +988,7 @@ fn spawn_widget_lab(
 ) {
     let cube_target = commands.mesh_anchor_target(*cube, MeshFace::PositiveZ);
     commands.spawn_tooltip(cube_target, cube_tooltip());
-    let slider = match slider_declaration() {
-        Ok(slider) => slider,
-        Err(error) => {
-            error!("widgets: failed to construct slider: {error}");
-            return;
-        },
-    };
+    let slider = slider_declaration();
     let material = materials.add(cube_face_panel_material());
     let panel = DiegeticPanel::world()
         .size(
@@ -1129,8 +1123,8 @@ fn screen_widget_tree() -> LayoutTree {
         SCREEN_TARGET_ID,
         SCREEN_TARGET_LABEL,
         SCREEN_CONTROL_WIDTH,
-        state_styled(Button::new()),
         None,
+        |element| element,
     );
     builder.build()
 }
@@ -1156,15 +1150,16 @@ fn screen_attachment_status_tree(state: ScreenWidgetAttachmentState) -> LayoutTr
     builder.build()
 }
 
-fn slider_declaration() -> Result<Slider, SliderConfigError> {
-    let range = SliderRange::new(SLIDER_RANGE_START, SLIDER_RANGE_END)?;
-    let step = SliderStep::new(SLIDER_STEP)?;
-    Ok(Slider::new(range, SLIDER_INITIAL_VALUE)?
-        .step(step)
+/// Builds the slider away from the layout chain so the tree below can show the
+/// pre-built [`El::widget`] path next to the inline `El::button` one.
+fn slider_declaration() -> Slider {
+    Slider::new(SLIDER_RANGE_START..=SLIDER_RANGE_END)
+        .value(SLIDER_INITIAL_VALUE)
+        .step(SLIDER_STEP)
         .direction(SliderDirection::LeftToRight)
         .reset_behavior(SliderResetBehavior::DoubleClick)
         .focused_thumb_border_color(SLIDER_THUMB_FOCUSED_BORDER)
-        .disabled_color(SLIDER_DISABLED_COLOR))
+        .disabled_color(SLIDER_DISABLED_COLOR)
 }
 
 fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip) -> LayoutTree {
@@ -1180,21 +1175,23 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
         PRIMARY_BUTTON_ID,
         "Primary button",
         CONTROL_WIDTH,
-        state_styled(Button::new().on_click(count_primary_click)),
         Some(primary_tooltip),
+        |element| element.on_click(count_primary_click),
     );
     add_button(
         &mut builder,
         SECONDARY_BUTTON_ID,
         "Secondary button",
         CONTROL_WIDTH,
-        state_styled(Button::new())
-            .disabled_background(BUTTON_FILL_DISABLED)
-            .disabled_border_color(BUTTON_BORDER_DISABLED),
         Some(authored_tooltip(
             "Secondary button",
             "Press D to toggle this control and the slider",
         )),
+        |element| {
+            element
+                .disabled_background(BUTTON_FILL_DISABLED)
+                .disabled_border_color(BUTTON_BORDER_DISABLED)
+        },
     );
     add_slider(&mut builder, slider, slider_tooltip);
     builder.build()
@@ -1207,7 +1204,7 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
             .height(Sizing::FIT)
             .gap(SLIDER_LABEL_GAP)
             .alignment(AlignX::Center, AlignY::Center)
-            .slider(SLIDER_ID, slider)
+            .widget(SLIDER_ID, slider)
             .tooltip(slider_tooltip),
         |builder| {
             builder.with(
@@ -1442,14 +1439,20 @@ fn interaction_status_transform() -> Transform {
     ))
 }
 
+/// A button element in the widget lab's row layout.
+type ButtonElement = El<Row, WidgetElement<Button>>;
+
 /// Direct state presentation shared by the world-panel buttons: hover and
-/// press restyle the fill while focus restyles only the border, so the two
-/// properties visibly layer independently.
-fn state_styled(button: Button) -> Button {
-    button
+/// press replace the fill while focus replaces only the border, so the two
+/// properties visibly layer independently. Focus thickens the border as well
+/// as recoloring it, which is what makes keyboard traversal readable at the
+/// distance the cube panel sits from the camera.
+fn state_styled(element: ButtonElement) -> ButtonElement {
+    element
         .hovered_background(BUTTON_FILL_HOVERED)
         .pressed_background(BUTTON_FILL_PRESSED)
         .focused_border_color(BUTTON_BORDER_FOCUSED)
+        .focused_border_width(CONTROL_BORDER_WIDTH_FOCUSED)
 }
 
 fn add_button(
@@ -1457,17 +1460,19 @@ fn add_button(
     id: &'static str,
     label: &'static str,
     width: Px,
-    button: Button,
     tooltip: Option<Tooltip>,
+    configure: impl FnOnce(ButtonElement) -> ButtonElement,
 ) {
-    let element = El::new()
-        .size(width, BUTTON_HEIGHT)
-        .padding(Padding::all(CONTROL_PADDING))
-        .alignment(AlignX::Center, AlignY::Center)
-        .background(BUTTON_FILL)
-        .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
-        .corner_radius(CornerRadius::all(CONTROL_RADIUS))
-        .button(id, button);
+    let element = configure(state_styled(
+        El::new()
+            .size(width, BUTTON_HEIGHT)
+            .padding(Padding::all(CONTROL_PADDING))
+            .alignment(AlignX::Center, AlignY::Center)
+            .background(BUTTON_FILL)
+            .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
+            .corner_radius(CornerRadius::all(CONTROL_RADIUS))
+            .button(id),
+    ));
     let element = match tooltip {
         Some(tooltip) => element.tooltip(tooltip),
         None => element,
@@ -1669,13 +1674,7 @@ fn replace_primary_tooltip(
     mut commands: Commands,
 ) {
     let next_timing = primary_tooltip_timing.toggled();
-    let slider = match slider_declaration() {
-        Ok(slider) => slider,
-        Err(error) => {
-            warn!("widgets: failed to recreate slider declaration: {error}");
-            return;
-        },
-    };
+    let slider = slider_declaration();
     match commands.set_tree(
         *panel,
         widget_tree(slider, next_timing.tooltip(), slider_tooltip.0.clone()),

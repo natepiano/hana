@@ -1,7 +1,5 @@
 //! Editable field specifications and applied value summaries.
 
-use bevy::prelude::Color;
-
 use super::ImeValueRevision;
 use super::PanelElementId;
 
@@ -87,10 +85,9 @@ pub enum ImeBuiltInValue {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImePanelField {
     /// Panel-local semantic identity.
-    pub field_id:         PanelElementId,
+    pub field_id:   PanelElementId,
     /// Editable behavior for this field.
-    pub field_spec:       ImeEditableFieldSpec,
-    focused_border_color: Option<Color>,
+    pub field_spec: ImeEditableFieldSpec,
 }
 
 impl ImePanelField {
@@ -100,13 +97,6 @@ impl ImePanelField {
         Self {
             field_id: field_id.into(),
             field_spec,
-            focused_border_color: None,
         }
     }
-
-    pub(crate) const fn set_focused_border_color(&mut self, color: Color) {
-        self.focused_border_color = Some(color);
-    }
-
-    pub(crate) const fn focused_border_color(&self) -> Option<Color> { self.focused_border_color }
 }

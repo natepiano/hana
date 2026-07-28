@@ -1,5 +1,6 @@
 use core::cmp::Ordering;
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 
 use bevy::camera::NormalizedRenderTarget;
 use bevy::camera::RenderTarget;
@@ -21,6 +22,8 @@ use super::WidgetOf;
 use super::WidgetSpec;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
+use super::appearance::StateAppearance;
+use super::appearance::WidgetState;
 use super::capture;
 use super::capture::WidgetCaptures;
 use super::constants::THUMB_CLICK_JITTER_PIXELS_SQUARED;
@@ -86,6 +89,13 @@ pub struct SliderRange {
 }
 
 impl SliderRange {
+    /// The `0.0..=1.0` range, used as the fallback for a slider declaration
+    /// panel build already rejected.
+    pub(crate) const UNIT: Self = Self {
+        start: 0.0,
+        end:   1.0,
+    };
+
     /// Creates a finite slider range whose start is strictly less than its end.
     ///
     /// # Errors
@@ -135,66 +145,42 @@ impl SliderStep {
     pub const fn value(self) -> f32 { self.0 }
 }
 
-/// Per-state presentation values for one slider root state layer.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct SliderStateValues {
-    background:   Option<Color>,
-    border_color: Option<Color>,
-    material:     Option<Handle<StandardMaterial>>,
-}
-
-/// One [`SliderStateValues`] layer per widget state, authored by the direct
-/// `Slider` root-state builders.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct SliderStatePresentation {
-    hovered:  SliderStateValues,
-    pressed:  SliderStateValues,
-    focused:  SliderStateValues,
-    disabled: SliderStateValues,
-}
-
 /// Authored configuration for a panel slider.
 ///
-/// Attach it to an element with [`El::slider`](crate::El::slider). Reified
-/// sliders store their applied value in [`SliderState`] and propose changes
-/// through [`SliderChangeRequested`]. The normal surface stays on the
-/// element's ordinary [`El::background`](crate::El::background),
+/// Declare one inline with [`El::slider`](crate::El::slider), or build one here
+/// and attach it with [`El::widget`](crate::El::widget). Reified sliders store
+/// their applied value in [`SliderState`] and propose changes through
+/// [`SliderChangeRequested`]. A slider carries behavior and its own thumb and
+/// disabled colors; the root's resting look stays on the element's ordinary
+/// [`El::background`](crate::El::background),
 /// [`El::border`](crate::El::border), and [`El::material`](crate::El::material)
-/// declarations; the root-state builders here patch only that root surface's
-/// retained records at runtime, layering normal → focused → hovered → pressed →
-/// disabled per property with missing values falling through to the prior
-/// layer. Child appearance stays application-authored except for the marked
-/// thumb's optional keyboard-focus border and the optional disabled color
-/// applied to the complete slider subtree.
+/// declarations, and its per-state look on the element's state builders.
+///
+/// Range, value, and step are stored as authored and validated when the owning
+/// panel builds, so every builder here is infallible and the first invalid
+/// value surfaces as [`PanelBuildError::SliderConfig`](crate::PanelBuildError).
 #[must_use]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider {
-    range:                      SliderRange,
+    range:                      RangeInclusive<f32>,
     default_value:              f32,
-    step:                       Option<SliderStep>,
+    step:                       Option<f32>,
     direction:                  SliderDirection,
     reset_behavior:             SliderResetBehavior,
     focused_thumb_border_color: Option<Color>,
     disabled_color:             Option<Color>,
-    states:                     Option<Box<SliderStatePresentation>>,
 }
 
 impl Slider {
-    /// Creates a slider declaration with a finite default value.
+    /// Creates a slider declaration over `range` whose default value is the
+    /// range start.
     ///
     /// The default value initializes the first runtime [`SliderState`] and is
     /// the target proposed by [`SliderResetBehavior::DoubleClick`] when that
     /// behavior is enabled.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SliderConfigError::NonFiniteValue`] when `default_value` is
-    /// non-finite.
-    pub fn new(range: SliderRange, default_value: f32) -> Result<Self, SliderConfigError> {
-        if !default_value.is_finite() {
-            return Err(SliderConfigError::NonFiniteValue);
-        }
-        Ok(Self {
+    pub fn new(range: RangeInclusive<f32>) -> Self {
+        let default_value = *range.start();
+        Self {
             range,
             default_value,
             step: None,
@@ -202,25 +188,30 @@ impl Slider {
             reset_behavior: SliderResetBehavior::default(),
             focused_thumb_border_color: None,
             disabled_color: None,
-            states: None,
-        })
+        }
     }
 
-    /// Sets the validated step interval.
-    pub const fn step(mut self, step: SliderStep) -> Self {
-        self.step = Some(step);
+    /// Sets the authored default value.
+    pub const fn value(mut self, value: f32) -> Self {
+        self.set_value(value);
+        self
+    }
+
+    /// Sets the step interval.
+    pub const fn step(mut self, step: f32) -> Self {
+        self.set_step(step);
         self
     }
 
     /// Sets the direction in which values increase.
     pub const fn direction(mut self, direction: SliderDirection) -> Self {
-        self.direction = direction;
+        self.set_direction(direction);
         self
     }
 
     /// Sets the optional thumb gesture that proposes the authored default.
     pub const fn reset_behavior(mut self, reset_behavior: SliderResetBehavior) -> Self {
-        self.reset_behavior = reset_behavior;
+        self.set_reset_behavior(reset_behavior);
         self
     }
 
@@ -229,7 +220,7 @@ impl Slider {
     /// Requires an authored border on the element marked with
     /// [`El::slider_thumb`](crate::El::slider_thumb).
     pub const fn focused_thumb_border_color(mut self, color: Color) -> Self {
-        self.focused_thumb_border_color = Some(color);
+        self.set_focused_thumb_border_color(color);
         self
     }
 
@@ -239,213 +230,81 @@ impl Slider {
     /// including text, track, and marked thumb records. Clearing the disabled
     /// state restores each record's authored color.
     pub const fn disabled_color(mut self, color: Color) -> Self {
+        self.set_disabled_color(color);
+        self
+    }
+
+    pub(crate) const fn set_value(&mut self, value: f32) { self.default_value = value; }
+
+    pub(crate) const fn set_step(&mut self, step: f32) { self.step = Some(step); }
+
+    pub(crate) const fn set_direction(&mut self, direction: SliderDirection) {
+        self.direction = direction;
+    }
+
+    pub(crate) const fn set_reset_behavior(&mut self, reset_behavior: SliderResetBehavior) {
+        self.reset_behavior = reset_behavior;
+    }
+
+    pub(crate) const fn set_focused_thumb_border_color(&mut self, color: Color) {
+        self.focused_thumb_border_color = Some(color);
+    }
+
+    pub(crate) const fn set_disabled_color(&mut self, color: Color) {
         self.disabled_color = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while a pointer hovers the slider.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// slider element.
-    pub fn hovered_background(mut self, color: Color) -> Self {
-        self.states_mut().hovered.background = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while the slider is dragged.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// slider element.
-    pub fn pressed_background(mut self, color: Color) -> Self {
-        self.states_mut().pressed.background = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while the slider's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// slider element.
-    pub fn focused_background(mut self, color: Color) -> Self {
-        self.states_mut().focused.background = Some(color);
-        self
-    }
-
-    /// Sets the root background color shown while the slider is disabled.
-    ///
-    /// Requires an authored [`El::background`](crate::El::background) on the
-    /// slider element.
-    pub fn disabled_background(mut self, color: Color) -> Self {
-        self.states_mut().disabled.background = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while a pointer hovers the slider.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the slider
-    /// element; border widths and radii stay as authored.
-    pub fn hovered_border_color(mut self, color: Color) -> Self {
-        self.states_mut().hovered.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while the slider is dragged.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the slider
-    /// element; border widths and radii stay as authored.
-    pub fn pressed_border_color(mut self, color: Color) -> Self {
-        self.states_mut().pressed.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while the slider's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the slider
-    /// element; border widths and radii stay as authored.
-    pub fn focused_border_color(mut self, color: Color) -> Self {
-        self.states_mut().focused.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root border color shown while the slider is disabled.
-    ///
-    /// Requires an authored [`El::border`](crate::El::border) on the slider
-    /// element; border widths and radii stay as authored.
-    pub fn disabled_border_color(mut self, color: Color) -> Self {
-        self.states_mut().disabled.border_color = Some(color);
-        self
-    }
-
-    /// Sets the root surface material shown while a pointer hovers the slider.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored root
-    /// surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the slider element.
-    pub fn hovered_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().hovered.material = Some(material);
-        self
-    }
-
-    /// Sets the root surface material shown while the slider is dragged.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored root
-    /// surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the slider element.
-    pub fn pressed_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().pressed.material = Some(material);
-        self
-    }
-
-    /// Sets the root surface material shown while the slider's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored root
-    /// surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the slider element.
-    pub fn focused_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().focused.material = Some(material);
-        self
-    }
-
-    /// Sets the root surface material shown while the slider is disabled.
-    ///
-    /// Applies to both the authored fill and border. Requires an authored root
-    /// surface — [`El::background`](crate::El::background) or
-    /// [`El::border`](crate::El::border) — on the slider element.
-    pub fn disabled_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.states_mut().disabled.material = Some(material);
-        self
-    }
-
-    fn states_mut(&mut self) -> &mut SliderStatePresentation {
-        self.states.get_or_insert_with(Default::default).as_mut()
-    }
-
-    pub(crate) fn set_focused_border_color(&mut self, color: Color) {
-        self.states_mut().focused.border_color = Some(color);
-    }
-
-    /// Whether any state layer authors a background color.
-    pub(crate) fn has_state_background(&self) -> bool {
-        self.states.as_deref().is_some_and(|states| {
-            states.focused.background.is_some()
-                || states.hovered.background.is_some()
-                || states.pressed.background.is_some()
-                || states.disabled.background.is_some()
-        })
-    }
-
-    /// Whether any state layer authors a border color.
-    pub(crate) fn has_state_border_color(&self) -> bool {
-        self.states.as_deref().is_some_and(|states| {
-            states.focused.border_color.is_some()
-                || states.hovered.border_color.is_some()
-                || states.pressed.border_color.is_some()
-                || states.disabled.border_color.is_some()
-        })
-    }
-
-    /// Whether any state layer authors a surface material.
-    pub(crate) fn has_state_material(&self) -> bool {
-        self.states.as_deref().is_some_and(|states| {
-            states.focused.material.is_some()
-                || states.hovered.material.is_some()
-                || states.pressed.material.is_some()
-                || states.disabled.material.is_some()
-        })
     }
 
     pub(crate) const fn has_focused_thumb_border_color(&self) -> bool {
         self.focused_thumb_border_color.is_some()
     }
 
-    /// Composes the desired root-slot override for the active state set.
+    /// Validates the authored range, default value, and step together.
     ///
-    /// Each property layers independently in the fixed order normal → focused →
-    /// hovered → pressed → disabled; a state without a value for a property
-    /// leaves the prior layer intact, and `None` means the authored normal
-    /// value.
-    fn state_override(&self, active: [bool; 4]) -> VisualSlotOverride {
-        let Some(states) = self.states.as_deref() else {
-            return VisualSlotOverride::default();
-        };
-        let mut layered = SliderStateValues::default();
-        for (active, values) in active.into_iter().zip([
-            &states.focused,
-            &states.hovered,
-            &states.pressed,
-            &states.disabled,
-        ]) {
-            if !active {
-                continue;
-            }
-            if let Some(background) = values.background {
-                layered.background = Some(background);
-            }
-            if let Some(border_color) = values.border_color {
-                layered.border_color = Some(border_color);
-            }
-            if let Some(material) = &values.material {
-                layered.material = Some(material.clone());
-            }
+    /// Panel build calls this once per authored slider; every later read goes
+    /// through [`Slider::initial_state`], which repeats the same conversion and
+    /// falls back to the authored range's start when a value cannot be
+    /// validated.
+    pub(crate) fn validated(&self) -> Result<ValidSliderConfig, SliderConfigError> {
+        let range = SliderRange::new(*self.range.start(), *self.range.end())?;
+        if !self.default_value.is_finite() {
+            return Err(SliderConfigError::NonFiniteValue);
         }
-        VisualSlotOverride {
-            fill_color: layered.background,
-            border_color: layered.border_color,
-            material: layered.material,
-            ..VisualSlotOverride::default()
-        }
+        let step = self.step.map(SliderStep::new).transpose()?;
+        Ok(ValidSliderConfig {
+            range,
+            default_value: self.default_value,
+            step,
+        })
     }
 
     /// Builds the first-spawn runtime state for this authored slider.
     ///
     /// The authored default initializes only the first state; later
     /// reifications preserve the live applied value while retaining the latest
-    /// default for reset proposals.
+    /// default for reset proposals. Panel build rejects an unvalidatable
+    /// declaration, so the fallback state here is never reached by a reified
+    /// slider.
     pub(crate) fn initial_state(&self) -> SliderState {
-        SliderState::from_validated(self.range, self.default_value, self.step, self.direction)
+        self.validated().map_or_else(
+            |_| SliderState::from_validated(SliderRange::UNIT, 0.0, None, self.direction),
+            |config| {
+                SliderState::from_validated(
+                    config.range,
+                    config.default_value,
+                    config.step,
+                    self.direction,
+                )
+            },
+        )
     }
+}
+
+/// A [`Slider`]'s authored numbers after panel-build validation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ValidSliderConfig {
+    range:         SliderRange,
+    default_value: f32,
+    step:          Option<SliderStep>,
 }
 
 /// Applied runtime state of a reified slider widget.
@@ -539,16 +398,20 @@ impl SliderState {
     /// direction; the authored default does not alter an existing applied value
     /// and is therefore not compared.
     pub(crate) fn matches_configuration(&self, authored: &Slider) -> bool {
-        self.range == authored.range
-            && self.step == authored.step
-            && self.direction == authored.direction
+        authored.validated().is_ok_and(|config| {
+            self.range == config.range
+                && self.step == config.step
+                && self.direction == authored.direction
+        })
     }
 
     /// Rebuilds state around `authored`'s configuration while preserving
     /// `value`, revalidating it through the same snap-then-clamp order as
     /// [`SliderState::set_value`].
     pub(crate) fn with_configuration(authored: &Slider, value: f32) -> Self {
-        Self::from_validated(authored.range, value, authored.step, authored.direction)
+        let mut state = authored.initial_state();
+        state.value = normalized(state.range, state.step, value);
+        state
     }
 
     /// Computes the raw-domain target for `adjustment` without normalizing it,
@@ -1264,7 +1127,8 @@ fn thumb_translation(slots: &WidgetVisualSlots, state: &SliderState) -> Option<V
 ///
 /// The changed query filters to [`WidgetKind::Slider`] so an unrelated button
 /// change never wakes the all-slider walk. `Changed<WidgetSpec>` /
-/// `Changed<WidgetVisualSlots>` cover reify and re-authoring,
+/// `Changed<StateAppearance>` / `Changed<WidgetVisualSlots>` cover reify and
+/// re-authoring,
 /// `Changed<SliderState>` covers the applied value, `Changed<PickingInteraction>`
 /// covers the hover/pressed aggregate, and `Changed` on [`WidgetFocusVisible`],
 /// [`WidgetDisabled`], and [`SliderDrag`] covers marker insertion. Each
@@ -1277,6 +1141,7 @@ pub(super) fn presentation_inputs_changed(
             With<WidgetOf>,
             Or<(
                 Changed<WidgetSpec>,
+                Changed<StateAppearance>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
                 Changed<WidgetFocusVisible>,
@@ -1327,6 +1192,7 @@ pub(super) fn present_slider_state(
         (
             Entity,
             &WidgetSpec,
+            &StateAppearance,
             &WidgetKind,
             &WidgetOf,
             &SliderState,
@@ -1345,6 +1211,7 @@ pub(super) fn present_slider_state(
     for (
         entity,
         authored,
+        appearance,
         kind,
         widget_of,
         state,
@@ -1365,15 +1232,16 @@ pub(super) fn present_slider_state(
         desired.set_subtree_color(disabled.then_some(slider.disabled_color).flatten());
         if slots.element_index(VisualSlotId::SLIDER_ROOT).is_some() {
             let active = [
-                focused,
+                focused.then_some(WidgetState::Focused),
                 matches!(
                     interaction,
                     Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
-                ),
-                dragging,
-                disabled,
+                )
+                .then_some(WidgetState::Hovered),
+                dragging.then_some(WidgetState::Pressed),
+                disabled.then_some(WidgetState::Disabled),
             ];
-            let root_override = slider.state_override(active);
+            let root_override = appearance.resolve(&active, panels.get(widget_of.panel()).ok());
             if root_override != VisualSlotOverride::default() {
                 desired.set(VisualSlotId::SLIDER_ROOT, root_override);
             }
@@ -2146,7 +2014,6 @@ mod tests {
     use crate::AlignY;
     use crate::Anchor;
     use crate::Border;
-    use crate::Button;
     use crate::ButtonClicked;
     use crate::ButtonPressed;
     use crate::ButtonReleased;
@@ -2161,6 +2028,7 @@ mod tests {
     use crate::PanelBuildError;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
+    use crate::Px;
     use crate::RequestWidgetFocus;
     use crate::TextStyle;
     use crate::WidgetInputPlugin;
@@ -2206,13 +2074,26 @@ mod tests {
     }
 
     #[test]
-    fn slider_rejects_non_finite_default_value() {
-        let Ok(range) = SliderRange::new(0.0, 1.0) else {
-            return;
-        };
+    fn slider_defers_a_non_finite_default_value_to_validation() {
         assert_eq!(
-            Slider::new(range, f32::NAN),
+            Slider::new(0.0..=1.0).value(f32::NAN).validated(),
             Err(SliderConfigError::NonFiniteValue)
+        );
+    }
+
+    #[test]
+    fn slider_defers_an_unordered_range_to_validation() {
+        assert_eq!(
+            Slider::new(2.0..=1.0).validated(),
+            Err(SliderConfigError::UnorderedRange)
+        );
+    }
+
+    #[test]
+    fn slider_defers_a_non_positive_step_to_validation() {
+        assert_eq!(
+            Slider::new(0.0..=1.0).step(0.0).validated(),
+            Err(SliderConfigError::NonPositiveStep)
         );
     }
 
@@ -2228,25 +2109,18 @@ mod tests {
 
     #[test]
     fn valid_slider_retains_authored_configuration() {
-        let Ok(range) = SliderRange::new(-1.0, 2.0) else {
-            return;
-        };
-        let Ok(step) = SliderStep::new(0.25) else {
-            return;
-        };
-        let Ok(slider) = Slider::new(range, 0.5) else {
-            return;
-        };
-        let slider = slider
-            .step(step)
+        let slider = Slider::new(-1.0..=2.0)
+            .value(0.5)
+            .step(0.25)
             .direction(SliderDirection::TopToBottom)
             .reset_behavior(SliderResetBehavior::DoubleClick)
             .focused_thumb_border_color(Color::WHITE)
             .disabled_color(Color::BLACK);
+        let config = slider.validated().expect("authored slider validates");
 
-        assert_eq!(slider.range, range);
+        assert_eq!(config.range, range(-1.0, 2.0));
         assert!((slider.default_value - 0.5).abs() <= f32::EPSILON);
-        assert_eq!(slider.step, Some(step));
+        assert_eq!(config.step, Some(step(0.25)));
         assert_eq!(slider.direction, SliderDirection::TopToBottom);
         assert_eq!(slider.reset_behavior, SliderResetBehavior::DoubleClick);
         assert_eq!(slider.focused_thumb_border_color, Some(Color::WHITE));
@@ -2365,7 +2239,7 @@ mod tests {
 
     fn slider_tree(id: &str, slider: Slider) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().size(20.0, 10.0).slider(id, slider), |_| {});
+        builder.with(El::new().size(20.0, 10.0).widget(id, slider), |_| {});
         builder.build()
     }
 
@@ -2505,10 +2379,8 @@ mod tests {
         let mut app = test_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         for (id, direction) in directions {
-            let slider = Slider::new(range(0.0, 1.0), 0.5)
-                .expect("slider should validate")
-                .direction(direction);
-            builder.with(El::new().size(20.0, 10.0).slider(id, slider), |_| {});
+            let slider = Slider::new(0.0..=1.0).value(0.5).direction(direction);
+            builder.with(El::new().size(20.0, 10.0).widget(id, slider), |_| {});
         }
         let panel = spawn_panel(&mut app, builder.build());
         app.update();
@@ -2528,10 +2400,8 @@ mod tests {
         let mut app = test_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         for (id, default_value) in [("over", 25.0), ("off", 4.4)] {
-            let slider = Slider::new(range(0.0, 10.0), default_value)
-                .expect("slider should validate")
-                .step(step(3.0));
-            builder.with(El::new().size(20.0, 10.0).slider(id, slider), |_| {});
+            let slider = Slider::new(0.0..=10.0).value(default_value).step(3.0);
+            builder.with(El::new().size(20.0, 10.0).widget(id, slider), |_| {});
         }
         let panel = spawn_panel(&mut app, builder.build());
         app.update();
@@ -2545,7 +2415,7 @@ mod tests {
     #[test]
     fn proposals_apply_only_through_explicit_app_decisions() {
         let mut app = test_app();
-        let slider = Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate");
+        let slider = Slider::new(0.0..=1.0).value(0.5);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -2581,9 +2451,7 @@ mod tests {
     fn opt_in_self_update_applies_each_proposal() {
         let mut app = test_app();
         app.add_observer(slider_self_update);
-        let slider = Slider::new(range(0.0, 10.0), 5.0)
-            .expect("slider should validate")
-            .step(step(0.5));
+        let slider = Slider::new(0.0..=10.0).value(5.0).step(0.5);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -2601,7 +2469,7 @@ mod tests {
     fn self_update_marks_state_changed_only_when_the_applied_value_changes() {
         let mut app = test_app();
         app.add_observer(slider_self_update);
-        let slider = Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate");
+        let slider = Slider::new(0.0..=1.0).value(0.5);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -2635,9 +2503,7 @@ mod tests {
         let mut app = test_app();
         app.add_observer(slider_self_update);
         // Range end 1.0 is off the step-0.3 lattice; applied 0.9 sits on it.
-        let slider = Slider::new(range(0.0, 1.0), 0.9)
-            .expect("slider should validate")
-            .step(step(0.3));
+        let slider = Slider::new(0.0..=1.0).value(0.9).step(0.3);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -2659,7 +2525,7 @@ mod tests {
     #[test]
     fn remote_requests_resolve_from_panel_and_id_and_validate_input() {
         let mut app = test_app();
-        let slider = Slider::new(range(0.0, 10.0), 5.0).expect("slider should validate");
+        let slider = Slider::new(0.0..=10.0).value(5.0);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         app.update();
 
@@ -2682,12 +2548,12 @@ mod tests {
     #[test]
     fn disabled_sliders_ignore_semantic_requests() {
         let mut app = test_app();
-        let slider = Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate");
+        let slider = Slider::new(0.0..=1.0).value(0.5);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
             El::new()
                 .size(20.0, 10.0)
-                .slider("level", slider)
+                .widget("level", slider)
                 .widget_interactivity(WidgetInteractivity::Disabled),
             |_| {},
         );
@@ -2704,7 +2570,7 @@ mod tests {
     #[test]
     fn reuse_preserves_live_value_and_revalidates_configuration_changes() {
         let mut app = test_app();
-        let slider = Slider::new(range(0.0, 10.0), 4.0).expect("slider should validate");
+        let slider = Slider::new(0.0..=10.0).value(4.0);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -2723,7 +2589,7 @@ mod tests {
 
         // An authored default-value change alone does not rewrite the reused
         // widget's live value or its state component.
-        let replacement = Slider::new(range(0.0, 10.0), 2.0).expect("slider should validate");
+        let replacement = Slider::new(0.0..=10.0).value(2.0);
         app.world_mut()
             .commands()
             .set_tree(panel, slider_tree("level", replacement))
@@ -2743,7 +2609,7 @@ mod tests {
 
         // An authored range change updates the configuration and revalidates
         // the preserved live value against it.
-        let narrowed = Slider::new(range(0.0, 5.0), 2.0).expect("slider should validate");
+        let narrowed = Slider::new(0.0..=5.0).value(2.0);
         app.world_mut()
             .commands()
             .set_tree(panel, slider_tree("level", narrowed))
@@ -2765,9 +2631,7 @@ mod tests {
             .add_systems(Startup, spawn_slider_input)
             .add_observer(send_held_adjustment)
             .add_observer(slider_self_update);
-        let slider = Slider::new(range(0.0, 10.0), 5.0)
-            .expect("slider should validate")
-            .step(step(0.5));
+        let slider = Slider::new(0.0..=10.0).value(5.0).step(0.5);
         let panel = spawn_panel(&mut app, slider_tree("level", slider));
         let window = app
             .world_mut()
@@ -3269,7 +3133,7 @@ mod tests {
     }
 
     fn ltr_scene() -> Scene {
-        let slider = Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate");
+        let slider = Slider::new(0.0..=1.0).value(0.5);
         projecting_scene(slider_tree("level", slider))
     }
 
@@ -3617,12 +3481,12 @@ mod tests {
         let panel = scene.panel;
         // Re-author the same slider as disabled: the same-kind refresh keeps
         // the capture, and the derived `WidgetDisabled` marker cancels it.
-        let slider = Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate");
+        let slider = Slider::new(0.0..=1.0).value(0.5);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
             El::new()
                 .size(20.0, 10.0)
-                .slider("level", slider)
+                .widget("level", slider)
                 .widget_interactivity(WidgetInteractivity::Disabled),
             |_| {},
         );
@@ -3706,12 +3570,7 @@ mod tests {
         press(&mut scene, CAPTURE_VIEWPORT * 0.5);
         let panel = scene.panel;
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(
-            El::new()
-                .size(20.0, 10.0)
-                .button("level", crate::Button::new()),
-            |_| {},
-        );
+        builder.with(El::new().size(20.0, 10.0).button("level"), |_| {});
         scene
             .app
             .world_mut()
@@ -3767,14 +3626,14 @@ mod tests {
 
     #[test]
     fn slider_root_content_box_excludes_border_and_padding_through_reify() {
-        let slider = Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate");
+        let slider = Slider::new(0.0..=1.0).value(0.5);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
             El::new()
                 .size(40.0, 20.0)
                 .border(crate::Border::all(2.0, Color::WHITE))
                 .padding(crate::Padding::all(3.0))
-                .slider("level", slider),
+                .widget("level", slider),
             |_| {},
         );
         let mut app = capture_app();
@@ -3817,14 +3676,14 @@ mod tests {
         // independently known value that no clamp to 0.0 or 1.0 can produce.
         // The root spans the 100-point authored width so the panel's layout
         // center (authored x = 50) falls inside its content box.
-        let slider = Slider::new(range(0.0, 4.0), 2.0).expect("slider should validate");
+        let slider = Slider::new(0.0..=4.0).value(2.0);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
             El::new()
                 .size(100.0, 20.0)
                 .border(crate::Border::all(2.0, Color::WHITE))
                 .padding(crate::Padding::all(3.0))
-                .slider("level", slider),
+                .widget("level", slider),
             |_| {},
         );
         let mut scene = center_anchored_scene(builder.build());
@@ -4101,38 +3960,33 @@ mod tests {
             && scene.app.world().resource::<WidgetCaptures>().is_empty()
     }
 
-    fn slider0() -> Slider { Slider::new(range(0.0, 1.0), 0.5).expect("slider should validate") }
+    fn slider0() -> Slider { Slider::new(0.0..=1.0).value(0.5) }
 
     fn reset_slider_tree(slider: Slider) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(
             El::overlay()
                 .size(100.0, 50.0)
                 .alignment(AlignX::Left, AlignY::Top)
-                .slider("level", slider),
+                .widget("level", slider),
         );
         builder.with(El::new().size(10.0, 10.0).slider_thumb(), |_| {});
         builder.build()
     }
 
     fn button_and_slider_tree() -> LayoutTree {
-        let slider = slider0()
-            .hovered_background(STATE_HOVER_FILL)
-            .pressed_background(STATE_PRESS_FILL)
-            .focused_border_color(STATE_FOCUS_BORDER);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(
-            El::new().size(20.0, 10.0).button("act", Button::new()),
-            |_| {},
-        );
+        builder.with(El::new().size(20.0, 10.0).button("act"), |_| {});
         // The slider's state layers override background and border color, so the
         // element authors both a normal background and a normal border for the
         // surface those overrides patch.
         builder.with(
-            El::new()
-                .size(20.0, 10.0)
-                .background(Color::WHITE)
-                .border(Border::all(1.0, Color::WHITE))
-                .slider("level", slider),
+            state_styled(
+                El::new()
+                    .size(20.0, 10.0)
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::WHITE))
+                    .widget("level", slider0()),
+            ),
             |_| {},
         );
         builder.build()
@@ -4142,22 +3996,17 @@ mod tests {
     /// one thumb, so a peer test can watch both the slider's root and thumb
     /// records react while the button stays untouched.
     fn button_and_thumb_slider_tree() -> LayoutTree {
-        let slider = plain_slider(0.5)
-            .hovered_background(STATE_HOVER_FILL)
-            .pressed_background(STATE_PRESS_FILL)
-            .focused_border_color(STATE_FOCUS_BORDER);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().size(20.0, 10.0).button("act"), |_| {});
         builder.with(
-            El::new().size(20.0, 10.0).button("act", Button::new()),
-            |_| {},
-        );
-        builder.with(
-            El::overlay()
-                .size(40.0, 16.0)
-                .background(Color::WHITE)
-                .border(Border::all(1.0, Color::WHITE))
-                .alignment(AlignX::Left, AlignY::Center)
-                .slider("level", slider),
+            state_styled(
+                El::overlay()
+                    .size(40.0, 16.0)
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::WHITE))
+                    .alignment(AlignX::Left, AlignY::Center)
+                    .widget("level", plain_slider(0.5)),
+            ),
             |builder| {
                 builder.with(El::new().size(8.0, 8.0).id(THUMB_ID).slider_thumb(), |_| {});
             },
@@ -4168,11 +4017,11 @@ mod tests {
     fn two_slider_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::new().size(20.0, 10.0).slider("first", slider0()),
+            El::new().size(20.0, 10.0).widget("first", slider0()),
             |_| {},
         );
         builder.with(
-            El::new().size(20.0, 10.0).slider("second", slider0()),
+            El::new().size(20.0, 10.0).widget("second", slider0()),
             |_| {},
         );
         builder.build()
@@ -5209,20 +5058,31 @@ mod tests {
     const THUMB_ID: &str = "thumb";
 
     fn plain_slider(value: f32) -> Slider {
-        Slider::new(range(0.0, 1.0), value)
-            .expect("slider should validate")
+        Slider::new(0.0..=1.0)
+            .value(value)
             .direction(SliderDirection::LeftToRight)
     }
 
     fn thumb_slider_tree(id: &str, slider: Slider, thumb_size: f32) -> LayoutTree {
+        styled_thumb_slider_tree(id, slider, thumb_size, |element| element)
+    }
+
+    fn styled_thumb_slider_tree(
+        id: &str,
+        slider: Slider,
+        thumb_size: f32,
+        configure: impl FnOnce(SliderElement<Overlay>) -> SliderElement<Overlay>,
+    ) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::overlay()
-                .size(40.0, 16.0)
-                .background(Color::WHITE)
-                .border(Border::all(1.0, Color::WHITE))
-                .alignment(AlignX::Left, AlignY::Center)
-                .slider(id, slider),
+            configure(
+                El::overlay()
+                    .size(40.0, 16.0)
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::WHITE))
+                    .alignment(AlignX::Left, AlignY::Center)
+                    .widget(id, slider),
+            ),
             |builder| {
                 builder.with(
                     El::new()
@@ -5243,7 +5103,7 @@ mod tests {
             El::overlay()
                 .size(40.0, 16.0)
                 .background(Color::WHITE)
-                .slider(id, slider),
+                .widget(id, slider),
             |builder| {
                 builder.text(("Value", TextStyle::new(10.0)));
                 builder.with(
@@ -5445,10 +5305,14 @@ mod tests {
     #[test]
     fn root_state_override_follows_hover_and_clears() {
         let mut app = test_app();
-        let slider = plain_slider(0.5)
-            .hovered_background(STATE_HOVER_FILL)
-            .focused_border_color(STATE_FOCUS_BORDER);
-        let panel = spawn_panel(&mut app, thumb_slider_tree("level", slider, 8.0));
+        let panel = spawn_panel(
+            &mut app,
+            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+                element
+                    .hovered_background(STATE_HOVER_FILL)
+                    .focused_border_color(STATE_FOCUS_BORDER)
+            }),
+        );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
         assert_eq!(root_override(&app, widget), None);
@@ -5532,7 +5396,7 @@ mod tests {
         builder.with(
             El::overlay()
                 .size(40.0, 16.0)
-                .slider("level", plain_slider(0.5)),
+                .widget("level", plain_slider(0.5)),
             |builder| {
                 builder.with(El::new().size(8.0, 8.0).id("a").slider_thumb(), |_| {});
                 builder.with(El::new().size(8.0, 8.0).id("b").slider_thumb(), |_| {});
@@ -5549,10 +5413,12 @@ mod tests {
     fn focused_thumb_border_requires_an_authored_thumb_border() {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::overlay().size(40.0, 16.0).slider(
-                "level",
-                plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER),
-            ),
+            El::overlay()
+                .widget(
+                    "level",
+                    plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER),
+                )
+                .size(40.0, 16.0),
             |builder| {
                 builder.with(El::new().size(8.0, 8.0).slider_thumb(), |_| {});
             },
@@ -5570,56 +5436,86 @@ mod tests {
         background.with(
             El::new()
                 .size(40.0, 16.0)
-                .slider("level", plain_slider(0.5).hovered_background(Color::WHITE)),
+                .widget("level", plain_slider(0.5))
+                .hovered_background(Color::WHITE),
             |_| {},
         );
         assert!(matches!(
             build_world_panel(background.build()),
-            Err(PanelBuildError::SliderStateBackgroundRequiresBackground(id))
+            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
                 if id == PanelElementId::named("level")
         ));
 
         let mut border = LayoutBuilder::new(100.0, 50.0);
         border.with(
-            El::new().size(40.0, 16.0).background(Color::WHITE).slider(
-                "level",
-                plain_slider(0.5).hovered_border_color(Color::WHITE),
-            ),
+            El::new()
+                .size(40.0, 16.0)
+                .background(Color::WHITE)
+                .widget("level", plain_slider(0.5))
+                .hovered_border_color(Color::WHITE),
             |_| {},
         );
         assert!(matches!(
             build_world_panel(border.build()),
-            Err(PanelBuildError::SliderStateBorderColorRequiresBorder(id))
+            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
+                if id == PanelElementId::named("level")
+        ));
+
+        let mut border_width = LayoutBuilder::new(100.0, 50.0);
+        border_width.with(
+            El::new()
+                .size(40.0, 16.0)
+                .background(Color::WHITE)
+                .widget("level", plain_slider(0.5))
+                .focused_border_width(Px(2.0)),
+            |_| {},
+        );
+        assert!(matches!(
+            build_world_panel(border_width.build()),
+            Err(PanelBuildError::StateBorderWidthRequiresBorder(id))
                 if id == PanelElementId::named("level")
         ));
 
         let mut material = LayoutBuilder::new(100.0, 50.0);
         material.with(
-            El::new().size(40.0, 16.0).slider(
-                "level",
-                plain_slider(0.5).hovered_material(Handle::<StandardMaterial>::default()),
-            ),
+            El::new()
+                .size(40.0, 16.0)
+                .widget("level", plain_slider(0.5))
+                .hovered_material(Handle::<StandardMaterial>::default()),
             |_| {},
         );
         assert!(matches!(
             build_world_panel(material.build()),
-            Err(PanelBuildError::SliderStateMaterialRequiresSurface(id))
+            Err(PanelBuildError::StateMaterialRequiresSurface(id))
                 if id == PanelElementId::named("level")
         ));
     }
+
+    /// Hover, press, and focus layers shared by the peer-isolation trees.
+    fn state_styled<L>(element: SliderElement<L>) -> SliderElement<L> {
+        element
+            .hovered_background(STATE_HOVER_FILL)
+            .pressed_background(STATE_PRESS_FILL)
+            .focused_border_color(STATE_FOCUS_BORDER)
+    }
+
+    /// A slider element in child layout `L`.
+    type SliderElement<L> = El<L, crate::WidgetElement<Slider>>;
+    type Overlay = crate::Overlay;
+    type Row = crate::Row;
 
     const STATE_FOCUS_FILL: Color = Color::srgb(0.15, 0.15, 0.4);
     const STATE_PRESS_FILL: Color = Color::srgb(0.6, 0.3, 0.1);
     const STATE_DISABLED_BORDER: Color = Color::srgb(0.35, 0.35, 0.4);
 
     fn directed_slider(direction: SliderDirection, value: f32) -> Slider {
-        Slider::new(range(0.0, 1.0), value)
-            .expect("slider should validate")
-            .direction(direction)
+        Slider::new(0.0..=1.0).value(value).direction(direction)
     }
 
-    fn state_slider() -> Slider {
-        plain_slider(0.5)
+    /// Every state layer a precedence test needs, authored on the slider
+    /// element.
+    fn state_layered<L>(element: SliderElement<L>) -> SliderElement<L> {
+        element
             .focused_background(STATE_FOCUS_FILL)
             .focused_border_color(STATE_FOCUS_BORDER)
             .hovered_background(STATE_HOVER_FILL)
@@ -5640,7 +5536,7 @@ mod tests {
                 .background(Color::WHITE)
                 .border(Border::all(1.0, Color::WHITE))
                 .alignment(AlignX::Center, AlignY::Center)
-                .slider("level", slider),
+                .widget("level", slider),
             |builder| {
                 builder.with(
                     El::new()
@@ -5664,7 +5560,7 @@ mod tests {
                 .background(Color::WHITE)
                 .border(Border::all(1.0, Color::WHITE))
                 .alignment(AlignX::Left, AlignY::Top)
-                .slider("level", slider),
+                .widget("level", slider),
             |builder| {
                 builder.with(
                     El::new()
@@ -5679,13 +5575,23 @@ mod tests {
     }
 
     fn headless_slider_tree(id: &str, slider: Slider) -> LayoutTree {
+        styled_headless_slider_tree(id, slider, |element| element)
+    }
+
+    fn styled_headless_slider_tree(
+        id: &str,
+        slider: Slider,
+        configure: impl FnOnce(SliderElement<Row>) -> SliderElement<Row>,
+    ) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
-            El::new()
-                .size(40.0, 16.0)
-                .background(Color::WHITE)
-                .border(Border::all(1.0, Color::WHITE))
-                .slider(id, slider),
+            configure(
+                El::new()
+                    .size(40.0, 16.0)
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::WHITE))
+                    .widget(id, slider),
+            ),
             |_| {},
         );
         builder.build()
@@ -6297,7 +6203,10 @@ mod tests {
     fn slider_state_precedence_layers_independently_per_property() {
         let mut app = test_app();
         let window = app.world_mut().spawn(Window::default()).id();
-        let panel = spawn_panel(&mut app, thumb_slider_tree("level", state_slider(), 8.0));
+        let panel = spawn_panel(
+            &mut app,
+            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, state_layered),
+        );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
 
@@ -6370,11 +6279,9 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            thumb_slider_tree(
-                "level",
-                plain_slider(0.5).pressed_background(STATE_PRESS_FILL),
-                8.0,
-            ),
+            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+                element.pressed_background(STATE_PRESS_FILL)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -6416,13 +6323,11 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            thumb_slider_tree(
-                "level",
-                plain_slider(0.5)
+            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+                element
                     .hovered_background(STATE_HOVER_FILL)
-                    .pressed_background(STATE_PRESS_FILL),
-                8.0,
-            ),
+                    .pressed_background(STATE_PRESS_FILL)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -6468,10 +6373,9 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            headless_slider_tree(
-                "level",
-                plain_slider(0.5).hovered_background(STATE_HOVER_FILL),
-            ),
+            styled_headless_slider_tree("level", plain_slider(0.5), |element| {
+                element.hovered_background(STATE_HOVER_FILL)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -6505,11 +6409,9 @@ mod tests {
         let mut app = test_app();
         let panel = spawn_panel(
             &mut app,
-            thumb_slider_tree(
-                "level",
-                plain_slider(0.5).hovered_background(STATE_HOVER_FILL),
-                8.0,
-            ),
+            styled_thumb_slider_tree("level", plain_slider(0.5), 8.0, |element| {
+                element.hovered_background(STATE_HOVER_FILL)
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
@@ -6562,7 +6464,7 @@ mod tests {
         duplicate.with(
             El::overlay()
                 .size(40.0, 16.0)
-                .slider("level", plain_slider(0.5)),
+                .widget("level", plain_slider(0.5)),
             |builder| {
                 builder.with(El::new().size(8.0, 8.0).id("a").slider_thumb(), |_| {});
                 builder.with(El::new().size(8.0, 8.0).id("b").slider_thumb(), |_| {});
@@ -6578,40 +6480,59 @@ mod tests {
         background.with(
             El::new()
                 .size(40.0, 16.0)
-                .slider("level", plain_slider(0.5).hovered_background(Color::WHITE)),
+                .widget("level", plain_slider(0.5))
+                .hovered_background(Color::WHITE),
             |_| {},
         );
         assert!(matches!(
             app.world_mut().commands().set_tree(panel, background.build()),
-            Err(PanelBuildError::SliderStateBackgroundRequiresBackground(id))
+            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
                 if id == PanelElementId::named("level")
         ));
 
         let mut border = LayoutBuilder::new(100.0, 50.0);
         border.with(
-            El::new().size(40.0, 16.0).background(Color::WHITE).slider(
-                "level",
-                plain_slider(0.5).hovered_border_color(Color::WHITE),
-            ),
+            El::new()
+                .size(40.0, 16.0)
+                .background(Color::WHITE)
+                .widget("level", plain_slider(0.5))
+                .hovered_border_color(Color::WHITE),
             |_| {},
         );
         assert!(matches!(
             app.world_mut().commands().set_tree(panel, border.build()),
-            Err(PanelBuildError::SliderStateBorderColorRequiresBorder(id))
+            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
+                if id == PanelElementId::named("level")
+        ));
+
+        let mut border_width = LayoutBuilder::new(100.0, 50.0);
+        border_width.with(
+            El::new()
+                .size(40.0, 16.0)
+                .background(Color::WHITE)
+                .widget("level", plain_slider(0.5))
+                .focused_border_width(Px(2.0)),
+            |_| {},
+        );
+        assert!(matches!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, border_width.build()),
+            Err(PanelBuildError::StateBorderWidthRequiresBorder(id))
                 if id == PanelElementId::named("level")
         ));
 
         let mut material = LayoutBuilder::new(100.0, 50.0);
         material.with(
-            El::new().size(40.0, 16.0).slider(
-                "level",
-                plain_slider(0.5).hovered_material(Handle::<StandardMaterial>::default()),
-            ),
+            El::new()
+                .size(40.0, 16.0)
+                .widget("level", plain_slider(0.5))
+                .hovered_material(Handle::<StandardMaterial>::default()),
             |_| {},
         );
         assert!(matches!(
             app.world_mut().commands().set_tree(panel, material.build()),
-            Err(PanelBuildError::SliderStateMaterialRequiresSurface(id))
+            Err(PanelBuildError::StateMaterialRequiresSurface(id))
                 if id == PanelElementId::named("level")
         ));
 

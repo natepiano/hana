@@ -962,7 +962,6 @@ mod tests {
     use super::PanelAnchorOffset;
     use super::PanelAttachment;
     use super::PanelAttachmentAuthored;
-    use crate::Button;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::LayoutBuilder;
@@ -1537,7 +1536,7 @@ mod tests {
         tree.with(
             El::new()
                 .size(WIDGET_WIDTH, WIDGET_HEIGHT)
-                .button("offset-target", Button::new()),
+                .button("offset-target"),
             |_| {},
         );
         let target = app
@@ -1673,7 +1672,7 @@ mod tests {
                 tree.with(
                     El::new()
                         .size(WIDGET_WIDTH, WIDGET_HEIGHT)
-                        .button("same-frame-offset-target", Button::new()),
+                        .button("same-frame-offset-target"),
                     |_| {},
                 );
             },
@@ -2014,7 +2013,7 @@ mod tests {
 
     fn screen_panel_with_widget(id: &'static str) -> DiegeticPanel {
         let mut tree = LayoutBuilder::new(100.0, 40.0);
-        tree.with(El::new().button(id, Button::new()), |_| {});
+        tree.with(El::new().button(id), |_| {});
         DiegeticPanel::screen()
             .size(Px(100.0), Px(40.0))
             .screen_position(10.0, 10.0)

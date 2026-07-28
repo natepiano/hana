@@ -585,7 +585,6 @@ mod tests {
     use super::WidgetFocusVisible;
     use super::WidgetFocusable;
     use super::WidgetFocused;
-    use crate::Button;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::El;
@@ -653,14 +652,14 @@ mod tests {
     fn widget_tree(ids: &[&str]) -> LayoutTree {
         let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
         for id in ids {
-            builder.with(El::new().button(*id, Button::new()), |_| {});
+            builder.with(El::new().button(*id), |_| {});
         }
         builder.build()
     }
 
     fn widget_and_field_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
-        builder.with(El::new().button("first", Button::new()), |_| {});
+        builder.with(El::new().button("first"), |_| {});
         builder.with(
             El::new().editable_field(
                 "editable",
@@ -668,7 +667,7 @@ mod tests {
             ),
             |_| {},
         );
-        builder.with(El::new().button("last", Button::new()), |_| {});
+        builder.with(El::new().button("last"), |_| {});
         builder.build()
     }
 

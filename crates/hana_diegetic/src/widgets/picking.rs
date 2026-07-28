@@ -433,7 +433,6 @@ mod tests {
     use super::PanelPicking;
     use super::camera_order;
     use crate::Anchor;
-    use crate::Button;
     use crate::ButtonClicked;
     use crate::ButtonPressed;
     use crate::ButtonReleased;
@@ -573,44 +572,26 @@ mod tests {
     fn spawn_picking_panel(app: &mut App) -> Entity {
         let mut layout = LayoutBuilder::new(100.0, 50.0);
         layout.with(El::row().size(20.0, 10.0).clip(), |layout| {
-            layout.with(
-                El::new().size(30.0, 10.0).button("partial", Button::new()),
-                |_| {},
-            );
-            layout.with(
-                El::new().size(10.0, 10.0).button("clipped", Button::new()),
-                |_| {},
-            );
+            layout.with(El::new().size(30.0, 10.0).button("partial"), |_| {});
+            layout.with(El::new().size(10.0, 10.0).button("clipped"), |_| {});
         });
         layout.with(El::overlay().size(20.0, 20.0), |layout| {
             layout.with(
-                El::new()
-                    .size(20.0, 20.0)
-                    .button("back", Button::new())
-                    .z_index(-1),
+                El::new().size(20.0, 20.0).button("back").z_index(-1),
                 |_| {},
             );
             layout.with(
-                El::new()
-                    .size(20.0, 20.0)
-                    .button("front-first", Button::new())
-                    .z_index(2),
+                El::new().size(20.0, 20.0).button("front-first").z_index(2),
                 |_| {},
             );
             layout.with(
-                El::new()
-                    .size(20.0, 20.0)
-                    .button("front-last", Button::new())
-                    .z_index(2),
+                El::new().size(20.0, 20.0).button("front-last").z_index(2),
                 |_| {},
             );
         });
         layout.with(El::row().size(100.0, 10.0), |layout| {
             layout.with(El::new().size(30.0, 10.0), |_| {});
-            layout.with(
-                El::new().size(20.0, 10.0).button("target", Button::new()),
-                |_| {},
-            );
+            layout.with(El::new().size(20.0, 10.0).button("target"), |_| {});
         });
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
@@ -629,7 +610,7 @@ mod tests {
         layout.with(
             El::new()
                 .size(SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT)
-                .button(SCREEN_TARGET_ID, Button::new()),
+                .button(SCREEN_TARGET_ID),
             |_| {},
         );
         let panel = DiegeticPanel::screen()
