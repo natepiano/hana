@@ -16,6 +16,12 @@ python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
   $ARGUMENTS
 ```
 
+Run it in the background (it takes minutes) and with `dangerouslyDisableSandbox: true` on
+every platform — do not attempt a sandboxed run first. The controller takes a lock under
+`~/.cache/bevy_clerestory/`, drives display power and scale, and launches GPU windows;
+the sandbox denies all three (`Operation not permitted` on the lock file is the first
+failure).
+
 `--dry-run` lists every case, its interaction requirement, evidence source, and
 availability without building an app or changing a display. `--assisted` is a separate
 run for cases needing one human action; it never occurs during `--automated`.
