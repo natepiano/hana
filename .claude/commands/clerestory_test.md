@@ -25,11 +25,11 @@ run for cases needing one human action; it never occurs during `--automated`.
 Choose `<PROFILE>` as the first of these that exists on disk, then substitute its path:
 
 - **Windows:** `crates/bevy_clerestory/tests/config/hardware.windows-vm.local.json`
-- **otherwise (macOS/Linux):** `crates/bevy_clerestory/tests/config/hardware.local.json`
+- **otherwise (macOS/Linux):** `crates/bevy_clerestory/tests/config/hardware.example.json`
 
 If none exists, omit `--hardware-profile` entirely — the controller runs the
-application-state cases and reports physical and cross-DPI cases as unavailable. These
-`hardware.*.local.json` profiles are git-ignored (machine-specific); never invent one.
+application-state cases and reports physical and cross-DPI cases as unavailable. A
+profile names the machine's monitor and its power commands; never invent one.
 
 ## Step 2 — Windows only: elevation for the display-backed partitions
 

@@ -148,7 +148,7 @@ Run the preflight and every available automated case through the controller:
 
 ```sh
 python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
-  --hardware-profile crates/bevy_clerestory/tests/config/hardware.local.json
+  --hardware-profile crates/bevy_clerestory/tests/config/hardware.example.json
 ```
 
 The controller prints the three preflight results, owns every child process,

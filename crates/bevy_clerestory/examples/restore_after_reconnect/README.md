@@ -72,7 +72,7 @@ The normal test entry point is one controller command from the workspace root:
 
 ```sh
 python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
-  --hardware-profile crates/bevy_clerestory/tests/config/hardware.local.json
+  --hardware-profile crates/bevy_clerestory/tests/config/hardware.example.json
 ```
 
 The controller builds each required example variant once, chooses unused local
