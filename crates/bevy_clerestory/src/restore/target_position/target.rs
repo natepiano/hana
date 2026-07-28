@@ -506,6 +506,51 @@ mod tests {
         assert_eq!(persisted.logical_position, captured.logical_position);
     }
 
+    /// The restore is sized and placed by the monitor it is going *to*, never the one the app
+    /// launched on.
+    ///
+    /// Launching from a differently-scaled monitor is the ordinary case — the window manager
+    /// opens the app wherever the invoking terminal or editor sits. Sizing from `starting_scale`
+    /// would be wrong for every such restore, and no test whose launch monitor is its target can
+    /// tell the two apart, so this is the only unit test that separates them.
+    #[test]
+    fn the_target_monitor_scale_sizes_the_restore_not_the_launch_monitor_scale() {
+        let starting_scale = 1.0;
+        let logical_offset = IVec2::new(120, 80);
+        let target_info = monitor(1, 2.0, LEFT_MONITOR_ORIGIN);
+        let position = PersistedPosition::MonitorOffset(logical_offset);
+        let saved = saved_state(position, target_info.index);
+
+        let target = compute_target_position(
+            &saved,
+            &target_info,
+            prepare_persisted_position(
+                position,
+                UVec2::new(saved.logical_width, saved.logical_height),
+                &target_info,
+            ),
+            UVec2::ZERO,
+            starting_scale,
+            Platform::Windows,
+        );
+
+        assert_eq!(
+            target.physical_size,
+            UVec2::new(1_600, 1_200),
+            "800x600 logical belongs to the target monitor at scale 2.0, not the launch monitor at {starting_scale}"
+        );
+        assert_eq!(
+            target.physical_position,
+            Some(IVec2::new(-6_640, 160)),
+            "the offset scales by the target monitor, so the launch scale cannot move the window"
+        );
+        assert_ne!(
+            target.monitor_scale_strategy,
+            MonitorScaleStrategy::ApplyUnchanged,
+            "a launch scale that differs from the target must select a cross-DPI strategy"
+        );
+    }
+
     /// An unchanged layout reconstructs inside the monitor, so the legacy coordinate is kept and
     /// converted exactly: the window returns to the pixel it was saved at.
     #[test]
