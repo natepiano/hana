@@ -193,6 +193,10 @@ impl QualifiedEvidence {
     /// Everything hashed here comes from the display itself, so the result is the same on every
     /// launch. Adding anything process-local (a handle address, a counter, an index) would make
     /// the fingerprint useless for persistence while still looking correct within one run.
+    #[allow(
+        clippy::missing_const_for_fn,
+        reason = "const only compiles where the macOS arm is the sole arm; the Vec arms are not"
+    )]
     pub(super) fn stable_bytes(&self) -> &[u8] {
         match self {
             #[cfg(target_os = "macos")]

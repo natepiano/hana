@@ -6,7 +6,7 @@ pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
 pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
 
 // monitor identity
-/// Length of a ColorSync display UUID, fixed by `CFUUIDBytes`.
+/// Length of a `ColorSync` display UUID, fixed by `CFUUIDBytes`.
 #[cfg(target_os = "macos")]
 pub(crate) const MACOS_DISPLAY_UUID_BYTES: usize = 16;
 /// FNV-1a 64-bit offset basis, fixed by the algorithm's specification.
