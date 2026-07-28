@@ -1,5 +1,17 @@
 //! Cross-module constants.
 
+// fullscreen restore
+/// Maximum duration (in seconds) a macOS fullscreen restore spends in
+/// `FullscreenRestoreState::MoveWindowedToTarget` waiting for the windowed window to arrive on
+/// the target monitor.
+///
+/// The move is a request, not a guarantee: winit drops a `WindowPosition::Centered` whose
+/// `MonitorSelection::Index` it cannot resolve, and the compositor is free to leave the window
+/// where it is. Without a deadline the state re-requests the move every frame while the window
+/// stays hidden. On expiry the restore applies the fullscreen mode anyway — winit resolves the
+/// monitor index itself at that point — so the window becomes visible instead of waiting forever.
+pub(crate) const FULLSCREEN_MONITOR_MOVE_TIMEOUT_SECS: f32 = SETTLE_TIMEOUT_SECS;
+
 // managed window names
 /// First numeric suffix appended to deduplicate a managed window name (e.g. `name-2`).
 pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;

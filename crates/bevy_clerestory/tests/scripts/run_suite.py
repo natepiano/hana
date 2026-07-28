@@ -20,6 +20,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO
 from typing import TextIO
@@ -52,6 +53,19 @@ DEFAULT_ARTIFACT_ROOT = WORKSPACE_ROOT / "target" / "clerestory-tests"
 CASE_TIMEOUT_SECONDS = 90.0
 BUILD_TIMEOUT_SECONDS = 1800.0
 ASSISTED_ACTION_TIMEOUT_SECONDS = 300.0
+LAUNCH_POSITION_INSET = 100
+
+
+class FullscreenSignal(StrEnum):
+    """Which observations must agree before a fullscreen wait is satisfied.
+
+    macOS drives a green-button transition through AppKit and never writes the result back into
+    Bevy's `Window.mode`, so an operator-driven fullscreen is observable only through
+    `native_fullscreen`. A fullscreen that Bevy itself applies sets both.
+    """
+
+    NATIVE = "native"
+    MODE_AND_NATIVE = "mode-and-native"
 
 
 @dataclass(frozen=True)
@@ -490,11 +504,27 @@ def substitute_environment(template: str, environment: dict[str, str]) -> str:
     return re.sub(r"\$\{([^}]+)\}", replacement, template)
 
 
+def launch_position(discovery: dict[str, str], launch_monitor: int) -> str | None:
+    """Physical `x,y` inset into `launch_monitor`, matching `run_test.py`'s launch placement.
+
+    `CLERESTORY_TEST_LAUNCH_MONITOR` alone only asks for a centered position, and winit drops a
+    `Centered(Index(n))` it cannot resolve while `WinitMonitors` is still empty at window
+    creation. The app is then born wherever the OS put it, which is not the monitor the case
+    configured.
+    """
+    position_x = discovery.get(f"MONITOR_{launch_monitor}_POS_X")
+    position_y = discovery.get(f"MONITOR_{launch_monitor}_POS_Y")
+    if position_x is None or position_y is None:
+        return None
+    return f"{int(position_x) + LAUNCH_POSITION_INSET},{int(position_y) + LAUNCH_POSITION_INSET}"
+
+
 def launch_restore_session(
     executable: Path,
     artifact_directory: Path,
     persistence_path: Path,
     launch_monitor: int,
+    discovery: dict[str, str],
 ) -> tuple[AppSession, RestoreClient]:
     port_pair = available_port_pair()
     environment = dict(os.environ)
@@ -506,6 +536,9 @@ def launch_restore_session(
             "CLERESTORY_TEST_PERSISTENCE_PATH": str(persistence_path),
         }
     )
+    position = launch_position(discovery, launch_monitor)
+    if position is not None:
+        environment["CLERESTORY_TEST_LAUNCH_POSITION"] = position
     launch_number = len(list(artifact_directory.glob("app-*.stdout.log"))) + 1
     session = AppSession(
         executable=executable,
@@ -532,7 +565,7 @@ def wait_for_primary_mode(
     report: RunReport,
     timeout_seconds: float,
     *,
-    require_native_fullscreen: bool = False,
+    signal: FullscreenSignal,
 ) -> tuple[str | None, bool | None]:
     deadline = time.monotonic() + timeout_seconds
     last_mode: str | None = None
@@ -551,9 +584,12 @@ def wait_for_primary_mode(
             if isinstance(native, str)
             else None
         )
-        if last_mode == expected_mode and (
-            not require_native_fullscreen or last_native is True
-        ):
+        reached = (
+            last_native is True
+            if signal is FullscreenSignal.NATIVE
+            else last_mode == expected_mode and last_native is True
+        )
+        if reached:
             return last_mode, last_native
         if session.poll() is not None:
             raise RuntimeError("restore app exited during the assisted wait")
@@ -581,7 +617,7 @@ def run_green_button_case(
     )
     launch_monitor = _coerce_monitor_index(test.get("launch_monitor", 0))
     session, client = launch_restore_session(
-        executable, artifact_directory, persistence_path, launch_monitor
+        executable, artifact_directory, persistence_path, launch_monitor, environment
     )
     started = time.monotonic()
     observed_mode: str | None = None
@@ -603,13 +639,13 @@ def run_green_button_case(
             "BorderlessFullscreen",
             report,
             ASSISTED_ACTION_TIMEOUT_SECONDS,
-            require_native_fullscreen=True,
+            signal=FullscreenSignal.NATIVE,
         )
-        if observed_mode == "BorderlessFullscreen" and observed_native is True:
+        if observed_native is True:
             report.event("operator-action-observed", "native fullscreen", case_id)
         _ = session.stop(graceful_shutdown=client.shutdown)
         session, client = launch_restore_session(
-            executable, artifact_directory, persistence_path, launch_monitor
+            executable, artifact_directory, persistence_path, launch_monitor, environment
         )
         restored_mode, restored_native = wait_for_primary_mode(
             session,
@@ -617,7 +653,7 @@ def run_green_button_case(
             "BorderlessFullscreen",
             report,
             CASE_TIMEOUT_SECONDS,
-            require_native_fullscreen=True,
+            signal=FullscreenSignal.MODE_AND_NATIVE,
         )
     except KeyboardInterrupt:
         return CaseResult(
@@ -650,8 +686,8 @@ def run_green_button_case(
         assertions=[
             AssertionResult(
                 "operator-fullscreen-transition",
-                observed_mode == "BorderlessFullscreen" and observed_native is True,
-                f"observed mode {observed_mode!r}, native fullscreen {observed_native!r} after the green-button action",
+                observed_native is True,
+                f"observed native fullscreen {observed_native!r} after the green-button action (Bevy mode {observed_mode!r}, which AppKit does not update)",
             ),
             AssertionResult(
                 "fullscreen-restored-after-relaunch",
