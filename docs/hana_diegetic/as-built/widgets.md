@@ -95,11 +95,12 @@ el.button("apply")
 **A later call replaces the bundle an earlier call authored for that state** — it
 does not merge into it.
 
-`pressed` exists only where `HasPressedState` is implemented — `Button` and
-`Slider`. An editable field has no pressed state (it takes a caret and
-keystrokes; it is not held), so `.pressed(...)` on one is a compile error rather
-than a silently ignored layer. Hovered, focused, and disabled reach every widget
-kind.
+`pressed` is accepted only for `Button` and `Slider`. At a widget root,
+`El::pressed` is gated by `Pressable`; on a widget part, it can be authored but
+`WidgetBuilder::with` rejects it for an editable field. An editable field has no
+pressed state (it takes a caret and keystrokes; it is not held), so this is a
+compile error rather than a silently ignored layer. Hovered, focused, and
+disabled reach every widget kind.
 
 `focused` means **the keyboard focus indicator is visible**, not merely that the
 widget is still the semantic focus target. A pointer press keeps focus but hides

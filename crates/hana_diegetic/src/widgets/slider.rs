@@ -3869,7 +3869,7 @@ mod tests {
     fn slider0() -> Slider { Slider::new(0.0..=1.0).value(0.5) }
 
     fn reset_slider_tree(slider: Slider) -> LayoutTree {
-        let mut builder = LayoutBuilder::with_root(
+        let mut builder = LayoutBuilder::with_widget_root(
             El::overlay()
                 .size(100.0, 50.0)
                 .alignment(AlignX::Left, AlignY::Top)
@@ -5050,6 +5050,7 @@ mod tests {
                 builder.with(
                     El::new()
                         .size(thumb_size, 8.0)
+                        .background(Color::BLACK)
                         .border(Border::all(1.0, Color::BLACK))
                         .id(THUMB_ID)
                         .slider_thumb(),

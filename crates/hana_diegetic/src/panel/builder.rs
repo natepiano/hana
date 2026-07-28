@@ -54,9 +54,6 @@ pub enum PanelBuildError {
     /// A widget used a builder-minted auto id instead of a stable authored id.
     #[error("widget `{0}` requires a named panel element id")]
     WidgetRequiresNamedId(PanelElementId),
-    /// A widget contains another interactive element in its descendants.
-    #[error("widget `{0}` contains an interactive descendant")]
-    WidgetContainsInteractiveDescendant(PanelElementId),
     /// A widget is inside a subtree rendered through precomposition.
     #[error("widget `{0}` is inside a precomposed subtree")]
     WidgetInsidePrecomposedSubtree(PanelElementId),
@@ -1006,12 +1003,6 @@ mod tests {
                 "widget `#auto-3` requires a named panel element id",
             ),
             (
-                PanelBuildError::WidgetContainsInteractiveDescendant(PanelElementId::named(
-                    "outer",
-                )),
-                "widget `outer` contains an interactive descendant",
-            ),
-            (
                 PanelBuildError::WidgetInsidePrecomposedSubtree(PanelElementId::named("button")),
                 "widget `button` is inside a precomposed subtree",
             ),
@@ -1132,24 +1123,6 @@ mod tests {
         assert!(matches!(
             result,
             Err(PanelBuildError::WidgetRequiresNamedId(id)) if id == auto_id
-        ));
-    }
-
-    #[test]
-    fn widget_with_interactive_descendant_errors_at_build() {
-        let result = DiegeticPanel::world()
-            .size(Mm(50.0), Mm(30.0))
-            .layout(|builder| {
-                builder.with(El::column().button("outer"), |builder| {
-                    builder.with(El::new().button("inner"), |_| {});
-                });
-            })
-            .build();
-
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::WidgetContainsInteractiveDescendant(id))
-                if id == PanelElementId::named("outer")
         ));
     }
 
@@ -1275,6 +1248,28 @@ mod tests {
             .build();
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn widget_part_state_background_without_surface_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().button("action"), |builder| {
+                    builder.with(
+                        El::new()
+                            .disabled(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
+                        |_| {},
+                    );
+                });
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
+                if id == PanelElementId::named("action")
+        ));
     }
 
     #[test]

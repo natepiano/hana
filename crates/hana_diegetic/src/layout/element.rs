@@ -782,12 +782,8 @@ impl LayoutTree {
                 (PrecomposeMode::Direct, PrecomposeMode::Direct) => PrecomposeMode::Direct,
             };
 
-            if (element.widget.is_some() || element.editable.is_some())
-                && let Some((widget_id, _)) = owning_widget.as_ref()
-            {
-                return Err(PanelBuildError::WidgetContainsInteractiveDescendant(
-                    widget_id.clone(),
-                ));
+            if let Some((widget_id, _)) = owning_widget.as_ref() {
+                validated_element_appearance(element, widget_id)?;
             }
 
             if element.visual_slot == Some(VisualSlotId::SLIDER_THUMB) {
@@ -1669,6 +1665,7 @@ mod tests {
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutEngine;
+    use crate::layout::LayoutOnly;
     use crate::layout::Padding;
     use crate::layout::PanelCoord;
     use crate::layout::PanelDraw;
@@ -1679,6 +1676,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextStyle;
     use crate::layout::Unit;
+    use crate::layout::WidgetElement;
     use crate::layout::child_layout::ChildLayout;
     use crate::widgets::StateAppearance;
     use crate::widgets::VisualElementCapabilities;
@@ -1741,8 +1739,16 @@ mod tests {
         assert_eq!(tree.text_element_id(1), Some(&id));
     }
 
-    fn root_tree<L: ChildLayoutState, Role: crate::ElementRole>(root: El<L, Role>) -> LayoutTree {
+    fn root_tree<L: ChildLayoutState>(root: El<L, LayoutOnly>) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
+        builder.text(("child", TextStyle::new(10.0)));
+        builder.build()
+    }
+
+    fn widget_root_tree<L: ChildLayoutState, W: crate::WidgetOwner>(
+        root: El<L, WidgetElement<W>>,
+    ) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_widget_root(root);
         builder.text(("child", TextStyle::new(10.0)));
         builder.build()
     }
@@ -1987,7 +1993,7 @@ mod tests {
     #[test]
     fn button_record_add_remove_classifies_as_visual_only() {
         let tree = root_tree(El::new());
-        let next = root_tree(El::new().button("action"));
+        let next = widget_root_tree(El::new().button("action"));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
         assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
@@ -1997,16 +2003,16 @@ mod tests {
     fn slider_record_edit_classifies_as_visual_only() {
         let slider = Slider::new(0.0..=10.0).value(2.0);
         let next_slider = Slider::new(0.0..=10.0).value(8.0);
-        let tree = root_tree(El::new().widget("level", slider));
-        let next = root_tree(El::new().widget("level", next_slider));
+        let tree = widget_root_tree(El::new().widget("level", slider));
+        let next = widget_root_tree(El::new().widget("level", next_slider));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
     }
 
     #[test]
     fn interactivity_only_classifies_as_visual_only() {
-        let tree = root_tree(El::new().button("action"));
-        let next = root_tree(
+        let tree = widget_root_tree(El::new().button("action"));
+        let next = widget_root_tree(
             El::new()
                 .button("action")
                 .widget_interactivity(WidgetInteractivity::Disabled),
@@ -2017,8 +2023,8 @@ mod tests {
 
     #[test]
     fn visual_slot_add_remove_classifies_as_visual_only() {
-        let tree = root_tree(El::new().button("action"));
-        let next = root_tree(El::new().button("action").visual_slot(VisualSlotId::new(1)));
+        let tree = widget_root_tree(El::new().button("action"));
+        let next = widget_root_tree(El::new().button("action").visual_slot(VisualSlotId::new(1)));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
         assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
@@ -2026,13 +2032,13 @@ mod tests {
 
     #[test]
     fn button_state_value_change_classifies_as_visual_only() {
-        let tree = root_tree(
+        let tree = widget_root_tree(
             El::new()
                 .background(Color::WHITE)
                 .button("action")
                 .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
         );
-        let next = root_tree(
+        let next = widget_root_tree(
             El::new()
                 .background(Color::WHITE)
                 .button("action")
@@ -2184,6 +2190,53 @@ mod tests {
                 .is_some_and(|(_, appearance)| appearance.hovered.as_override().is_some()),
             "an overridden empty appearance keeps its hovered cascade channel",
         );
+    }
+
+    #[test]
+    fn authored_slider_parts_reach_sorted_visual_recipients() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().slider("level", 0.0..=1.0), |builder| {
+            builder.with(
+                El::new()
+                    .background(Color::WHITE)
+                    .disabled(Appearance::new().background(Color::BLACK)),
+                |_| {},
+            );
+            builder.with(
+                El::new()
+                    .background(Color::WHITE)
+                    .border(Border::all(1.0, Color::BLACK))
+                    .slider_thumb()
+                    .disabled(Appearance::new().background(Color::BLACK)),
+                |_| {},
+            );
+            builder.text(
+                Text::new("LEVEL", TextStyle::new(10.0)).layout(
+                    El::new()
+                        .background(Color::NONE)
+                        .disabled(Appearance::new().background(Color::BLACK)),
+                ),
+            );
+        });
+        let tree = builder.build();
+
+        assert!(tree.validate_widgets().is_ok());
+
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+        assert_eq!(records.len(), 1);
+
+        let record = &records[0];
+        let parts = record.part_appearances();
+        assert_eq!(parts.len(), 3);
+        assert!(parts.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(parts.iter().all(|(element_index, _)| {
+            record
+                .visual_elements()
+                .iter()
+                .any(|(visual_index, _)| visual_index == element_index)
+        }));
     }
 
     #[test]

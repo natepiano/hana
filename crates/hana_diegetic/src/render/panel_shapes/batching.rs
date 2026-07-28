@@ -3089,7 +3089,7 @@ mod tests {
     }
 
     fn spawn_slotted_widget_line_panel(app: &mut App, transform: Transform) -> Entity {
-        let tree = LayoutBuilder::with_root(
+        let tree = LayoutBuilder::with_widget_root(
             El::new()
                 .size(40.0, 20.0)
                 .draw(PanelDraw::lines([horizontal_line()]))

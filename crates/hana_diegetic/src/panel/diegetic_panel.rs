@@ -1950,14 +1950,6 @@ mod tests {
         builder.build()
     }
 
-    fn nested_widget_tree() -> crate::LayoutTree {
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::column().button("outer"), |builder| {
-            builder.with(El::new().button("inner"), |_| {});
-        });
-        builder.build()
-    }
-
     fn precomposed_widget_tree() -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::column().precompose_ldr(), |builder| {
@@ -2217,15 +2209,6 @@ mod tests {
             auto_error,
             Err(PanelBuildError::WidgetRequiresNamedId(id))
                 if id == PanelElementId::auto(7)
-        ));
-        let nested_error = app
-            .world_mut()
-            .commands()
-            .set_tree(panel, nested_widget_tree());
-        assert!(matches!(
-            nested_error,
-            Err(PanelBuildError::WidgetContainsInteractiveDescendant(id))
-                if id == PanelElementId::named("outer")
         ));
         let precompose_error = app
             .world_mut()

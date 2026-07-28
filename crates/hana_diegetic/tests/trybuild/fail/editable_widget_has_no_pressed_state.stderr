@@ -1,19 +1,27 @@
-error[E0599]: the method `pressed` exists for struct `El<hana_diegetic::Row, WidgetElement<ImeEditableFieldSpec>>`, but its trait bounds were not satisfied
-  --> tests/trybuild/fail/editable_widget_has_no_pressed_state.rs:12:10
+error[E0277]: the trait bound `EditableField: Pressable` is not satisfied
+  --> tests/trybuild/fail/editable_widget_has_no_pressed_state.rs:13:13
    |
- 9 |       let _ = El::new()
-   |  _____________-
-10 | |         .background(Color::WHITE)
-11 | |         .editable_field("editable", field)
-12 | |         .pressed(Appearance::new().background(Color::BLACK));
-   | |         -^^^^^^^ method cannot be called due to unsatisfied trait bounds
-   | |_________|
+12 |           builder.with(
+   |                   ---- required by a bound introduced by this call
+13 | /             El::new()
+14 | |                 .background(Color::WHITE)
+15 | |                 .pressed(Appearance::new().background(Color::BLACK)),
+   | |____________________________________________________________________^ the trait `Pressable` is not implemented for `EditableField`
    |
+help: the following other types implement trait `Pressable`
+  --> src/layout/builder.rs
    |
-  ::: src/ime/field.rs
+   | impl Pressable for Button {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ `hana_diegetic::Button`
    |
-   |   pub enum ImeEditableFieldSpec {
-   |   ----------------------------- doesn't satisfy `ImeEditableFieldSpec: HasPressedState`
+   | impl Pressable for Slider {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^ `Slider`
+   = note: required for `WidgetBuilder<'_, EditableField>` to implement `AcceptsElement<PressedPart>`
+note: required by a bound in `WidgetBuilder::<'_, W>::with`
+  --> src/layout/builder.rs
    |
-   = note: the following trait bounds were not satisfied:
-           `ImeEditableFieldSpec: HasPressedState`
+   |     pub fn with<L, Role>(
+   |            ---- required by a bound in this associated function
+...
+   |         Self: AcceptsElement<Role>,
+   |               ^^^^^^^^^^^^^^^^^^^^ required by this bound in `WidgetBuilder::<'_, W>::with`
