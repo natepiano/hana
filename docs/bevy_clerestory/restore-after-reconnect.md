@@ -1549,7 +1549,7 @@ topology transition.
   source file it changes.
 - Phase 13 is an audit of regressions shipped by earlier phases and permits new
   code only for a concrete coverage gap.
-- Phase 14 preserves the Phase 8 macOS automatic-policy row; Phases 14–16 now
+- Phase 14 preserves the Phase 8 macOS automatic-policy row; Phases 14–17 now
   separate unsupported automatic exclusive fullscreen from explicit/startup
   fullscreen restore tests.
 - Phase 11 and the remaining Clerestory physical/release phases need no further
@@ -2100,7 +2100,7 @@ payload coverage in its regression inventory.
   six public notification/result events, remote triggering of both public
   request events, and the test-only remote dependencies. It also inventories
   canonical-role content timing.
-- Phase 18 preserves the README contracts established here, including
+- Phase 19 preserves the README contracts established here, including
   one-shot registration, canonical-role content rebinding, zero-window process
   lifetime, explicit close handling, exact reflected paths, and non-executing
   event-loop doctests.
@@ -2310,7 +2310,7 @@ the accepted recovery generation remains unchanged.
   revision for every physical row, and repeat or revalidate affected earlier
   rows after a shared correction. The completed Phase 12 macOS run remains its
   own evidence row.
-- Phase 18 repeats the final Clerestory automated gates after all physical
+- Phase 19 repeats the final Clerestory automated gates after all platform
   testing and publishes the exact package version consumed later by the Hana
   plan. `0.2.0` remains the expected release.
 - No pending user decision or phase-order change remains.
@@ -2897,101 +2897,65 @@ consume this controller rather than recreating agent instructions.
   cross-DPI return, and three repeated cycles with cancellation. The Dell was
   confirmed on after cleanup and no probe process remained.
 
-### Phase 15 — Record the Windows physical matrix  · status: todo
+### Phase 15 — Record the Windows suite results  · status: todo
 
 #### Work Order
 
-**Goal:** Prove Windows panel identity, relocation/lifetime, explicit
-cancellation, fullscreen, and entity-scoped real DPI behavior.
+**Goal:** Prove Windows restore, cross-DPI, and probe behavior through the
+Phase 14.5 controller on the release-candidate revision.
+
+**Physical panel reconnect is out of scope on Windows.** The Windows box is an
+ARM64 VMware guest with no controllable physical panel of its own: its SVGA
+displays expose no EDID, so they resolve `Unverified` and never arm recovery,
+and VMware cannot be driven programmatically for topology changes. Panel-identity
+rows are recorded `unavailable` with that reason rather than left open.
 
 **Spec:**
 
-- Execute the Phase 14.5 controller on Windows and record the same core identity,
-  dock/port, duplicate, reorder, zero-display, reconnect-order, rapid-hotplug,
-  mode, and cross-DPI scenarios as Phase 14. Use the finalized startup/mode
+- Execute the Phase 14.5 controller on the Windows VM against the exact
+  release-candidate revision, covering the automated restore partition, the
+  cross-DPI partition, and the probe cases. Use the finalized startup/mode
   controls from Phase 14 rather than creating a Windows-only harness.
-- When Windows runs in VMware and the Dell's power control remains on the Mac,
-  run the controller and probe inside the Windows guest. The guest owns the
-  application process and must observe its own display removal and return;
-  SSH to the Mac is only the power-control path. Configure one ignored local
-  hardware profile with these separate actions, using the existing Shortcut
-  names rather than a combined power-cycle command:
+- Run from one elevated shell. The virtual display driver's enable/disable and
+  inventory toggles require Administrator, and a non-elevated run silently
+  degrades the partitions that need them
+  (`crates/bevy_clerestory/tests/scripts/windows_vdd/README.md`).
 
-  ```json
-  {
-    "name": "Windows VMware guest with remote macOS Dell power",
-    "target_matcher": "DELL S3425DW",
-    "inventory_name_field": "_name",
-    "probe_monitor_matcher": {
-      "physical_size": [3440, 1440],
-      "refresh_rate_millihertz": 120000
-    },
-    "minimum_off_seconds": 1,
-    "minimum_on_seconds": 5,
-    "power_off": {
-      "executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
-      "arguments": [
-        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-        "natemccoy@192.168.4.38",
-        "/usr/bin/shortcuts run \"dell monitor off\""
-      ],
-      "timeout_seconds": 20,
-      "accepted_exit_codes": [0]
-    },
-    "power_on": {
-      "executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
-      "arguments": [
-        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-        "natemccoy@192.168.4.38",
-        "/usr/bin/shortcuts run \"dell monitor on\""
-      ],
-      "timeout_seconds": 20,
-      "accepted_exit_codes": [0]
-    },
-    "inventory": {
-      "executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
-      "arguments": [
-        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-        "natemccoy@192.168.4.38",
-        "/usr/sbin/system_profiler SPDisplaysDataType -json"
-      ],
-      "timeout_seconds": 35,
-      "accepted_exit_codes": [0],
-      "output_limit_bytes": 4000000
-    }
-  }
+  ```
+  python crates/bevy_clerestory/tests/scripts/run_suite.py --automated ^
+      --hardware-profile crates/bevy_clerestory/tests/config/hardware.windows-vm.local.json
   ```
 
-  Save it as `crates/bevy_clerestory/tests/config/hardware.windows-vm.local.json`
-  on the Windows checkout, use its path with `run_suite.py --hardware-profile`,
-  and do not commit it. Before a run, establish SSH key authentication and a
-  known-host entry from Windows; `BatchMode=yes` makes a missing key, password,
-  or host-confirmation prompt fail rather than hang the controller. The
-  controller executes each listed argument directly; the final argument is the
-  quoted command interpreted by the remote macOS SSH session.
-- Before accepting any physical Windows row, make one controlled run prove both
-  sides of the connection: the remote Mac inventory must lose and regain the
-  Dell, and the Windows probe must report its selected target monitor's removal
-  and return. A VMware virtual display that stays present while the Mac Dell is
-  power-cycled is useful only as synthetic coverage; mark the physical Windows
-  row unavailable rather than treating the Mac inventory alone as Windows
-  evidence. Keep the Dell on after that calibration; all later off/on actions
-  go through the controller and its cleanup path.
+- The hardware profile points `power_off` / `power_on` / `inventory` at the
+  VDD's `disable.ps1` / `enable.ps1` / `inventory.ps1`, with
+  `target_matcher: "MTT1337"`, `inventory_name_field: "name"`, and
+  `probe_monitor_matcher: { "physical_size": [800, 600] }` — matched by size,
+  never by the volatile `\\.\DISPLAYn` name. It stays git-ignored and is never
+  committed. This supersedes the earlier SSH-to-macOS profile, which existed
+  only to power-cycle a physical Dell for the guest; with physical reconnect
+  descoped, the guest needs no remote power control or remote inventory.
+- Everything the VDD provides is **synthetic** and the report must label it so:
+  a 256-byte EDID that makes the monitor `Verified(MonitorId(..))`, deterministic
+  connect/disconnect by device enable/disable, and — via
+  `dpi_scale.ps1 -Match MTT1337 -Action setrel -Rel 0` — the second scale the
+  cross-DPI partition needs. Synthetic topology changes satisfy the automated
+  identity, lifetime, and DPI rows. They never satisfy a physical panel-identity
+  row, and no Phase 15 row may claim one.
+- Do not treat a remote macOS Dell power-cycle plus Mac `system_profiler`
+  inventory as Windows evidence. The guest must observe its own display removal
+  and return for any row it records.
 - Use the shared per-window metadata panel and trace to record each window's
   key, recovery policy, original target, current monitor, mode, and placement.
-  For rapid hotplug, record the operator's action timing separately from the
+  For rapid hotplug, record the controller's action timing separately from the
   revisions Windows actually delivers; do not claim coalescing unless observed.
-- Confirm verified evidence identifies a physical panel rather than device name
-  or adapter and remains unverified when descriptor/serial evidence is missing
-  or duplicated.
 - Compare `MonitorId` only across entity lifetimes in one running `App`; record
   evidence rather than token equality across separate runs. Monitor entity or
   list-index equality is never continuity evidence.
 - Retain the automated same-update fallback-relocation regression for primary
-  and managed windows, and record the physical branch if Windows produces it.
-  Also verify that delayed fallback geometry changes do not replace the
-  registered target and that explicit cancellation keeps the selected fallback
-  window in place. Never assert front-to-back ordering after reconstruction.
+  and managed windows. Verify that delayed fallback geometry changes do not
+  replace the registered target and that explicit cancellation keeps the
+  selected fallback window in place. Never assert front-to-back ordering after
+  reconstruction.
 - Verify concurrent cross-DPI windows cannot advance each other's attempts.
   Automatic exclusive-fullscreen recovery remains unarmed; exercise explicit
   or startup exclusive-fullscreen surface creation/restore as a separate row.
@@ -3002,8 +2966,13 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
   observed.
 - Fix proven platform defects with automated regressions and rerun gates; never
   promote weak identity to make a row pass.
-- Record the tested source revision for every row. Repeat or explicitly
-  revalidate affected macOS rows after any shared source correction.
+- Record the tested source revision for every row. Any shared-source change
+  landed after the recorded run invalidates these rows and requires a rerun on
+  the new revision.
+- Note the WARP accommodations already wired in and inert on hardware renderers:
+  `build.rs` reserves a 256 MB stack for the example executables on
+  Windows-MSVC, and the reconnect timeouts are longer on Windows. Neither is a
+  test result.
 
 **Files:**
 
@@ -3011,15 +2980,15 @@ cancellation, fullscreen, and entity-scoped real DPI behavior.
   probe corrections only if needed.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — shared
   startup/runtime mode harness reference; edit only for an observed
-  cross-platform harness defect and revalidate affected macOS rows.
+  cross-platform harness defect, which reopens the Phase 18 macOS revalidation.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   shared selector/control configuration reference under the same correction
   rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/window_panel.rs` —
   shared per-window evidence readout; edit only for an observed cross-platform
-  probe defect and revalidate affected macOS rows.
+  probe defect, under the same correction rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Windows
-  rows/evidence.
+  rows/evidence, including the explicit out-of-scope physical rows.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — Win32 display-path
   and EDID acquisition fixes only if observed.
 - `crates/bevy_clerestory/src/monitors/identity/edid.rs` — panel-evidence
@@ -3038,7 +3007,7 @@ Phase 14 established the report schema, and Phase 14.5 owns orchestration,
 polling, cleanup, and report generation; platform evidence remains independent.
 `MonitorId` is process-local and never comparable across application runs.
 macOS cascade ordering is not assumed on Windows. Phase 14 and automated startup
-evidence do not substitute for a fresh Windows row on the tested source.
+evidence do not substitute for a fresh Windows run on the tested source.
 `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
 `Monitors::by_index` matches the stored cached-winit enumeration index, and
 `Monitors::first()` is not guaranteed to be primary. Continuity uses verified
@@ -3046,54 +3015,73 @@ evidence do not substitute for a fresh Windows row on the tested source.
 shared panel uses one isolated screen-space view per target window; do not add
 a Windows-only camera or readout.
 
-**Acceptance gate:** Every applicable Windows scenario has an evidence row and
-expected/actual result and tested source revision; unavailable hardware or a
-safe observable setup is explicit. Any correction has a regression test, green
-Windows Clerestory Build/Test/Lint gates, and revalidated affected earlier-
-platform rows.
+**Acceptance gate:** `SUITE EXIT 0` on the release-candidate revision with the
+restore partition, cross-DPI partition, and probe cases all recorded; every
+synthetic row labeled synthetic; every physical panel-identity row recorded
+`unavailable` with the out-of-scope reason; the tested source revision named for
+every row. Any correction has a regression test and green Windows Clerestory
+Build/Test/Lint gates, and reopens the Phase 18 macOS revalidation.
 
-### Phase 16 — Record the X11 physical matrix  · status: todo
+### Phase 16 — Record the X11 suite results  · status: todo
 
 #### Work Order
 
-**Goal:** Prove X11 panel identity, monitor lifetime, frame-compensated
-placement, fullscreen, explicit cancellation, and DPI behavior.
+**Goal:** Prove X11 restore, frame-compensated placement, fullscreen, and
+explicit cancellation through the Phase 14.5 controller.
+
+**Physical panel reconnect and cross-DPI are out of scope on Linux.** No Linux
+hardware profile exists and none is planned: there is no Linux equivalent of the
+Windows VDD for deterministic connect/disconnect, and no Linux equivalent of
+`dpi_scale.ps1` for provisioning a second scale
+(`docs/offset-fix-and-test-fix.md`). Both partitions record `unavailable`.
 
 **Spec:**
 
-- Execute the Phase 14.5 controller in an X11 session and record the core
-  matrix. Use the finalized startup/mode controls from Phase 14 rather than
-  creating an X11-only harness.
+- Execute the Phase 14.5 controller in an X11 session on the Asahi Linux install
+  and record the 19 `"backend": "x11"` cases in
+  `crates/bevy_clerestory/tests/config/linux.json`, plus the probe case. Use the
+  finalized startup/mode controls from Phase 14 rather than creating an X11-only
+  harness.
+- Run without `--hardware-profile`. The controller then reports the physical and
+  cross-DPI cases as unavailable, which is the intended Linux result:
+
+  ```sh
+  python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated
+  ```
+
+- Correct `.claude/commands/clerestory_test.md` Step 1 before the first run. It
+  currently routes Linux to `crates/bevy_clerestory/tests/config/hardware.example.json`,
+  which is macOS-only — its power and inventory actions invoke `/usr/bin/shortcuts`
+  and `/usr/sbin/system_profiler`, neither of which exists on Linux, so the run
+  fails at the profile rather than reporting unavailable.
+- Force the X11 backend when the session would otherwise select Wayland:
+  `WAYLAND_DISPLAY= <command>`.
+- Bring the external panel up per `docs/bevy_clerestory/README.md`: on Asahi,
+  leave HDMI unplugged until the login screen appears, then plug it in and
+  advance the external monitor's input source if it does not wake.
 - Use the shared per-window metadata panel and trace to record each window's
   key, recovery policy, original target, current monitor, mode, and placement.
-  For rapid hotplug, record the operator's action timing separately from the
-  revisions X11 actually delivers; do not claim coalescing unless observed.
 - Confirm a RandR CRTC/connector alone never verifies a physical panel; require
   stable descriptor/serial evidence and preserve permanent duplicate ambiguity.
 - Compare `MonitorId` only across entity lifetimes in one running `App`; record
   evidence rather than token equality across separate runs. Monitor entity or
   list-index equality is never continuity evidence.
 - Retain the automated same-update fallback-relocation regression for primary
-  and managed windows, and record the physical branch if X11 produces it.
-  Also verify that delayed fallback geometry changes do not replace the
-  registered target and that explicit cancellation keeps the selected fallback
-  window in place. Never assert front-to-back ordering after reconstruction.
-- Exercise negative origins, arrangement and connected-entity scale changes,
-  1x↔2x cross-DPI reconnect, windowed placement, borderless/exclusive
-  fullscreen, zero displays, non-target-first return, and rapid hotplug. Record
-  unchanged-entity arrangement/resolution/scale cases as the documented
+  and managed windows. Verify that delayed fallback geometry changes do not
+  replace the registered target and that explicit cancellation keeps the
+  selected fallback window in place. Never assert front-to-back ordering after
+  reconstruction.
+- Exercise negative origins, windowed placement, and borderless fullscreen.
+  Record unchanged-entity arrangement/resolution/scale cases as the documented
   no-refresh limitation rather than recovery transitions.
 - Treat exclusive fullscreen as a separate explicit/startup restore row;
   automatic exclusive-fullscreen recovery is expected to remain unarmed.
 - Prove `X11FrameCompensated` remains between preparation and application and
-  the thin primary `PreStartup` flush still matches runtime placement.
-- Record linked-cascade versus surviving relocation, removal versus installed
-  topology order, zero-window process survival, replacement entity/key, and the
-  unregistered control outcome. Exercise the Phase 10 replacement path only
-  when deletion occurs.
+  the thin primary `PreStartup` flush still matches runtime placement. This is
+  the X11-specific result the phase exists for, and it is fully observable
+  without a reconnect.
 - Fix proven defects with automated regressions and rerun gates.
-- Record the tested source revision for every row. Repeat or explicitly
-  revalidate affected macOS and Windows rows after any shared source correction.
+- Record the tested source revision for every row.
 
 **Files:**
 
@@ -3101,15 +3089,18 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
   corrections only if needed.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — shared
   startup/runtime mode harness reference; edit only for an observed
-  cross-platform harness defect and revalidate affected macOS and Windows rows.
+  cross-platform harness defect, which reopens the Phase 18 macOS revalidation
+  and the affected Windows rows.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   shared selector/control configuration reference under the same correction
   rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/window_panel.rs` —
   shared per-window evidence readout; edit only for an observed cross-platform
-  probe defect and revalidate affected macOS and Windows rows.
+  probe defect, under the same correction rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — X11
-  rows/evidence.
+  rows/evidence, including the explicit out-of-scope physical and cross-DPI
+  rows.
+- `.claude/commands/clerestory_test.md` — Linux hardware-profile routing fix.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — X11 RandR/EDID
   acquisition fixes only if observed.
 - `crates/bevy_clerestory/src/monitors/identity/edid.rs` — panel-evidence
@@ -3125,39 +3116,46 @@ placement, fullscreen, explicit cancellation, and DPI behavior.
 
 **Constraints from prior phases:** Phase 13 supplies the stable baseline,
 Phase 14.5 owns the shared controller, and its report distinguishes physical
-proof from automated assertions.
-`MonitorId` is process-local and never comparable across application runs.
-macOS cascade ordering is not assumed on X11. Earlier platform rows and
-automated startup evidence do not substitute for a fresh X11 row on the tested
-source. `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
+proof from automated assertions. This is the first execution of the X11 harness
+path: it has been written and reviewed but never run
+(`docs/offset-fix-and-test-fix.md`), so a first-run harness defect is expected
+and in scope. `MonitorId` is process-local and never comparable across
+application runs. macOS cascade ordering is not assumed on X11. Earlier platform
+rows and automated startup evidence do not substitute for a fresh X11 run on the
+tested source. `CLERESTORY_PROBE_MONITOR_INDEX` is only a run-local selector:
 `Monitors::by_index` matches the stored cached-winit enumeration index, and
 `Monitors::first()` is not guaranteed to be primary. Continuity uses verified
 `MonitorId`, never the selector, entity, index, or enumeration order. The
 shared panel uses one isolated screen-space view per target window; do not add
 an X11-only camera or readout.
 
-**Acceptance gate:** Every applicable X11 scenario has an evidence row and
-expected/actual result and tested source revision; unavailable hardware or a
-safe observable setup is explicit. Placement/fullscreen rows demonstrate
-compensation order. Any correction has a regression, green X11 Clerestory
-Build/Test/Lint gates, and revalidated affected earlier-platform rows.
+**Acceptance gate:** `SUITE EXIT 0` on the release-candidate revision with the
+19 X11 cases and the probe case recorded; physical and cross-DPI rows recorded
+`unavailable` with the out-of-scope reason; placement/fullscreen rows demonstrate
+compensation order; the tested source revision named for every row. Any
+correction has a regression, green X11 Clerestory Build/Test/Lint gates, and
+reopens the Phase 18 macOS revalidation.
 
-### Phase 17 — Record the Wayland physical matrix  · status: todo
+### Phase 17 — Record the Wayland suite results  · status: todo
 
 #### Work Order
 
-**Goal:** Prove Wayland behavior without claiming client-controlled windowed
-placement or unsupported exclusive fullscreen.
+**Goal:** Prove Wayland behavior through the Phase 14.5 controller without
+claiming client-controlled windowed placement or unsupported exclusive
+fullscreen.
+
+**Physical panel reconnect and cross-DPI are out of scope on Linux**, for the
+reasons given in Phase 16. Both partitions record `unavailable`.
 
 **Spec:**
 
 - Execute the Phase 14.5 controller in the available Wayland compositor(s) and
-  record the core identity/lifetime/reconnect matrix using the finalized
-  startup/mode controls from Phase 14.
+  record the 13 `"backend": "wayland"` cases in
+  `crates/bevy_clerestory/tests/config/linux.json`, using the finalized
+  startup/mode controls from Phase 14. Run without `--hardware-profile`, as in
+  Phase 16.
 - Use the shared per-window metadata panel and trace to record each window's
   key, recovery policy, original target, current monitor, mode, and placement.
-  For rapid hotplug, record the operator's action timing separately from the
-  revisions Wayland actually delivers; do not claim coalescing unless observed.
 - A `wl_output` object ID alone remains `Unverified`. Record whether the
   compositor exposes equivalent stable physical-panel evidence; do not infer
   continuity from output name, position, or index.
@@ -3167,7 +3165,7 @@ placement or unsupported exclusive fullscreen.
 - Windowed capture must be
   `CapturedWindowPosition::CompositorControlled`, project
   `logical_position: None`, never emit `WindowPosition::At`, and leave
-  `FallbackAndReturn` unarmed.
+  `FallbackAndReturn` unarmed. These are pass criteria, not failures.
 - Exercise borderless fullscreen separately: when identity is verified and the
   compositor/winit path supports monitor selection, it may target the returned
   output without a coordinate.
@@ -3175,17 +3173,13 @@ placement or unsupported exclusive fullscreen.
   return mechanism.
 - For `ApplicationControlled`, verify factual availability and supported
   size/mode application; compositor placement mismatch remains explicit.
-- Record entity survival/cascade, removal versus installed topology order,
-  zero-window process survival, replacement entity/key where a supported mode
-  arms automatic return, and the unregistered control outcome. Fix only proven
-  defects with automated regressions.
 - Mark the same-update windowed-relocation regression inapplicable because
   Wayland windowed automatic return is unarmed. For any supported
   monitor-targeted mode, verify that geometry/mode changes preserve the
   registered target until explicit cancellation, and never assert
   front-to-back ordering after reconstruction.
-- Record the tested source revision for every row. Repeat or explicitly
-  revalidate affected earlier-platform rows after any shared source correction.
+- Fix only proven defects with automated regressions.
+- Record the tested source revision for every row.
 
 **Files:**
 
@@ -3193,15 +3187,17 @@ placement or unsupported exclusive fullscreen.
   probe corrections only if needed.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/setup.rs` — shared
   startup/runtime mode harness reference; edit only for an observed
-  cross-platform harness defect and revalidate affected earlier-platform rows.
+  cross-platform harness defect, which reopens the Phase 18 macOS revalidation
+  and the affected Windows and X11 rows.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/constants.rs` —
   shared selector/control configuration reference under the same correction
   rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/window_panel.rs` —
   shared per-window evidence readout; edit only for an observed cross-platform
-  probe defect and revalidate affected earlier-platform rows.
+  probe defect, under the same correction rule.
 - `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — Wayland
-  rows/evidence.
+  rows/evidence, including the explicit out-of-scope physical and cross-DPI
+  rows.
 - `crates/bevy_clerestory/src/monitors/identity/native.rs` — compositor evidence
   qualification fixes only if observed.
 - `crates/bevy_clerestory/src/monitors/identity/registry.rs` — Wayland
@@ -3221,21 +3217,98 @@ Wayland's lack of client-controlled windowed positioning is a fixed contract,
 not a test failure to work around. `MonitorId` remains process-local and never
 comparable across application runs. macOS cascade ordering is not assumed on
 Wayland. Earlier platform rows and automated startup evidence do not substitute
-for a fresh Wayland row on the tested source. `CLERESTORY_PROBE_MONITOR_INDEX`
+for a fresh Wayland run on the tested source. `CLERESTORY_PROBE_MONITOR_INDEX`
 is only a run-local selector: `Monitors::by_index` matches the stored
 cached-winit enumeration index, and `Monitors::first()` is not guaranteed to
 be primary. Continuity uses verified `MonitorId`, never the selector, entity,
 index, or enumeration order. The shared panel uses one isolated screen-space
 view per target window; do not add a Wayland-only camera or readout.
 
-**Acceptance gate:** Every applicable Wayland scenario has an evidence row and
-expected/actual result and tested source revision; compositor and
-unavailable hardware/setup limits are explicit. Windowed, borderless, and
-exclusive modes have separate results. Any correction has a regression, green
-Wayland Clerestory Build/Test/Lint gates, and revalidated affected earlier-
-platform rows.
+**Acceptance gate:** `SUITE EXIT 0` on the release-candidate revision with the
+13 Wayland cases recorded; physical and cross-DPI rows recorded `unavailable`
+with the out-of-scope reason; windowed, borderless, and exclusive modes have
+separate results; compositor limits are explicit; the tested source revision
+named for every row. Any correction has a regression, green Wayland Clerestory
+Build/Test/Lint gates, and reopens the Phase 18 macOS revalidation.
 
-### Phase 18 — Release bevy_clerestory  · status: todo
+### Phase 18 — Revalidate the macOS matrix on the release revision  · status: todo
+
+#### Work Order
+
+**Goal:** Bring the macOS evidence — the only physical evidence backing the
+release — onto the exact revision selected for publication, after Phases 15–17
+have landed every correction they prove.
+
+**Why this runs last.** A defect found on Windows, X11, or Wayland is usually in
+shared code, and its fix invalidates macOS rows recorded earlier. Revalidating
+macOS after all three platform runs costs one pass instead of one per
+correction. The Phase 14 matrix was recorded at `a6a2086` on 2026-07-22/23 and is
+already behind the branch tip, so this phase is required even if Phases 15–17
+prove no defect.
+
+**Spec:**
+
+- Select the release-candidate revision first. Every result in this phase names
+  it, and any later source change reopens the phase.
+- Run the automated partition and the assisted partition on macOS:
+
+  ```sh
+  python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
+      --hardware-profile crates/bevy_clerestory/tests/config/hardware.example.json
+  python3 crates/bevy_clerestory/tests/scripts/run_suite.py --assisted \
+      --hardware-profile crates/bevy_clerestory/tests/config/hardware.example.json
+  ```
+
+  `--automated` and `--assisted` are mutually exclusive; they are two runs, not
+  one invocation.
+- Repeat the physical matrix rows in
+  `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` that passed
+  in Phase 14 — same-panel reconnect, other port/dock, panel swap on the original
+  connector, lid close/open, three-cycle churn, arrangement-only reorder,
+  non-target-first return, rapid hotplug, borderless, exclusive-unarmed, and the
+  Dell-to-built-in cross-DPI return. Rows recorded unavailable in Phase 14
+  (duplicate-identity evidence, different-same-model panel, zero displays) stay
+  unavailable; this phase does not acquire new hardware.
+- Where Phases 15–17 produced no change to a row's shared source, an explicit
+  revalidation note naming the release revision and the unchanged files may
+  stand in for repeating that physical row. Where they did change it, repeat the
+  row. Record which of the two applies for every row — an unlabeled row is not
+  evidence.
+- Rerun the Phase 13 automated gates on macOS as part of this pass so the
+  library, example, and controller self-tests are green on the same revision the
+  physical rows name.
+- Fix proven defects with automated regressions. A macOS correction at this
+  point reopens the affected Windows, X11, and Wayland rows in the same way
+  those platforms reopen macOS; state explicitly which rows a correction
+  invalidates.
+
+**Files:**
+
+- `crates/bevy_clerestory/examples/restore_after_reconnect/README.md` — the
+  macOS physical matrix, updated in place with the release revision and each
+  row's repeated-or-revalidated label.
+- `crates/bevy_clerestory/tests/config/hardware.example.json` — macOS monitor
+  power/inventory profile, read-only unless a defect in it is observed.
+- `crates/bevy_clerestory/src/` — corrections only if a defect is observed, each
+  with a regression test.
+
+**Constraints from prior phases:** Phase 14 established the matrix and its
+schema; Phase 14.5 owns orchestration, polling, cleanup, and reports. `MonitorId`
+remains process-local and never comparable across application runs. The macOS
+zero-display row remains unavailable: no safe, observable zero-display run
+exists on this MacBook, and the row is recorded as not run rather than inferred.
+Phases 15–17 supply no physical panel evidence — Windows and Linux physical
+reconnect are out of scope — so macOS is the sole physical evidence the release
+rests on.
+
+**Acceptance gate:** Every macOS row names the release-candidate revision and is
+labeled repeated or explicitly revalidated; the automated and assisted suite runs
+both exit 0 on that revision; the Phase 13 gates are green on it; rows that were
+unavailable in Phase 14 remain explicitly unavailable with their reason. Any
+correction has a regression test and names the earlier-platform rows it
+invalidates.
+
+### Phase 19 — Release bevy_clerestory  · status: todo
 
 #### Work Order
 
@@ -3245,12 +3318,21 @@ development line for independent downstream adoption.
 **Spec:**
 
 - Require green Phase 13 automated gates, the Phase 14.5 self-running
-  controller gate, and completed Phase 14–17 evidence
-  rows. Every physical row must name its tested source revision, and any row
-  affected by a later correction must have been repeated or explicitly
-  revalidated on the corrected revision. Unresolved platform failures block
-  release.
-- After all physical testing and corrections are complete, rerun Phase 13's
+  controller gate, and completed Phase 14–18 evidence rows. Every row must name
+  its tested source revision, and any row affected by a later correction must
+  have been repeated or explicitly revalidated on the corrected revision.
+  Unresolved platform failures block release.
+- The physical evidence backing this release is macOS-only. Windows and Linux
+  physical panel reconnect are out of scope (Phases 15–17), and their
+  panel-identity rows are recorded unavailable with that reason rather than left
+  open. The Windows VDD rows are labeled synthetic and do not substitute for
+  physical evidence. `README.md` and `CHANGELOG.md` must state this boundary as
+  a released limitation, not omit it.
+- Phase 18's macOS revalidation must have run *after* Phases 15–17, so a shared
+  correction proved on Windows or Linux cannot land behind the macOS evidence.
+  A macOS row dated before the last shared correction does not satisfy this
+  gate.
+- After all platform testing and corrections are complete, rerun Phase 13's
   final full-workspace Build, Test, and Lint gates in Clerestory against the
   exact source selected for release. Earlier Phase 13 results do not substitute
   for this post-matrix run.
@@ -3284,8 +3366,8 @@ development line for independent downstream adoption.
   the deterministic acceptance-trace regression.
 
 **Constraints from prior phases:** Phase 13 freezes automated behavior; Phases
-14–17 supply required native evidence. Any correction during Phases 14–17
-reopens the affected Phase 13 gates and physical rows. Phase 11's README
+14–18 supply required native evidence. Any correction during Phases 14–18
+reopens the affected Phase 13 gates and platform rows. Phase 11's README
 behavior and doctest contracts remain part of the released public API
 documentation. The `recovery-accepted` trace test intentionally gives only its
 test `App` a `SingleThreadedExecutor`: `with_default` is thread-local, while
@@ -3299,8 +3381,9 @@ the exact selected `bevy_clerestory` version (expected `0.2.0`), the published
 package is verified, release metadata and tag/changelog are consistent, the
 README contracts above remain intact, and its event-loop doctests compile
 without running. The final report records the release source revision, maps
-every physical row to a tested or revalidated revision, and includes green
-post-matrix full-workspace Clerestory gates. The concurrent
+every row to a tested or revalidated revision, names the out-of-scope platform
+partitions explicitly, and includes green post-matrix full-workspace Clerestory
+gates. The concurrent
 `cargo nextest run --all-features --workspace --tests` gate retains the single
 `recovery-accepted` trace assertion. The exact verified version becomes the
 prerequisite version for the separate Hana adoption plan.

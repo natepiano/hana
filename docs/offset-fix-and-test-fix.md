@@ -439,7 +439,7 @@ retained template.
 | Deadlock classification (3) | **Cross-OS** | `run_test.py` + one BRP method. |
 | Deadline invariant (6) | **Cross-OS** | Rust unit test. |
 | Inverted expectations (7), mutation re-anchor (10) | **Cross-OS** | `run_test.py`. |
-| On-screen assertion (1) | Native only | Uncomputable on Wayland; all of `linux.json` is Wayland. |
+| On-screen assertion (1) | Native + X11 | Uncomputable on Wayland only. See the correction below — `linux.json` is 19 X11 cases and 13 Wayland, so the assertion is computable on the X11 cases. |
 | Reconnect containment (11) | **Cross-OS** | `run_reconnect.py`. |
 | Seeded fixtures (2, incl. folded 4) | Mechanism cross-OS, values per platform | Derived from discovery. |
 | Scale change mid-test (5) | Windows only today | `dpi_scale.ps1` is DisplayConfig. macOS and Linux need their own tool. |
@@ -448,6 +448,12 @@ retained template.
 
 Only Windows can be run here. macOS and Linux need their own suite run before the shared-code
 changes are trusted there.
+
+**Correction (2026-07-28).** Two claims in this section and in B17 are wrong: `linux.json` is not
+all Wayland. It holds 19 cases with `"backend": "x11"` and 13 with `"backend": "wayland"`. Any
+decision that scoped the on-screen containment assertion out of Linux entirely rested on that false
+premise; the assertion is computable on the 19 X11 cases and should be enabled there when Phase 16
+runs.
 
 ---
 
@@ -837,6 +843,7 @@ better on disk: `monitor_panel: Anonymous` rather than an absent field.
 ### Unverified
 
 The macOS `ColorSync` path (`CGDisplayCreateUUIDFromDisplayID` replacing the per-process counter in
-`MacOsDisplayUuid`) has never been compiled: CI is ubuntu-only and the implementing session had no
-Mac. It is the first thing to check on a Mac build. It also fixes a latent bug — the old counter did
-not survive a replug even within one session.
+`MacOsDisplayUuid`) was written on a Windows-only session against ubuntu CI and had never been
+compiled when this was written. It compiles and runs on macOS as of `69a30654` / `dc416a2f` /
+`f1987de5` (2026-07-27); the macOS suite has been green on it since. It also fixes a latent bug —
+the old counter did not survive a replug even within one session.
