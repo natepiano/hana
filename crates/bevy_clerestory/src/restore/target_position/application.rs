@@ -18,6 +18,7 @@ use super::strategy::NativeFullscreenState;
 use super::strategy::WindowRestoreState;
 use super::target::TargetPosition;
 use crate::Platform;
+use crate::constants::FULLSCREEN_MONITOR_MOVE_TIMEOUT_SECS;
 use crate::constants::MILLIS_PER_SECOND;
 use crate::constants::RESTORE_STRATEGY_APPLY_UNCHANGED;
 use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
@@ -354,33 +355,12 @@ fn advance_fullscreen_restore(
                 Some(FullscreenRestoreState::MoveWindowedToTarget);
             RestoreStatus::Waiting
         },
-        FullscreenRestoreState::MoveWindowedToTarget => {
-            if native_fullscreen != NativeFullscreenState::Windowed {
-                debug!(
-                    "[restore_windows] macOS fullscreen: waiting for AppKit to finish leaving fullscreen"
-                );
-                return RestoreStatus::Waiting;
-            }
-            let target_monitor_reached = current_monitor.is_some_and(|current_monitor| {
-                current_monitor.monitor_info.index == target_position.monitor_index
-            });
-            if target_monitor_reached {
-                debug!(
-                    "[restore_windows] macOS fullscreen: windowed window reached target monitor {}",
-                    target_position.monitor_index
-                );
-                target_position.fullscreen_restore_state = Some(FullscreenRestoreState::ApplyMode);
-            } else {
-                debug!(
-                    "[restore_windows] macOS fullscreen: moving windowed window to target monitor {}",
-                    target_position.monitor_index
-                );
-                window.position = WindowPosition::Centered(MonitorSelection::Index(
-                    target_position.monitor_index,
-                ));
-            }
-            RestoreStatus::Waiting
-        },
+        FullscreenRestoreState::MoveWindowedToTarget => advance_move_windowed_to_target(
+            target_position,
+            window,
+            current_monitor,
+            native_fullscreen,
+        ),
         FullscreenRestoreState::MoveToMonitor => {
             if let Some(position) = target_position.physical_position {
                 debug!("[restore_windows] Fullscreen MoveToMonitor: position={position:?}");
@@ -428,6 +408,64 @@ fn advance_fullscreen_restore(
     }
 }
 
+/// Drive `FullscreenRestoreState::MoveWindowedToTarget`: request the windowed window onto
+/// `TargetPosition::monitor_index` and hand off to `FullscreenRestoreState::ApplyMode` once it
+/// arrives, or once `TargetPosition::fullscreen_move_wait` expires.
+fn advance_move_windowed_to_target(
+    target_position: &mut TargetPosition,
+    window: &mut Window,
+    current_monitor: Option<&CurrentMonitor>,
+    native_fullscreen: NativeFullscreenState,
+) -> RestoreStatus {
+    if native_fullscreen != NativeFullscreenState::Windowed {
+        debug!(
+            "[restore_windows] macOS fullscreen: waiting for AppKit to finish leaving fullscreen"
+        );
+        return RestoreStatus::Waiting;
+    }
+    let target_monitor_reached = current_monitor.is_some_and(|current_monitor| {
+        current_monitor.monitor_info.index == target_position.monitor_index
+    });
+    if target_monitor_reached {
+        debug!(
+            "[restore_windows] macOS fullscreen: windowed window reached target monitor {}",
+            target_position.monitor_index
+        );
+        target_position.fullscreen_move_wait = None;
+        target_position.fullscreen_restore_state = Some(FullscreenRestoreState::ApplyMode);
+        return RestoreStatus::Waiting;
+    }
+    let move_wait = target_position.fullscreen_move_wait.get_or_insert_with(|| {
+        Timer::from_seconds(FULLSCREEN_MONITOR_MOVE_TIMEOUT_SECS, TimerMode::Once)
+    });
+    if move_wait.is_finished() {
+        warn!(
+            "The windowed window did not reach monitor {} within \
+             {FULLSCREEN_MONITOR_MOVE_TIMEOUT_SECS}s (it is on monitor {:?}). Applying the saved \
+             fullscreen mode from where it is, so the window becomes visible rather than staying \
+             hidden while the move is re-requested.",
+            target_position.monitor_index,
+            current_monitor.map(|current_monitor| current_monitor.monitor_info.index),
+        );
+        target_position.fullscreen_move_wait = None;
+        target_position.fullscreen_restore_state = Some(FullscreenRestoreState::ApplyMode);
+        return RestoreStatus::Waiting;
+    }
+    // `WindowPosition::At` over `Centered`: bevy's `changed_windows` calls `set_outer_position`
+    // only when `Window::position` differs from its cached value, and a window launched with the
+    // same `Centered(Index(n))` this phase would re-request never moves at all.
+    let move_position = target_position.physical_position.map_or_else(
+        || WindowPosition::Centered(MonitorSelection::Index(target_position.monitor_index)),
+        WindowPosition::At,
+    );
+    debug!(
+        "[restore_windows] macOS fullscreen: moving windowed window to {move_position:?} for target monitor {}",
+        target_position.monitor_index
+    );
+    window.position = move_position;
+    RestoreStatus::Waiting
+}
+
 /// Apply pending window restore. Runs only when entities with `TargetPosition` exist.
 pub(crate) fn restore_windows(
     mut windows: Query<
@@ -458,6 +496,9 @@ pub(crate) fn restore_windows(
     {
         if let Some(scale_change_wait) = target_position.scale_change_wait.as_mut() {
             scale_change_wait.tick(delta);
+        }
+        if let Some(fullscreen_move_wait) = target_position.fullscreen_move_wait.as_mut() {
+            fullscreen_move_wait.tick(delta);
         }
         if let (Some(restore_attempt), Some(registrations), Some(monitors), Some(revision)) = (
             restore_preparation.recovery_attempt(),
@@ -869,6 +910,7 @@ mod scale_change_wait_tests {
             saved_window_mode: SavedWindowMode::Windowed,
             monitor_index: MONITOR_INDEX,
             fullscreen_restore_state: None,
+            fullscreen_move_wait: None,
             scale_change_wait,
             settle_state: None,
         }
@@ -1009,6 +1051,7 @@ mod tests {
     use crate::WindowKey;
     use crate::monitors::MonitorIdentity;
 
+    const BORDERLESS_TARGET_POSITION: IVec2 = IVec2::new(-4_256, -2_249);
     const FALLBACK_MONITOR_INDEX: usize = 0;
     const TARGET_MONITOR_INDEX: usize = 2;
 
@@ -1041,6 +1084,7 @@ mod tests {
             saved_window_mode:        SavedWindowMode::Windowed,
             monitor_index:            TARGET_MONITOR_INDEX,
             fullscreen_restore_state: None,
+            fullscreen_move_wait:     None,
             scale_change_wait:        None,
             settle_state:             None,
         }
@@ -1048,8 +1092,8 @@ mod tests {
 
     const fn borderless_target() -> TargetPosition {
         TargetPosition {
-            physical_position:        Some(IVec2::new(-4_256, -2_249)),
-            logical_position:         Some(IVec2::new(-4_256, -2_249)),
+            physical_position:        Some(BORDERLESS_TARGET_POSITION),
+            logical_position:         Some(BORDERLESS_TARGET_POSITION),
             physical_size:            UVec2::new(3_440, 1_440),
             logical_size:             UVec2::new(3_440, 1_440),
             target_scale:             1.0,
@@ -1058,6 +1102,7 @@ mod tests {
             saved_window_mode:        SavedWindowMode::BorderlessFullscreen,
             monitor_index:            TARGET_MONITOR_INDEX,
             fullscreen_restore_state: Some(FullscreenRestoreState::LeaveFullscreen),
+            fullscreen_move_wait:     None,
             scale_change_wait:        None,
             settle_state:             None,
         }
@@ -1162,7 +1207,7 @@ mod tests {
         );
         assert_eq!(
             window.position,
-            WindowPosition::Centered(MonitorSelection::Index(TARGET_MONITOR_INDEX))
+            WindowPosition::At(BORDERLESS_TARGET_POSITION)
         );
 
         advance(
@@ -1175,6 +1220,7 @@ mod tests {
             target.fullscreen_restore_state,
             Some(FullscreenRestoreState::ApplyMode)
         );
+        assert!(target.fullscreen_move_wait.is_none());
 
         advance(
             &mut target,
@@ -1219,5 +1265,68 @@ mod tests {
         );
         assert!(target.fullscreen_restore_state.is_none());
         assert!(target.settle_state.is_some());
+    }
+
+    /// A move the compositor never performs must not hold the window hidden forever.
+    ///
+    /// winit drops a `WindowPosition::Centered` whose `MonitorSelection::Index` it cannot
+    /// resolve — which is every index at window-creation time, before `WinitMonitors` is
+    /// populated. A window created that way sits on whichever monitor macOS chose while bevy's
+    /// cache records the unhonored request, so `MoveWindowedToTarget` re-requesting the same
+    /// value is skipped by `changed_windows` and `CurrentMonitor` never reports arrival.
+    #[test]
+    fn a_windowed_move_that_never_arrives_applies_fullscreen_once_the_deadline_passes() {
+        let fallback = current_monitor(FALLBACK_MONITOR_INDEX, 2.0);
+        let mut target = borderless_target();
+        target.fullscreen_restore_state = Some(FullscreenRestoreState::MoveWindowedToTarget);
+        let mut window = Window {
+            visible: false,
+            ..default()
+        };
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::MoveWindowedToTarget),
+            "the phase keeps waiting while its deadline is live"
+        );
+
+        let move_wait = target
+            .fullscreen_move_wait
+            .as_mut()
+            .expect("the first frame in the phase starts the deadline");
+        move_wait.tick(Duration::from_secs_f32(
+            FULLSCREEN_MONITOR_MOVE_TIMEOUT_SECS,
+        ));
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            target.fullscreen_restore_state,
+            Some(FullscreenRestoreState::ApplyMode),
+            "an expired deadline applies the fullscreen mode instead of re-requesting the move"
+        );
+        assert!(target.fullscreen_move_wait.is_none());
+
+        advance(
+            &mut target,
+            &mut window,
+            &fallback,
+            NativeFullscreenState::Windowed,
+        );
+        assert_eq!(
+            window.mode,
+            WindowMode::BorderlessFullscreen(MonitorSelection::Index(TARGET_MONITOR_INDEX))
+        );
+        assert!(window.visible, "the window is revealed, not left hidden");
     }
 }

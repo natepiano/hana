@@ -168,6 +168,15 @@ pub(crate) struct TargetPosition {
     pub(crate) monitor_index:            usize,
     /// Fullscreen restore state (DX12/DXGI workaround).
     pub(crate) fullscreen_restore_state: Option<FullscreenRestoreState>,
+    /// Deadline for the macOS `FullscreenRestoreState::MoveWindowedToTarget` phase. Set on the
+    /// first frame in that phase and cleared when it ends.
+    ///
+    /// The phase ends when `CurrentMonitor` reports the windowed window on `monitor_index`.
+    /// Arrival is not guaranteed: winit drops a `WindowPosition::Centered` whose
+    /// `MonitorSelection::Index` it cannot resolve, so the requested move can silently never
+    /// happen. This timer bounds the wait so the fullscreen mode is applied — and the window
+    /// revealed — instead of the phase re-requesting the move forever while the window is hidden.
+    pub(crate) fullscreen_move_wait:     Option<Timer>,
     /// Deadline for the cross-DPI `WindowRestoreState::WaitingForScaleChange` phase. Set when the
     /// initial move enters that phase and cleared once the phase ends.
     ///
@@ -307,6 +316,7 @@ pub(crate) fn compute_target_position(
             .saved_window_mode
             .is_fullscreen()
             .then_some(platform.fullscreen_restore_state()),
+        fullscreen_move_wait: None,
         scale_change_wait: None,
         settle_state: None,
     }
