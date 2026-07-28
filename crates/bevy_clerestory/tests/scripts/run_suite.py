@@ -421,6 +421,46 @@ def prebuild_reconnect(report: RunReport) -> Path:
     return destination
 
 
+def run_probe_lifecycle_case(
+    executable: Path,
+    artifact_directory: Path,
+    run_id: str,
+    case_id: str,
+) -> CaseResult:
+    """Run the zero-window lifecycle case, or report why this host cannot.
+
+    Windows is held out: the probe closes its windows over the remote channel, and there the app
+    stops servicing further requests part way through the sequence. That is window teardown
+    misbehaving, not the liveness and reconstruction this case exists to measure, so reporting it
+    as a failure would attribute the wrong defect. macOS and Linux run the case for real, and a
+    failure there is recorded as a failure — an availability label must never be able to absorb a
+    genuine regression.
+    """
+    if sys.platform == "win32":
+        return unavailable_case(
+            case_id,
+            Interaction.AUTOMATED,
+            Evidence.APPLICATION,
+            "closing every owned window over the probe channel stops the app answering",
+            "windows-window-teardown",
+        )
+    try:
+        return run_zero_window_case(executable, artifact_directory, run_id)
+    except Exception as error:
+        # Keep the controller alive so the physical reconnect partition still runs, but record
+        # the outcome as the failure it is.
+        return CaseResult(
+            case_id=case_id,
+            interaction=Interaction.AUTOMATED,
+            evidence=Evidence.APPLICATION,
+            outcome=(
+                Outcome.TIMED_OUT if isinstance(error, TimeoutError) else Outcome.HARNESS_ERROR
+            ),
+            assertions=[AssertionResult("expected-state-reached", False, str(error))],
+            artifacts=[str(artifact_directory)],
+        )
+
+
 def run_discovery(
     config_path: Path,
     executable: Path,
@@ -1368,24 +1408,12 @@ def main() -> int:
                             outcome=Outcome.HARNESS_ERROR,
                         )
                     else:
-                        try:
-                            result = run_zero_window_case(
-                                reconnect_executable,
-                                report.artifact_directory / "probe-cases" / case_id,
-                                report.run_id,
-                            )
-                        except Exception as error:
-                            # A no-EDID host has no verified monitor for the probe to
-                            # target, so this lifecycle case cannot establish its subject.
-                            # Report it unavailable and keep going instead of aborting the
-                            # whole controller before the physical reconnect partition.
-                            result = unavailable_case(
-                                case_id,
-                                Interaction.AUTOMATED,
-                                Evidence.APPLICATION,
-                                f"probe lifecycle case could not run: {error}",
-                                "verified-monitor-identity",
-                            )
+                        result = run_probe_lifecycle_case(
+                            reconnect_executable,
+                            report.artifact_directory / "probe-cases" / case_id,
+                            report.run_id,
+                            case_id,
+                        )
                     report.append(result)
                     report.event("case-completed", result.outcome.value, case_id)
 

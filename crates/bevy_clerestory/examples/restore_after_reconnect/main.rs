@@ -125,6 +125,7 @@ impl Plugin for HotplugProbePlugin {
                     recovery_trace::record_recovery_readiness,
                     window_trace::trace_os_window_events,
                     window_trace::trace_internal_window_messages,
+                    control::despawn_requested_windows,
                 )
                     .chain_ignore_deferred(),
             )
