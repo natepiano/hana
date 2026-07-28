@@ -1,11 +1,11 @@
 use core::cmp::Ordering;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ops::RangeInclusive;
 
 use bevy::camera::NormalizedRenderTarget;
 use bevy::camera::RenderTarget;
 use bevy::ecs::lifecycle::HookContext;
+use bevy::ecs::query::QueryData;
 use bevy::ecs::system::SystemParam;
 use bevy::ecs::world::DeferredWorld;
 use bevy::picking::hover::PickingInteraction;
@@ -195,25 +195,25 @@ impl Slider {
 
     /// Sets the authored default value.
     pub const fn value(mut self, value: f32) -> Self {
-        self.set_value(value);
+        self.default_value = value;
         self
     }
 
     /// Sets the step interval.
     pub const fn step(mut self, step: f32) -> Self {
-        self.set_step(step);
+        self.step = Some(step);
         self
     }
 
     /// Sets the direction in which values increase.
     pub const fn direction(mut self, direction: SliderDirection) -> Self {
-        self.set_direction(direction);
+        self.direction = direction;
         self
     }
 
     /// Sets the optional thumb gesture that proposes the authored default.
     pub const fn reset_behavior(mut self, reset_behavior: SliderResetBehavior) -> Self {
-        self.set_reset_behavior(reset_behavior);
+        self.reset_behavior = reset_behavior;
         self
     }
 
@@ -222,7 +222,7 @@ impl Slider {
     /// Requires an authored border on the element marked with
     /// [`El::slider_thumb`](crate::El::slider_thumb).
     pub const fn focused_thumb_border_color(mut self, color: Color) -> Self {
-        self.set_focused_thumb_border_color(color);
+        self.focused_thumb_border_color = Some(color);
         self
     }
 
@@ -232,51 +232,33 @@ impl Slider {
     /// including text, track, and marked thumb records. Clearing the disabled
     /// state restores each record's authored color.
     pub const fn disabled_color(mut self, color: Color) -> Self {
-        self.set_disabled_color(color);
-        self
-    }
-
-    pub(crate) const fn set_value(&mut self, value: f32) { self.default_value = value; }
-
-    pub(crate) const fn set_step(&mut self, step: f32) { self.step = Some(step); }
-
-    pub(crate) const fn set_direction(&mut self, direction: SliderDirection) {
-        self.direction = direction;
-    }
-
-    pub(crate) const fn set_reset_behavior(&mut self, reset_behavior: SliderResetBehavior) {
-        self.reset_behavior = reset_behavior;
-    }
-
-    pub(crate) const fn set_focused_thumb_border_color(&mut self, color: Color) {
-        self.focused_thumb_border_color = Some(color);
-    }
-
-    pub(crate) const fn set_disabled_color(&mut self, color: Color) {
         self.disabled_color = Some(color);
+        self
     }
 
     pub(crate) const fn has_focused_thumb_border_color(&self) -> bool {
         self.focused_thumb_border_color.is_some()
     }
 
-    /// Validates the authored range, default value, and step together.
+    /// Validates the authored range, default value, and step together, building
+    /// the [`SliderState`] they describe.
     ///
-    /// Panel build calls this once per authored slider; every later read goes
-    /// through [`Slider::initial_state`], which repeats the same conversion and
-    /// falls back to the authored range's start when a value cannot be
-    /// validated.
-    pub(crate) fn validated(&self) -> Result<ValidSliderConfig, SliderConfigError> {
+    /// Panel build calls this once per authored slider and keeps only the
+    /// `Result`; every later read goes through [`Slider::initial_state`], which
+    /// repeats the same conversion and falls back to the authored range's start
+    /// when a value cannot be validated.
+    pub(crate) fn validated(&self) -> Result<SliderState, SliderConfigError> {
         let range = SliderRange::new(*self.range.start(), *self.range.end())?;
         if !self.default_value.is_finite() {
             return Err(SliderConfigError::NonFiniteValue);
         }
         let step = self.step.map(SliderStep::new).transpose()?;
-        Ok(ValidSliderConfig {
+        Ok(SliderState::from_validated(
             range,
-            default_value: self.default_value,
+            self.default_value,
             step,
-        })
+            self.direction,
+        ))
     }
 
     /// Builds the first-spawn runtime state for this authored slider.
@@ -287,26 +269,10 @@ impl Slider {
     /// declaration, so the fallback state here is never reached by a reified
     /// slider.
     pub(crate) fn initial_state(&self) -> SliderState {
-        self.validated().map_or_else(
-            |_| SliderState::from_validated(SliderRange::UNIT, 0.0, None, self.direction),
-            |config| {
-                SliderState::from_validated(
-                    config.range,
-                    config.default_value,
-                    config.step,
-                    self.direction,
-                )
-            },
-        )
+        self.validated().unwrap_or_else(|_| {
+            SliderState::from_validated(SliderRange::UNIT, 0.0, None, self.direction)
+        })
     }
-}
-
-/// A [`Slider`]'s authored numbers after panel-build validation.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ValidSliderConfig {
-    range:         SliderRange,
-    default_value: f32,
-    step:          Option<SliderStep>,
 }
 
 /// Applied runtime state of a reified slider widget.
@@ -400,10 +366,10 @@ impl SliderState {
     /// direction; the authored default does not alter an existing applied value
     /// and is therefore not compared.
     pub(crate) fn matches_configuration(&self, authored: &Slider) -> bool {
-        authored.validated().is_ok_and(|config| {
-            self.range == config.range
-                && self.step == config.step
-                && self.direction == authored.direction
+        authored.validated().is_ok_and(|initial| {
+            self.range == initial.range
+                && self.step == initial.step
+                && self.direction == initial.direction
         })
     }
 
@@ -718,20 +684,6 @@ enum SliderTerminal {
     Cancel(SliderCancelCause),
 }
 
-/// Where a reset-enabled pointer press began.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum PressOrigin {
-    Thumb,
-    Track,
-}
-
-/// Whether pointer motion remains within click jitter tolerance.
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum PressMotion {
-    WithinSlop,
-    Moved,
-}
-
 /// Release behavior selected when a pointer press begins.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ClickResolution {
@@ -739,38 +691,54 @@ enum ClickResolution {
     ResetDefault,
 }
 
+/// Where a pointer press began and whether it has left click-jitter tolerance.
+///
+/// Only a thumb press still inside [`THUMB_CLICK_JITTER_PIXELS_SQUARED`] can
+/// resolve as [`ClickResolution::ResetDefault`], so the resolution is stored in
+/// [`PressPhase::ThumbHeld`] rather than beside the origin as a separate field.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PressPhase {
+    /// The press landed on the track, so every drag position updates the raw
+    /// target.
+    Track,
+    /// The press landed on the marked thumb and has not moved beyond
+    /// [`THUMB_CLICK_JITTER_PIXELS_SQUARED`], so the applied value is held.
+    ThumbHeld(ClickResolution),
+    /// The press landed on the marked thumb and left that tolerance, so drag
+    /// positions update the raw target and no click resolution survives.
+    ThumbDragging,
+}
+
+/// The facts one slider press records, shared by a live drag and by a press
+/// awaiting recapture.
+struct SliderPress {
+    id:              PanelElementId,
+    camera:          Entity,
+    captured_target: NormalizedRenderTarget,
+    position:        Vec2,
+    value:           f32,
+    phase:           PressPhase,
+}
+
 /// Slider-only capture payload keyed by the captured widget entity.
 ///
 /// Pointer/widget occupancy and raw-action ordering live in the shared
 /// [`WidgetCaptures`]; this holds only the slider facts terminal emission and
-/// reprojection need: the panel-local id, the captured camera entity and
-/// normalized render target, the latest raw projected target, and the typed
-/// terminal outcome.
+/// reprojection need: the originating [`SliderPress`], the owning pointer, the
+/// latest raw projected target, and the typed terminal outcome.
 struct SliderCapture {
-    id:                PanelElementId,
+    press:             SliderPress,
     pointer_id:        PointerId,
-    camera:            Entity,
-    captured_target:   NormalizedRenderTarget,
-    press_position:    Vec2,
     latest_raw_target: f32,
-    press_origin:      PressOrigin,
-    press_motion:      PressMotion,
-    click_resolution:  ClickResolution,
     terminal:          SliderTerminal,
 }
 
 /// A projected slider press that shared occupancy rejected, awaiting recapture
 /// by the raw dispatcher once its pointer and widget free within the batch.
 struct PendingSliderPress {
-    entity:           Entity,
-    sequence:         u64,
-    id:               PanelElementId,
-    camera:           Entity,
-    captured_target:  NormalizedRenderTarget,
-    press_position:   Vec2,
-    value:            f32,
-    press_origin:     PressOrigin,
-    click_resolution: ClickResolution,
+    entity:   Entity,
+    sequence: u64,
+    press:    SliderPress,
 }
 
 /// Slider drag payloads and rejected-press pending records.
@@ -782,30 +750,13 @@ pub(crate) struct SliderCaptures {
 }
 
 impl SliderCaptures {
-    fn begin(
-        &mut self,
-        entity: Entity,
-        id: PanelElementId,
-        pointer_id: PointerId,
-        camera: Entity,
-        captured_target: NormalizedRenderTarget,
-        press_position: Vec2,
-        value: f32,
-        press_origin: PressOrigin,
-        click_resolution: ClickResolution,
-    ) {
+    fn begin(&mut self, entity: Entity, pointer_id: PointerId, press: SliderPress) {
         self.drags.insert(
             entity,
             SliderCapture {
-                id,
+                latest_raw_target: press.value,
+                press,
                 pointer_id,
-                camera,
-                captured_target,
-                press_position,
-                latest_raw_target: value,
-                press_origin,
-                press_motion: PressMotion::WithinSlop,
-                click_resolution,
                 terminal: SliderTerminal::Pending,
             },
         );
@@ -816,20 +767,20 @@ impl SliderCaptures {
     fn capture_context(&self, entity: Entity) -> Option<(Entity, NormalizedRenderTarget)> {
         self.drags
             .get(&entity)
-            .map(|capture| (capture.camera, capture.captured_target.clone()))
+            .map(|capture| (capture.press.camera, capture.press.captured_target.clone()))
     }
 
     fn update_raw_target(&mut self, entity: Entity, position: Vec2, value: f32) -> bool {
         let pointer_id = self.drags.get_mut(&entity).and_then(|capture| {
-            if capture.press_origin == PressOrigin::Thumb
-                && capture.press_motion == PressMotion::WithinSlop
-                && position.distance_squared(capture.press_position)
+            if let PressPhase::ThumbHeld(_) = capture.press.phase {
+                if position.distance_squared(capture.press.position)
                     <= THUMB_CLICK_JITTER_PIXELS_SQUARED
-            {
-                return None;
+                {
+                    return None;
+                }
+                capture.press.phase = PressPhase::ThumbDragging;
             }
             capture.latest_raw_target = value;
-            capture.press_motion = PressMotion::Moved;
             Some(capture.pointer_id)
         });
         if let Some(pointer_id) = pointer_id {
@@ -840,39 +791,40 @@ impl SliderCaptures {
         }
     }
 
-    fn observe_reset_press(
+    /// Records `phase`'s press for double-click reset tracking and returns it
+    /// with its [`ClickResolution`] resolved: a repeat thumb press on the same
+    /// pointer and widget resolves to [`ClickResolution::ResetDefault`].
+    fn resolve_press_phase(
         &mut self,
         pointer_id: PointerId,
         entity: Entity,
         count: u8,
-        press_origin: PressOrigin,
-    ) -> ClickResolution {
-        let resets = count >= 2
-            && press_origin == PressOrigin::Thumb
-            && self.reset_candidates.get(&pointer_id) == Some(&entity);
-        if press_origin == PressOrigin::Thumb {
-            self.reset_candidates.insert(pointer_id, entity);
-        } else {
+        phase: PressPhase,
+    ) -> PressPhase {
+        let PressPhase::ThumbHeld(_) = phase else {
             self.reset_candidates.remove(&pointer_id);
-        }
-        if resets {
+            return PressPhase::Track;
+        };
+        let resets = count >= 2 && self.reset_candidates.get(&pointer_id) == Some(&entity);
+        self.reset_candidates.insert(pointer_id, entity);
+        PressPhase::ThumbHeld(if resets {
             ClickResolution::ResetDefault
         } else {
             ClickResolution::Ordinary
-        }
+        })
     }
 
     fn preserves_click_value(&self, entity: Entity) -> Option<f32> {
         let capture = self.drags.get(&entity)?;
-        (capture.press_origin == PressOrigin::Thumb
-            && capture.press_motion == PressMotion::WithinSlop)
-            .then_some(capture.latest_raw_target)
+        matches!(capture.press.phase, PressPhase::ThumbHeld(_)).then_some(capture.latest_raw_target)
     }
 
     fn resets_on_click(&self, entity: Entity) -> bool {
         self.drags.get(&entity).is_some_and(|capture| {
-            capture.click_resolution == ClickResolution::ResetDefault
-                && capture.press_motion == PressMotion::WithinSlop
+            matches!(
+                capture.press.phase,
+                PressPhase::ThumbHeld(ClickResolution::ResetDefault)
+            )
         })
     }
 
@@ -942,6 +894,36 @@ impl SliderCaptures {
     pub(crate) fn is_empty(&self) -> bool { self.drags.is_empty() && self.pending.is_empty() }
 }
 
+/// The live slider facts pointer handling reads from one widget entity.
+#[derive(QueryData)]
+pub(super) struct SliderWidget {
+    widget: &'static PanelWidget,
+    kind:   &'static WidgetKind,
+    owner:  &'static WidgetOf,
+    state:  &'static SliderState,
+    slots:  &'static WidgetVisualSlots,
+}
+
+/// Everything [`present_slider_state`] reads from one slider entity: the
+/// authored declaration, the four state-appearance cascades, the applied value,
+/// the solved slots, and the live hover / focus / disabled / dragging flags.
+#[derive(QueryData)]
+pub(super) struct SliderPresentation {
+    authored:            &'static WidgetSpec,
+    hovered:             &'static Cascade<super::WidgetHoveredAppearance>,
+    pressed:             &'static Cascade<super::WidgetPressedAppearance>,
+    focused_appearance:  &'static Cascade<super::WidgetFocusedAppearance>,
+    disabled_appearance: &'static Cascade<super::WidgetDisabledAppearance>,
+    kind:                &'static WidgetKind,
+    owner:               &'static WidgetOf,
+    state:               &'static SliderState,
+    slots:               &'static WidgetVisualSlots,
+    interaction:         Option<&'static PickingInteraction>,
+    disabled:            Has<WidgetDisabled>,
+    focused:             Has<WidgetFocusVisible>,
+    dragging:            Has<SliderDrag>,
+}
+
 /// Live camera, panel, and window state for reprojecting a slider pointer.
 #[derive(SystemParam)]
 pub(crate) struct SliderProjection<'w, 's> {
@@ -971,10 +953,7 @@ impl SliderProjection<'_, '_> {
         captured_target: &NormalizedRenderTarget,
         viewport_position: Vec2,
         panel_entity: Entity,
-        content: BoundingBox,
-        thumb_extent: Option<f32>,
-        range: SliderRange,
-        direction: SliderDirection,
+        travel: SliderTravel,
     ) -> Result<(Vec2, f32), SliderCancelCause> {
         let Ok((camera, camera_transform, render_target)) = self.cameras.get(camera_entity) else {
             return Err(SliderCancelCause::ProjectionUnavailable);
@@ -994,9 +973,40 @@ impl SliderProjection<'_, '_> {
         let pointer_local =
             render::project_flat_panel_ray_hit(&captured_camera_ray, panel, panel_transform)
                 .map_err(|_| SliderCancelCause::ProjectionUnavailable)?;
-        let value = project_pointer_value(pointer_local, content, thumb_extent, range, direction)
-            .map_err(|_| SliderCancelCause::ProjectionUnavailable)?;
+        let value = project_pointer_value(
+            pointer_local,
+            travel.content,
+            travel.thumb_extent,
+            travel.range,
+            travel.direction,
+        )
+        .map_err(|_| SliderCancelCause::ProjectionUnavailable)?;
         Ok((pointer_local, value))
+    }
+}
+
+/// The solved geometry one slider projection reads: the slider root's content
+/// box, the marked thumb's active-axis extent, and the value range and
+/// direction the pointer coordinate maps through.
+#[derive(Clone, Copy)]
+struct SliderTravel {
+    content:      BoundingBox,
+    thumb_extent: Option<f32>,
+    range:        SliderRange,
+    direction:    SliderDirection,
+}
+
+impl SliderTravel {
+    /// Reads the geometry from the widget's solved slots, or `None` when the
+    /// [`VisualSlotId::SLIDER_ROOT`] slot solved no content box.
+    fn new(state: &SliderState, slots: &WidgetVisualSlots) -> Option<Self> {
+        let direction = state.direction();
+        Some(Self {
+            content: slots.content_box(VisualSlotId::SLIDER_ROOT)?,
+            thumb_extent: thumb_extent(slots, direction),
+            range: state.range(),
+            direction,
+        })
     }
 }
 
@@ -1010,27 +1020,6 @@ fn thumb_extent(slots: &WidgetVisualSlots, direction: SliderDirection) -> Option
     })
 }
 
-fn project_widget(
-    projection: &SliderProjection<'_, '_>,
-    camera: Entity,
-    captured_target: &NormalizedRenderTarget,
-    viewport_position: Vec2,
-    panel: Entity,
-    state: &SliderState,
-    slots: &WidgetVisualSlots,
-) -> Result<f32, SliderCancelCause> {
-    project_widget_hit(
-        projection,
-        camera,
-        captured_target,
-        viewport_position,
-        panel,
-        state,
-        slots,
-    )
-    .map(|(_, value)| value)
-}
-
 fn project_widget_hit(
     projection: &SliderProjection<'_, '_>,
     camera: Entity,
@@ -1040,19 +1029,10 @@ fn project_widget_hit(
     state: &SliderState,
     slots: &WidgetVisualSlots,
 ) -> Result<(Vec2, f32), SliderCancelCause> {
-    let Some(content) = slots.content_box(VisualSlotId::SLIDER_ROOT) else {
+    let Some(travel) = SliderTravel::new(state, slots) else {
         return Err(SliderCancelCause::ProjectionUnavailable);
     };
-    projection.project(
-        camera,
-        captured_target,
-        viewport_position,
-        panel,
-        content,
-        thumb_extent(slots, state.direction()),
-        state.range(),
-        state.direction(),
-    )
+    projection.project(camera, captured_target, viewport_position, panel, travel)
 }
 
 /// Presented thumb bounds in panel layout coordinates, expanded by a small
@@ -1158,25 +1138,7 @@ pub(super) fn present_slider_state(
             )>,
         ),
     >,
-    sliders: Query<
-        (
-            Entity,
-            &WidgetSpec,
-            &Cascade<super::WidgetHoveredAppearance>,
-            &Cascade<super::WidgetPressedAppearance>,
-            &Cascade<super::WidgetFocusedAppearance>,
-            &Cascade<super::WidgetDisabledAppearance>,
-            &WidgetKind,
-            &WidgetOf,
-            &SliderState,
-            &WidgetVisualSlots,
-            Option<&PickingInteraction>,
-            Has<WidgetDisabled>,
-            Has<WidgetFocusVisible>,
-            Has<SliderDrag>,
-        ),
-        With<WidgetOf>,
-    >,
+    sliders: Query<SliderPresentation, With<WidgetOf>>,
     kinds: Query<&WidgetKind, With<WidgetOf>>,
     panels: Query<&DiegeticPanel>,
     mut removed_interactions: RemovedComponents<PickingInteraction>,
@@ -1186,62 +1148,50 @@ pub(super) fn present_slider_state(
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    let mut dirty: HashSet<Entity> = changed
-        .iter()
-        .filter_map(|(entity, kind)| (*kind == WidgetKind::Slider).then_some(entity))
-        .collect();
-    dirty.extend(
+    let dirty = visual::dirty_widgets(
+        changed.iter().map(|(entity, kind)| (entity, *kind)),
         removed_interactions
             .read()
             .chain(removed_focus.read())
             .chain(removed_disabled.read())
-            .chain(removed_drags.read())
-            .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::Slider))),
+            .chain(removed_drags.read()),
+        &kinds,
+        WidgetKind::Slider,
     );
     for entity in dirty {
-        let Ok((
-            entity,
-            authored,
-            hovered,
-            pressed_appearance,
-            focused_appearance,
-            disabled_appearance,
-            kind,
-            widget_of,
-            state,
-            slots,
-            interaction,
-            disabled,
-            focused,
-            dragging,
-        )) = sliders.get(entity)
-        else {
+        let Ok(present) = sliders.get(entity) else {
             continue;
         };
-        if *kind != WidgetKind::Slider {
+        if *present.kind != WidgetKind::Slider {
             continue;
         }
-        let WidgetSpec::Slider(slider) = authored else {
+        let WidgetSpec::Slider(slider) = present.authored else {
             continue;
         };
+        let (state, slots, disabled, focused) = (
+            present.state,
+            present.slots,
+            present.disabled,
+            present.focused,
+        );
         let mut desired = WidgetVisualOverrides::default();
         desired.set_subtree_color(disabled.then_some(slider.disabled_color).flatten());
         let active = [
             focused.then_some(WidgetState::Focused),
             matches!(
-                interaction,
+                present.interaction,
                 Some(PickingInteraction::Hovered | PickingInteraction::Pressed)
             )
             .then_some(WidgetState::Hovered),
-            dragging.then_some(WidgetState::Pressed),
+            present.dragging.then_some(WidgetState::Pressed),
             disabled.then_some(WidgetState::Disabled),
         ];
-        let panel = panels.get(widget_of.panel()).ok();
+        let panel = panels.get(present.owner.panel()).ok();
         let appearance = WidgetStateCascades::new(
-            hovered,
-            pressed_appearance,
-            focused_appearance,
-            disabled_appearance,
+            present.hovered,
+            present.pressed,
+            present.focused_appearance,
+            present.disabled_appearance,
         );
         if slots.element_index(VisualSlotId::SLIDER_ROOT).is_some() {
             let root_override = appearance.resolve(&active, panel);
@@ -1282,26 +1232,12 @@ fn begin_drag(
     slider_captures: &mut SliderCaptures,
     commands: &mut Commands<'_, '_>,
     entity: Entity,
-    id: PanelElementId,
-    camera: Entity,
-    captured_target: NormalizedRenderTarget,
-    press_position: Vec2,
-    value: f32,
     pointer_id: PointerId,
-    press_origin: PressOrigin,
-    click_resolution: ClickResolution,
+    press: SliderPress,
 ) {
-    slider_captures.begin(
-        entity,
-        id.clone(),
-        pointer_id,
-        camera,
-        captured_target,
-        press_position,
-        value,
-        press_origin,
-        click_resolution,
-    );
+    let id = press.id.clone();
+    let value = press.value;
+    slider_captures.begin(entity, pointer_id, press);
     commands.entity(entity).insert(SliderDrag);
     commands.trigger(SliderGrabbed {
         entity,
@@ -1374,19 +1310,30 @@ pub(super) fn grab_from_pointer(
         WidgetSpec::Slider(slider)
             if slider.reset_behavior == SliderResetBehavior::DoubleClick
     );
-    let press_origin = if reset_enabled
-        && current_thumb_hit_bounds(slots, state).is_some_and(|thumb| thumb.contains(pointer_local))
-    {
-        PressOrigin::Thumb
-    } else {
-        PressOrigin::Track
-    };
-    let click_resolution =
-        slider_captures.observe_reset_press(press.pointer_id, entity, press.count, press_origin);
-    let value = if press_origin == PressOrigin::Thumb {
-        state.value()
-    } else {
-        projected_value
+    let landed_on_thumb = reset_enabled
+        && current_thumb_hit_bounds(slots, state)
+            .is_some_and(|thumb| thumb.contains(pointer_local));
+    let phase = slider_captures.resolve_press_phase(
+        press.pointer_id,
+        entity,
+        press.count,
+        if landed_on_thumb {
+            PressPhase::ThumbHeld(ClickResolution::Ordinary)
+        } else {
+            PressPhase::Track
+        },
+    );
+    let press_record = SliderPress {
+        id: widget.id().clone(),
+        camera,
+        captured_target,
+        position: viewport_position,
+        value: if landed_on_thumb {
+            state.value()
+        } else {
+            projected_value
+        },
+        phase,
     };
     let Some(sequence) = captures.observe_press(press.pointer_id, entity) else {
         return;
@@ -1396,14 +1343,8 @@ pub(super) fn grab_from_pointer(
             &mut slider_captures,
             &mut commands,
             entity,
-            widget.id().clone(),
-            camera,
-            captured_target,
-            viewport_position,
-            value,
             press.pointer_id,
-            press_origin,
-            click_resolution,
+            press_record,
         );
     } else {
         slider_captures.record_pending(
@@ -1411,13 +1352,7 @@ pub(super) fn grab_from_pointer(
             PendingSliderPress {
                 entity,
                 sequence,
-                id: widget.id().clone(),
-                camera,
-                captured_target,
-                press_position: viewport_position,
-                value,
-                press_origin,
-                click_resolution,
+                press: press_record,
             },
         );
     }
@@ -1427,13 +1362,7 @@ pub(super) fn grab_from_pointer(
 /// when the drag position no longer projects.
 pub(super) fn drag_from_pointer(
     mut drag: On<Pointer<Drag>>,
-    widgets: Query<(
-        &PanelWidget,
-        &WidgetKind,
-        &WidgetOf,
-        &SliderState,
-        &WidgetVisualSlots,
-    )>,
+    widgets: Query<SliderWidget>,
     projection: SliderProjection,
     captures: Res<WidgetCaptures>,
     mut slider_captures: ResMut<SliderCaptures>,
@@ -1443,10 +1372,10 @@ pub(super) fn drag_from_pointer(
         return;
     }
     let entity = drag.event_target();
-    let Ok((widget, kind, widget_of, state, slots)) = widgets.get(entity) else {
+    let Ok(slider) = widgets.get(entity) else {
         return;
     };
-    if *kind != WidgetKind::Slider {
+    if *slider.kind != WidgetKind::Slider {
         return;
     }
     drag.propagate(false);
@@ -1456,20 +1385,20 @@ pub(super) fn drag_from_pointer(
     let Some((camera, captured_target)) = slider_captures.capture_context(entity) else {
         return;
     };
-    match project_widget(
+    match project_widget_hit(
         &projection,
         camera,
         &captured_target,
         drag.pointer_location.position,
-        widget_of.panel(),
-        state,
-        slots,
+        slider.owner.panel(),
+        slider.state,
+        slider.slots,
     ) {
-        Ok(value) => {
+        Ok((_, value)) => {
             if slider_captures.update_raw_target(entity, drag.pointer_location.position, value) {
                 commands.trigger(SliderChangeRequested {
                     entity,
-                    id: widget.id().clone(),
+                    id: slider.widget.id().clone(),
                     value,
                     is_final: false,
                     pointer_id: Some(drag.pointer_id),
@@ -1484,13 +1413,7 @@ pub(super) fn drag_from_pointer(
 
 pub(super) fn release_from_pointer(
     mut release: On<Pointer<Release>>,
-    widgets: Query<(
-        &PanelWidget,
-        &WidgetKind,
-        &WidgetOf,
-        &SliderState,
-        &WidgetVisualSlots,
-    )>,
+    widgets: Query<SliderWidget>,
     projection: SliderProjection,
     captures: Res<WidgetCaptures>,
     mut slider_captures: ResMut<SliderCaptures>,
@@ -1500,10 +1423,10 @@ pub(super) fn release_from_pointer(
         return;
     }
     let entity = release.event_target();
-    let Ok((_, kind, ..)) = widgets.get(entity) else {
+    let Ok(slider) = widgets.get(entity) else {
         return;
     };
-    if *kind != WidgetKind::Slider {
+    if *slider.kind != WidgetKind::Slider {
         return;
     }
     release.propagate(false);
@@ -1564,13 +1487,7 @@ pub(super) fn reset_from_pointer(
 
 pub(super) fn release_from_drag_end(
     mut drag_end: On<Pointer<DragEnd>>,
-    widgets: Query<(
-        &PanelWidget,
-        &WidgetKind,
-        &WidgetOf,
-        &SliderState,
-        &WidgetVisualSlots,
-    )>,
+    widgets: Query<SliderWidget>,
     projection: SliderProjection,
     captures: Res<WidgetCaptures>,
     mut slider_captures: ResMut<SliderCaptures>,
@@ -1580,10 +1497,10 @@ pub(super) fn release_from_drag_end(
         return;
     }
     let entity = drag_end.event_target();
-    let Ok((_, kind, ..)) = widgets.get(entity) else {
+    let Ok(slider) = widgets.get(entity) else {
         return;
     };
-    if *kind != WidgetKind::Slider {
+    if *slider.kind != WidgetKind::Slider {
         return;
     }
     if !captures.captures(drag_end.pointer_id, entity) {
@@ -1609,25 +1526,15 @@ pub(super) fn release_from_drag_end(
 pub(super) fn resolve_release(
     entity: Entity,
     viewport_position: Vec2,
-    widgets: &Query<
-        '_,
-        '_,
-        (
-            &PanelWidget,
-            &WidgetKind,
-            &WidgetOf,
-            &SliderState,
-            &WidgetVisualSlots,
-        ),
-    >,
+    widgets: &Query<'_, '_, SliderWidget>,
     projection: &SliderProjection<'_, '_>,
     slider_captures: &mut SliderCaptures,
     commands: &mut Commands<'_, '_>,
 ) -> bool {
-    let Ok((_, kind, widget_of, state, slots)) = widgets.get(entity) else {
+    let Ok(slider) = widgets.get(entity) else {
         return false;
     };
-    if *kind != WidgetKind::Slider {
+    if *slider.kind != WidgetKind::Slider {
         return false;
     }
     let Some((camera, captured_target)) = slider_captures.capture_context(entity) else {
@@ -1636,16 +1543,16 @@ pub(super) fn resolve_release(
     let recorded = if let Some(value) = slider_captures.preserves_click_value(entity) {
         slider_captures.set_release(entity, value)
     } else {
-        match project_widget(
+        match project_widget_hit(
             projection,
             camera,
             &captured_target,
             viewport_position,
-            widget_of.panel(),
-            state,
-            slots,
+            slider.owner.panel(),
+            slider.state,
+            slider.slots,
         ) {
-            Ok(value) => slider_captures.set_release(entity, value),
+            Ok((_, value)) => slider_captures.set_release(entity, value),
             Err(cause) => slider_captures.cancel(entity, cause),
         }
     };
@@ -1826,27 +1733,12 @@ pub(super) fn capture_reconciled_press(
     {
         return;
     }
-    let PendingSliderPress {
-        id,
-        camera,
-        captured_target,
-        press_position,
-        value,
-        press_origin,
-        click_resolution,
-        ..
-    } = pending;
-    world.resource_mut::<SliderCaptures>().begin(
-        entity,
-        id.clone(),
-        pointer_id,
-        camera,
-        captured_target,
-        press_position,
-        value,
-        press_origin,
-        click_resolution,
-    );
+    let PendingSliderPress { press, .. } = pending;
+    let id = press.id.clone();
+    let value = press.value;
+    world
+        .resource_mut::<SliderCaptures>()
+        .begin(entity, pointer_id, press);
     world.entity_mut(entity).insert(SliderDrag);
     world.trigger(SliderGrabbed {
         entity,
@@ -1878,11 +1770,14 @@ fn emit_slider_terminal(mut world: DeferredWorld, context: HookContext) {
         warn!(
             "slider {:?} ({entity}) has an active drag but no capture owner; skipping terminal \
              events",
-            capture.id
+            capture.press.id
         );
         return;
     };
-    let SliderCapture { id, terminal, .. } = capture;
+    let SliderCapture {
+        press, terminal, ..
+    } = capture;
+    let id = press.id;
     match terminal {
         SliderTerminal::Release(value) => {
             capture::trigger_immediate(

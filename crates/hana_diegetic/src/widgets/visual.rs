@@ -18,12 +18,14 @@
 //! record for an unauthored fill, border, image, text, or panel-line role.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use bevy::prelude::*;
 
 use super::PanelWidget;
 use super::StateAppearance;
 use super::VisualElementCapabilities;
+use super::WidgetKind;
 use super::WidgetOf;
 use crate::DiegeticPanel;
 use crate::layout::BoundingBox;
@@ -336,6 +338,26 @@ impl WidgetVisualOverrides {
     }
 
     fn element_overrides(&self) -> &[(usize, VisualSlotOverride)] { &self.elements }
+}
+
+/// Collects the widgets of `kind` whose presentation inputs moved this frame.
+///
+/// `changed` carries the entities a per-widget `Changed` filter matched and
+/// `removed` the entities drained from that widget's [`RemovedComponents`]
+/// streams; a removal names an entity with no live component to read, so its
+/// kind comes from `kinds` instead. Both are consumed here, so a quiet frame
+/// never walks the live widgets.
+pub(crate) fn dirty_widgets(
+    changed: impl Iterator<Item = (Entity, WidgetKind)>,
+    removed: impl Iterator<Item = Entity>,
+    kinds: &Query<&WidgetKind, With<WidgetOf>>,
+    kind: WidgetKind,
+) -> HashSet<Entity> {
+    let mut dirty: HashSet<Entity> = changed
+        .filter_map(|(entity, changed_kind)| (changed_kind == kind).then_some(entity))
+        .collect();
+    dirty.extend(removed.filter(|&entity| kinds.get(entity) == Ok(&kind)));
+    dirty
 }
 
 /// Resolves sparse part appearances onto their retained-record recipients.

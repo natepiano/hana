@@ -12,11 +12,9 @@ use bevy::picking::pointer::PointerInput;
 use bevy::prelude::*;
 
 use super::PanelWidget;
-use super::SliderState;
 use super::WidgetDisabled;
 use super::WidgetKind;
 use super::WidgetOf;
-use super::WidgetVisualSlots;
 use super::button;
 use super::button::ButtonCancelCause;
 use super::button::ButtonCaptures;
@@ -24,6 +22,7 @@ use super::slider;
 use super::slider::SliderCancelCause;
 use super::slider::SliderCaptures;
 use super::slider::SliderProjection;
+use super::slider::SliderWidget;
 
 /// One occupancy entry: the widget a pointer owns and the checked
 /// attempted-press sequence number that accepted it.
@@ -205,13 +204,7 @@ pub(super) fn reconcile_pointer_input(
     hover_map: Res<HoverMap>,
     picking_settings: Res<PickingSettings>,
     widgets: Query<(&WidgetKind, Has<WidgetDisabled>), (With<PanelWidget>, With<WidgetOf>)>,
-    sliders: Query<(
-        &PanelWidget,
-        &WidgetKind,
-        &WidgetOf,
-        &SliderState,
-        &WidgetVisualSlots,
-    )>,
+    sliders: Query<SliderWidget>,
     slider_projection: SliderProjection,
     mut captures: ResMut<WidgetCaptures>,
     mut button_captures: ResMut<ButtonCaptures>,

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
 use std::sync::Arc;
@@ -179,17 +178,15 @@ pub(super) fn present_button_state(
     mut overrides: Query<&mut WidgetVisualOverrides>,
     mut commands: Commands,
 ) {
-    let mut dirty: HashSet<Entity> = changed
-        .iter()
-        .filter_map(|(entity, kind)| (*kind == WidgetKind::Button).then_some(entity))
-        .collect();
-    dirty.extend(
+    let dirty = visual::dirty_widgets(
+        changed.iter().map(|(entity, kind)| (entity, *kind)),
         removed_interactions
             .read()
             .chain(removed_focus.read())
             .chain(removed_disabled.read())
-            .chain(removed_presses.read())
-            .filter(|&entity| matches!(kinds.get(entity), Ok(WidgetKind::Button))),
+            .chain(removed_presses.read()),
+        &kinds,
+        WidgetKind::Button,
     );
     for entity in dirty {
         let Ok((

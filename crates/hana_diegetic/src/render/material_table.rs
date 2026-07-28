@@ -2469,6 +2469,77 @@ mod tests {
         assert_eq!(builder.freeze().row_count(), 1);
     }
 
+    #[derive(Resource)]
+    struct ProbeKeys {
+        offset: u32,
+        count:  u32,
+    }
+
+    fn probe_write_rows(keys: Res<ProbeKeys>, mut build: ResMut<FrameMaterialTableBuild>) {
+        let values = MaterialSlotValues::from(&StandardMaterial::default());
+        for index in 0..keys.count {
+            let _ = build
+                .builder_mut()
+                .upsert_values(MaterialSourceKey::Test(keys.offset + index), values);
+        }
+    }
+
+    fn probe_report(build: Res<FrameMaterialTableBuild>, table_buffer: Res<MaterialTableBuffer>) {
+        println!(
+            "PROBE device_row_limit={} active_capacity={} builder_row_limit={} entries={} \
+             live={} dropped={} required={}",
+            build.row_limit(),
+            table_buffer.capacity,
+            build.builder.row_limit,
+            build.table().row_count(),
+            build.table().live_row_count(),
+            build.dropped_record_count(),
+            build.required_row_count(),
+        );
+    }
+
+    #[test]
+    fn probe_rekey_drop() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Assets::<ShaderBuffer>::default())
+            .init_resource::<FrameMaterialTableBuild>()
+            .init_resource::<MaterialTableBuffer>()
+            .insert_resource(ProbeKeys {
+                offset: 0,
+                count:  100,
+            })
+            .add_systems(
+                Update,
+                (
+                    activate_prepared_material_table_buffer,
+                    clear_frame_material_table,
+                    probe_write_rows,
+                    freeze_frame_material_table,
+                    ensure_material_table_buffer_handle,
+                    probe_report,
+                )
+                    .chain(),
+            );
+
+        println!("-- frame 1: 100 sources, keys 0..100 (no buffer yet)");
+        app.update();
+        println!("-- frame 2: same 100 keys");
+        app.update();
+        println!("-- frame 3: full re-key, 100 fresh keys 10_000..10_100");
+        app.world_mut().resource_mut::<ProbeKeys>().offset = 10_000;
+        app.update();
+        println!("-- frame 4: same fresh keys");
+        app.update();
+        println!("-- frame 5");
+        app.update();
+        println!("-- frame 6: second full re-key 20_000..20_100");
+        app.world_mut().resource_mut::<ProbeKeys>().offset = 20_000;
+        app.update();
+        println!("-- frame 7");
+        app.update();
+    }
+
     #[test]
     fn configured_row_limit_is_applied_by_frame_build_clear() {
         let mut app = App::new();

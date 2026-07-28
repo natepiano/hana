@@ -850,46 +850,44 @@ impl<L> El<L, WidgetElement<Slider>> {
     /// Sets the slider's authored default value.
     ///
     /// See [`Slider::value`].
-    pub fn value(self, value: f32) -> Self {
-        self.configure_slider(|slider| slider.set_value(value))
-    }
+    pub fn value(self, value: f32) -> Self { self.configure_slider(|slider| slider.value(value)) }
 
     /// Sets the slider's step interval.
     ///
     /// See [`Slider::step`].
-    pub fn step(self, step: f32) -> Self { self.configure_slider(|slider| slider.set_step(step)) }
+    pub fn step(self, step: f32) -> Self { self.configure_slider(|slider| slider.step(step)) }
 
     /// Sets the direction in which slider values increase.
     ///
     /// See [`Slider::direction`].
     pub fn direction(self, direction: SliderDirection) -> Self {
-        self.configure_slider(|slider| slider.set_direction(direction))
+        self.configure_slider(|slider| slider.direction(direction))
     }
 
     /// Sets the optional thumb gesture that proposes the authored default.
     ///
     /// See [`Slider::reset_behavior`].
     pub fn reset_behavior(self, reset_behavior: SliderResetBehavior) -> Self {
-        self.configure_slider(|slider| slider.set_reset_behavior(reset_behavior))
+        self.configure_slider(|slider| slider.reset_behavior(reset_behavior))
     }
 
     /// Sets the marked thumb's border color while keyboard focus is visible.
     ///
     /// See [`Slider::focused_thumb_border_color`].
     pub fn focused_thumb_border_color(self, color: Color) -> Self {
-        self.configure_slider(|slider| slider.set_focused_thumb_border_color(color))
+        self.configure_slider(|slider| slider.focused_thumb_border_color(color))
     }
 
     /// Sets the color applied to every authored slider visual while disabled.
     ///
     /// See [`Slider::disabled_color`].
     pub fn disabled_color(self, color: Color) -> Self {
-        self.configure_slider(|slider| slider.set_disabled_color(color))
+        self.configure_slider(|slider| slider.disabled_color(color))
     }
 
-    fn configure_slider(mut self, configure: impl FnOnce(&mut Slider)) -> Self {
+    fn configure_slider(mut self, configure: impl FnOnce(Slider) -> Slider) -> Self {
         if let Some(WidgetSpec::Slider(slider)) = self.widget_mut() {
-            configure(slider);
+            *slider = configure(slider.clone());
         }
         self
     }

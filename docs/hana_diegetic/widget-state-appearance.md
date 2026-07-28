@@ -270,7 +270,7 @@ This is a shape change only — no resolution behavior moves in this phase, and 
 - **Delegation Context** and every remaining phase had their file/line references re-verified against the post-Phase-2 tree; the test-count floor moved from 1100 to **1107 passed / 2 skipped**.
 - **Retrospective corrected:** the claim that a slider drag marks part appearance changed was wrong. Reification is gated on `Changed<ComputedDiegeticPanel>` and re-inserts slots only on inequality, and a drag does not relayout. The coupling runs the other way — re-authoring dirties the slots component and wakes a full index rebuild.
 
-### Phase 3 — Element override channel and dirty-entity presentation · status: done (`39590160`)
+### Phase 3 — Element override channel and dirty-entity presentation · status: done (`3d21f5bd`)
 
 #### Work Order
 
@@ -577,7 +577,7 @@ Re-keying across the transition is **already free and needs no work here.** The 
 - **Phase 4:** `EditableField` is the zero-sized owner marker, `El::editable_field` returns `El<L, WidgetElement<EditableField>>`, and `EditableField` implements `WidgetOwner` but **not** `Widget` — so `pressed` is unavailable on its parts by construction and must stay unavailable on the generated ones.
 - **Phase 5:** part appearance is validated per property in `validate_tree`'s stack walk against a capability mask; the four generated parts are validated the same way once their bundles land in the tree.
 - **Phase 2:** the part map is re-derived from the tree on every compute and replaced wholesale, so renumbering across the display↔editor transition re-keys itself; `editable_tree_replacement_rekeys_part_appearance_entries` already covers it.
-- **Phase 3:** presentation resolves every recipient, so a generated part with a bundle presents with no presenter change. `Changed<WidgetVisualSlots>` is already a dirty-set term in all three presenters (`button.rs:149`, `editable.rs:40`, `slider.rs:1152`), so the regenerated editor tree re-runs resolution against the new element indices on its own — **do not add a redundant wake source or a transition observer.** The presenters also merge-walk `WidgetVisualSlots::elements` against `part_appearances` assuming both are ascending by element index and never re-sort, so the four generated parts must be inserted in that order.
+- **Phase 3:** presentation resolves every recipient, so a generated part with a bundle presents with no presenter change. `Changed<WidgetVisualSlots>` is already a dirty-set term in all three presenters (`button.rs:149`, `editable.rs:40`, `slider.rs:1132`), so the regenerated editor tree re-runs resolution against the new element indices on its own — **do not add a redundant wake source or a transition observer.** The presenters also merge-walk `WidgetVisualSlots::elements` against `part_appearances` assuming both are ascending by element index and never re-sort, so the four generated parts must be inserted in that order.
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
@@ -842,7 +842,7 @@ Presentation does not read `Resolved<…>` yet — that is Phase 10.
 Resolution is **two-stage**, because `Cascade<T>` and `Resolved<T>` are per-entity components while parts are layout indices on one widget entity — a single `Resolved<T>` cannot carry a distinct value per part, and spawning an entity per part would add roughly eight entities, their relationships, and eight cascade components each per slider.
 
 1. `CascadePlugin` resolves **global → panel → widget** on the widget entity, over the four attribute types (already wired in Phase 9).
-2. Presentation resolves **part against widget** by reference: each sparse map entry is a part-local `Cascade<…>` resolved against the widget's `Resolved<…>`, through **one typed helper** rather than precedence spelled out in each presenter. **That helper already exists.** Phase 3 shipped `widgets::visual::resolve_part_overrides` (`widgets/visual.rs:347`), called identically by all three presenters (`button.rs:235`, `editable.rs:121`, `slider.rs:1252`) — it is already the single part-resolution seam. Extend it to take the four `&Resolved<Widget*Appearance>` as parameters. **Do not write a second helper in `src/cascade/`**: that duplicates the seam Phase 3 established and leaves the three presenters resolving through two different paths.
+2. Presentation resolves **part against widget** by reference: each sparse map entry is a part-local `Cascade<…>` resolved against the widget's `Resolved<…>`, through **one typed helper** rather than precedence spelled out in each presenter. **That helper already exists.** Phase 3 shipped `widgets::visual::resolve_part_overrides` (`widgets/visual.rs:347`), called identically by all three presenters (`button.rs:235`, `editable.rs:121`, `slider.rs:1202`) — it is already the single part-resolution seam. Extend it to take the four `&Resolved<Widget*Appearance>` as parameters. **Do not write a second helper in `src/cascade/`**: that duplicates the seam Phase 3 established and leaves the three presenters resolving through two different paths.
 
 **Then, and only then,** layer the active states in `LAYER_ORDER` (`widgets/appearance.rs:382`, `[Focused, Hovered, Pressed, Disabled]`) and build the record override. The two axes must not be interleaved.
 
@@ -873,7 +873,7 @@ This phase must additionally:
 **Files:**
 - `src/widgets/visual.rs:347` — extend Phase 3's existing `resolve_part_overrides` (the part-against-widget seam) to take the four `&Resolved<Widget*Appearance>`; invert the no-part-entry skip (`:362-367`); read `VisualElementCapabilities` at `:355` instead of discarding it. **No new helper in `src/cascade/`.**
 - `src/widgets/mod.rs:238-268` and `:299-307` — presentation ordering after `Propagate` and `ReifyCommandsApplied`.
-- `src/widgets/button.rs:235`, `src/widgets/slider.rs:1252`, `src/widgets/editable.rs:121` — the three `resolve_part_overrides` call sites; each passes the four `&Resolved<…>` and gains four `Changed<Resolved<…>>` dirty inputs. **Query-signature changes only** — the resolution logic stays in `visual.rs`.
+- `src/widgets/button.rs:235`, `src/widgets/slider.rs:1202`, `src/widgets/editable.rs:121` — the three `resolve_part_overrides` call sites; each passes the four `&Resolved<…>` and gains four `Changed<Resolved<…>>` dirty inputs. **Query-signature changes only** — the resolution logic stays in `visual.rs`.
 - `src/widgets/appearance.rs:243-365` — add the resolved-side state view alongside the authored `WidgetStateCascades<'a>` (`:258`) and share one `LAYER_ORDER` (`:382`) fold between them. `resolve` (`:326`) composes the merged bundles in `LAYER_ORDER` after level resolution, not during it. **This is a smaller change than it sounds**, though not for the reason previously recorded here: Phase 3 rewrote `resolve`, and it does **not** layer against an `Appearance::default()` accumulator. It accumulates four `Option<&T>` per-property winners across the `LAYER_ORDER` loop (`:335`) and builds a `VisualSlotOverride` directly (`:331-362`), taking `panel: Option<&DiegeticPanel>` for border-width conversion. It does already keep the two axes separate. What changes is only where each layer comes from — the resolved bundles passed in, instead of `layer(state)` (`:289`) reading this record's own `Cascade`s. Do not rewrite the layering algorithm.
 - `docs/hana_diegetic/widgets-deferred.md` — the four documentation edits above.
 
@@ -888,15 +888,15 @@ This phase must additionally:
 **Pending decision:** which override channel carries the widget level.
 
 Actual problem:
-Phase 3 gave `WidgetVisualOverrides` two channels — per-element overrides (`set_element` `widgets/visual.rs:318`, read back via `element_overrides` `:338`) and the older whole-slot overrides. `dispatch_visual_overrides` composes them in that order: the slot override is the baseline, the element override lays over it per property via `apply_element` (`:207`, applied at `:524-538`). This phase writes the resolved widget-level bundle to every recipient but never says **which of those two channels it uses**, and the slider still writes its root as a *slot* today (`slider.rs:1246-1250`). Phase 11's focus-border rework silently depends on the answer.
+Phase 3 gave `WidgetVisualOverrides` two channels — per-element overrides (`set_element` `widgets/visual.rs:318`, read back via `element_overrides` `:338`) and the older whole-slot overrides. `dispatch_visual_overrides` composes them in that order: the slot override is the baseline, the element override lays over it per property via `apply_element` (`:207`, applied at `:524-538`). This phase writes the resolved widget-level bundle to every recipient but never says **which of those two channels it uses**, and the slider still writes its root as a *slot* today (`slider.rs:1196-1199`). Phase 11's focus-border rework silently depends on the answer.
 
 What exists now:
 - `apply` (`:193`) and `apply_element` (`:207`) are both per-property `overlay.or(self)` — an overlay that names `border_color` replaces it, one that leaves it `Unchanged` preserves what was underneath.
-- The slider writes `SLIDER_ROOT` through the slot channel (`slider.rs:1246-1250`); nothing yet writes a widget-level bundle through the element channel.
+- The slider writes `SLIDER_ROOT` through the slot channel (`slider.rs:1196-1199`); nothing yet writes a widget-level bundle through the element channel.
 - Phase 11's three focus-border bullets ("a disabled `border_color: To(…)` replaces it, `Unchanged` preserves it, an element overlay without `offset` leaves the thumb translation alone") describe exactly what `apply_element` already does.
 
 What should change — pick one:
-- **Element channel.** The widget-level resolved bundle is written per recipient through `set_element`. Composition against the authored slot baseline is then the existing `apply_element` path, so Phase 11's focus-border rework collapses to deleting the `!(disabled && slider.disabled_color.is_some())` guard at `slider.rs:1271-1272` — the behavior it currently hand-rolls is inherited.
+- **Element channel.** The widget-level resolved bundle is written per recipient through `set_element`. Composition against the authored slot baseline is then the existing `apply_element` path, so Phase 11's focus-border rework collapses to deleting the `!(disabled && slider.disabled_color.is_some())` guard at `slider.rs:1221-1222` — the behavior it currently hand-rolls is inherited.
 - **Root slot.** The widget-level bundle composes at slot granularity, matching how the slider writes its root today. Phase 11 must then implement the focus-border interaction itself rather than inheriting it, and this phase must say how a widget-level slot override and a part-level element override compose on the same element.
 
 Recommendation:
@@ -937,7 +937,7 @@ Approve this direction, or modify it?
 
 **Spec:**
 
-Delete `Slider::disabled_color` — the field (`widgets/slider.rs:173`), its constructor default (`:192`), its builder method (`:234`), its crate-internal setter (`:255`), its `El` forward, and its test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` (`:5379`). Delete `WidgetVisualOverrides::subtree_color` (`widgets/visual.rs:265`), `set_subtree_color` (`:272`), the getter (`:277`), the seeding loop in `slider.rs:1228`, and its consumption in `dispatch_visual_overrides` (`visual.rs:513-523`).
+Delete `Slider::disabled_color` — the field (`widgets/slider.rs:173`), its constructor default (`:192`), its builder method (`:234`), its `El` forward (`layout/builder.rs:883-886`), and its test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` (`:5274`). **There is no crate-internal setter** — an earlier revision of this Work Order claimed one at `slider.rs:255`; that line is inside `fn validated()` and no `set_disabled_color` exists anywhere in the crate. Delete `WidgetVisualOverrides::subtree_color` (`widgets/visual.rs:265`), `set_subtree_color` (`:272`), the getter (`:277`), the `set_subtree_color` seeding call in `slider.rs:1178`, and its consumption in `dispatch_visual_overrides` (`visual.rs:513-523`).
 
 With its only production producer gone, delete `VisualSlotOverride::color` (`visual.rs:171`), its overlay logic, and the `with_color` test helper (`:220`); move the text, image, and draw-primitive consumers to `content_color`. **The overlay logic is now two methods, not one** — `apply` (`:193`, the only one that names `color`) and `apply_element` (`:207`), both added or reworked by Phase 3; edit both.
 
@@ -948,7 +948,7 @@ With its only production producer gone, delete `VisualSlotOverride::color` (`vis
 - a disabled `border_color: Unchanged` **preserves** it,
 - an element overlay without `offset` leaves the thumb translation alone.
 
-**Phase 3 already satisfies all three, provided Phase 10 routes the widget level through the element channel.** `apply_element` (`visual.rs:207`, applied at `:524-538`) is per-property `overlay.or(self)`: a named `border_color` replaces, an `Unchanged` one preserves, and `offset` is untouched because the overlay never names it. If Phase 10's pending decision lands on the element channel, this section's remaining work is a **deletion** — remove the `!(disabled && slider.disabled_color.is_some())` guard at `slider.rs:1271-1272` — not a rewrite. If it lands on the root slot instead, compose the layer by hand as originally written. Check Phase 10's resolved decision before starting.
+**Phase 3 already satisfies all three, provided Phase 10 routes the widget level through the element channel.** `apply_element` (`visual.rs:207`, applied at `:524-538`) is per-property `overlay.or(self)`: a named `border_color` replaces, an `Unchanged` one preserves, and `offset` is untouched because the overlay never names it. If Phase 10's pending decision lands on the element channel, this section's remaining work is a **deletion** — remove the `!(disabled && slider.disabled_color.is_some())` guard at `slider.rs:1221-1222` — not a rewrite. If it lands on the root slot instead, compose the layer by hand as originally written. Check Phase 10's resolved decision before starting.
 
 Convert `examples/widgets.rs`'s slider (`add_slider` `:1200`, `.disabled_color` use `:1162`) to author its parts explicitly.
 
@@ -959,10 +959,10 @@ Convert `examples/widgets.rs`'s slider (`add_slider` `:1200`, `.disabled_color` 
 - add one incompatible case asserting **only the affected members migrate**.
 
 **Files:**
-- `src/widgets/slider.rs` — delete `disabled_color` (field `:173`, default `:192`, builder `:234`, crate-internal setter `:255`) and the subtree seeding loop (`:1228`); rework focus-border composition in `present_slider_state` (`:1141`), which under the element-channel outcome means deleting the guard at `:1271-1272`; delete the `:5379` test.
+- `src/widgets/slider.rs` — delete `disabled_color` (field `:173`, default `:192`, builder `:234`; there is no crate-internal setter) and the `set_subtree_color` seeding call (`:1178`); rework focus-border composition in `present_slider_state` (`:1121`), which under the element-channel outcome means deleting the guard at `:1221-1222`; delete the `:5274` test.
 - `src/widgets/visual.rs` — delete `subtree_color` (`:265`, `set_subtree_color` `:272`, getter `:277`), `VisualSlotOverride::color` (`:171`) and its overlay logic in **both** `apply` (`:193`) and `apply_element` (`:207`), the subtree branch of `dispatch_visual_overrides` (`:513-523`, keeping the map at `:512`), and `with_color` (`:220`). Phase 3 added seven `with_color` sites in this file, including tests at `:860`, `:900`, `:940` with assertions at `:1060-1138` that read `VisualSlotOverride::color` — they migrate to `content_color` with the rest.
 - `src/render/panel_text/batching.rs`, `src/render/panel_text/reify.rs`, `src/render/panel_shapes/batching.rs`, `src/render/analytic_paths/batching.rs`, `src/render/fill_batch.rs:1359`, `src/widgets/tooltip.rs`, `src/widgets/reify.rs` — move remaining `color` consumers to `content_color`. `with_color` has roughly 29 call sites across these seven files; the last three were absent from this list before Phase 3's review.
-- `src/layout/builder.rs` — remove the `disabled_color` forward.
+- `src/layout/builder.rs:883-886` — remove the `disabled_color` forward.
 - `examples/widgets.rs:1162`, `:1200` — author slider parts explicitly.
 
 **Constraints from prior phases:**
@@ -984,6 +984,66 @@ Convert `examples/widgets.rs`'s slider (`add_slider` `:1200`, `.disabled_color` 
 - The example's final resolved overrides for root, track, thumb, and label are asserted **exactly** — the headless harness produces no pixels, so visual equality is not a gate.
 - Material churn: a compatible label/track/thumb transition causes no batch-key move and no batch entity creation; an incompatible one migrates only the affected retained members.
 
+### Phase 12 — Stable material keys: no dropped material rows · status: todo
+
+#### Work Order
+
+**Goal:** No frame ever renders a surface whose material row was dropped. The material-table drop path becomes unreachable in normal operation, so `warn_material_table_drops` firing is a defect signal rather than expected growth noise.
+
+**Spec:**
+
+**The defect.** `SdfMaterialSourceKey` (`render/fill_batch.rs:167-175`) identifies a material row by `command_index: CommandIndex` — a slot number in the panel's `LayoutResult::commands` vector (`render/draw_order.rs:30-33`). It is the key into `source_slots: HashMap<MaterialSourceKey, MaterialSlotId>` (`render/material_table.rs:545`), which maps a source to its row in the GPU material table. Because the field is positional, inserting or removing one command shifts every later index, so every later surface presents a key the map has never seen and claims a **fresh** row while its old row is still pinned by `retire_unseen_sources` (`:708-725`, `MATERIAL_SLOT_RETIREMENT_FRAMES = 2` at `:115`). That frame needs 2× the live row count.
+
+The append window is clamped to the **active GPU buffer capacity**, not the device cap: `clear_frame_material_table` (`:1213-1222`) calls `clear_with_active_capacity` (`:786`) whenever a buffer handle exists, and the drop guard at `:617-632` tests `entries.len() < row_limit` against that. Capacity starts at 128 rows and grows one power-of-two step with a **one-frame lag** — `ensure_material_table_buffer_handle` stages into `pending` (`:1265-1268`) and `activate_prepared_material_table_buffer` (`:1205-1211`) promotes it at the start of the next frame. So the frame that first needs the larger buffer is the frame that drops, and every dropped surface renders that frame with `INVALID_GPU_MATERIAL_SLOT` (`:71`).
+
+Measured on a headless probe — 100 sources held constant, keys fully re-keyed at frame 3:
+
+```
+frame 2  active_capacity=128  entries=100  live=100  dropped= 0  required=100
+frame 3  active_capacity=128  entries=128  live= 28  dropped=72  required=200   <-- drop frame
+frame 4  active_capacity=256  entries=200  live=100  dropped= 0  required=200
+frame 6  active_capacity=256  entries=200  live=100  dropped= 0  required=200   <-- second re-key, no drop
+```
+
+Frame 6 is the evidence that capacity ≥ 2× live makes re-keys free. Frame 3 is the flash.
+
+**Four changes, all required.** Any one alone leaves a reachable drop path.
+
+1. **Key on identity, not position.** Replace the `command_index` field with the element's `PanelElementId` (`ime/ids.rs:85`), already stored on every `Element` as `id: Option<PanelElementId>` (`layout/element.rs:108`) and readable via `element_id` (`:679`). Keep `panel` and `role`.
+
+2. **Make `Auto` ids structural.** `PanelElementId::Auto` is minted from a flat per-build counter (`layout/builder.rs:1229-1231`, `:1290`), so an unnamed element's auto id shifts on insertion exactly as the index did — change 1 alone fixes only *named* elements. Derive the auto id from the element's path through the layout tree instead of build order, so inserting a sibling above an unnamed element leaves that element's id unchanged.
+
+3. **Remove the growth lag.** A cold start with more surfaces than the initial 128-row capacity drops on frame 1 regardless of key stability, and a panel respawn changes `panel: Entity` and re-keys wholesale no matter what changes 1 and 2 do. Either promote a grown buffer in the same frame it is staged, or stop clamping the CPU append window to the active capacity and truncate the *upload* instead at `encode_material_table_upload` (`:1390-1399`) / `padded_rows` (`:509-517`). Both remove the drop; the second costs one frame of stale rows for the overflow.
+
+4. **Widen the growth headroom.** `CAPACITY_HEADROOM_DIVISOR = 8` (`:114`, applied at `:826`) reserves 12.5%; a wholesale re-key needs ~100%. Raise it so a re-key of the current live set fits without growing.
+
+**Named risk — `Named(String)` in a per-frame hash key.** `PanelElementId::Named` holds a `String` (`ime/ids.rs:87`). After change 1 that string is hashed once per SDF surface per frame in the render path, where the current key hashes a `usize`. Intern element ids to a `u32` handle for the render-side key, or measure and accept the cost — do not ship an unmeasured `String` hash into the per-frame loop.
+
+**Drop-count amplification (verify, do not assume).** `append_sdf_record_materials` (`render/fill_batch.rs:998-1034`) is atomic per surface: if `Border` hits the limit after `Fill` succeeded it calls `rollback_assignments_after` (`:1010`, `:1026`), returning the slot to `retired` with `reusable_at_frame: self.frame` — immediately reusable (`:665-668`). At the limit the next surface claims that freed slot for `Fill` and fails on `Border`, so `dropped_records` may increment once per surface rather than once per missing row, inflating the warned number. This is inferred from the code, not measured. Confirm or refute it while writing the zero-drop tests; if real, the gate below still holds, since the target is zero.
+
+**Files:**
+- `src/render/fill_batch.rs:167-175` — `SdfMaterialSourceKey`: `command_index` → element identity. `:998-1034` — the paired Fill/Border append and its rollback path; all key construction sites move with the field.
+- `src/render/material_table.rs` — `:114` `CAPACITY_HEADROOM_DIVISOR`; `:509-517` `padded_rows`; `:545` `source_slots`; `:617-632` the drop guard; `:786` `clear_with_active_capacity` and `:1213-1222` its caller; `:1205-1211` / `:1265-1268` the stage-then-promote lag; `:1390-1399` upload encoding; `:1417-1425` `warn_material_table_drops`.
+- `src/layout/builder.rs:1229-1231`, `:1290` — auto-id minting becomes structural.
+- `src/ime/ids.rs:85-103` — `PanelElementId`; add the interned render-side handle if that is the chosen answer to the named risk.
+- `src/layout/element.rs:108`, `:679` — element id storage and accessor.
+- `src/render/draw_order.rs:30-33` — `CommandIndex` loses this consumer; delete it only if no other consumer remains.
+
+**Constraints from prior phases:**
+- **Independent of phases 1-11.** This is a render-layer defect in material-row identity; no widget appearance behavior depends on it and it gates none of the earlier phases. It is sequenced last because Phase 11 edits `render/fill_batch.rs:1359` and the seven-file `content_color` migration, and this phase should start from that settled tree.
+- **Phase 11:** `VisualSlotOverride::color` is gone and all consumers read `content_color`. Do not reintroduce a `color` read while touching the batching files.
+
+**Acceptance gate:**
+- `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
+- `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic`
+- `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
+- `bash ~/.claude/scripts/delegate/verify.sh example hana_diegetic widgets`
+- **Zero drops under wholesale re-key.** A headless test drives a full re-key of a live source set across several frames and asserts `dropped_record_count() == 0` on **every** frame, including the re-key frame. The existing `probe_rekey_drop` test in `render::material_table::tests` is this test's starting point — it currently *demonstrates* the 72-row drop; it is promoted to a regression test asserting zero.
+- **Zero drops on cold-start growth.** A test whose first frame requires more rows than the initial capacity asserts zero drops on that first frame — this is the case key stability alone does not cover.
+- **Zero drops on panel respawn.** A test that despawns and respawns a panel with the same content asserts zero drops across the transition, since the `panel: Entity` field re-keys every row regardless of element identity.
+- **Element identity survives insertion.** Inserting an element above an existing **unnamed** element leaves that element's resolved material key unchanged. Assert on the key, not on the row count — a stable row count with shifted keys passes by accident.
+- **Warn reachability.** `warn_material_table_drops` (`:1417-1425`) stays a `warn!`, not `warn_once!`. With drops unreachable, one firing is a defect, and demoting it would hide the regression this phase exists to prevent.
+
 ## Outstanding items
 
 <!-- Project state outside the phase spine. Not dispatched by /plan:delegate. -->
@@ -991,6 +1051,5 @@ Convert `examples/widgets.rs`'s slider (`add_slider` `:1200`, `.disabled_color` 
 - **Uncommitted work.** Three rounds sat uncommitted on `feature/widgets` at `2f12a56d` — the `apply_state_appearance` / `_with` renames, the editable-field state fix (hover and disabled present on fields; `pressed_*` gated behind `HasPressedState`) with four new tests and a trybuild case, and the `HasPressedState` doc comment. These landed as `64f8bdc0`, which is current `HEAD`.
 - **`docs/hana_diegetic/widgets.md`** — done. Rewritten as `docs/hana_diegetic/as-built/widgets.md`, current-state only (state appearance described as the four `Appearance` verbs, not the removed flat builders), and the old phased plan deleted. Inbound links in `surface-panels.md` and `widgets-deferred.md` repointed.
 - **Widget demonstration checkpoint.** The retired widget plan ended with an undelivered discussion phase: decide with the owner how to demonstrate the whole widget system working together — buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and IME/text input coexisting on one panel — and name both the live demonstration and the deterministic integration gate, including the tooltip's final retained transform after first reveal and after a replacement creates a fresh controller. `examples/widgets.rs` is the cumulative baseline; do not reopen which example owns that path, remove either input-integration proof, replace the diagnostic rows, or change the established picking policies.
-- **`cargo mend`.** Never run on this branch; it is the first step of the `/clippy` workflow.
 - **`WidgetElement<ImeEditableFieldSpec>`** — settled by Phase 4's `EditableField` marker.
 - **`HasPressedState`** — name accepted as-is.
