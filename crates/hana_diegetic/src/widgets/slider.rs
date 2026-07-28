@@ -2013,6 +2013,7 @@ mod tests {
     use crate::AlignX;
     use crate::AlignY;
     use crate::Anchor;
+    use crate::Appearance;
     use crate::Border;
     use crate::ButtonClicked;
     use crate::ButtonPressed;
@@ -5309,8 +5310,8 @@ mod tests {
             &mut app,
             thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
                 element
-                    .hovered_background(STATE_HOVER_FILL)
-                    .focused_border_color(STATE_FOCUS_BORDER)
+                    .hovered(Appearance::new().background(STATE_HOVER_FILL))
+                    .focused(Appearance::new().border_color(STATE_FOCUS_BORDER))
             }),
         );
         app.update();
@@ -5437,7 +5438,7 @@ mod tests {
             El::new()
                 .size(40.0, 16.0)
                 .widget("level", plain_slider(0.5))
-                .hovered_background(Color::WHITE),
+                .hovered(Appearance::new().background(Color::WHITE)),
             |_| {},
         );
         assert!(matches!(
@@ -5452,7 +5453,7 @@ mod tests {
                 .size(40.0, 16.0)
                 .background(Color::WHITE)
                 .widget("level", plain_slider(0.5))
-                .hovered_border_color(Color::WHITE),
+                .hovered(Appearance::new().border_color(Color::WHITE)),
             |_| {},
         );
         assert!(matches!(
@@ -5467,7 +5468,7 @@ mod tests {
                 .size(40.0, 16.0)
                 .background(Color::WHITE)
                 .widget("level", plain_slider(0.5))
-                .focused_border_width(Px(2.0)),
+                .focused(Appearance::new().border_width(Px(2.0))),
             |_| {},
         );
         assert!(matches!(
@@ -5481,7 +5482,7 @@ mod tests {
             El::new()
                 .size(40.0, 16.0)
                 .widget("level", plain_slider(0.5))
-                .hovered_material(Handle::<StandardMaterial>::default()),
+                .hovered(Appearance::new().material(Handle::<StandardMaterial>::default())),
             |_| {},
         );
         assert!(matches!(
@@ -5494,9 +5495,9 @@ mod tests {
     /// Hover, press, and focus layers shared by the peer-isolation trees.
     fn apply_state_appearance<L>(element: SliderElement<L>) -> SliderElement<L> {
         element
-            .hovered_background(STATE_HOVER_FILL)
-            .pressed_background(STATE_PRESS_FILL)
-            .focused_border_color(STATE_FOCUS_BORDER)
+            .hovered(Appearance::new().background(STATE_HOVER_FILL))
+            .pressed(Appearance::new().background(STATE_PRESS_FILL))
+            .focused(Appearance::new().border_color(STATE_FOCUS_BORDER))
     }
 
     /// A slider element in child layout `L`.
@@ -5516,11 +5517,14 @@ mod tests {
     /// element.
     fn apply_all_state_layers<L>(element: SliderElement<L>) -> SliderElement<L> {
         element
-            .focused_background(STATE_FOCUS_FILL)
-            .focused_border_color(STATE_FOCUS_BORDER)
-            .hovered_background(STATE_HOVER_FILL)
-            .pressed_background(STATE_PRESS_FILL)
-            .disabled_border_color(STATE_DISABLED_BORDER)
+            .focused(
+                Appearance::new()
+                    .background(STATE_FOCUS_FILL)
+                    .border_color(STATE_FOCUS_BORDER),
+            )
+            .hovered(Appearance::new().background(STATE_HOVER_FILL))
+            .pressed(Appearance::new().background(STATE_PRESS_FILL))
+            .disabled(Appearance::new().border_color(STATE_DISABLED_BORDER))
     }
 
     /// A slider whose marked thumb is authored at the content-box center — away
@@ -6280,7 +6284,7 @@ mod tests {
         let panel = spawn_panel(
             &mut app,
             thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
-                element.pressed_background(STATE_PRESS_FILL)
+                element.pressed(Appearance::new().background(STATE_PRESS_FILL))
             }),
         );
         app.update();
@@ -6325,8 +6329,8 @@ mod tests {
             &mut app,
             thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
                 element
-                    .hovered_background(STATE_HOVER_FILL)
-                    .pressed_background(STATE_PRESS_FILL)
+                    .hovered(Appearance::new().background(STATE_HOVER_FILL))
+                    .pressed(Appearance::new().background(STATE_PRESS_FILL))
             }),
         );
         app.update();
@@ -6374,7 +6378,7 @@ mod tests {
         let panel = spawn_panel(
             &mut app,
             headless_slider_tree_with("level", plain_slider(0.5), |element| {
-                element.hovered_background(STATE_HOVER_FILL)
+                element.hovered(Appearance::new().background(STATE_HOVER_FILL))
             }),
         );
         app.update();
@@ -6410,7 +6414,7 @@ mod tests {
         let panel = spawn_panel(
             &mut app,
             thumb_slider_tree_with("level", plain_slider(0.5), 8.0, |element| {
-                element.hovered_background(STATE_HOVER_FILL)
+                element.hovered(Appearance::new().background(STATE_HOVER_FILL))
             }),
         );
         app.update();
@@ -6481,7 +6485,7 @@ mod tests {
             El::new()
                 .size(40.0, 16.0)
                 .widget("level", plain_slider(0.5))
-                .hovered_background(Color::WHITE),
+                .hovered(Appearance::new().background(Color::WHITE)),
             |_| {},
         );
         assert!(matches!(
@@ -6496,7 +6500,7 @@ mod tests {
                 .size(40.0, 16.0)
                 .background(Color::WHITE)
                 .widget("level", plain_slider(0.5))
-                .hovered_border_color(Color::WHITE),
+                .hovered(Appearance::new().border_color(Color::WHITE)),
             |_| {},
         );
         assert!(matches!(
@@ -6511,7 +6515,7 @@ mod tests {
                 .size(40.0, 16.0)
                 .background(Color::WHITE)
                 .widget("level", plain_slider(0.5))
-                .focused_border_width(Px(2.0)),
+                .focused(Appearance::new().border_width(Px(2.0))),
             |_| {},
         );
         assert!(matches!(
@@ -6527,7 +6531,7 @@ mod tests {
             El::new()
                 .size(40.0, 16.0)
                 .widget("level", plain_slider(0.5))
-                .hovered_material(Handle::<StandardMaterial>::default()),
+                .hovered(Appearance::new().material(Handle::<StandardMaterial>::default())),
             |_| {},
         );
         assert!(matches!(

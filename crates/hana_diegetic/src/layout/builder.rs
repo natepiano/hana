@@ -64,6 +64,7 @@ use crate::PanelElementId;
 use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::Appearance;
 use crate::widgets::Button;
 use crate::widgets::ButtonClicked;
 use crate::widgets::Slider;
@@ -71,11 +72,13 @@ use crate::widgets::SliderDirection;
 use crate::widgets::SliderResetBehavior;
 use crate::widgets::StateAppearance;
 use crate::widgets::Tooltip;
-use crate::widgets::VisualChange;
 use crate::widgets::VisualSlotId;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
 use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetPressedAppearance;
 use crate::widgets::WidgetSpec;
-use crate::widgets::WidgetState;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -145,12 +148,12 @@ impl Widget for Slider {
 
 /// A widget kind that can be held — a button press or a slider drag.
 ///
-/// Only these elements carry the `pressed_*` state builders. Widgets that are
+/// Only these elements carry the [`El::pressed`] state builder. Widgets that are
 /// never held have no pressed state to author: an input text box takes a caret
 /// and keystrokes, a read-only value readout is not grabbed at all, and a
 /// scrolling log is driven by its content rather than by a pointer hold. Those
 /// kinds still reach hover, focus, and disabled, and author only those layers;
-/// their elements do not expose `pressed_*` at all, so authoring a layer that
+/// their elements do not expose [`El::pressed`] at all, so authoring a layer that
 /// would never present is a compile error rather than a silent no-op.
 pub trait HasPressedState: Widget {}
 
@@ -780,120 +783,34 @@ impl<L, W> El<L, WidgetElement<W>> {
         self
     }
 
-    /// Sets the root background color shown while a pointer hovers this widget.
+    /// Sets the appearance while a pointer hovers this widget.
     ///
-    /// Requires an authored [`El::background`].
-    pub fn hovered_background(self, color: Color) -> Self {
-        self.set_background(WidgetState::Hovered, color)
-    }
-
-    /// Sets the root background color shown while this widget's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::background`].
-    pub fn focused_background(self, color: Color) -> Self {
-        self.set_background(WidgetState::Focused, color)
-    }
-
-    /// Sets the root background color shown while this widget is disabled.
-    ///
-    /// Requires an authored [`El::background`].
-    pub fn disabled_background(self, color: Color) -> Self {
-        self.set_background(WidgetState::Disabled, color)
-    }
-
-    /// Sets the root border color shown while a pointer hovers this widget.
-    ///
-    /// Requires an authored [`El::border`]; border radii stay as authored.
-    pub fn hovered_border_color(self, color: Color) -> Self {
-        self.set_border_color(WidgetState::Hovered, color)
-    }
-
-    /// Sets the root border color shown while this widget's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Requires an authored [`El::border`]; border radii stay as authored.
-    pub fn focused_border_color(self, color: Color) -> Self {
-        self.set_border_color(WidgetState::Focused, color)
-    }
-
-    /// Sets the root border color shown while this widget is disabled.
-    ///
-    /// Requires an authored [`El::border`]; border radii stay as authored.
-    pub fn disabled_border_color(self, color: Color) -> Self {
-        self.set_border_color(WidgetState::Disabled, color)
-    }
-
-    /// Sets the root border width shown while a pointer hovers this widget.
-    ///
-    /// Applies to all four sides and requires an authored [`El::border`]. The
-    /// border grows inward, so the element's outer bounds and solved layout are
-    /// unchanged.
-    pub fn hovered_border_width(self, width: impl Into<Dimension>) -> Self {
-        self.set_border_width(WidgetState::Hovered, width.into())
-    }
-
-    /// Sets the root border width shown while this widget's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Applies to all four sides and requires an authored [`El::border`]. The
-    /// border grows inward, so the element's outer bounds and solved layout are
-    /// unchanged.
-    pub fn focused_border_width(self, width: impl Into<Dimension>) -> Self {
-        self.set_border_width(WidgetState::Focused, width.into())
-    }
-
-    /// Sets the root border width shown while this widget is disabled.
-    ///
-    /// Applies to all four sides and requires an authored [`El::border`]. The
-    /// border grows inward, so the element's outer bounds and solved layout are
-    /// unchanged.
-    pub fn disabled_border_width(self, width: impl Into<Dimension>) -> Self {
-        self.set_border_width(WidgetState::Disabled, width.into())
-    }
-
-    /// Sets the root material shown while a pointer hovers this widget.
-    ///
-    /// Covers the authored fill and border, and requires an authored root
-    /// surface — [`El::background`] or [`El::border`].
-    pub fn hovered_material(self, material: Handle<StandardMaterial>) -> Self {
-        self.set_material(WidgetState::Hovered, material)
-    }
-
-    /// Sets the root material shown while this widget's keyboard focus
-    /// indicator is visible.
-    ///
-    /// Covers the authored fill and border, and requires an authored root
-    /// surface — [`El::background`] or [`El::border`].
-    pub fn focused_material(self, material: Handle<StandardMaterial>) -> Self {
-        self.set_material(WidgetState::Focused, material)
-    }
-
-    /// Sets the root material shown while this widget is disabled.
-    ///
-    /// Covers the authored fill and border, and requires an authored root
-    /// surface — [`El::background`] or [`El::border`].
-    pub fn disabled_material(self, material: Handle<StandardMaterial>) -> Self {
-        self.set_material(WidgetState::Disabled, material)
-    }
-
-    fn set_background(mut self, state: WidgetState, color: Color) -> Self {
-        self.appearance_mut().layer_mut(state).background = VisualChange::To(color);
+    /// See [`Appearance`] for each property's retained record and ordinary
+    /// declaration requirement.
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn hovered(mut self, appearance: Appearance) -> Self {
+        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
         self
     }
 
-    fn set_border_color(mut self, state: WidgetState, color: Color) -> Self {
-        self.appearance_mut().layer_mut(state).border_color = VisualChange::To(color);
+    /// Sets the appearance while this widget's keyboard focus indicator is visible.
+    ///
+    /// See [`Appearance`] for each property's retained record and ordinary
+    /// declaration requirement.
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn focused(mut self, appearance: Appearance) -> Self {
+        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
         self
     }
 
-    fn set_border_width(mut self, state: WidgetState, width: Dimension) -> Self {
-        self.appearance_mut().layer_mut(state).border_width = VisualChange::To(width);
-        self
-    }
-
-    fn set_material(mut self, state: WidgetState, material: Handle<StandardMaterial>) -> Self {
-        self.appearance_mut().layer_mut(state).material = VisualChange::To(material);
+    /// Sets the appearance while this widget is disabled.
+    ///
+    /// See [`Appearance`] for each property's retained record and ordinary
+    /// declaration requirement.
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn disabled(mut self, appearance: Appearance) -> Self {
+        self.appearance_mut().disabled =
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 
@@ -905,39 +822,14 @@ impl<L, W> El<L, WidgetElement<W>> {
 }
 
 impl<L, W: HasPressedState> El<L, WidgetElement<W>> {
-    /// Sets the root background color shown while this widget is held — a
-    /// button press or a slider drag.
+    /// Sets the appearance while this widget is held by a button press or slider drag.
     ///
-    /// Requires an authored [`El::background`].
-    pub fn pressed_background(self, color: Color) -> Self {
-        self.set_background(WidgetState::Pressed, color)
-    }
-
-    /// Sets the root border color shown while this widget is held — a button
-    /// press or a slider drag.
-    ///
-    /// Requires an authored [`El::border`]; border radii stay as authored.
-    pub fn pressed_border_color(self, color: Color) -> Self {
-        self.set_border_color(WidgetState::Pressed, color)
-    }
-
-    /// Sets the root border width shown while this widget is held — a button
-    /// press or a slider drag.
-    ///
-    /// Applies to all four sides and requires an authored [`El::border`]. The
-    /// border grows inward, so the element's outer bounds and solved layout are
-    /// unchanged.
-    pub fn pressed_border_width(self, width: impl Into<Dimension>) -> Self {
-        self.set_border_width(WidgetState::Pressed, width.into())
-    }
-
-    /// Sets the root material shown while this widget is held — a button press
-    /// or a slider drag.
-    ///
-    /// Covers the authored fill and border, and requires an authored root
-    /// surface — [`El::background`] or [`El::border`].
-    pub fn pressed_material(self, material: Handle<StandardMaterial>) -> Self {
-        self.set_material(WidgetState::Pressed, material)
+    /// See [`Appearance`] for each property's retained record and ordinary
+    /// declaration requirement.
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn pressed(mut self, appearance: Appearance) -> Self {
+        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
+        self
     }
 }
 
@@ -1418,5 +1310,23 @@ impl LayoutTree {
             parent,
             el.into_element(ElementContent::Image { handle, tint }),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::El;
+    use crate::Appearance;
+    use crate::cascade::Cascade;
+
+    #[test]
+    fn explicit_empty_hovered_appearance_is_a_cascade_override() {
+        let element = El::new().button("action").hovered(Appearance::new());
+        let appearance = element.common.appearance.unwrap_or_default();
+
+        assert!(matches!(appearance.hovered, Cascade::Override(_)));
+        assert!(matches!(appearance.pressed, Cascade::Inherit));
+        assert!(matches!(appearance.focused, Cascade::Inherit));
+        assert!(matches!(appearance.disabled, Cascade::Inherit));
     }
 }

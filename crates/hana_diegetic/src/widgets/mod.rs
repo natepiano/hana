@@ -14,8 +14,12 @@ mod slider;
 mod tooltip;
 mod visual;
 
+pub use appearance::Appearance;
 pub(crate) use appearance::StateAppearance;
-pub(crate) use appearance::VisualChange;
+pub use appearance::WidgetDisabledAppearance;
+pub use appearance::WidgetFocusedAppearance;
+pub use appearance::WidgetHoveredAppearance;
+pub use appearance::WidgetPressedAppearance;
 pub(crate) use appearance::WidgetState;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;

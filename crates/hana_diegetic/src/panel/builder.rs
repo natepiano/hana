@@ -966,6 +966,7 @@ mod tests {
     use bevy_kana::Cascade;
 
     use super::PanelBuildError;
+    use crate::Appearance;
     use crate::Border;
     use crate::DiegeticPanel;
     use crate::El;
@@ -1178,7 +1179,7 @@ mod tests {
                 builder.with(
                     El::new()
                         .button("action")
-                        .hovered_background(Color::srgb(0.2, 0.4, 0.8)),
+                        .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
                     |_| {},
                 );
             })
@@ -1200,7 +1201,7 @@ mod tests {
                     El::new()
                         .background(Color::srgb(0.1, 0.1, 0.1))
                         .button("action")
-                        .focused_border_color(Color::srgb(0.9, 0.8, 0.2)),
+                        .focused(Appearance::new().border_color(Color::srgb(0.9, 0.8, 0.2))),
                     |_| {},
                 );
             })
@@ -1221,7 +1222,7 @@ mod tests {
                 builder.with(
                     El::new()
                         .editable_field("name", field_spec())
-                        .focused_border_color(Color::srgb(0.9, 0.8, 0.2)),
+                        .focused(Appearance::new().border_color(Color::srgb(0.9, 0.8, 0.2))),
                     |_| {},
                 );
             })
@@ -1242,7 +1243,7 @@ mod tests {
                 builder.with(
                     El::new()
                         .button("action")
-                        .pressed_material(Handle::default()),
+                        .pressed(Appearance::new().material(Handle::default())),
                     |_| {},
                 );
             })
@@ -1265,9 +1266,9 @@ mod tests {
                         .background(Color::srgb(0.1, 0.1, 0.1))
                         .border(Border::all(1.0, Color::srgb(0.4, 0.4, 0.4)))
                         .button("action")
-                        .hovered_background(Color::srgb(0.2, 0.4, 0.8))
-                        .focused_border_color(Color::srgb(0.9, 0.8, 0.2))
-                        .pressed_material(Handle::default()),
+                        .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8)))
+                        .focused(Appearance::new().border_color(Color::srgb(0.9, 0.8, 0.2)))
+                        .pressed(Appearance::new().material(Handle::default())),
                     |_| {},
                 );
             })

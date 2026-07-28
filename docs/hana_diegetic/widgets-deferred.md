@@ -1,6 +1,6 @@
 # Widgets V2: Presets and Themes
 
-> **Status: DEFERRED.** Design this only after applications have used the direct button, slider, and tooltip authoring APIs together. The current widget plan remains in [`widgets.md`](widgets.md).
+> **Status: DEFERRED.** Design this only after applications have used the direct button, slider, and tooltip authoring APIs together. What is built today is recorded in [`as-built/widgets.md`](as-built/widgets.md).
 
 ## Why this is deferred
 

@@ -881,6 +881,7 @@ mod tests {
     use super::handle_semantic_intent;
     use super::press_from_pointer;
     use super::release_from_pointer;
+    use crate::Appearance;
     use crate::Border;
     use crate::Button;
     use crate::CascadeEntityCommandsExt;
@@ -2955,7 +2956,7 @@ mod tests {
                     .background(NORMAL_FILL)
                     .border(Border::all(1.0, NORMAL_BORDER))
                     .button(id)
-                    .hovered_background(hover),
+                    .hovered(Appearance::new().background(hover)),
                 |_| {},
             );
         }
@@ -3009,7 +3010,9 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
+            button_tree_with(BUTTON_ID, |element| {
+                element.hovered(Appearance::new().background(HOVER_FILL))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3047,8 +3050,8 @@ mod tests {
             &mut app,
             button_tree_with(BUTTON_ID, |element| {
                 element
-                    .hovered_border_color(FOCUS_BORDER)
-                    .pressed_material(material.clone())
+                    .hovered(Appearance::new().border_color(FOCUS_BORDER))
+                    .pressed(Appearance::new().material(material.clone()))
             }),
         );
         app.update();
@@ -3092,7 +3095,7 @@ mod tests {
                 .background(NORMAL_FILL)
                 .border(Border::all(Px(0.0), FOCUS_BORDER))
                 .button(BUTTON_ID)
-                .focused_border_width(Px(3.0)),
+                .focused(Appearance::new().border_width(Px(3.0))),
             |_| {},
         );
         let panel = spawn_panel(&mut app, tree.build());
@@ -3117,7 +3120,9 @@ mod tests {
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.focused_border_width(Px(3.0))),
+            button_tree_with(BUTTON_ID, |element| {
+                element.focused(Appearance::new().border_width(Px(3.0)))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3161,11 +3166,14 @@ mod tests {
             &mut app,
             button_tree_with(BUTTON_ID, |element| {
                 element
-                    .focused_background(FOCUS_FILL)
-                    .focused_border_color(FOCUS_BORDER)
-                    .hovered_background(HOVER_FILL)
-                    .pressed_background(PRESS_FILL)
-                    .disabled_border_color(DISABLED_BORDER)
+                    .focused(
+                        Appearance::new()
+                            .background(FOCUS_FILL)
+                            .border_color(FOCUS_BORDER),
+                    )
+                    .hovered(Appearance::new().background(HOVER_FILL))
+                    .pressed(Appearance::new().background(PRESS_FILL))
+                    .disabled(Appearance::new().border_color(DISABLED_BORDER))
             }),
         );
         app.update();
@@ -3238,7 +3246,9 @@ mod tests {
 
         let mut background_only = LayoutBuilder::new(100.0, 50.0);
         background_only.with(
-            El::new().button(BUTTON_ID).hovered_background(HOVER_FILL),
+            El::new()
+                .button(BUTTON_ID)
+                .hovered(Appearance::new().background(HOVER_FILL)),
             |_| {},
         );
         let result = app
@@ -3256,7 +3266,7 @@ mod tests {
             El::new()
                 .background(NORMAL_FILL)
                 .button(BUTTON_ID)
-                .hovered_border_color(FOCUS_BORDER),
+                .hovered(Appearance::new().border_color(FOCUS_BORDER)),
             |_| {},
         );
         let result = app
@@ -3274,7 +3284,7 @@ mod tests {
             El::new()
                 .background(NORMAL_FILL)
                 .button(BUTTON_ID)
-                .focused_border_width(Px(2.0)),
+                .focused(Appearance::new().border_width(Px(2.0))),
             |_| {},
         );
         let result = app
@@ -3291,7 +3301,7 @@ mod tests {
         material_only.with(
             El::new()
                 .button(BUTTON_ID)
-                .disabled_material(Handle::default()),
+                .disabled(Appearance::new().material(Handle::default())),
             |_| {},
         );
         let result = app
@@ -3355,7 +3365,9 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
+            button_tree_with(BUTTON_ID, |element| {
+                element.hovered(Appearance::new().background(HOVER_FILL))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3384,7 +3396,9 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.pressed_background(PRESS_FILL)),
+            button_tree_with(BUTTON_ID, |element| {
+                element.pressed(Appearance::new().background(PRESS_FILL))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3433,7 +3447,7 @@ mod tests {
                 .border(Border::all(1.0, NORMAL_BORDER))
                 .button(id);
             let element = match focus_border {
-                Some(color) => element.focused_border_color(color),
+                Some(color) => element.focused(Appearance::new().border_color(color)),
                 None => element,
             };
             tree.with(element, |_| {});
@@ -3495,9 +3509,9 @@ mod tests {
             &mut app,
             button_tree_with(BUTTON_ID, |element| {
                 element
-                    .hovered_background(HOVER_FILL)
-                    .pressed_background(PRESS_FILL)
-                    .focused_border_color(FOCUS_BORDER)
+                    .hovered(Appearance::new().background(HOVER_FILL))
+                    .pressed(Appearance::new().background(PRESS_FILL))
+                    .focused(Appearance::new().border_color(FOCUS_BORDER))
             }),
         );
         app.update();
@@ -3608,7 +3622,7 @@ mod tests {
         let panel = spawn_panel(
             &mut app,
             button_tree_with(BUTTON_ID, |element| {
-                element.focused_border_color(FOCUS_BORDER)
+                element.focused(Appearance::new().border_color(FOCUS_BORDER))
             }),
         );
         app.update();
@@ -3645,9 +3659,11 @@ mod tests {
         let panel = spawn_panel(
             &mut app,
             button_tree_with(BUTTON_ID, |element| {
-                element
-                    .disabled_background(DISABLED_FILL)
-                    .disabled_border_color(DISABLED_BORDER)
+                element.disabled(
+                    Appearance::new()
+                        .background(DISABLED_FILL)
+                        .border_color(DISABLED_BORDER),
+                )
             }),
         );
         app.update();
@@ -3721,7 +3737,9 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
+            button_tree_with(BUTTON_ID, |element| {
+                element.hovered(Appearance::new().background(HOVER_FILL))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3760,7 +3778,9 @@ mod tests {
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
+            button_tree_with(BUTTON_ID, |element| {
+                element.hovered(Appearance::new().background(HOVER_FILL))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3834,7 +3854,9 @@ mod tests {
         let mut app = integrated_test_app();
         let panel = spawn_panel(
             &mut app,
-            button_tree_with(BUTTON_ID, |element| element.hovered_background(HOVER_FILL)),
+            button_tree_with(BUTTON_ID, |element| {
+                element.hovered(Appearance::new().background(HOVER_FILL))
+            }),
         );
         app.update();
         let widget = resolve_widget(&mut app, panel);
@@ -3893,7 +3915,7 @@ mod tests {
             button_tree_with(BUTTON_ID, |element| {
                 element
                     .on_click(record_callback_click)
-                    .hovered_background(HOVER_FILL)
+                    .hovered(Appearance::new().background(HOVER_FILL))
             }),
         );
         app.update();

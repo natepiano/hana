@@ -12,6 +12,7 @@ fn typestate_helper_signatures_compile() {
 fn tooltip_typestate_signatures_compile() {
     let test_cases = trybuild::TestCases::new();
     test_cases.pass("tests/trybuild/pass/tooltip_typestate.rs");
+    test_cases.pass("tests/trybuild/pass/widget_state_appearance.rs");
     test_cases.compile_fail("tests/trybuild/fail/editable_widget_*.rs");
     test_cases.compile_fail("tests/trybuild/fail/tooltip_*.rs");
 }

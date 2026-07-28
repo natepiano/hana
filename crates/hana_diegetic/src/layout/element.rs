@@ -1585,6 +1585,7 @@ mod tests {
     use super::LayoutTree;
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
+    use crate::Appearance;
     use crate::CalloutCap;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
@@ -1953,13 +1954,13 @@ mod tests {
             El::new()
                 .background(Color::WHITE)
                 .button("action")
-                .hovered_background(Color::srgb(0.2, 0.4, 0.8)),
+                .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
         );
         let next = root_tree(
             El::new()
                 .background(Color::WHITE)
                 .button("action")
-                .hovered_background(Color::srgb(0.8, 0.4, 0.2)),
+                .hovered(Appearance::new().background(Color::srgb(0.8, 0.4, 0.2))),
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);

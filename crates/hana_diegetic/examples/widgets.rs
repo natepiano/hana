@@ -46,6 +46,7 @@ use fairy_dust::cube_face_transform;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
+use hana_diegetic::Appearance;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
 use hana_diegetic::ButtonCanceled;
@@ -1188,9 +1189,11 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
             "Press D to toggle this control and the slider",
         )),
         |element| {
-            element
-                .disabled_background(BUTTON_FILL_DISABLED)
-                .disabled_border_color(BUTTON_BORDER_DISABLED)
+            element.disabled(
+                Appearance::new()
+                    .background(BUTTON_FILL_DISABLED)
+                    .border_color(BUTTON_BORDER_DISABLED),
+            )
         },
     );
     add_slider(&mut builder, slider, slider_tooltip);
@@ -1449,10 +1452,13 @@ type ButtonElement = El<Row, WidgetElement<Button>>;
 /// distance the cube panel sits from the camera.
 fn apply_state_appearance(element: ButtonElement) -> ButtonElement {
     element
-        .hovered_background(BUTTON_FILL_HOVERED)
-        .pressed_background(BUTTON_FILL_PRESSED)
-        .focused_border_color(BUTTON_BORDER_FOCUSED)
-        .focused_border_width(CONTROL_BORDER_WIDTH_FOCUSED)
+        .hovered(Appearance::new().background(BUTTON_FILL_HOVERED))
+        .pressed(Appearance::new().background(BUTTON_FILL_PRESSED))
+        .focused(
+            Appearance::new()
+                .border_color(BUTTON_BORDER_FOCUSED)
+                .border_width(CONTROL_BORDER_WIDTH_FOCUSED),
+        )
 }
 
 fn add_button(

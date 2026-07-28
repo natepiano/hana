@@ -10,14 +10,19 @@
 //! retained routes apply, so state presentation patches records layout already
 //! emitted and never re-authors layout.
 
+use core::mem::size_of;
+use std::sync::Arc;
+
 use bevy::prelude::*;
 
 use super::VisualSlotOverride;
 use crate::DiegeticPanel;
+use crate::cascade::CASCADE_ATTRIBUTE_BYTES;
+use crate::cascade::Cascade;
 use crate::layout::Dimension;
 
 /// One widget state's decision for a single visual property.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Reflect)]
 pub(crate) enum VisualChange<T> {
     /// The state keeps whatever value the prior layer resolved.
     #[default]
@@ -48,9 +53,64 @@ impl<T: Clone> VisualChange<T> {
     }
 }
 
-/// The properties one widget state replaces on a widget's root visual slot.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct Appearance {
+/// The visual properties a widget state replaces.
+///
+/// State methods on [`crate::El`] accept one `Appearance` bundle. Each builder
+/// below names a retained record that an ordinary element declaration must
+/// already have emitted:
+///
+/// | Builder | Retained record | Ordinary declaration required |
+/// | --- | --- | --- |
+/// | [`Appearance::background`] | Root SDF fill | [`crate::El::background`] |
+/// | [`Appearance::border_color`] | Root SDF border color | [`crate::El::border`] |
+/// | [`Appearance::border_width`] | Root SDF border widths | [`crate::El::border`] |
+/// | [`Appearance::material`] | Root SDF fill or border material | [`crate::El::background`] or [`crate::El::border`] |
+///
+/// A button and slider can author hovered, focused, pressed, and disabled
+/// bundles. An editable field can author hovered, focused, and disabled
+/// bundles, but has no pressed state. Each state inherits independently from
+/// the lower-precedence cascade scopes before active states layer in this
+/// order: focused, hovered, pressed, then disabled. A property named by a
+/// later state replaces the same property from an earlier state; a
+/// property the bundle does not name keeps the earlier state's result or the
+/// ordinary declaration.
+///
+/// A state bundle only patches an existing retained record. Use
+/// `Border::all(Px(0.0), color)` when a state needs to widen a border that is
+/// normally invisible, or [`crate::El::background`] with [`Color::NONE`] when
+/// a state needs a transparent fill record.
+///
+/// # Examples
+///
+/// ```no_run
+/// use bevy::color::Color;
+/// use hana_diegetic::Appearance;
+/// use hana_diegetic::Border;
+/// use hana_diegetic::El;
+/// use hana_diegetic::Px;
+/// use hana_diegetic::Slider;
+///
+/// let button = El::new()
+///     .background(Color::NONE)
+///     .border(Border::all(Px(0.0), Color::WHITE))
+///     .button("apply")
+///     .hovered(Appearance::new().background(Color::BLACK))
+///     .focused(Appearance::new().border_width(Px(2.0)))
+///     .pressed(Appearance::new().border_color(Color::WHITE))
+///     .disabled(Appearance::new().material(Default::default()));
+/// let slider = El::new()
+///     .background(Color::NONE)
+///     .border(Border::all(Px(0.0), Color::WHITE))
+///     .widget("level", Slider::new(0.0..=1.0))
+///     .hovered(Appearance::new().background(Color::BLACK))
+///     .focused(Appearance::new().border_width(Px(2.0)))
+///     .pressed(Appearance::new().border_color(Color::WHITE))
+///     .disabled(Appearance::new().material(Default::default()));
+/// let _ = (button, slider);
+/// ```
+#[must_use]
+#[derive(Clone, Debug, Default, PartialEq, Reflect)]
+pub struct Appearance {
     /// Replaces the element's authored background color.
     pub(crate) background:   VisualChange<Color>,
     /// Replaces the element's authored border color.
@@ -62,6 +122,52 @@ pub(crate) struct Appearance {
 }
 
 impl Appearance {
+    /// Creates a bundle that leaves every property unchanged.
+    pub const fn new() -> Self {
+        Self {
+            background:   VisualChange::Unchanged,
+            border_color: VisualChange::Unchanged,
+            border_width: VisualChange::Unchanged,
+            material:     VisualChange::Unchanged,
+        }
+    }
+
+    /// Replaces the root SDF fill color.
+    ///
+    /// The widget element must also call [`crate::El::background`] so layout
+    /// emits the retained fill record this value patches.
+    pub const fn background(mut self, color: Color) -> Self {
+        self.background = VisualChange::To(color);
+        self
+    }
+
+    /// Replaces the root SDF border color without changing its radii.
+    ///
+    /// The widget element must also call [`crate::El::border`] so layout emits
+    /// the retained border record this value patches.
+    pub const fn border_color(mut self, color: Color) -> Self {
+        self.border_color = VisualChange::To(color);
+        self
+    }
+
+    /// Replaces all four root SDF border widths without changing solved layout.
+    ///
+    /// The widget element must also call [`crate::El::border`]. The retained
+    /// border grows inward, leaving the element's outer bounds unchanged.
+    pub fn border_width(mut self, width: impl Into<Dimension>) -> Self {
+        self.border_width = VisualChange::To(width.into());
+        self
+    }
+
+    /// Replaces the material for the root SDF fill and border records.
+    ///
+    /// The widget element must also call [`crate::El::background`] or
+    /// [`crate::El::border`] so layout emits a retained surface record.
+    pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.material = VisualChange::To(material);
+        self
+    }
+
     /// Applies every property this layer authors over `resolved`.
     fn layer_onto(&self, resolved: &mut Self) {
         self.background.layer_onto(&mut resolved.background);
@@ -87,33 +193,115 @@ impl Appearance {
     }
 }
 
+/// Hovered-state cascade attribute for one [`Appearance`] bundle.
+///
+/// [`crate::El::hovered`] creates this opaque attribute from its bundle.
+#[derive(Clone, Debug, Reflect)]
+pub struct WidgetHoveredAppearance(Arc<Appearance>);
+
+impl WidgetHoveredAppearance {
+    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+
+    fn appearance(&self) -> &Appearance { &self.0 }
+}
+
+impl PartialEq for WidgetHoveredAppearance {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+const _: () = assert!(size_of::<WidgetHoveredAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
+
+/// Pressed-state cascade attribute for one [`Appearance`] bundle.
+///
+/// [`crate::El::pressed`] creates this opaque attribute from its bundle.
+#[derive(Clone, Debug, Reflect)]
+pub struct WidgetPressedAppearance(Arc<Appearance>);
+
+impl WidgetPressedAppearance {
+    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+
+    fn appearance(&self) -> &Appearance { &self.0 }
+}
+
+impl PartialEq for WidgetPressedAppearance {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+const _: () = assert!(size_of::<WidgetPressedAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
+
+/// Focused-state cascade attribute for one [`Appearance`] bundle.
+///
+/// [`crate::El::focused`] creates this opaque attribute from its bundle.
+#[derive(Clone, Debug, Reflect)]
+pub struct WidgetFocusedAppearance(Arc<Appearance>);
+
+impl WidgetFocusedAppearance {
+    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+
+    fn appearance(&self) -> &Appearance { &self.0 }
+}
+
+impl PartialEq for WidgetFocusedAppearance {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+const _: () = assert!(size_of::<WidgetFocusedAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
+
+/// Disabled-state cascade attribute for one [`Appearance`] bundle.
+///
+/// [`crate::El::disabled`] creates this opaque attribute from its bundle.
+#[derive(Clone, Debug, Reflect)]
+pub struct WidgetDisabledAppearance(Arc<Appearance>);
+
+impl WidgetDisabledAppearance {
+    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+
+    fn appearance(&self) -> &Appearance { &self.0 }
+}
+
+impl PartialEq for WidgetDisabledAppearance {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+const _: () = assert!(size_of::<WidgetDisabledAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
+
 /// One [`Appearance`] per [`WidgetState`], authored by the state builders on a
 /// widget element and carried to the widget entity for state presentation.
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct StateAppearance {
-    pub(crate) hovered:  Appearance,
-    pub(crate) pressed:  Appearance,
-    pub(crate) focused:  Appearance,
-    pub(crate) disabled: Appearance,
+    pub(crate) hovered:  Cascade<WidgetHoveredAppearance>,
+    pub(crate) pressed:  Cascade<WidgetPressedAppearance>,
+    pub(crate) focused:  Cascade<WidgetFocusedAppearance>,
+    pub(crate) disabled: Cascade<WidgetDisabledAppearance>,
 }
 
 impl StateAppearance {
-    const fn layer(&self, state: WidgetState) -> &Appearance {
+    fn layer(&self, state: WidgetState) -> Option<&Appearance> {
         match state {
-            WidgetState::Focused => &self.focused,
-            WidgetState::Hovered => &self.hovered,
-            WidgetState::Pressed => &self.pressed,
-            WidgetState::Disabled => &self.disabled,
-        }
-    }
-
-    /// Returns the layer `state` authors so a builder can replace one property.
-    pub(crate) const fn layer_mut(&mut self, state: WidgetState) -> &mut Appearance {
-        match state {
-            WidgetState::Focused => &mut self.focused,
-            WidgetState::Hovered => &mut self.hovered,
-            WidgetState::Pressed => &mut self.pressed,
-            WidgetState::Disabled => &mut self.disabled,
+            WidgetState::Focused => self
+                .focused
+                .as_override()
+                .map(WidgetFocusedAppearance::appearance),
+            WidgetState::Hovered => self
+                .hovered
+                .as_override()
+                .map(WidgetHoveredAppearance::appearance),
+            WidgetState::Pressed => self
+                .pressed
+                .as_override()
+                .map(WidgetPressedAppearance::appearance),
+            WidgetState::Disabled => self
+                .disabled
+                .as_override()
+                .map(WidgetDisabledAppearance::appearance),
         }
     }
 
@@ -121,7 +309,7 @@ impl StateAppearance {
     pub(crate) fn any(&self, authored: impl Fn(&Appearance) -> bool) -> bool {
         WidgetState::LAYER_ORDER
             .into_iter()
-            .any(|state| authored(self.layer(state)))
+            .any(|state| self.layer(state).is_some_and(&authored))
     }
 
     /// Composes the root-slot override for the active state set.
@@ -140,8 +328,10 @@ impl StateAppearance {
     ) -> VisualSlotOverride {
         let mut resolved = Appearance::default();
         for state in WidgetState::LAYER_ORDER {
-            if active.contains(&Some(state)) {
-                self.layer(state).layer_onto(&mut resolved);
+            if active.contains(&Some(state))
+                && let Some(layer) = self.layer(state)
+            {
+                layer.layer_onto(&mut resolved);
             }
         }
         resolved.into_slot_override(panel)
@@ -194,12 +384,16 @@ fn render_border_widths(width: Dimension, panel: &DiegeticPanel) -> Option<[f32;
 mod tests {
     use bevy::prelude::*;
 
+    use super::Appearance;
     use super::StateAppearance;
-    use super::VisualChange;
+    use super::WidgetFocusedAppearance;
+    use super::WidgetHoveredAppearance;
+    use super::WidgetPressedAppearance;
     use super::WidgetState;
     use crate::DiegeticPanel;
     use crate::Mm;
     use crate::Px;
+    use crate::cascade::Cascade;
 
     const HOVER_FILL: Color = Color::srgb(0.1, 0.2, 0.3);
     const FOCUS_BORDER: Color = Color::srgb(0.9, 0.8, 0.2);
@@ -213,12 +407,20 @@ mod tests {
     }
 
     fn state_appearance() -> StateAppearance {
-        let mut state_appearance = StateAppearance::default();
-        state_appearance.hovered.background = VisualChange::To(HOVER_FILL);
-        state_appearance.pressed.background = VisualChange::To(PRESS_FILL);
-        state_appearance.focused.border_color = VisualChange::To(FOCUS_BORDER);
-        state_appearance.focused.border_width = VisualChange::To(Px(2.0).into());
-        state_appearance
+        StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                Appearance::new().background(HOVER_FILL),
+            )),
+            pressed: Cascade::Override(WidgetPressedAppearance::new(
+                Appearance::new().background(PRESS_FILL),
+            )),
+            focused: Cascade::Override(WidgetFocusedAppearance::new(
+                Appearance::new()
+                    .border_color(FOCUS_BORDER)
+                    .border_width(Px(2.0)),
+            )),
+            ..StateAppearance::default()
+        }
     }
 
     #[test]

@@ -1,12 +1,14 @@
-error[E0599]: the method `pressed_background` exists for struct `El<hana_diegetic::Row, WidgetElement<ImeEditableFieldSpec>>`, but its trait bounds were not satisfied
-  --> tests/trybuild/fail/editable_widget_has_no_pressed_state.rs:11:10
+error[E0599]: the method `pressed` exists for struct `El<hana_diegetic::Row, WidgetElement<ImeEditableFieldSpec>>`, but its trait bounds were not satisfied
+  --> tests/trybuild/fail/editable_widget_has_no_pressed_state.rs:12:10
    |
- 8 |       let _ = El::new()
+ 9 |       let _ = El::new()
    |  _____________-
- 9 | |         .background(Color::WHITE)
-10 | |         .editable_field("editable", field)
-11 | |         .pressed_background(Color::BLACK);
-   | |_________-^^^^^^^^^^^^^^^^^^
+10 | |         .background(Color::WHITE)
+11 | |         .editable_field("editable", field)
+12 | |         .pressed(Appearance::new().background(Color::BLACK));
+   | |         -^^^^^^^ method cannot be called due to unsatisfied trait bounds
+   | |_________|
+   |
    |
   ::: src/ime/field.rs
    |

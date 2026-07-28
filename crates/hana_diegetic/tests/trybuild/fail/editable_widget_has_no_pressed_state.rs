@@ -1,4 +1,5 @@
 use bevy::color::Color;
+use hana_diegetic::Appearance;
 use hana_diegetic::El;
 use hana_diegetic::ImeAppOwnedFieldSpec;
 use hana_diegetic::ImeEditableFieldSpec;
@@ -8,5 +9,5 @@ fn main() {
     let _ = El::new()
         .background(Color::WHITE)
         .editable_field("editable", field)
-        .pressed_background(Color::BLACK);
+        .pressed(Appearance::new().background(Color::BLACK));
 }

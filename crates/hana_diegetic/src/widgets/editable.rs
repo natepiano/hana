@@ -61,7 +61,7 @@ pub(super) fn presentation_inputs_changed(
 /// Focus reads [`WidgetFocusVisible`], hover reads the all-pointer
 /// [`PickingInteraction`] aggregate, and disabled reads [`WidgetDisabled`]. A
 /// field has no press, so [`WidgetState::Pressed`] never applies and its
-/// element does not offer the `pressed_*` builders.
+/// element does not offer [`crate::El::pressed`].
 pub(super) fn present_editable_state(
     fields: Query<
         (
@@ -112,6 +112,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
 
     use super::*;
+    use crate::Appearance;
     use crate::Border;
     use crate::CascadeEntityCommandsExt;
     use crate::ClearWidgetFocus;
@@ -151,14 +152,14 @@ mod tests {
             El::new()
                 .border(Border::all(1.0, NORMAL_BORDER))
                 .editable_field(FIELD_ID, field)
-                .focused_border_color(FOCUS_BORDER),
+                .focused(Appearance::new().border_color(FOCUS_BORDER)),
             |_| {},
         );
         builder.build()
     }
 
     /// A field authoring every state layer its kind can reach: focus, hover,
-    /// and disabled. A field has no press, so `pressed_*` is not available on
+    /// and disabled. A field has no press, so [`crate::El::pressed`] is not available on
     /// its element at all.
     fn state_layered_field_tree() -> crate::LayoutTree {
         let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
@@ -168,9 +169,9 @@ mod tests {
                 .background(NORMAL_FILL)
                 .border(Border::all(1.0, NORMAL_BORDER))
                 .editable_field(FIELD_ID, field)
-                .focused_border_color(FOCUS_BORDER)
-                .hovered_background(HOVER_FILL)
-                .disabled_border_color(DISABLED_BORDER),
+                .focused(Appearance::new().border_color(FOCUS_BORDER))
+                .hovered(Appearance::new().background(HOVER_FILL))
+                .disabled(Appearance::new().border_color(DISABLED_BORDER)),
             |_| {},
         );
         builder.build()
