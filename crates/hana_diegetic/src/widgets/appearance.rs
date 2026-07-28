@@ -39,15 +39,14 @@ impl<T> VisualChange<T> {
 /// The visual properties a widget state replaces.
 ///
 /// State methods on [`crate::El`] accept one `Appearance` bundle. Each builder
-/// below names a retained record that an ordinary element declaration must
-/// already have emitted:
+/// below replaces values on a retained record layout emits:
 ///
-/// | Builder | Retained record | Ordinary declaration required |
-/// | --- | --- | --- |
-/// | [`Appearance::background`] | Root SDF fill | [`crate::El::background`] |
-/// | [`Appearance::border_color`] | Root SDF border color | [`crate::El::border`] |
-/// | [`Appearance::border_width`] | Root SDF border widths | [`crate::El::border`] |
-/// | [`Appearance::material`] | Root SDF fill or border material | [`crate::El::background`] or [`crate::El::border`] |
+/// | Builder | Retained record |
+/// | --- | --- |
+/// | [`Appearance::background`] | Root SDF fill |
+/// | [`Appearance::border_color`] | Root SDF border color |
+/// | [`Appearance::border_width`] | Root SDF border widths |
+/// | [`Appearance::material`] | Root SDF fill or border material |
 ///
 /// A button and slider can author hovered, focused, pressed, and disabled
 /// bundles. An editable field can author hovered, focused, and disabled
@@ -58,10 +57,13 @@ impl<T> VisualChange<T> {
 /// property the bundle does not name keeps the earlier state's result or the
 /// ordinary declaration.
 ///
-/// A state bundle only patches an existing retained record. Use
-/// `Border::all(Px(0.0), color)` when a state needs to widen a border that is
-/// normally invisible, or [`crate::El::background`] with [`Color::NONE`] when
-/// a state needs a transparent fill record.
+/// A state bundle only replaces values on an existing retained record, so
+/// naming a property the element does not declare emits a transparent
+/// stand-in to replace: a state background gets a [`Color::NONE`] fill, and a
+/// state border color or width gets `Border::all(Px(0.0), Color::NONE)`.
+/// Declare [`crate::El::border`] with the resting color when a state widens a
+/// border that is normally invisible — a width replacement alone leaves the
+/// defaulted border transparent.
 ///
 /// # Examples
 ///
@@ -117,8 +119,8 @@ impl Appearance {
 
     /// Replaces the root SDF fill color.
     ///
-    /// The widget element must also call [`crate::El::background`] so layout
-    /// emits the retained fill record this value patches.
+    /// Without [`crate::El::background`], layout emits a [`Color::NONE`] fill
+    /// record for this value to replace.
     pub const fn background(mut self, color: Color) -> Self {
         self.background = VisualChange::To(color);
         self
@@ -126,8 +128,8 @@ impl Appearance {
 
     /// Replaces the root SDF border color without changing its radii.
     ///
-    /// The widget element must also call [`crate::El::border`] so layout emits
-    /// the retained border record this value patches.
+    /// Without [`crate::El::border`], layout emits a zero-width transparent
+    /// border record for this value to replace.
     pub const fn border_color(mut self, color: Color) -> Self {
         self.border_color = VisualChange::To(color);
         self
@@ -135,8 +137,10 @@ impl Appearance {
 
     /// Replaces all four root SDF border widths without changing solved layout.
     ///
-    /// The widget element must also call [`crate::El::border`]. The retained
-    /// border grows inward, leaving the element's outer bounds unchanged.
+    /// The retained border grows inward, leaving the element's outer bounds
+    /// unchanged. Without [`crate::El::border`], layout emits a zero-width
+    /// transparent border record — the widened border stays transparent, so
+    /// declare the resting color there.
     pub fn border_width(mut self, width: impl Into<Dimension>) -> Self {
         self.border_width = VisualChange::To(width.into());
         self
@@ -144,8 +148,10 @@ impl Appearance {
 
     /// Replaces the material for the root SDF fill and border records.
     ///
-    /// The widget element must also call [`crate::El::background`] or
-    /// [`crate::El::border`] so layout emits a retained surface record.
+    /// The material carries its own color — the fill reads
+    /// `StandardMaterial::base_color` — so without [`crate::El::background`]
+    /// or [`crate::El::border`], layout emits a [`Color::NONE`] fill record
+    /// for this material to re-key.
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
         self.material = VisualChange::To(material);
         self

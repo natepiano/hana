@@ -782,10 +782,6 @@ impl LayoutTree {
                 (PrecomposeMode::Direct, PrecomposeMode::Direct) => PrecomposeMode::Direct,
             };
 
-            if let Some((widget_id, _)) = owning_widget.as_ref() {
-                validated_element_appearance(element, widget_id)?;
-            }
-
             if element.visual_slot == Some(VisualSlotId::SLIDER_THUMB) {
                 if let Some((slider_id, WidgetKind::Slider)) = owning_widget.as_ref() {
                     if !sliders_with_thumb.insert(slider_id.clone()) {
@@ -1269,7 +1265,6 @@ fn validated_element_widget_owner(
             .clone()
             .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
         let id = validated_widget_id(id, precompose)?;
-        validated_element_appearance(element, &id)?;
         if let WidgetSpec::Slider(slider) = widget {
             slider
                 .validated()
@@ -1282,47 +1277,9 @@ fn validated_element_widget_owner(
     }
     if let Some(field) = &element.editable {
         let id = validated_widget_id(field.field_id.clone(), precompose)?;
-        validated_element_appearance(element, &id)?;
         return Ok(Some((id, WidgetKind::EditableField)));
     }
     Ok(owning_widget)
-}
-
-/// Rejects a state appearance whose properties have no authored counterpart to
-/// replace.
-///
-/// A [`VisualSlotOverride`](crate::widgets::VisualSlotOverride) patches records
-/// layout already emitted; it never authors a missing one, so a state
-/// background without [`El::background`](crate::El::background) — or a state
-/// border without [`El::border`](crate::El::border) — would silently do
-/// nothing. `Border::all(Px(0.0), color)` is the borderless declaration a state
-/// width can still widen.
-fn validated_element_appearance(
-    element: &Element,
-    id: &PanelElementId,
-) -> Result<(), PanelBuildError> {
-    let Some(appearance) = element.appearance.as_deref() else {
-        return Ok(());
-    };
-    let cascades = appearance.cascades();
-    if cascades.any(|layer| layer.background.is_authored()) && element.background.is_none() {
-        return Err(PanelBuildError::StateBackgroundRequiresBackground(
-            id.clone(),
-        ));
-    }
-    if cascades.any(|layer| layer.border_color.is_authored()) && element.border.is_none() {
-        return Err(PanelBuildError::StateBorderColorRequiresBorder(id.clone()));
-    }
-    if cascades.any(|layer| layer.border_width.is_authored()) && element.border.is_none() {
-        return Err(PanelBuildError::StateBorderWidthRequiresBorder(id.clone()));
-    }
-    if cascades.any(|layer| layer.material.is_authored())
-        && element.background.is_none()
-        && element.border.is_none()
-    {
-        return Err(PanelBuildError::StateMaterialRequiresSurface(id.clone()));
-    }
-    Ok(())
 }
 
 fn element_visual_capabilities(element: &Element) -> VisualElementCapabilities {

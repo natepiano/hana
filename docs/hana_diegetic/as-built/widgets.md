@@ -108,25 +108,29 @@ the indicator.
 
 ### What a state layer may touch
 
-A state layer patches records layout already emitted; it never authors a missing
-one. `.background(X).disabled(Appearance::new().background(Y))` is not redundant
-— the ordinary call is what emits the fill record the state patches. Two escape
-hatches exist for a state-only role: `Border::all(Px(0.0), color)` emits a
-zero-width border record a focus width can widen, and
-`El::new().background(Color::NONE)` emits a transparent fill record.
+A state layer replaces values on records layout already emitted; it never authors
+a missing one. `.background(X).disabled(Appearance::new().background(Y))` is not
+redundant — the ordinary call is what the element shows at rest.
 
-Authoring a state property with no compatible record is a build error, not a
-silent no-op:
+Naming a state property the element does not declare is neither a build error nor
+a silent no-op: layout emits a transparent stand-in for the state to replace.
 
-| Error | Displays |
+| Authored state property | Defaulted record when the element declares none |
 | --- | --- |
-| `StateBackgroundRequiresBackground` | widget `{0}` state background requires an authored background |
-| `StateBorderColorRequiresBorder` | widget `{0}` state border color requires an authored border |
-| `StateBorderWidthRequiresBorder` | widget `{0}` state border width requires an authored border |
-| `StateMaterialRequiresSurface` | widget `{0}` state material requires an authored background or border |
+| background | `Color::NONE` fill |
+| border color | `Border::all(Px(0.0), Color::NONE)` |
+| border width | `Border::all(Px(0.0), Color::NONE)` |
+| material | `Color::NONE` fill, unless a border record already exists |
 
-State builders affect **only the element carrying the widget declaration**. Child
-text, icons, images, and shapes stay as authored. A state border width applies to
+A state material carries its own color — the fill reads
+`StandardMaterial::base_color` — so a defaulted transparent fill is enough for
+it to render. A state border width with no declared border color widens a
+transparent border, the same outcome as declaring
+`El::border(Border::all(Px(2.0), Color::NONE))` directly.
+
+A state layer affects **only the element that authored it**. A child inherits
+nothing: it stays as authored unless it carries its own state layer. A state
+border width applies to
 all four sides and grows inward from the authored outer bounds, so no state
 change alters solved layout.
 

@@ -914,7 +914,6 @@ mod tests {
     use crate::LayoutBuilder;
     use crate::LayoutTree;
     use crate::Mm;
-    use crate::PanelBuildError;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
     use crate::PanelWidgetWriter;
@@ -3266,11 +3265,10 @@ mod tests {
     }
 
     #[test]
-    fn set_tree_rejects_missing_state_targets_and_preserves_the_tree() {
+    fn set_tree_accepts_state_targets_without_ordinary_declarations() {
         let mut app = integrated_test_app();
         let panel = spawn_panel(&mut app, button_tree_with(BUTTON_ID, |element| element));
         app.update();
-        let widget = resolve_widget(&mut app, panel);
 
         let mut background_only = LayoutBuilder::new(100.0, 50.0);
         background_only.with(
@@ -3283,11 +3281,7 @@ mod tests {
             .world_mut()
             .commands()
             .set_tree(panel, background_only.build());
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
-                if id == PanelElementId::named(BUTTON_ID)
-        ));
+        assert!(result.is_ok());
 
         let mut border_only = LayoutBuilder::new(100.0, 50.0);
         border_only.with(
@@ -3301,11 +3295,7 @@ mod tests {
             .world_mut()
             .commands()
             .set_tree(panel, border_only.build());
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
-                if id == PanelElementId::named(BUTTON_ID)
-        ));
+        assert!(result.is_ok());
 
         let mut border_width_only = LayoutBuilder::new(100.0, 50.0);
         border_width_only.with(
@@ -3319,11 +3309,7 @@ mod tests {
             .world_mut()
             .commands()
             .set_tree(panel, border_width_only.build());
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBorderWidthRequiresBorder(id))
-                if id == PanelElementId::named(BUTTON_ID)
-        ));
+        assert!(result.is_ok());
 
         let mut material_only = LayoutBuilder::new(100.0, 50.0);
         material_only.with(
@@ -3336,18 +3322,9 @@ mod tests {
             .world_mut()
             .commands()
             .set_tree(panel, material_only.build());
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateMaterialRequiresSurface(id))
-                if id == PanelElementId::named(BUTTON_ID)
-        ));
+        assert!(result.is_ok());
 
         app.update();
-        assert_eq!(
-            resolve_widget(&mut app, panel),
-            widget,
-            "the rejected trees must leave the current widget live",
-        );
     }
 
     #[test]

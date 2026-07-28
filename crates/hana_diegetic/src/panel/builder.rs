@@ -57,20 +57,6 @@ pub enum PanelBuildError {
     /// A widget is inside a subtree rendered through precomposition.
     #[error("widget `{0}` is inside a precomposed subtree")]
     WidgetInsidePrecomposedSubtree(PanelElementId),
-    /// A widget element authored a state background without a normal
-    /// background.
-    #[error("widget `{0}` state background requires an authored background")]
-    StateBackgroundRequiresBackground(PanelElementId),
-    /// A widget element authored a state border color without a normal border.
-    #[error("widget `{0}` state border color requires an authored border")]
-    StateBorderColorRequiresBorder(PanelElementId),
-    /// A widget element authored a state border width without a normal border.
-    #[error("widget `{0}` state border width requires an authored border")]
-    StateBorderWidthRequiresBorder(PanelElementId),
-    /// A widget element authored a state material without a background or
-    /// border.
-    #[error("widget `{0}` state material requires an authored background or border")]
-    StateMaterialRequiresSurface(PanelElementId),
     /// A slider-thumb marker sits outside every slider subtree.
     #[error("slider thumb `{0}` must be inside a slider subtree")]
     SliderThumbOutsideSlider(PanelElementId),
@@ -1007,22 +993,6 @@ mod tests {
                 "widget `button` is inside a precomposed subtree",
             ),
             (
-                PanelBuildError::StateBackgroundRequiresBackground(PanelElementId::named("action")),
-                "widget `action` state background requires an authored background",
-            ),
-            (
-                PanelBuildError::StateBorderColorRequiresBorder(PanelElementId::named("action")),
-                "widget `action` state border color requires an authored border",
-            ),
-            (
-                PanelBuildError::StateBorderWidthRequiresBorder(PanelElementId::named("action")),
-                "widget `action` state border width requires an authored border",
-            ),
-            (
-                PanelBuildError::StateMaterialRequiresSurface(PanelElementId::named("action")),
-                "widget `action` state material requires an authored background or border",
-            ),
-            (
                 PanelBuildError::SliderThumbOutsideSlider(PanelElementId::named("thumb")),
                 "slider thumb `thumb` must be inside a slider subtree",
             ),
@@ -1145,7 +1115,7 @@ mod tests {
     }
 
     #[test]
-    fn button_state_background_without_background_errors_at_build() {
+    fn button_state_background_without_background_builds_ok() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
@@ -1158,15 +1128,11 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
-                if id == PanelElementId::named("action")
-        ));
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn button_state_border_color_without_border_errors_at_build() {
+    fn button_state_border_color_without_border_builds_ok() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
@@ -1180,15 +1146,11 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
-                if id == PanelElementId::named("action")
-        ));
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn editable_focus_border_color_without_border_errors_at_build() {
+    fn editable_focus_border_color_without_border_builds_ok() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
@@ -1201,15 +1163,11 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
-                if id == PanelElementId::named("name")
-        ));
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn button_state_material_without_surface_errors_at_build() {
+    fn button_state_material_without_surface_builds_ok() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
@@ -1222,11 +1180,7 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateMaterialRequiresSurface(id))
-                if id == PanelElementId::named("action")
-        ));
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -1251,7 +1205,7 @@ mod tests {
     }
 
     #[test]
-    fn widget_part_state_background_without_surface_errors_at_build() {
+    fn widget_part_state_background_without_surface_builds_ok() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
@@ -1265,11 +1219,7 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
-                if id == PanelElementId::named("action")
-        ));
+        assert!(result.is_ok());
     }
 
     #[test]

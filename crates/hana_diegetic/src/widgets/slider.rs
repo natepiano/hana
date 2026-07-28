@@ -5456,7 +5456,7 @@ mod tests {
     }
 
     #[test]
-    fn slider_state_builders_require_authored_surfaces() {
+    fn slider_state_builders_default_missing_surfaces() {
         let mut background = LayoutBuilder::new(100.0, 50.0);
         background.with(
             El::new()
@@ -5465,11 +5465,7 @@ mod tests {
                 .hovered(Appearance::new().background(Color::WHITE)),
             |_| {},
         );
-        assert!(matches!(
-            build_world_panel(background.build()),
-            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
-                if id == PanelElementId::named("level")
-        ));
+        assert!(build_world_panel(background.build()).is_ok());
 
         let mut border = LayoutBuilder::new(100.0, 50.0);
         border.with(
@@ -5480,11 +5476,7 @@ mod tests {
                 .hovered(Appearance::new().border_color(Color::WHITE)),
             |_| {},
         );
-        assert!(matches!(
-            build_world_panel(border.build()),
-            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
-                if id == PanelElementId::named("level")
-        ));
+        assert!(build_world_panel(border.build()).is_ok());
 
         let mut border_width = LayoutBuilder::new(100.0, 50.0);
         border_width.with(
@@ -5495,11 +5487,7 @@ mod tests {
                 .focused(Appearance::new().border_width(Px(2.0))),
             |_| {},
         );
-        assert!(matches!(
-            build_world_panel(border_width.build()),
-            Err(PanelBuildError::StateBorderWidthRequiresBorder(id))
-                if id == PanelElementId::named("level")
-        ));
+        assert!(build_world_panel(border_width.build()).is_ok());
 
         let mut material = LayoutBuilder::new(100.0, 50.0);
         material.with(
@@ -5509,11 +5497,7 @@ mod tests {
                 .hovered(Appearance::new().material(Handle::<StandardMaterial>::default())),
             |_| {},
         );
-        assert!(matches!(
-            build_world_panel(material.build()),
-            Err(PanelBuildError::StateMaterialRequiresSurface(id))
-                if id == PanelElementId::named("level")
-        ));
+        assert!(build_world_panel(material.build()).is_ok());
     }
 
     /// Hover, press, and focus layers shared by the peer-isolation trees.
@@ -6567,66 +6551,6 @@ mod tests {
         assert!(matches!(
             app.world_mut().commands().set_tree(panel, duplicate.build()),
             Err(PanelBuildError::SliderHasMultipleThumbs(id))
-                if id == PanelElementId::named("level")
-        ));
-
-        let mut background = LayoutBuilder::new(100.0, 50.0);
-        background.with(
-            El::new()
-                .size(40.0, 16.0)
-                .widget("level", plain_slider(0.5))
-                .hovered(Appearance::new().background(Color::WHITE)),
-            |_| {},
-        );
-        assert!(matches!(
-            app.world_mut().commands().set_tree(panel, background.build()),
-            Err(PanelBuildError::StateBackgroundRequiresBackground(id))
-                if id == PanelElementId::named("level")
-        ));
-
-        let mut border = LayoutBuilder::new(100.0, 50.0);
-        border.with(
-            El::new()
-                .size(40.0, 16.0)
-                .background(Color::WHITE)
-                .widget("level", plain_slider(0.5))
-                .hovered(Appearance::new().border_color(Color::WHITE)),
-            |_| {},
-        );
-        assert!(matches!(
-            app.world_mut().commands().set_tree(panel, border.build()),
-            Err(PanelBuildError::StateBorderColorRequiresBorder(id))
-                if id == PanelElementId::named("level")
-        ));
-
-        let mut border_width = LayoutBuilder::new(100.0, 50.0);
-        border_width.with(
-            El::new()
-                .size(40.0, 16.0)
-                .background(Color::WHITE)
-                .widget("level", plain_slider(0.5))
-                .focused(Appearance::new().border_width(Px(2.0))),
-            |_| {},
-        );
-        assert!(matches!(
-            app.world_mut()
-                .commands()
-                .set_tree(panel, border_width.build()),
-            Err(PanelBuildError::StateBorderWidthRequiresBorder(id))
-                if id == PanelElementId::named("level")
-        ));
-
-        let mut material = LayoutBuilder::new(100.0, 50.0);
-        material.with(
-            El::new()
-                .size(40.0, 16.0)
-                .widget("level", plain_slider(0.5))
-                .hovered(Appearance::new().material(Handle::<StandardMaterial>::default())),
-            |_| {},
-        );
-        assert!(matches!(
-            app.world_mut().commands().set_tree(panel, material.build()),
-            Err(PanelBuildError::StateMaterialRequiresSurface(id))
                 if id == PanelElementId::named("level")
         ));
 

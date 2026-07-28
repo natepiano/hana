@@ -46,6 +46,7 @@ use super::Dimension;
 use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
+use super::Px;
 use super::ShadowCasting;
 use super::Sizing;
 use super::TextStyle;
@@ -434,6 +435,39 @@ struct CommonEl {
     precompose:      PrecomposeMode,
 }
 
+impl CommonEl {
+    /// Emits the surface records a state [`Appearance`] replaces values on.
+    ///
+    /// A [`VisualSlotOverride`](crate::widgets::VisualSlotOverride) replaces
+    /// values on records layout already emitted; it never authors a missing
+    /// one. A state background therefore needs an [`Element::background`] fill
+    /// record and a state border color or width needs an [`Element::border`]
+    /// record, so a declaration naming one without the matching ordinary
+    /// declaration gets a transparent stand-in to replace. A state material
+    /// carries its own color — the SDF fill reads
+    /// `StandardMaterial::base_color` — so it needs a fill record only when
+    /// there is no border record to re-key.
+    fn default_state_surfaces(&mut self) {
+        let Some(appearance) = self.appearance.as_deref() else {
+            return;
+        };
+        let cascades = appearance.cascades();
+        let state_background = cascades.any(|layer| layer.background.is_authored());
+        let state_border = cascades
+            .any(|layer| layer.border_color.is_authored() || layer.border_width.is_authored());
+        let state_material = cascades.any(|layer| layer.material.is_authored());
+
+        if self.background.is_none()
+            && (state_background || (state_material && self.border.is_none()))
+        {
+            self.background = Some(Color::NONE);
+        }
+        if state_border && self.border.is_none() {
+            self.border = Some(Border::all(Px(0.0), Color::NONE));
+        }
+    }
+}
+
 impl Default for CommonEl {
     fn default() -> Self {
         Self {
@@ -467,7 +501,8 @@ impl Default for CommonEl {
     }
 }
 
-fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
+fn text_leaf_element(mut common: CommonEl, content: ElementContent) -> Element {
+    common.default_state_surfaces();
     Element {
         id: common.id,
         width: common.width,
@@ -1098,10 +1133,11 @@ impl<L, Role> El<L, Role> {
         Role: ElementRole,
     {
         let Self {
-            common,
+            mut common,
             child_layout,
             role: _,
         } = self;
+        common.default_state_surfaces();
         let child_layout = if matches!(
             content,
             ElementContent::Text { .. } | ElementContent::Image { .. }
@@ -1824,8 +1860,15 @@ impl LayoutTree {
 
 #[cfg(test)]
 mod tests {
+    use bevy::color::Color;
+    use bevy::pbr::StandardMaterial;
+    use bevy::prelude::Handle;
+
     use super::El;
+    use super::ElementContent;
     use crate::Appearance;
+    use crate::Border;
+    use crate::Px;
     use crate::cascade::Cascade;
 
     #[test]
@@ -1837,5 +1880,65 @@ mod tests {
         assert!(matches!(appearance.pressed, Cascade::Inherit));
         assert!(matches!(appearance.focused, Cascade::Inherit));
         assert!(matches!(appearance.disabled, Cascade::Inherit));
+    }
+
+    #[test]
+    fn state_background_without_a_background_defaults_a_transparent_fill() {
+        let element = El::new()
+            .button("action")
+            .hovered(Appearance::new().background(Color::WHITE))
+            .into_element(ElementContent::Empty);
+
+        assert_eq!(element.background, Some(Color::NONE));
+        assert_eq!(element.border, None);
+    }
+
+    #[test]
+    fn state_border_width_without_a_border_defaults_a_transparent_border() {
+        let element = El::new()
+            .button("action")
+            .hovered(Appearance::new().border_width(Px(2.0)))
+            .into_element(ElementContent::Empty);
+
+        assert_eq!(element.border, Some(Border::all(Px(0.0), Color::NONE)));
+        assert_eq!(element.background, None);
+    }
+
+    #[test]
+    fn state_material_without_a_surface_defaults_a_transparent_fill() {
+        let element = El::new()
+            .button("action")
+            .hovered(Appearance::new().material(Handle::<StandardMaterial>::default()))
+            .into_element(ElementContent::Empty);
+
+        assert_eq!(element.background, Some(Color::NONE));
+    }
+
+    #[test]
+    fn state_material_re_keys_an_authored_border_without_defaulting_a_fill() {
+        let element = El::new()
+            .button("action")
+            .border(Border::all(Px(1.0), Color::BLACK))
+            .hovered(Appearance::new().material(Handle::<StandardMaterial>::default()))
+            .into_element(ElementContent::Empty);
+
+        assert_eq!(element.background, None);
+    }
+
+    #[test]
+    fn a_declared_surface_survives_the_state_defaulting() {
+        let element = El::new()
+            .button("action")
+            .background(Color::BLACK)
+            .border(Border::all(Px(1.0), Color::WHITE))
+            .hovered(
+                Appearance::new()
+                    .background(Color::WHITE)
+                    .border_width(Px(2.0)),
+            )
+            .into_element(ElementContent::Empty);
+
+        assert_eq!(element.background, Some(Color::BLACK));
+        assert_eq!(element.border, Some(Border::all(Px(1.0), Color::WHITE)));
     }
 }
