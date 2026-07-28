@@ -16,6 +16,10 @@ python3 crates/bevy_clerestory/tests/scripts/run_suite.py --automated \
   $ARGUMENTS
 ```
 
+`--automated` and `--assisted` are mutually exclusive. When `$ARGUMENTS` contains
+`--assisted`, drop `--automated` from the command — passing both makes argparse exit 2
+before anything runs.
+
 Run it in the background (it takes minutes) and with `dangerouslyDisableSandbox: true` on
 every platform — do not attempt a sandboxed run first. The controller takes a lock under
 `~/.cache/bevy_clerestory/`, drives display power and scale, and launches GPU windows;
@@ -31,11 +35,19 @@ run for cases needing one human action; it never occurs during `--automated`.
 Choose `<PROFILE>` as the first of these that exists on disk, then substitute its path:
 
 - **Windows:** `crates/bevy_clerestory/tests/config/hardware.windows-vm.local.json`
-- **otherwise (macOS/Linux):** `crates/bevy_clerestory/tests/config/hardware.example.json`
+- **macOS:** `crates/bevy_clerestory/tests/config/hardware.example.json`
+- **Linux:** none — omit `--hardware-profile` entirely.
 
-If none exists, omit `--hardware-profile` entirely — the controller runs the
-application-state cases and reports physical and cross-DPI cases as unavailable. A
-profile names the machine's monitor and its power commands; never invent one.
+`hardware.example.json` is macOS-only: its power and inventory actions invoke
+`/usr/bin/shortcuts` and `/usr/sbin/system_profiler`, neither of which exists on Linux, so
+passing it there fails the run instead of reporting unavailable. There is no Linux profile
+and none is planned — no Linux equivalent of the Windows VDD exists for deterministic
+connect/disconnect, and no Linux equivalent of `dpi_scale.ps1` exists for provisioning a
+second scale.
+
+With no profile the controller runs the application-state cases and reports physical and
+cross-DPI cases as unavailable, which is the intended Linux result. A profile names the
+machine's monitor and its power commands; never invent one.
 
 ## Step 2 — Windows only: elevation for the display-backed partitions
 
