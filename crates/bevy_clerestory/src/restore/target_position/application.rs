@@ -11,6 +11,7 @@ use bevy::window::WindowPosition;
 use bevy::window::WindowScaleFactorChanged;
 use bevy::winit::WINIT_WINDOWS;
 use bevy_kana::ToI32;
+use bevy_kana::ToU32;
 
 use super::strategy::FullscreenRestoreState;
 use super::strategy::MonitorScaleStrategy;
@@ -286,8 +287,13 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
 /// triggers the final `ApplySize` phase at `target_scale`.
 ///
 /// With no saved position, we anchor the window on the saved monitor via
-/// `WindowPosition::Centered` and size from `TargetPosition::physical_size`, which
-/// `compute_target_position` already derived at `target_scale`.
+/// `WindowPosition::Centered` and size at the window's live scale factor.
+/// `set_physical_resolution` is interpreted at that scale, and both macOS and Windows carry
+/// the resulting logical size through the move, so the post-move physical size resolves to
+/// `TargetPosition::logical_size * target_scale` — which is `TargetPosition::physical_size`,
+/// the value settle compares against. Reading the live scale rather than
+/// `TargetPosition::starting_scale` also covers Windows, where `windows_dpi_fix` forwards
+/// `WM_DPICHANGED` to the still-hidden window and the crossing can already have happened.
 /// The `WindowScaleFactorChanged` -> `WindowRestoreState::ApplySize` transition is
 /// skipped because macOS does not fire `WindowScaleFactorChanged` for windows that are
 /// still hidden; waiting for it would deadlock. Settle starts immediately and verifies
@@ -298,22 +304,23 @@ fn begin_cross_dpi_restore(
     attempt_id: Option<RestoreAttemptId>,
 ) {
     if target_position.physical_position.is_none() {
-        let physical_size = target_position.physical_size;
+        let live_scale = f64::from(window.resolution.scale_factor());
+        let physical_width = (f64::from(target_position.logical_size.x) * live_scale).to_u32();
+        let physical_height = (f64::from(target_position.logical_size.y) * live_scale).to_u32();
         debug!(
             "[begin_cross_dpi_restore] no saved position, centering on monitor {} at \
-             target_scale={} (physical {}x{} = logical {}x{})",
+             live_scale={live_scale} (physical {physical_width}x{physical_height} → logical \
+             {}x{} after the move to target_scale={})",
             target_position.monitor_index,
-            target_position.target_scale,
-            physical_size.x,
-            physical_size.y,
             target_position.logical_size.x,
-            target_position.logical_size.y
+            target_position.logical_size.y,
+            target_position.target_scale
         );
         window.position =
             WindowPosition::Centered(MonitorSelection::Index(target_position.monitor_index));
         window
             .resolution
-            .set_physical_resolution(physical_size.x, physical_size.y);
+            .set_physical_resolution(physical_width, physical_height);
         window.visible = true;
         target_position.settle_state = Some(SettleState::new());
         return;
@@ -1127,12 +1134,14 @@ mod tests {
         );
     }
 
-    /// A window launched on a denser monitor is still sized by the monitor it restores *to*.
-    /// `set_physical_resolution` takes `TargetPosition::physical_size` directly; recomputing it
-    /// from `starting_scale` left the window at `logical_size * starting_scale` and settle never
-    /// reached the saved size.
+    /// `set_physical_resolution` is interpreted at the scale the window is on when the request is
+    /// made, and the compositor carries the resulting logical size through the move, so the
+    /// request has to be `logical_size * starting_scale` for the window to land on the target
+    /// monitor at `TargetPosition::physical_size`. Passing `physical_size` straight through left
+    /// the window at `physical_size / starting_scale * target_scale` and settle never reached the
+    /// saved size.
     #[test]
-    fn an_unpositioned_cross_dpi_restore_sizes_the_window_at_the_target_scale() {
+    fn an_unpositioned_cross_dpi_restore_requests_the_size_that_survives_the_move() {
         let mut target = unpositioned_cross_dpi_target();
         let mut resolution = WindowResolution::new(1_600, 1_200);
         resolution.set_scale_factor(2.0);
@@ -1148,10 +1157,17 @@ mod tests {
             NativeFullscreenState::Windowed,
         );
 
+        let requested_logical =
+            window.resolution.physical_size().as_dvec2() / target.starting_scale;
         assert_eq!(
-            window.resolution.physical_size(),
+            requested_logical.as_uvec2(),
+            target.logical_size,
+            "the request must resolve to the saved logical size at the window's current scale"
+        );
+        assert_eq!(
+            (requested_logical * target.target_scale).as_uvec2(),
             target.physical_size,
-            "the centered window is sized at target_scale, not starting_scale"
+            "the logical size carried through the move must resolve to the saved physical size"
         );
         assert_eq!(
             window.position,
