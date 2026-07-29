@@ -382,7 +382,7 @@ The state file uses a versioned v3 schema:
 All spatial values (position, size) are stored in **logical pixels**, making them independent
 of monitor scale factor. A position is an offset from its monitor's top-left corner, saved
 alongside that monitor's index and — where the platform supplies enough evidence — a
-fingerprint of the panel: an EDID hash on Windows and X11, the ColorSync UUID on macOS. The
+fingerprint of the panel: an EDID hash on Windows and X11, the `ColorSync` UUID on macOS. The
 fingerprint is what finds the right display again after a replug, dock, or driver update
 renumbers the monitors; where it is absent (Wayland, or a virtual display with no usable
 EDID) the saved index is used instead. On restore, values are converted to physical pixels
