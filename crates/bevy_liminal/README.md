@@ -2,8 +2,8 @@
 
 [![Crates.io](https://img.shields.io/crates/v/bevy_liminal.svg)](https://crates.io/crates/bevy_liminal)
 [![Downloads](https://img.shields.io/crates/d/bevy_liminal.svg)](https://crates.io/crates/bevy_liminal)
-[![CI](https://github.com/natepiano/bevy_liminal/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/bevy_liminal/actions/workflows/ci.yml)
-[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/bevy_liminal#license)
+[![CI](https://github.com/natepiano/hana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/hana/actions/workflows/ci.yml)
+[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/hana/tree/main/crates/bevy_liminal#license)
 
 A Bevy plugin for rendering 3D mesh outlines using jump-flood and hull-extrusion methods.
 
