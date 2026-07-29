@@ -614,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_clerestory"
-version = "0.2.0-dev"
+version = "0.2.0"
 dependencies = [
  "bevy",
  "bevy_diagnostic",

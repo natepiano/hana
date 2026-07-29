@@ -374,19 +374,26 @@ have not yet been recorded.
 
 ### State File Format
 
-The state file uses a versioned v2 schema:
+The state file uses a versioned v3 schema:
 
-- `version: 2`
+- `version: 3`
 - `entries: [{ key, state }, ...]`
 
 All spatial values (position, size) are stored in **logical pixels**, making them independent
-of monitor scale factor. On restore, values are converted to physical pixels using the target
-monitor's live scale factor.
+of monitor scale factor. A position is an offset from its monitor's top-left corner, saved
+alongside that monitor's index and — where the platform supplies enough evidence — a
+fingerprint of the panel: an EDID hash on Windows and X11, the ColorSync UUID on macOS. The
+fingerprint is what finds the right display again after a replug, dock, or driver update
+renumbers the monitors; where it is absent (Wayland, or a virtual display with no usable
+EDID) the saved index is used instead. On restore, values are converted to physical pixels
+using the target monitor's live scale factor.
 
 `key` is typed (`Primary` or `Managed("<name>")`), so the primary window and a managed
 window named `"primary"` are distinct and unambiguous.
 
-Legacy state files (unversioned and v1) are still accepted on read and migrated to v2 on save.
+Legacy state files (unversioned, v1, and v2) are still accepted on read and migrated to v3 on
+save. A migrated position is checked against the live monitor layout before it is used, and
+discarded if it no longer lands on a display.
 
 ## Version Compatibility
 

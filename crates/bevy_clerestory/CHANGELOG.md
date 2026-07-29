@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-07-29
 
 ### Added
 - While the application remains running, its windows can now return to the same
@@ -76,8 +76,25 @@
   current window state in memory and writes only after that state changes.
   While a window is waiting to return automatically, its saved placement stays
   unchanged until restoration finishes or the application cancels recovery.
+- The saved state file moves to schema v3. A window position is stored as an
+  offset from its monitor instead of an absolute desktop coordinate, and each
+  entry records a fingerprint of the panel it was saved against — an EDID hash
+  on Windows and X11, the ColorSync UUID on macOS — so the saved monitor is
+  still found after a replug, dock, or driver update renumbers the displays.
+  Where no panel evidence is available (Wayland, or a virtual display with no
+  usable EDID) the entry stays anonymous and the saved monitor index is used,
+  as in earlier versions. Unversioned, v1, and v2 files are still read and are
+  migrated to v3 on the next save; a migrated coordinate is checked against the
+  live monitor layout and discarded if it no longer lands on a display.
 - Added a direct `winit` dependency (pinned to Bevy 0.19's version) to read
   platform-specific monitor identification data.
+
+### Fixed
+- A window with no saved position restoring onto a lower-density monitor was
+  sized from the scale of the monitor it started on, so it returned at the
+  wrong size and the restore never settled. Present in 0.1.1.
+- macOS: a fullscreen restore waited without limit for a monitor move that
+  winit never resolved, which could leave the window hidden.
 
 ### Verification
 - Automated Bevy tests exercise the platform-specific recovery logic for
