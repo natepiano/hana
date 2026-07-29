@@ -443,7 +443,7 @@ In your `Cargo.toml`, you can selectively enable features:
 
 ```toml
 [dependencies]
-bevy_clerestory = { version = "0.1", default-features = false, features = ["workaround-winit-4341"] }
+bevy_clerestory = { version = "0.2", default-features = false, features = ["workaround-winit-4341"] }
 ```
 
 ## License
