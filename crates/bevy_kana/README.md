@@ -6,7 +6,7 @@
 
 **Ergonomic, opinionated utilities for Bevy — type-safe math, input wiring, and more.**
 
-[![CI](https://github.com/natepiano/bevy_kana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/bevy_kana/actions/workflows/ci.yml)
+[![CI](https://github.com/natepiano/hana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/hana/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/bevy_kana.svg)](https://crates.io/crates/bevy_kana)
 [![docs.rs](https://docs.rs/bevy_kana/badge.svg)](https://docs.rs/bevy_kana)
 [![license](https://img.shields.io/crates/l/bevy_kana.svg)](LICENSE-MIT)
@@ -15,7 +15,7 @@
 
 ---
 
-> **Work in progress.** This crate is in active development (v0.1.0) and not
+> **Work in progress.** This crate is in active development (v0.2.0) and not
 > subject to semver stability guarantees. APIs will change without notice
 > between commits. Do not depend on this in production code yet.
 
@@ -154,6 +154,7 @@ cargo run --example cascade
 
 | bevy_kana | Bevy |
 |-----------|------|
+| 0.2.0 | 0.19 |
 | 0.1.0 | 0.19 |
 | 0.0.6 | 0.18 |
 
@@ -163,7 +164,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy_kana = "0.1.0"
+bevy_kana = "0.2.0"
 ```
 
 Run the example:
