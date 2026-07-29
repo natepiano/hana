@@ -633,6 +633,18 @@ mod tests {
         control:          Entity,
     }
 
+    /// A window the window manager has already placed on the selected monitor.
+    ///
+    /// `setup::monitor_agreement` ignores a window whose reported position does not fall inside
+    /// the monitor `OnMonitor` names, so a `Window::default()` fixture — still at
+    /// `WindowPosition::Automatic` — would never register or confirm.
+    fn placed_window(monitors: setup::tests::ProbeTestMonitors) -> Window {
+        Window {
+            position: WindowPosition::At(monitors.selected_monitor.physical_position),
+            ..default()
+        }
+    }
+
     fn spawn_readiness_fixtures(
         app: &mut App,
         monitors: setup::tests::ProbeTestMonitors,
@@ -641,7 +653,7 @@ mod tests {
         let primary = app
             .world_mut()
             .spawn((
-                Window::default(),
+                placed_window(monitors),
                 PrimaryWindow,
                 OnMonitor(monitors.selected_entity),
                 current_monitor,
@@ -651,7 +663,7 @@ mod tests {
         let automatic = app
             .world_mut()
             .spawn((
-                Window::default(),
+                placed_window(monitors),
                 ManagedWindow {
                     name: AUTOMATIC_WINDOW_KEY.into(),
                 },
@@ -663,7 +675,7 @@ mod tests {
         let application = app
             .world_mut()
             .spawn((
-                Window::default(),
+                placed_window(monitors),
                 ManagedWindow {
                     name: APPLICATION_WINDOW_KEY.into(),
                 },
@@ -675,7 +687,7 @@ mod tests {
         let control = app
             .world_mut()
             .spawn((
-                Window::default(),
+                placed_window(monitors),
                 setup::UnregisteredControl,
                 OnMonitor(monitors.selected_entity),
             ))

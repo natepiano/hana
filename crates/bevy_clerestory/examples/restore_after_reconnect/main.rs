@@ -21,6 +21,7 @@ use std::process::id;
 use bevy::ecs::schedule::common_conditions::not;
 use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::log::LogPlugin;
+use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy::window::ExitCondition;
 use bevy::window::MonitorSelection;
@@ -312,12 +313,32 @@ fn main() -> std::io::Result<()> {
                     }),
                     exit_condition: ExitCondition::DontExit,
                     ..default()
+                })
+                // This probe renders only the `DiegeticPanel` overlays built in
+                // `window_panel::build_panel`, so GPU mesh preprocessing and its frustum-culling
+                // compute pass are pure overhead. Disabling them also avoids a startup crash on
+                // GPUs whose `max_storage_buffers_per_shader_stage` is below the 8 that the
+                // frustum-culling bind group requires (e.g. Asahi/Mesa, limit 6).
+                .set(PbrPlugin {
+                    use_gpu_instance_buffer_builder: false,
+                    ..default()
                 }),
         )
         .add_plugins(remote::plugin())
-        .add_plugins(remote::http_plugin(probe_port))
-        .add_plugins(hana_diegetic::DiegeticUiPlugin)
-        .add_plugins(WindowManagerPlugin::with_path(persistence_path));
+        .add_plugins(remote::http_plugin(probe_port));
+    // The `DiegeticPanel` overlays exist so a human can read window state off the screen; nothing
+    // this probe asserts depends on them. `hana_diegetic`'s material shaders bind six fragment
+    // storage buffers (`sdf_panel.wgsl` and `analytic_path.wgsl`, bindings 101-108) on top of
+    // Bevy's PBR view bindings, which exceeds the `max_storage_buffers_per_shader_stage` that Mesa
+    // adapters (e.g. Asahi, limit 6) expose; `pbr_alpha_blend_mesh_pipeline` then fails validation
+    // and `bevy_render::error_handler` quits the probe before `remote::http_plugin` opens its port.
+    // Without this plugin the `DiegeticPanel` components stay inert — they require only `Transform`
+    // and `Visibility`, so no mesh is ever built for them — and every window still opens with the
+    // clear-color camera from `window_panel::spawn_window_clear_camera`.
+    if !cfg!(target_os = "linux") {
+        app.add_plugins(hana_diegetic::DiegeticUiPlugin);
+    }
+    app.add_plugins(WindowManagerPlugin::with_path(persistence_path));
     if let Some(frame) = smoke_exit_frame {
         app.insert_resource(SmokeExitFrame(frame));
     }

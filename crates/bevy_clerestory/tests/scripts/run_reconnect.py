@@ -29,6 +29,11 @@ from clerestory_test.probe_client import ProbeClient
 
 
 AUTOMATIC_WINDOW_KEYS = ("primary", "hotplug-automatic")
+# Monitor index a probe starts on before the snapshot says which panels the host can fingerprint.
+BOOTSTRAP_MONITOR_INDEX = 0
+# Subdirectory holding the second probe's artifacts when the bootstrap monitor is unidentifiable,
+# so its logs and `windows.ron` do not overwrite the bootstrap probe's.
+VERIFIED_MONITOR_ARTIFACTS = "verified-monitor"
 # WARP software rendering on a GPU-less Windows host (the VMware test guest) makes the
 # per-window surface reconfiguration during a reconnect very slow; give the cycle far more
 # time there. Hardware renderers (macOS, GPU hosts) complete quickly on the original bounds.
@@ -113,6 +118,13 @@ class ProbeProcess:
         port_pair = available_port_pair()
         client = ProbeClient(port_pair.base, self.capability)
         environment = dict(os.environ)
+        # Match the restore partition, which forces X11 on Linux (`run_test.py`, backend "x11").
+        # Under Wayland the compositor exposes no stable physical monitor identity, so every
+        # monitor stays `Unverified` and a windowed automatic key never arms; the probe then never
+        # reports `recovery-ready` and every case here times out waiting for a state this backend
+        # cannot reach.
+        if sys.platform.startswith("linux"):
+            environment["WAYLAND_DISPLAY"] = ""
         environment.update(
             {
                 "CLERESTORY_PROBE_RUN_ID": self.run_id,
@@ -373,6 +385,16 @@ def verified_id(monitor: dict[str, object]) -> str:
     if not isinstance(value, str) or not value:
         raise RuntimeError("target monitor did not have a verified identity")
     return value
+
+
+def verified_monitor_index(snapshot: dict[str, object]) -> int | None:
+    """Lowest monitor index the app fingerprinted, or `None` when it fingerprinted none of them."""
+    indices = [
+        _as_int(monitor.get("index"))
+        for monitor in _dict_list(snapshot.get("monitors"))
+        if isinstance(identity := monitor.get("verified_id"), str) and identity
+    ]
+    return min(indices) if indices else None
 
 
 def windows_by_key(snapshot: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -821,17 +843,57 @@ def physical_error_case(
     )
 
 
+def _retarget_to_verified_monitor(
+    probe: ProbeProcess,
+    snapshot: dict[str, object],
+    executable: Path,
+    artifact_directory: Path,
+    suite_run_id: str,
+) -> tuple[ProbeProcess, dict[str, object]]:
+    """Restart `probe` on a monitor the app fingerprinted, when it did not start on one.
+
+    `accept_eligible_registrations` skips a window whose monitor identity is `Unverified`, so no
+    `recovery-accepted` record is ever written for a panel the host cannot fingerprint and
+    `retained-recovery-trace` cannot pass against it. Apple's internal panels publish no EDID at
+    all, which leaves monitor 0 on a MacBook permanently unidentifiable while an attached external
+    panel identifies normally, so the bootstrap index alone is not a usable target.
+
+    A host that fingerprints no monitor keeps the bootstrap probe and fails
+    `retained-recovery-trace`. That is the accurate outcome rather than a missing capability:
+    reconnect recovery arms nowhere on such a host, and reporting the case as unavailable would
+    let a real regression in registration acceptance pass as a host limitation.
+    """
+    target_index = verified_monitor_index(snapshot)
+    if target_index is None or target_index == probe.monitor_index:
+        return probe, snapshot
+    probe.stop()
+    retargeted = ProbeProcess(
+        executable,
+        artifact_directory / VERIFIED_MONITOR_ARTIFACTS,
+        target_index,
+        probe.startup_mode,
+        suite_run_id,
+    )
+    return retargeted, retargeted.start()
+
+
 def run_zero_window_case(
     executable: Path,
     artifact_directory: Path,
     suite_run_id: str,
 ) -> CaseResult:
-    probe = ProbeProcess(executable, artifact_directory, 0, "windowed", suite_run_id)
+    probe = ProbeProcess(
+        executable, artifact_directory, BOOTSTRAP_MONITOR_INDEX, "windowed", suite_run_id
+    )
     try:
         # This case closes every window and asserts liveness, record retention, command
-        # idempotence, and reconstruction. None of that re-resolves the target monitor, so a
-        # host without EDID must not be blocked from running it.
+        # idempotence, and reconstruction. Only `retained-recovery-trace` depends on the target
+        # monitor's identity, so the probe starts unpinned on the bootstrap index and moves to a
+        # fingerprinted monitor only when the bootstrap one turns out not to be fingerprinted.
         initial = probe.start(pin_verified_identity=False)
+        probe, initial = _retarget_to_verified_monitor(
+            probe, initial, executable, artifact_directory, suite_run_id
+        )
         initial_cursor = _as_int(initial.get("record_cursor", 0))
         for selector in ("control", "application", "automatic", "primary"):
             receipt = probe.client.command(

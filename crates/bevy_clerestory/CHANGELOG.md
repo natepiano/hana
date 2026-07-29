@@ -55,6 +55,10 @@
 - The `restore_after_reconnect` example demonstrates both recovery policies,
   records an ordered diagnostic log, includes automated tests, and provides a
   two-cycle manual monitor-disconnect script.
+- Linux monitors are now identified from `/sys/class/drm` when X11 reports no
+  EDID: the kernel's EDID blob, or the connector name for built-in panels
+  (`eDP`, `LVDS`, `DSI`, `DPI`), so they reach `MonitorIdentity::Verified`
+  under XWayland and on EDID-less internal panels.
 
 ### Changed
 - `MonitorInfo` gains an `identity: MonitorIdentity` field. Breaking for code

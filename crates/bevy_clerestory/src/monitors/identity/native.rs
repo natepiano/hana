@@ -1,7 +1,13 @@
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
+#[cfg(target_os = "linux")]
+use std::fs;
 #[cfg(target_os = "windows")]
 use std::mem::size_of;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
+#[cfg(target_os = "linux")]
+use std::str;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Devices::DeviceAndDriverInstallation::DICS_FLAG_GLOBAL;
@@ -95,6 +101,8 @@ use x11rb::connection::Connection;
 #[cfg(all(unix, not(target_os = "macos")))]
 use x11rb::protocol::randr::ConnectionExt as RandrConnectionExt;
 #[cfg(all(unix, not(target_os = "macos")))]
+use x11rb::protocol::randr::Output;
+#[cfg(all(unix, not(target_os = "macos")))]
 use x11rb::protocol::xproto::AtomEnum;
 #[cfg(all(unix, not(target_os = "macos")))]
 use x11rb::protocol::xproto::ConnectionExt as XprotoConnectionExt;
@@ -109,11 +117,25 @@ use super::edid::EdidEvidence;
 use crate::Platform;
 #[cfg(target_os = "windows")]
 use crate::constants::DISPLAY_CONFIG_ACQUISITION_ATTEMPTS;
+#[cfg(target_os = "linux")]
+use crate::constants::DRM_CLASS_DIRECTORY;
+#[cfg(target_os = "linux")]
+use crate::constants::DRM_CONNECTOR_EDID_FILE;
+#[cfg(target_os = "linux")]
+use crate::constants::DRM_CONNECTOR_NAME_SEPARATOR;
+#[cfg(target_os = "linux")]
+use crate::constants::DRM_INTERNAL_CONNECTOR_EVIDENCE_TAG;
+#[cfg(target_os = "linux")]
+use crate::constants::DRM_INTERNAL_CONNECTOR_PREFIXES;
 #[cfg(target_os = "macos")]
 use crate::constants::MACOS_DISPLAY_UUID_BYTES;
+#[cfg(all(unix, not(target_os = "macos")))]
+use crate::constants::X11_EDID_PROPERTY_NAME;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum QualifiedEvidence {
+    #[cfg(target_os = "linux")]
+    InternalConnector(InternalConnector),
     #[cfg(target_os = "macos")]
     MacOsDisplayUuid(MacOsDisplayUuid),
     #[cfg(target_os = "windows")]
@@ -122,6 +144,41 @@ pub enum QualifiedEvidence {
     X11Edid(Vec<u8>),
     #[cfg(test)]
     Synthetic(Vec<u8>),
+}
+
+/// The DRM connector name of a panel built into the machine, tagged with
+/// [`DRM_INTERNAL_CONNECTOR_EVIDENCE_TAG`].
+///
+/// Only a connector whose name starts with one of [`DRM_INTERNAL_CONNECTOR_PREFIXES`] may be named
+/// this way. Those connectors carry a panel that is soldered or wired to the board and can never
+/// be exchanged, so naming the connector names the panel. Naming any other connector would claim
+/// that whatever is plugged into a socket today is the same display that was plugged into it when
+/// the position was saved, which is the conflation `PanelIdentity::Anonymous` exists to prevent.
+///
+/// macOS already resolves the same case the same way: `CGDisplayCreateUUIDFromDisplayID` falls
+/// back to the physical port for panels that report no serial, which is why a built-in laptop
+/// panel is [`MonitorIdentity::Verified`](super::MonitorIdentity::Verified) there and, before this
+/// evidence existed, was not on Linux.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct InternalConnector(Vec<u8>);
+
+#[cfg(target_os = "linux")]
+impl InternalConnector {
+    /// The evidence for `connector_name`, or `None` when that connector accepts a display the user
+    /// can swap.
+    fn identify(connector_name: &str) -> Option<Self> {
+        DRM_INTERNAL_CONNECTOR_PREFIXES
+            .iter()
+            .any(|prefix| connector_name.starts_with(prefix))
+            .then(|| {
+                let mut evidence = DRM_INTERNAL_CONNECTOR_EVIDENCE_TAG.to_vec();
+                evidence.extend_from_slice(connector_name.as_bytes());
+                Self(evidence)
+            })
+    }
+
+    fn as_bytes(&self) -> &[u8] { &self.0 }
 }
 
 /// The panel's `ColorSync` UUID: 16 bytes macOS derives from the display's own vendor, model and
@@ -199,6 +256,8 @@ impl QualifiedEvidence {
     )]
     pub(super) fn stable_bytes(&self) -> &[u8] {
         match self {
+            #[cfg(target_os = "linux")]
+            Self::InternalConnector(connector) => connector.as_bytes(),
             #[cfg(target_os = "macos")]
             Self::MacOsDisplayUuid(uuid) => uuid.as_bytes(),
             #[cfg(target_os = "windows")]
@@ -239,7 +298,7 @@ pub fn qualified_evidence(
         Platform::X11 => {
             #[cfg(all(unix, not(target_os = "macos")))]
             {
-                x11_panel_evidence(handle).map(QualifiedEvidence::X11Edid)
+                x11_panel_evidence(handle)
             }
             #[cfg(not(all(unix, not(target_os = "macos"))))]
             {
@@ -561,7 +620,9 @@ fn terminated_utf16(code_units: &[u16]) -> Option<Vec<u16>> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn x11_panel_evidence(handle: &MonitorHandle) -> Result<Vec<u8>, MonitorIdentificationError> {
+fn x11_panel_evidence(
+    handle: &MonitorHandle,
+) -> Result<QualifiedEvidence, MonitorIdentificationError> {
     let (connection, screen_number) = XCBConnection::connect(None)
         .map_err(|_| OperatingSystemQueryError::DisplayConfiguration)?;
     let root = connection
@@ -586,13 +647,31 @@ fn x11_panel_evidence(handle: &MonitorHandle) -> Result<Vec<u8>, MonitorIdentifi
         if output_info.crtc != crtc {
             continue;
         }
-        if matched_output.replace(output).is_some() {
+        if matched_output.replace((output, output_info.name)).is_some() {
             return Err(MonitorIdentificationError::InvalidStableIdentity);
         }
     }
-    let output = matched_output.ok_or(MonitorIdentificationError::InvalidStableIdentity)?;
+    let (output, connector_name) =
+        matched_output.ok_or(MonitorIdentificationError::InvalidStableIdentity)?;
+    let panel_evidence =
+        qualify_edid(x11_output_edid(&connection, output)).map(QualifiedEvidence::X11Edid);
+    // XWayland answers `randr_get_output_property` for `EDID` with nothing, so under a Wayland
+    // compositor every panel would stay `MonitorIdentity::Unverified` and
+    // `accept_eligible_registrations` would decline every window, disabling reconnect recovery on
+    // the whole desktop. The kernel still describes the panel the X server said nothing about.
+    #[cfg(target_os = "linux")]
+    let panel_evidence = panel_evidence
+        .or_else(|property_error| drm_panel_evidence(&connector_name, property_error));
+    panel_evidence
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn x11_output_edid(
+    connection: &XCBConnection,
+    output: Output,
+) -> Result<Vec<u8>, MonitorIdentificationError> {
     let edid_atom = connection
-        .intern_atom(true, b"EDID")
+        .intern_atom(true, X11_EDID_PROPERTY_NAME)
         .map_err(|_| OperatingSystemQueryError::StableIdentityProperty)?
         .reply()
         .map_err(|_| OperatingSystemQueryError::StableIdentityProperty)?
@@ -608,7 +687,69 @@ fn x11_panel_evidence(handle: &MonitorHandle) -> Result<Vec<u8>, MonitorIdentifi
     if edid.format != EdidEvidence::PROPERTY_FORMAT || edid.bytes_after != 0 {
         return Err(MonitorIdentificationError::InvalidStableIdentity);
     }
-    qualify_edid(Ok(edid.data))
+    Ok(edid.data)
+}
+
+/// What the kernel says about the panel on `connector_name`, or `property_error` when it describes
+/// the panel no better than the `RandR` property did.
+///
+/// `connector_name` is the `RandR` output name, which the modesetting driver keeps identical to the
+/// kernel's connector name (`eDP-1`, `HDMI-A-1`), so it selects the connector directory directly.
+///
+/// An `edid` file that reads back empty is the kernel stating that this panel publishes no EDID at
+/// all — Apple's internal panels describe themselves through firmware instead. That is a durable
+/// property of the hardware rather than a transient read failure, so a connector that
+/// [`InternalConnector::identify`] accepts may be named directly at that point. A read that fails
+/// makes no such statement and leaves the monitor unverified.
+#[cfg(target_os = "linux")]
+fn drm_panel_evidence(
+    connector_name: &[u8],
+    property_error: MonitorIdentificationError,
+) -> Result<QualifiedEvidence, MonitorIdentificationError> {
+    let Ok(connector_name) = str::from_utf8(connector_name) else {
+        return Err(property_error);
+    };
+    let Some(connector_directory) = drm_connector_directory(connector_name) else {
+        return Err(property_error);
+    };
+    let Ok(edid) = fs::read(connector_directory.join(DRM_CONNECTOR_EDID_FILE)) else {
+        return Err(property_error);
+    };
+    if !edid.is_empty() {
+        return EdidEvidence::qualify(edid).map(QualifiedEvidence::X11Edid);
+    }
+    InternalConnector::identify(connector_name).map_or(Err(property_error), |connector| {
+        Ok(QualifiedEvidence::InternalConnector(connector))
+    })
+}
+
+/// The [`DRM_CLASS_DIRECTORY`] entry for `connector_name`, matched on the part of the entry name
+/// that follows the card it belongs to.
+///
+/// Returns `None` when no entry matches, and when two DRM cards expose the same connector name,
+/// since nothing then says which panel the entry describes.
+#[cfg(target_os = "linux")]
+fn drm_connector_directory(connector_name: &str) -> Option<PathBuf> {
+    let mut matched_directory = None;
+    for entry in fs::read_dir(DRM_CLASS_DIRECTORY).ok()? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let entry_name = entry.file_name();
+        let Some((_, entry_connector)) = entry_name
+            .to_str()
+            .and_then(|entry_name| entry_name.split_once(DRM_CONNECTOR_NAME_SEPARATOR))
+        else {
+            continue;
+        };
+        if entry_connector != connector_name {
+            continue;
+        }
+        if matched_directory.replace(entry.path()).is_some() {
+            return None;
+        }
+    }
+    matched_directory
 }
 
 #[cfg(any(test, target_os = "windows", all(unix, not(target_os = "macos"))))]
@@ -619,6 +760,10 @@ fn qualify_edid(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use super::*;
 
@@ -638,5 +783,45 @@ mod tests {
             rejected_data,
             Err(MonitorIdentificationError::InvalidStableIdentity)
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn every_internal_connector_prefix_names_its_panel() {
+        for prefix in DRM_INTERNAL_CONNECTOR_PREFIXES {
+            let connector_name = format!("{prefix}1");
+
+            assert!(
+                InternalConnector::identify(&connector_name).is_some(),
+                "{connector_name} carries a panel that cannot be exchanged"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn connectors_that_accept_any_display_name_no_panel() {
+        // `DP-1` shares its first two characters with the `DPI-` prefix, so a prefix test that
+        // dropped `DRM_CONNECTOR_NAME_SEPARATOR` would treat a DisplayPort socket as a wired panel.
+        for connector_name in ["DP-1", "DVI-D-1", "HDMI-A-1", "VGA-1", "Virtual-1"] {
+            assert!(
+                InternalConnector::identify(connector_name).is_none(),
+                "{connector_name} accepts a display the user can swap"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn internal_connector_evidence_is_tagged_and_distinct_per_connector() {
+        let first = InternalConnector::identify("eDP-1").expect("eDP-1 is an internal connector");
+        let second = InternalConnector::identify("eDP-2").expect("eDP-2 is an internal connector");
+
+        assert!(
+            first
+                .as_bytes()
+                .starts_with(DRM_INTERNAL_CONNECTOR_EVIDENCE_TAG)
+        );
+        assert_ne!(first.as_bytes(), second.as_bytes());
     }
 }

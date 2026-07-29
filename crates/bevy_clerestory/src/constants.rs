@@ -18,13 +18,43 @@ pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
 pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
 
 // monitor identity
-/// Length of a `ColorSync` display UUID, fixed by `CFUUIDBytes`.
-#[cfg(target_os = "macos")]
-pub(crate) const MACOS_DISPLAY_UUID_BYTES: usize = 16;
+/// Directory the kernel populates with one `card<N>-<connector>` entry per DRM connector.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_CLASS_DIRECTORY: &str = "/sys/class/drm";
+/// File inside a DRM connector directory holding that panel's raw EDID block.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_CONNECTOR_EDID_FILE: &str = "edid";
+/// Separates the card name from the connector name in a DRM connector directory name, as in
+/// `card2-HDMI-A-1`.
+///
+/// Connector names contain further separators of their own, so only the first occurrence splits
+/// the directory name.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_CONNECTOR_NAME_SEPARATOR: char = '-';
+/// Hashed ahead of a connector name by `QualifiedEvidence::stable_bytes`, so a `PanelFingerprint`
+/// built from a connector can never equal one built from an EDID block.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_INTERNAL_CONNECTOR_EVIDENCE_TAG: &[u8] = b"drm-internal-connector:";
+/// DRM connector-name prefixes whose panel is built into the machine rather than plugged into it.
+///
+/// `eDP` and `LVDS` carry laptop panels; `DSI` and `DPI` carry panels wired straight to the board.
+/// Nothing else can ever appear on these connectors, so the connector name identifies the panel
+/// and not merely the port it occupies. Every other connector type is a socket that accepts any
+/// display, where the same name would name a different panel after a replug.
+///
+/// Each prefix includes [`DRM_CONNECTOR_NAME_SEPARATOR`] so that `DP-1` cannot match `DPI-`.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_INTERNAL_CONNECTOR_PREFIXES: [&str; 4] = ["DPI-", "DSI-", "LVDS-", "eDP-"];
 /// FNV-1a 64-bit offset basis, fixed by the algorithm's specification.
 pub(crate) const FNV_1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a 64-bit prime, fixed by the algorithm's specification.
 pub(crate) const FNV_1A_PRIME: u64 = 0x0000_0100_0000_01b3;
+/// Length of a `ColorSync` display UUID, fixed by `CFUUIDBytes`.
+#[cfg(target_os = "macos")]
+pub(crate) const MACOS_DISPLAY_UUID_BYTES: usize = 16;
+/// `RandR` output property carrying a panel's EDID block.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) const X11_EDID_PROPERTY_NAME: &[u8] = b"EDID";
 
 // monitor lookup
 pub(crate) const MONITOR_SOURCE_EXISTING: &str = "existing";
