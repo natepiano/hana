@@ -618,7 +618,7 @@ version = "0.3.0-dev"
 dependencies = [
  "bevy",
  "bevy_diagnostic",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_remote",
  "block2 0.6.2",
  "dirs",
@@ -1135,6 +1135,16 @@ dependencies = [
 
 [[package]]
 name = "bevy_kana"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68b7d6dd9d4ed398ea1e4aa89685a61b264c5f3dc52f5656ba70bf9fe845b48a"
+dependencies = [
+ "bevy",
+ "bevy_enhanced_input",
+]
+
+[[package]]
+name = "bevy_kana"
 version = "0.3.0-dev"
 dependencies = [
  "bevy",
@@ -1152,7 +1162,7 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_clerestory",
  "bevy_enhanced_input",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
@@ -1192,7 +1202,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_lagrange",
  "bevy_render",
  "bytemuck",
@@ -2858,7 +2868,7 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_clerestory",
  "bevy_enhanced_input",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_lagrange",
  "hana_diegetic",
  "hana_valence",
@@ -3280,7 +3290,7 @@ name = "hana_conduit"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
@@ -3293,7 +3303,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_lagrange",
  "bitflags 2.13.0",
  "clay-layout",
@@ -3327,7 +3337,7 @@ name = "hana_prosody"
 version = "0.0.1"
 dependencies = [
  "bevy",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_lagrange",
  "bevy_remote",
  "cpal 0.18.1",
@@ -3347,7 +3357,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_enhanced_input",
- "bevy_kana 0.3.0-dev",
+ "bevy_kana 0.2.0",
  "bevy_lagrange",
  "bevy_math",
  "bevy_platform",
