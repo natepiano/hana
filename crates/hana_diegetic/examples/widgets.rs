@@ -1283,6 +1283,8 @@ fn add_editable_text(builder: &mut LayoutBuilder) {
             .padding(Padding::all(CONTROL_PADDING))
             .alignment(AlignX::Center, AlignY::Center)
             .editable_field(TEXT_FIELD_ID, field)
+            .editor_selection(El::new().focused(Appearance::new().background(BUTTON_FILL_HOVERED)))
+            .editor_caret(El::new().focused(Appearance::new().background(BUTTON_BORDER_FOCUSED)))
             .tooltip(authored_tooltip(
                 "Editable text",
                 "Tab selects all; Enter or double-click edits",

@@ -1836,6 +1836,10 @@ impl ComputedDiegeticPanel {
 
         result.regenerate_commands(tree);
         self.draw_order = DrawOrder::from_commands(&result.commands);
+        let (field_records, field_id_conflicts) =
+            super::field::collect_panel_field_records(tree, result);
+        self.field_records = field_records;
+        self.field_id_conflicts = field_id_conflicts;
         self.widget_records = tree.computed_widget_records(result);
         self.tooltip_records = tree.computed_tooltip_records();
         true
@@ -1910,6 +1914,7 @@ mod tests {
     use bevy::window::Window;
     use bevy::window::WindowRef;
 
+    use super::ComputedDiegeticPanel;
     use super::CoordinateSpace;
     use super::DiegeticPanel;
     use super::DiegeticPanelChangeClassification;
@@ -1920,10 +1925,14 @@ mod tests {
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
+    use crate::Appearance;
     use crate::CascadeEntityCommandsExt as _;
     use crate::DiegeticTextMeasurer;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
+    use crate::ImeEditableFieldSpec;
     use crate::LayoutBuilder;
     use crate::Mm;
     use crate::PanelBuildError;
@@ -1955,6 +1964,21 @@ mod tests {
         builder.with(El::column().precompose_ldr(), |builder| {
             builder.with(El::new().button("action"), |_| {});
         });
+        builder.build()
+    }
+
+    fn editable_tree_with_editor_text(fill: Color) -> crate::LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .editable_field("field", field)
+                .editor_text(El::new().focused(Appearance::new()).background(fill)),
+            |builder| {
+                builder.text(("display", TextStyle::new(10.0)));
+            },
+        );
         builder.build()
     }
 
@@ -2000,6 +2024,66 @@ mod tests {
 
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 1);
+    }
+
+    #[test]
+    fn visual_only_editor_declaration_refreshes_field_presentation() {
+        let initial_tree = editable_tree_with_editor_text(Color::srgb(0.2, 0.3, 0.4));
+        let replacement_tree = editable_tree_with_editor_text(Color::srgb(0.7, 0.6, 0.5));
+        assert_eq!(
+            initial_tree.classify_change(&replacement_tree),
+            LayoutTreeChange::VisualOnly,
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(DiegeticTextMeasurer::default());
+        app.add_plugins(HeadlessLayoutPlugin);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(initial_tree)
+                    .build()
+                    .expect("editable panel should build"),
+            )
+            .id();
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(panel)
+            .expect("editable panel should compute");
+        let layout_solves = computed.layout_solves();
+        let initial_declaration = computed
+            .field_records()
+            .first()
+            .expect("editable panel should have one field")
+            .presentation()
+            .editor_text
+            .clone();
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, replacement_tree)
+            .expect("visual-only editable tree should be accepted");
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(panel)
+            .expect("editable panel should remain computed");
+        assert_eq!(computed.layout_solves(), layout_solves);
+        assert_ne!(
+            computed
+                .field_records()
+                .first()
+                .expect("editable panel should retain its field")
+                .presentation()
+                .editor_text,
+            initial_declaration,
+        );
     }
 
     #[test]

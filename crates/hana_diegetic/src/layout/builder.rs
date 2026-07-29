@@ -403,36 +403,172 @@ impl ChildLayoutState for Column {}
 
 impl ChildLayoutState for Overlay {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct CommonEl {
-    id:              Option<PanelElementId>,
-    width:           Sizing,
-    height:          Sizing,
-    padding:         Padding,
-    align_x:         AlignX,
-    align_y:         AlignY,
-    background:      Option<Color>,
-    border:          Option<Border>,
-    corner_radius:   CornerRadius,
-    overflow:        ChildOverflow,
-    scroll_offset:   Vec2,
-    scroll_anchor_x: ScrollAnchor,
-    scroll_anchor_y: ScrollAnchor,
-    material:        Cascade<Handle<StandardMaterial>>,
-    interactivity:   Cascade<WidgetInteractivity>,
-    editable:        Option<ImePanelField>,
-    widget:          Option<WidgetSpec>,
+    id:                Option<PanelElementId>,
+    width:             Sizing,
+    height:            Sizing,
+    padding:           Padding,
+    align_x:           AlignX,
+    align_y:           AlignY,
+    background:        Option<Color>,
+    border:            Option<Border>,
+    corner_radius:     CornerRadius,
+    overflow:          ChildOverflow,
+    scroll_offset:     Vec2,
+    scroll_anchor_x:   ScrollAnchor,
+    scroll_anchor_y:   ScrollAnchor,
+    material:          Cascade<Handle<StandardMaterial>>,
+    interactivity:     Cascade<WidgetInteractivity>,
+    editable:          Option<ImePanelField>,
+    widget:            Option<WidgetSpec>,
     /// Boxed so the per-state appearance a widget element authors does not
     /// widen every ordinary element declaration.
-    appearance:      Option<Box<StateAppearance>>,
-    tooltip:         Option<Tooltip>,
-    visual_slot:     Option<VisualSlotId>,
-    draw:            Option<PanelDraw>,
-    z_index:         DrawZIndex,
-    anti_alias:      Cascade<AntiAlias>,
-    hairline_fade:   Cascade<HairlineFade>,
-    shadow_casting:  Cascade<ShadowCasting>,
-    precompose:      PrecomposeMode,
+    appearance:        Option<Box<StateAppearance>>,
+    editor_text:       Option<Box<EditorPart>>,
+    editor_selection:  Option<Box<EditorPart>>,
+    editor_caret:      Option<Box<EditorPart>>,
+    editor_validation: Option<Box<EditorPart>>,
+    tooltip:           Option<Tooltip>,
+    visual_slot:       Option<VisualSlotId>,
+    draw:              Option<PanelDraw>,
+    z_index:           DrawZIndex,
+    anti_alias:        Cascade<AntiAlias>,
+    hairline_fade:     Cascade<HairlineFade>,
+    shadow_casting:    Cascade<ShadowCasting>,
+    precompose:        PrecomposeMode,
+}
+
+/// An erased generated-editor part declaration retained by an editable field.
+///
+/// The declaration keeps the `CommonEl` and child-layout value from the
+/// authored [`El`]. Its reconstruction helpers restore the original typed
+/// `El` before the generated editor adds it to a [`LayoutBuilder`].
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EditorPart {
+    common:       CommonEl,
+    child_layout: ChildLayout,
+}
+
+enum EditorPartDeclaration {
+    Row(El<Row>),
+    Column(El<Column>),
+    Overlay(El<Overlay>),
+}
+
+impl EditorPart {
+    fn from_el<L>(el: El<L, WidgetPart>) -> Self
+    where
+        L: ChildLayoutState,
+    {
+        let El {
+            common,
+            child_layout,
+            role: _,
+        } = el;
+        let child_layout =
+            private::Sealed::into_child_layout(child_layout, common.align_x, common.align_y);
+        Self {
+            common,
+            child_layout,
+        }
+    }
+
+    pub(crate) const fn with_width(mut self, width: Sizing) -> Self {
+        self.common.width = width;
+        self
+    }
+
+    pub(crate) const fn with_height(mut self, height: Sizing) -> Self {
+        self.common.height = height;
+        self
+    }
+
+    pub(crate) const fn with_background_if_unset(mut self, background: Color) -> Self {
+        if self.common.background.is_none() {
+            self.common.background = Some(background);
+        }
+        self
+    }
+
+    pub(crate) fn scaled(&self, default_scale: f32) -> Self {
+        let mut scaled = self.clone();
+        scaled.common.width = scaled.common.width.resolved(default_scale);
+        scaled.common.height = scaled.common.height.resolved(default_scale);
+        scaled.common.padding = scaled.common.padding.resolved(default_scale);
+        scaled.child_layout = scaled.child_layout.to_points(default_scale);
+        if let Some(border) = &mut scaled.common.border {
+            *border = border.resolved(default_scale);
+        }
+        scaled.common.corner_radius = scaled.common.corner_radius.resolved(default_scale);
+        if let Some(panel_draw) = &mut scaled.common.draw {
+            *panel_draw = panel_draw.scaled(default_scale);
+        }
+        scaled.common.scroll_offset *= default_scale;
+        scale_editor_part(&mut scaled.common.editor_text, default_scale);
+        scale_editor_part(&mut scaled.common.editor_selection, default_scale);
+        scale_editor_part(&mut scaled.common.editor_caret, default_scale);
+        scale_editor_part(&mut scaled.common.editor_validation, default_scale);
+        scaled
+    }
+
+    pub(crate) fn into_text(mut self, text: &str, style: &TextStyle) -> Text {
+        self.common.id = None;
+        match self.into_declaration() {
+            EditorPartDeclaration::Row(el) => Text::new(text, style.clone()).layout(el),
+            EditorPartDeclaration::Column(el) => Text::new(text, style.clone()).layout(el),
+            EditorPartDeclaration::Overlay(el) => Text::new(text, style.clone()).layout(el),
+        }
+    }
+
+    pub(crate) fn with_children(
+        self,
+        builder: &mut LayoutBuilder,
+        children: impl FnOnce(&mut LayoutBuilder),
+    ) {
+        match self.into_declaration() {
+            EditorPartDeclaration::Row(el) => {
+                builder.with(el, children);
+            },
+            EditorPartDeclaration::Column(el) => {
+                builder.with(el, children);
+            },
+            EditorPartDeclaration::Overlay(el) => {
+                builder.with(el, children);
+            },
+        }
+    }
+
+    fn into_declaration(self) -> EditorPartDeclaration {
+        let Self {
+            common,
+            child_layout,
+        } = self;
+        match child_layout {
+            ChildLayout::Row { gap, divider, .. } => EditorPartDeclaration::Row(El {
+                common,
+                child_layout: Row { gap, divider },
+                role: PhantomData,
+            }),
+            ChildLayout::Column { gap, divider, .. } => EditorPartDeclaration::Column(El {
+                common,
+                child_layout: Column { gap, divider },
+                role: PhantomData,
+            }),
+            ChildLayout::Overlay { .. } => EditorPartDeclaration::Overlay(El {
+                common,
+                child_layout: Overlay,
+                role: PhantomData,
+            }),
+        }
+    }
+}
+
+fn scale_editor_part(part: &mut Option<Box<EditorPart>>, default_scale: f32) {
+    if let Some(part) = part {
+        let scaled = part.scaled(default_scale);
+        **part = scaled;
+    }
 }
 
 impl CommonEl {
@@ -471,32 +607,36 @@ impl CommonEl {
 impl Default for CommonEl {
     fn default() -> Self {
         Self {
-            id:              None,
-            width:           Sizing::FIT,
-            height:          Sizing::FIT,
-            padding:         Padding::default(),
-            align_x:         AlignX::default(),
-            align_y:         AlignY::default(),
-            background:      None,
-            border:          None,
-            corner_radius:   CornerRadius::ZERO,
-            overflow:        ChildOverflow::Visible,
-            scroll_offset:   Vec2::ZERO,
-            scroll_anchor_x: ScrollAnchor::Start,
-            scroll_anchor_y: ScrollAnchor::Start,
-            material:        Cascade::Inherit,
-            interactivity:   Cascade::Inherit,
-            editable:        None,
-            widget:          None,
-            appearance:      None,
-            tooltip:         None,
-            visual_slot:     None,
-            draw:            None,
-            z_index:         DrawZIndex::default(),
-            anti_alias:      Cascade::Inherit,
-            hairline_fade:   Cascade::Inherit,
-            shadow_casting:  Cascade::Inherit,
-            precompose:      PrecomposeMode::Direct,
+            id:                None,
+            width:             Sizing::FIT,
+            height:            Sizing::FIT,
+            padding:           Padding::default(),
+            align_x:           AlignX::default(),
+            align_y:           AlignY::default(),
+            background:        None,
+            border:            None,
+            corner_radius:     CornerRadius::ZERO,
+            overflow:          ChildOverflow::Visible,
+            scroll_offset:     Vec2::ZERO,
+            scroll_anchor_x:   ScrollAnchor::Start,
+            scroll_anchor_y:   ScrollAnchor::Start,
+            material:          Cascade::Inherit,
+            interactivity:     Cascade::Inherit,
+            editable:          None,
+            widget:            None,
+            appearance:        None,
+            editor_text:       None,
+            editor_selection:  None,
+            editor_caret:      None,
+            editor_validation: None,
+            tooltip:           None,
+            visual_slot:       None,
+            draw:              None,
+            z_index:           DrawZIndex::default(),
+            anti_alias:        Cascade::Inherit,
+            hairline_fade:     Cascade::Inherit,
+            shadow_casting:    Cascade::Inherit,
+            precompose:        PrecomposeMode::Direct,
         }
     }
 }
@@ -521,6 +661,10 @@ fn text_leaf_element(mut common: CommonEl, content: ElementContent) -> Element {
         editable: common.editable,
         widget: common.widget,
         appearance: common.appearance,
+        editor_text: common.editor_text,
+        editor_selection: common.editor_selection,
+        editor_caret: common.editor_caret,
+        editor_validation: common.editor_validation,
         tooltip: common.tooltip,
         visual_slot: common.visual_slot,
         draw: common.draw,
@@ -916,6 +1060,64 @@ impl<L, W> El<L, WidgetElement<W>> {
     const fn widget_mut(&mut self) -> Option<&mut WidgetSpec> { self.common.widget.as_mut() }
 }
 
+impl<L> El<L, WidgetElement<EditableField>> {
+    /// Authors the state appearance for generated committed and preedit text runs.
+    ///
+    /// A later call replaces an earlier text declaration. The generated text
+    /// content and [`TextStyle`] remain editor-controlled; this declaration's
+    /// layout and visual properties become the generated text element.
+    pub fn editor_text<L2>(mut self, part: El<L2, WidgetPart>) -> Self
+    where
+        L2: ChildLayoutState,
+    {
+        self.common.editor_text = Some(Box::new(EditorPart::from_el(part)));
+        self
+    }
+
+    /// Authors the state appearance for the generated selection highlight box.
+    ///
+    /// A later call replaces an earlier selection declaration. The generated
+    /// selection assigns [`Sizing::FIT`] width and height after this declaration;
+    /// its other layout and visual properties become the highlight element. When
+    /// `background` is unset, the generated selection keeps its built-in color;
+    /// an authored `background` replaces that color.
+    pub fn editor_selection<L2>(mut self, part: El<L2, WidgetPart>) -> Self
+    where
+        L2: ChildLayoutState,
+    {
+        self.common.editor_selection = Some(Box::new(EditorPart::from_el(part)));
+        self
+    }
+
+    /// Authors the state appearance for the generated caret box.
+    ///
+    /// A later call replaces an earlier caret declaration. The generated caret
+    /// assigns its width and visible-text height after this declaration; its
+    /// other layout and visual properties become the caret element. When
+    /// `background` is unset, the generated caret keeps its built-in color; an
+    /// authored `background` replaces that color.
+    pub fn editor_caret<L2>(mut self, part: El<L2, WidgetPart>) -> Self
+    where
+        L2: ChildLayoutState,
+    {
+        self.common.editor_caret = Some(Box::new(EditorPart::from_el(part)));
+        self
+    }
+
+    /// Authors the state appearance for the generated validation message run.
+    ///
+    /// A later call replaces an earlier validation declaration. The generated
+    /// validation message and [`TextStyle`] remain editor-controlled; this
+    /// declaration's layout and visual properties become the validation element.
+    pub fn editor_validation<L2>(mut self, part: El<L2, WidgetPart>) -> Self
+    where
+        L2: ChildLayoutState,
+    {
+        self.common.editor_validation = Some(Box::new(EditorPart::from_el(part)));
+        self
+    }
+}
+
 impl<L, W: Pressable> El<L, WidgetElement<W>> {
     /// Sets the appearance while this widget is held by a button press or slider drag.
     ///
@@ -1164,6 +1366,10 @@ impl<L, Role> El<L, Role> {
             editable: common.editable,
             widget: common.widget,
             appearance: common.appearance,
+            editor_text: common.editor_text,
+            editor_selection: common.editor_selection,
+            editor_caret: common.editor_caret,
+            editor_validation: common.editor_validation,
             tooltip: common.tooltip,
             visual_slot: common.visual_slot,
             draw: common.draw,

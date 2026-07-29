@@ -56,6 +56,7 @@ pub use builder::AcceptsElement;
 pub use builder::ChildLayoutState;
 pub use builder::Column;
 pub use builder::EditableField;
+pub(crate) use builder::EditorPart;
 pub use builder::El;
 pub use builder::ElementRole;
 pub use builder::LayoutBuilder;

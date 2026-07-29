@@ -34,6 +34,7 @@ use super::Sizing;
 use super::TextSizing;
 use super::TextStyle;
 use super::Unit;
+use super::builder::EditorPart;
 use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
 use super::engine;
@@ -105,65 +106,73 @@ pub(crate) enum PrecomposeMode {
 #[derive(Clone, Debug)]
 pub(super) struct Element {
     /// Optional panel-local identity for this layout element.
-    pub(super) id:              Option<PanelElementId>,
+    pub(super) id:                Option<PanelElementId>,
     /// Width sizing rule.
-    pub(super) width:           Sizing,
+    pub(super) width:             Sizing,
     /// Height sizing rule.
-    pub(super) height:          Sizing,
+    pub(super) height:            Sizing,
     /// Interior padding.
-    pub(super) padding:         Padding,
+    pub(super) padding:           Padding,
     /// Child layout mode, spacing, and alignment.
-    pub(super) child_layout:    ChildLayout,
+    pub(super) child_layout:      ChildLayout,
     /// Optional background color.
-    pub(super) background:      Option<Color>,
+    pub(super) background:        Option<Color>,
     /// Optional border.
-    pub(super) border:          Option<Border>,
+    pub(super) border:            Option<Border>,
     /// Corner radius for rounded backgrounds and borders.
-    pub(super) corner_radius:   CornerRadius,
+    pub(super) corner_radius:     CornerRadius,
     /// How this element handles overflowing children (`Visible` or `Clipped`).
-    pub(super) overflow:        ChildOverflow,
+    pub(super) overflow:          ChildOverflow,
     /// Scroll offset (logical px) subtracted from child positions when this
     /// element clips. Clamped during positioning to `[0, content - viewport]`
     /// per axis. Interpreted relative to each axis' scroll anchor.
-    pub(super) scroll_offset:   Vec2,
+    pub(super) scroll_offset:     Vec2,
     /// Which horizontal edge `scroll_offset.x` measures from.
-    pub(super) scroll_anchor_x: ScrollAnchor,
+    pub(super) scroll_anchor_x:   ScrollAnchor,
     /// Which vertical edge `scroll_offset.y` measures from.
-    pub(super) scroll_anchor_y: ScrollAnchor,
+    pub(super) scroll_anchor_y:   ScrollAnchor,
     /// Authored PBR source-material handle for this element's surfaces.
     ///
     /// When overridden, render systems use this over the panel material handle
     /// and global material cascade defaults.
     /// `base_color` is overridden by layout or primitive color when both are set.
-    pub(super) material:        Cascade<Handle<StandardMaterial>>,
+    pub(super) material:          Cascade<Handle<StandardMaterial>>,
     /// Authored widget interactivity for this layout scope.
-    pub(super) interactivity:   Cascade<WidgetInteractivity>,
+    pub(super) interactivity:     Cascade<WidgetInteractivity>,
     /// Optional editable field contract.
-    pub(super) editable:        Option<ImePanelField>,
+    pub(super) editable:          Option<ImePanelField>,
     /// Optional authored widget contract.
-    pub(super) widget:          Option<WidgetSpec>,
+    pub(super) widget:            Option<WidgetSpec>,
     /// Optional per-state appearance for this widget element's root visual
     /// slot. Boxed so an ordinary element pays one pointer rather than four
     /// appearance layers.
-    pub(super) appearance:      Option<Box<StateAppearance>>,
+    pub(super) appearance:        Option<Box<StateAppearance>>,
+    /// Authored declaration for generated committed and preedit text runs.
+    pub(super) editor_text:       Option<Box<EditorPart>>,
+    /// Authored declaration for the generated selection highlight box.
+    pub(super) editor_selection:  Option<Box<EditorPart>>,
+    /// Authored declaration for the generated caret box.
+    pub(super) editor_caret:      Option<Box<EditorPart>>,
+    /// Authored declaration for the generated validation message run.
+    pub(super) editor_validation: Option<Box<EditorPart>>,
     /// Optional tooltip declaration associated with this widget.
-    pub(super) tooltip:         Option<Tooltip>,
+    pub(super) tooltip:           Option<Tooltip>,
     /// Optional stable visual-slot id for widget-owned retained records.
-    pub(super) visual_slot:     Option<VisualSlotId>,
+    pub(super) visual_slot:       Option<VisualSlotId>,
     /// Optional paint-only draw data.
-    pub(super) draw:            Option<PanelDraw>,
+    pub(super) draw:              Option<PanelDraw>,
     /// `DrawZIndex` stamped onto this element's render commands.
-    pub(super) z_index:         DrawZIndex,
+    pub(super) z_index:           DrawZIndex,
     /// Authored anti-alias mode for this element's analytic line marks.
-    pub(super) anti_alias:      Cascade<AntiAlias>,
+    pub(super) anti_alias:        Cascade<AntiAlias>,
     /// Authored hairline fade policy for this element's analytic line marks.
-    pub(super) hairline_fade:   Cascade<HairlineFade>,
+    pub(super) hairline_fade:     Cascade<HairlineFade>,
     /// Authored shadow-casting policy for this element and its render commands.
-    pub(super) shadow_casting:  Cascade<ShadowCasting>,
+    pub(super) shadow_casting:    Cascade<ShadowCasting>,
     /// Optional subtree precomposition mode.
-    pub(super) precompose:      PrecomposeMode,
+    pub(super) precompose:        PrecomposeMode,
     /// Content of this element.
-    pub(super) content:         ElementContent,
+    pub(super) content:           ElementContent,
 }
 
 /// What an element contains.
@@ -210,32 +219,36 @@ impl LayoutTreeChange {
 impl Default for Element {
     fn default() -> Self {
         Self {
-            id:              None,
-            width:           Sizing::FIT,
-            height:          Sizing::FIT,
-            padding:         Padding::default(),
-            child_layout:    ChildLayout::default(),
-            background:      None,
-            border:          None,
-            corner_radius:   CornerRadius::ZERO,
-            overflow:        ChildOverflow::Visible,
-            scroll_offset:   Vec2::ZERO,
-            scroll_anchor_x: ScrollAnchor::Start,
-            scroll_anchor_y: ScrollAnchor::Start,
-            material:        Cascade::Inherit,
-            interactivity:   Cascade::Inherit,
-            editable:        None,
-            widget:          None,
-            appearance:      None,
-            tooltip:         None,
-            visual_slot:     None,
-            draw:            None,
-            z_index:         DrawZIndex::default(),
-            anti_alias:      Cascade::Inherit,
-            hairline_fade:   Cascade::Inherit,
-            shadow_casting:  Cascade::Inherit,
-            precompose:      PrecomposeMode::Direct,
-            content:         ElementContent::Empty,
+            id:                None,
+            width:             Sizing::FIT,
+            height:            Sizing::FIT,
+            padding:           Padding::default(),
+            child_layout:      ChildLayout::default(),
+            background:        None,
+            border:            None,
+            corner_radius:     CornerRadius::ZERO,
+            overflow:          ChildOverflow::Visible,
+            scroll_offset:     Vec2::ZERO,
+            scroll_anchor_x:   ScrollAnchor::Start,
+            scroll_anchor_y:   ScrollAnchor::Start,
+            material:          Cascade::Inherit,
+            interactivity:     Cascade::Inherit,
+            editable:          None,
+            widget:            None,
+            appearance:        None,
+            editor_text:       None,
+            editor_selection:  None,
+            editor_caret:      None,
+            editor_validation: None,
+            tooltip:           None,
+            visual_slot:       None,
+            draw:              None,
+            z_index:           DrawZIndex::default(),
+            anti_alias:        Cascade::Inherit,
+            hairline_fade:     Cascade::Inherit,
+            shadow_casting:    Cascade::Inherit,
+            precompose:        PrecomposeMode::Direct,
+            content:           ElementContent::Empty,
         }
     }
 }
@@ -559,6 +572,10 @@ impl LayoutTree {
             align_x: element.child_layout.align_x(),
             align_y: element.child_layout.align_y(),
             text_style,
+            editor_text: element.editor_text.as_deref().cloned(),
+            editor_selection: element.editor_selection.as_deref().cloned(),
+            editor_caret: element.editor_caret.as_deref().cloned(),
+            editor_validation: element.editor_validation.as_deref().cloned(),
         })
     }
 
@@ -1193,6 +1210,10 @@ impl LayoutTree {
                 *panel_draw = panel_draw.scaled(layout_scale);
             }
             element.scroll_offset *= layout_scale;
+            scale_editor_part(&mut element.editor_text, layout_scale);
+            scale_editor_part(&mut element.editor_selection, layout_scale);
+            scale_editor_part(&mut element.editor_caret, layout_scale);
+            scale_editor_part(&mut element.editor_validation, layout_scale);
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
                 // `TextStyle::new(Mm(6.0))`), convert from that unit to
@@ -1231,11 +1252,22 @@ impl LayoutTree {
                 *panel_draw = panel_draw.scaled(points_to_pixels);
             }
             element.scroll_offset *= points_to_pixels;
+            scale_editor_part(&mut element.editor_text, points_to_pixels);
+            scale_editor_part(&mut element.editor_selection, points_to_pixels);
+            scale_editor_part(&mut element.editor_caret, points_to_pixels);
+            scale_editor_part(&mut element.editor_validation, points_to_pixels);
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 *config = config.scaled_as_unit(points_to_pixels, Unit::Pixels);
             }
         }
         tree
+    }
+}
+
+fn scale_editor_part(part: &mut Option<Box<EditorPart>>, default_scale: f32) {
+    if let Some(part) = part {
+        let scaled = part.scaled(default_scale);
+        **part = scaled;
     }
 }
 
@@ -1326,59 +1358,67 @@ fn record_owned_widget_element(
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
     let Element {
-        id,
+        id: _,
         width,
         height,
         padding,
         child_layout,
-        background,
+        background: _,
         border,
-        corner_radius,
+        corner_radius: _,
         overflow,
         scroll_offset,
         scroll_anchor_x,
         scroll_anchor_y,
-        material,
-        interactivity,
+        material: _,
+        interactivity: _,
         editable,
-        widget,
-        appearance,
-        tooltip,
-        visual_slot,
-        draw,
-        z_index,
-        anti_alias,
-        hairline_fade,
-        shadow_casting,
-        precompose,
+        widget: _,
+        appearance: _,
+        editor_text: _,
+        editor_selection: _,
+        editor_caret: _,
+        editor_validation: _,
+        tooltip: _,
+        visual_slot: _,
+        draw: _,
+        z_index: _,
+        anti_alias: _,
+        hairline_fade: _,
+        shadow_casting: _,
+        precompose: _,
         content,
     } = element;
     let Element {
-        id: n_id,
+        id: _,
         width: n_width,
         height: n_height,
         padding: n_padding,
         child_layout: n_child_layout,
-        background: n_background,
+        background: _,
         border: n_border,
-        corner_radius: n_corner_radius,
+        corner_radius: _,
         overflow: n_overflow,
         scroll_offset: n_scroll_offset,
         scroll_anchor_x: n_scroll_anchor_x,
         scroll_anchor_y: n_scroll_anchor_y,
-        material: n_material,
-        interactivity: n_interactivity,
+        material: _,
+        interactivity: _,
         editable: n_editable,
-        widget: n_widget,
-        appearance: n_appearance,
-        tooltip: n_tooltip,
-        visual_slot: n_visual_slot,
-        draw: n_draw,
-        z_index: n_z_index,
-        anti_alias: n_anti_alias,
-        hairline_fade: n_hairline_fade,
-        shadow_casting: n_shadow_casting,
-        precompose: n_precompose,
+        widget: _,
+        appearance: _,
+        editor_text: _,
+        editor_selection: _,
+        editor_caret: _,
+        editor_validation: _,
+        tooltip: _,
+        visual_slot: _,
+        draw: _,
+        z_index: _,
+        anti_alias: _,
+        hairline_fade: _,
+        shadow_casting: _,
+        precompose: _,
         content: n_content,
     } = next;
 
@@ -1405,26 +1445,60 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     let mut change = border_change.combine(child_layout_change);
-    if id != n_id
-        || widget != n_widget
-        || appearance != n_appearance
-        || tooltip != n_tooltip
-        || visual_slot != n_visual_slot
-        || interactivity != n_interactivity
-        || background != n_background
-        || corner_radius != n_corner_radius
-        || draw != n_draw
-        || z_index != n_z_index
-        || anti_alias != n_anti_alias
-        || hairline_fade != n_hairline_fade
-        || shadow_casting != n_shadow_casting
-        || precompose != n_precompose
-        || material != n_material
-    {
+    if visual_only_properties_changed(element, next) {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
     change.combine(classify_content_change(content, n_content))
+}
+
+fn visual_only_properties_changed(element: &Element, next: &Element) -> bool {
+    element.id != next.id
+        || element.widget != next.widget
+        || element.appearance != next.appearance
+        || editor_parts_changed(
+            (
+                element.editor_text.as_deref(),
+                element.editor_selection.as_deref(),
+                element.editor_caret.as_deref(),
+                element.editor_validation.as_deref(),
+            ),
+            (
+                next.editor_text.as_deref(),
+                next.editor_selection.as_deref(),
+                next.editor_caret.as_deref(),
+                next.editor_validation.as_deref(),
+            ),
+        )
+        || element.tooltip != next.tooltip
+        || element.visual_slot != next.visual_slot
+        || element.interactivity != next.interactivity
+        || element.background != next.background
+        || element.corner_radius != next.corner_radius
+        || element.draw != next.draw
+        || element.z_index != next.z_index
+        || element.anti_alias != next.anti_alias
+        || element.hairline_fade != next.hairline_fade
+        || element.shadow_casting != next.shadow_casting
+        || element.precompose != next.precompose
+        || element.material != next.material
+}
+
+fn editor_parts_changed(
+    editor_parts: (
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+    ),
+    next_editor_parts: (
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+    ),
+) -> bool {
+    editor_parts != next_editor_parts
 }
 
 fn classify_child_layout_change(old: &ChildLayout, next: &ChildLayout) -> LayoutTreeChange {
@@ -1833,6 +1907,50 @@ mod tests {
         let expected_text_size = 3.0 * millimeters_to_points * points_to_pixels;
         assert!((config.size() - expected_text_size).abs() < FLOAT_TOLERANCE);
         assert_eq!(config.unit(), Cascade::Override(Unit::Pixels));
+    }
+
+    #[test]
+    fn screen_source_scaled_scales_editor_caret_declaration_dimensions() {
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(
+            El::new()
+                .editable_field("field", field_spec())
+                .editor_caret(
+                    El::new()
+                        .hovered(Appearance::new())
+                        .width(Sizing::fixed(Mm(4.0)))
+                        .padding(Padding::all(Mm(2.0))),
+                ),
+            |_| {},
+        );
+        let tree = builder.build();
+        let millimeters_to_points = Unit::Millimeters.to_points();
+        let points_to_pixels = 2.0;
+        let scaled = tree.screen_source_scaled(
+            millimeters_to_points,
+            millimeters_to_points,
+            points_to_pixels,
+        );
+        let declaration = scaled.elements[1]
+            .editor_caret
+            .as_deref()
+            .cloned()
+            .expect("editor caret declaration should be retained");
+
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.text(declaration.into_text("caret", &TextStyle::new(3.0)));
+        let generated = builder.build();
+        let expected_scale = millimeters_to_points * points_to_pixels;
+        assert!(matches!(generated.elements[1].width, Sizing::Fixed(_)));
+        let Sizing::Fixed(width) = generated.elements[1].width else {
+            return;
+        };
+        assert!((-4.0_f32).mul_add(expected_scale, width.value).abs() < FLOAT_TOLERANCE);
+        assert_eq!(width.unit, None);
+
+        let padding = generated.elements[1].padding;
+        assert!((-2.0_f32).mul_add(expected_scale, padding.left.value).abs() < FLOAT_TOLERANCE);
+        assert_eq!(padding.left.unit, None);
     }
 
     fn assert_default_leaf_child_layout(child_layout: ChildLayout) {

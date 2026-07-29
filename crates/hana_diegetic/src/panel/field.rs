@@ -12,19 +12,24 @@ use crate::Padding;
 use crate::PanelElementId;
 use crate::TextStyle;
 use crate::layout::BoundingBox;
+use crate::layout::EditorPart;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
 
 /// Authored visual presentation copied by the transient field editor.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct PanelFieldPresentation {
-    pub(crate) background:    Option<Color>,
-    pub(crate) border:        Option<Border>,
-    pub(crate) corner_radius: CornerRadius,
-    pub(crate) padding:       Padding,
-    pub(crate) align_x:       AlignX,
-    pub(crate) align_y:       AlignY,
-    pub(crate) text_style:    Option<TextStyle>,
+    pub(crate) background:        Option<Color>,
+    pub(crate) border:            Option<Border>,
+    pub(crate) corner_radius:     CornerRadius,
+    pub(crate) padding:           Padding,
+    pub(crate) align_x:           AlignX,
+    pub(crate) align_y:           AlignY,
+    pub(crate) text_style:        Option<TextStyle>,
+    pub(crate) editor_text:       Option<EditorPart>,
+    pub(crate) editor_selection:  Option<EditorPart>,
+    pub(crate) editor_caret:      Option<EditorPart>,
+    pub(crate) editor_validation: Option<EditorPart>,
 }
 
 /// Computed editable field on a laid-out panel.

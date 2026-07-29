@@ -267,13 +267,17 @@ struct TextHit {
 
 #[derive(Clone, Debug, PartialEq)]
 struct ImeEditorPresentation {
-    background:    Option<Color>,
-    border:        Option<Border>,
-    corner_radius: CornerRadius,
-    padding:       Padding,
-    align_x:       AlignX,
-    align_y:       AlignY,
-    text_style:    TextStyle,
+    background:        Option<Color>,
+    border:            Option<Border>,
+    corner_radius:     CornerRadius,
+    padding:           Padding,
+    align_x:           AlignX,
+    align_y:           AlignY,
+    text_style:        TextStyle,
+    editor_text:       Option<crate::layout::EditorPart>,
+    editor_selection:  Option<crate::layout::EditorPart>,
+    editor_caret:      Option<crate::layout::EditorPart>,
+    editor_validation: Option<crate::layout::EditorPart>,
 }
 
 /// Last picked entity classified as outside the active editor.
@@ -931,21 +935,29 @@ fn projected_editor_presentation(
         align_x: authored.align_x,
         align_y: authored.align_y,
         text_style,
+        editor_text: authored.editor_text.clone(),
+        editor_selection: authored.editor_selection.clone(),
+        editor_caret: authored.editor_caret.clone(),
+        editor_validation: authored.editor_validation.clone(),
     }
 }
 
 fn inline_editor_presentation(authored: &PanelFieldPresentation) -> ImeEditorPresentation {
     ImeEditorPresentation {
-        background:    authored.background,
-        border:        authored.border,
-        corner_radius: authored.corner_radius,
-        padding:       authored.padding,
-        align_x:       authored.align_x,
-        align_y:       authored.align_y,
-        text_style:    authored
+        background:        authored.background,
+        border:            authored.border,
+        corner_radius:     authored.corner_radius,
+        padding:           authored.padding,
+        align_x:           authored.align_x,
+        align_y:           authored.align_y,
+        text_style:        authored
             .text_style
             .clone()
             .unwrap_or_else(editor_text_style),
+        editor_text:       authored.editor_text.clone(),
+        editor_selection:  authored.editor_selection.clone(),
+        editor_caret:      authored.editor_caret.clone(),
+        editor_validation: authored.editor_validation.clone(),
     }
 }
 
@@ -1165,19 +1177,28 @@ fn append_editor_rows(
             .text_style
             .clone()
             .with_color(EDITOR_VALIDATION);
-        add_text(builder, validation, &validation_style);
+        add_text(
+            builder,
+            validation,
+            &validation_style,
+            presentation.editor_validation.as_ref(),
+        );
     }
 }
 
 fn default_editor_presentation() -> ImeEditorPresentation {
     ImeEditorPresentation {
-        background:    Some(EDITOR_BACKGROUND),
-        border:        Some(Border::all(EDITOR_BORDER_WIDTH, EDITOR_BORDER)),
-        corner_radius: CornerRadius::all(EDITOR_CORNER_RADIUS),
-        padding:       Padding::xy(EDITOR_PADDING_X, EDITOR_PADDING_Y),
-        align_x:       AlignX::Left,
-        align_y:       AlignY::Center,
-        text_style:    editor_text_style().with_color(EDITOR_TEXT),
+        background:        Some(EDITOR_BACKGROUND),
+        border:            Some(Border::all(EDITOR_BORDER_WIDTH, EDITOR_BORDER)),
+        corner_radius:     CornerRadius::all(EDITOR_CORNER_RADIUS),
+        padding:           Padding::xy(EDITOR_PADDING_X, EDITOR_PADDING_Y),
+        align_x:           AlignX::Left,
+        align_y:           AlignY::Center,
+        text_style:        editor_text_style().with_color(EDITOR_TEXT),
+        editor_text:       None,
+        editor_selection:  None,
+        editor_caret:      None,
+        editor_validation: None,
     }
 }
 
@@ -1198,12 +1219,14 @@ fn append_buffer(
                 builder,
                 &snapshot.committed_text[..index],
                 &presentation.text_style,
+                presentation.editor_text.as_ref(),
             );
-            add_caret(builder, &presentation.text_style);
+            add_caret(builder, &presentation.text_style, presentation);
             add_text(
                 builder,
                 &snapshot.committed_text[index..],
                 &presentation.text_style,
+                presentation.editor_text.as_ref(),
             );
         },
         ImeCursorState::Selection(selection) => {
@@ -1212,16 +1235,19 @@ fn append_buffer(
                 builder,
                 &snapshot.committed_text[..start],
                 &presentation.text_style,
+                presentation.editor_text.as_ref(),
             );
             add_selected_text(
                 builder,
                 &snapshot.committed_text[start..end],
                 &presentation.text_style,
+                presentation,
             );
             add_text(
                 builder,
                 &snapshot.committed_text[end..],
                 &presentation.text_style,
+                presentation.editor_text.as_ref(),
             );
         },
     }
@@ -1243,15 +1269,27 @@ fn append_preedit_buffer(
         builder,
         &snapshot.committed_text[..start],
         &presentation.text_style,
+        presentation.editor_text.as_ref(),
     );
     let preedit_style = presentation.text_style.clone().with_color(EDITOR_PREEDIT);
-    add_text(builder, &preedit.text[..cursor], &preedit_style);
-    add_caret(builder, &presentation.text_style);
-    add_text(builder, &preedit.text[cursor..], &preedit_style);
+    add_text(
+        builder,
+        &preedit.text[..cursor],
+        &preedit_style,
+        presentation.editor_text.as_ref(),
+    );
+    add_caret(builder, &presentation.text_style, presentation);
+    add_text(
+        builder,
+        &preedit.text[cursor..],
+        &preedit_style,
+        presentation.editor_text.as_ref(),
+    );
     add_text(
         builder,
         &snapshot.committed_text[end..],
         &presentation.text_style,
+        presentation.editor_text.as_ref(),
     );
 }
 
@@ -1261,41 +1299,79 @@ fn selection_range(selection: &ImeSelectionSnapshot) -> (usize, usize) {
     (anchor.min(focus), anchor.max(focus))
 }
 
-fn add_text(builder: &mut LayoutBuilder, text: &str, style: &TextStyle) {
+fn add_text(
+    builder: &mut LayoutBuilder,
+    text: &str,
+    style: &TextStyle,
+    declaration: Option<&crate::layout::EditorPart>,
+) {
     if text.is_empty() {
         return;
     }
-    builder.text((text, style.clone()));
+    match declaration {
+        Some(declaration) => builder.text(declaration.clone().into_text(text, style)),
+        None => builder.text((text, style.clone())),
+    };
 }
 
-fn add_selected_text(builder: &mut LayoutBuilder, text: &str, style: &TextStyle) {
+fn add_selected_text(
+    builder: &mut LayoutBuilder,
+    text: &str,
+    style: &TextStyle,
+    presentation: &ImeEditorPresentation,
+) {
     if text.is_empty() {
         return;
     }
-    builder.with(
-        El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .background(EDITOR_SELECTION)
-            .padding(Padding::xy(0.0, 0.0)),
-        |builder| add_text(builder, text, style),
-    );
+    match &presentation.editor_selection {
+        Some(declaration) => declaration
+            .clone()
+            .with_background_if_unset(EDITOR_SELECTION)
+            .with_width(Sizing::FIT)
+            .with_height(Sizing::FIT)
+            .with_children(builder, |builder| {
+                add_text(builder, text, style, presentation.editor_text.as_ref());
+            }),
+        None => {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .background(EDITOR_SELECTION)
+                    .padding(Padding::xy(0.0, 0.0)),
+                |builder| add_text(builder, text, style, presentation.editor_text.as_ref()),
+            );
+        },
+    }
 }
 
-fn add_caret(builder: &mut LayoutBuilder, text_style: &TextStyle) {
+fn add_caret(
+    builder: &mut LayoutBuilder,
+    text_style: &TextStyle,
+    presentation: &ImeEditorPresentation,
+) {
+    let caret_height = visible_caret_height(text_style);
     builder.with(
         El::column()
             .width(Sizing::fixed(0.0))
             .height(Sizing::GROW)
             .alignment(AlignX::Left, AlignY::Center),
-        |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::fixed(CARET_WIDTH))
-                    .height(Sizing::fixed(visible_caret_height(text_style)))
-                    .background(EDITOR_CARET),
-                |_| {},
-            );
+        |builder| match &presentation.editor_caret {
+            Some(declaration) => declaration
+                .clone()
+                .with_background_if_unset(EDITOR_CARET)
+                .with_width(Sizing::fixed(CARET_WIDTH))
+                .with_height(Sizing::fixed(caret_height))
+                .with_children(builder, |_| {}),
+            None => {
+                builder.with(
+                    El::new()
+                        .width(Sizing::fixed(CARET_WIDTH))
+                        .height(Sizing::fixed(caret_height))
+                        .background(EDITOR_CARET),
+                    |_| {},
+                );
+            },
         },
     );
 }
@@ -1317,6 +1393,7 @@ mod tests {
     use bevy::picking::pointer::PointerId;
     use bevy::prelude::App;
     use bevy::prelude::Click;
+    use bevy::prelude::Color;
     use bevy::prelude::Entity;
     use bevy::prelude::GlobalTransform;
     use bevy::prelude::MinimalPlugins;
@@ -1333,6 +1410,7 @@ mod tests {
     use bevy::window::WindowFocused;
     use bevy::window::WindowRef;
 
+    use super::EDITOR_SELECTION;
     use super::ImeBlurIntent;
     use super::ImeEditor;
     use super::ImeEditorPanel;
@@ -1349,6 +1427,7 @@ mod tests {
     use super::screen_field_record_rect;
     use super::text_hit_at_x;
     use crate::AlignX;
+    use crate::Appearance;
     use crate::BoundingBox;
     use crate::DiegeticPanel;
     use crate::DiegeticTextMeasurer;
@@ -1376,6 +1455,9 @@ mod tests {
     use crate::PanelElementId;
     use crate::PanelFieldRecord;
     use crate::PanelScreenBounds;
+    use crate::PanelWidgetReader;
+    use crate::Px;
+    use crate::RequestWidgetFocus;
     use crate::TextStyle;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::ime::ActiveImeSession;
@@ -1383,10 +1465,23 @@ mod tests {
     use crate::ime::ImePlugin;
     use crate::ime::buffer::ImeEditCommand;
     use crate::layout::LayoutTreeChange;
+    use crate::layout::RectangleSource;
+    use crate::layout::RenderCommandKind;
     use crate::panel::PanelFieldPresentation;
+    use crate::widgets::SemanticWidgetIntent;
+    use crate::widgets::VisualElementCapabilities;
+    use crate::widgets::VisualOverrideIndex;
+    use crate::widgets::WidgetState;
+    use crate::widgets::WidgetVisualSlots;
+    use crate::widgets::WidgetsPlugin;
 
     #[derive(Default, Resource)]
     struct PropagatedPanelClicks(Vec<bool>);
+
+    const EDITOR_CARET_FOCUSED_FILL: Color = Color::srgb(0.20, 0.80, 0.40);
+    const EDITOR_SELECTION_FOCUSED_FILL: Color = Color::srgb(0.90, 0.30, 0.20);
+    const EDITOR_TEXT_FOCUSED_FILL: Color = Color::srgb(0.20, 0.50, 0.90);
+    const EDITOR_VALIDATION_FOCUSED_FILL: Color = Color::srgb(0.80, 0.30, 0.80);
 
     fn record_propagated_panel_click(
         click: On<Pointer<Click>>,
@@ -1417,6 +1512,52 @@ mod tests {
         builder.with(El::new().editable_field("field", field), |builder| {
             builder.text((text, TextStyle::new(10.0)));
         });
+        builder.build()
+    }
+
+    fn styled_editable_tree() -> LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Float {
+                min: None,
+                max: None,
+            }));
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(
+            El::new()
+                .editable_field("field", field)
+                .editor_text(
+                    El::new()
+                        .id("editor-text")
+                        .focused(Appearance::new().background(EDITOR_TEXT_FOCUSED_FILL)),
+                )
+                .editor_selection(
+                    El::new().focused(Appearance::new().background(EDITOR_SELECTION_FOCUSED_FILL)),
+                )
+                .editor_caret(
+                    El::new().focused(Appearance::new().background(EDITOR_CARET_FOCUSED_FILL)),
+                )
+                .editor_validation(
+                    El::new().focused(Appearance::new().background(EDITOR_VALIDATION_FOCUSED_FILL)),
+                ),
+            |builder| {
+                builder.text(("display", TextStyle::new(10.0)));
+            },
+        );
+        builder.build()
+    }
+
+    fn hover_only_selection_tree() -> LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(
+            El::new().editable_field("field", field).editor_selection(
+                El::new().hovered(Appearance::new().background(Color::srgb(0.9, 0.2, 0.1))),
+            ),
+            |builder| {
+                builder.text(("display", TextStyle::new(10.0)));
+            },
+        );
         builder.build()
     }
 
@@ -1455,6 +1596,74 @@ mod tests {
         (app, window, panel)
     }
 
+    fn inline_editor_visual_app(tree: LayoutTree) -> (App, Entity, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ImePlugin));
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(40.0))
+            .window(WindowRef::Entity(window))
+            .with_tree(tree)
+            .build()
+            .expect("the styled editable panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        app.update();
+        (app, window, panel)
+    }
+
+    fn resolve_field_widget(app: &mut App, panel: Entity) -> Entity {
+        app.world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("field"))
+            })
+            .expect("field reader should run")
+            .expect("field should reify")
+    }
+
+    fn assert_focused_editor_parts(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        expected_fills: &[Color],
+    ) -> Vec<usize> {
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("editable field should carry visual slots");
+        let parts = slots.part_appearances();
+        assert_eq!(parts.len(), expected_fills.len());
+        assert!(
+            parts.windows(2).all(|pair| pair[0].0 < pair[1].0),
+            "generated editor part appearances must remain element-index ordered",
+        );
+        for ((element_index, appearance), expected_fill) in parts.iter().zip(expected_fills) {
+            assert!(slots.elements().iter().any(|(visual_index, capabilities)| {
+                *visual_index == *element_index
+                    && capabilities.contains(VisualElementCapabilities::SDF_FILL)
+            }));
+            assert_eq!(
+                appearance
+                    .cascades()
+                    .resolve(&[Some(WidgetState::Focused)], None)
+                    .fill_color,
+                Some(*expected_fill),
+            );
+            assert_eq!(
+                app.world()
+                    .resource::<VisualOverrideIndex>()
+                    .get(panel, *element_index)
+                    .and_then(|override_value| override_value.fill_color),
+                Some(*expected_fill),
+            );
+        }
+        parts
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect()
+    }
+
     fn open_inline_editor(app: &mut App, window: Entity, panel: Entity, text: &str) {
         app.world_mut().trigger(ImeOpenSession {
             target: ImeTarget::WorldPanelField {
@@ -1476,6 +1685,33 @@ mod tests {
             .resource::<ActiveImeSession>()
             .active_session_id()
             .expect("the IME session should be active")
+    }
+
+    fn activate_styled_inline_editor(app: &mut App, window: Entity, field: Entity) {
+        app.world_mut().trigger(RequestWidgetFocus {
+            window,
+            widget: field,
+        });
+        app.world_mut().flush();
+        app.update();
+
+        app.world_mut().trigger(SemanticWidgetIntent::Activate {
+            entity: field,
+            window,
+        });
+        app.world_mut().flush();
+        app.update();
+    }
+
+    fn move_inline_editor_cursor(app: &mut App, position: usize) {
+        let input_blocker = app.world().resource::<crate::ImeInputBlocker>().clone();
+        let changed = app
+            .world_mut()
+            .resource_mut::<ActiveImeSession>()
+            .apply_edit_command(ImeEditCommand::PlaceCursor(position), &input_blocker)
+            .expect("active editor should accept a cursor placement");
+        app.world_mut().trigger(changed);
+        app.world_mut().flush();
     }
 
     fn field_word_position(app: &App, panel: Entity, prefix: &str, character: &str) -> Vec3 {
@@ -1584,6 +1820,133 @@ mod tests {
             query.iter(world).count()
         };
         assert_eq!(editor_panels, 0);
+    }
+
+    #[test]
+    fn generated_editor_parts_resolve_through_display_editor_display() {
+        let (mut app, window, panel) = inline_editor_visual_app(styled_editable_tree());
+        let field = resolve_field_widget(&mut app, panel);
+        activate_styled_inline_editor(&mut app, window, field);
+        let selection_indices = assert_focused_editor_parts(
+            &app,
+            panel,
+            field,
+            &[EDITOR_SELECTION_FOCUSED_FILL, EDITOR_TEXT_FOCUSED_FILL],
+        );
+
+        move_inline_editor_cursor(&mut app, "display".len() / 2);
+        app.update();
+        let insertion_indices = assert_focused_editor_parts(
+            &app,
+            panel,
+            field,
+            &[
+                EDITOR_TEXT_FOCUSED_FILL,
+                EDITOR_CARET_FOCUSED_FILL,
+                EDITOR_TEXT_FOCUSED_FILL,
+            ],
+        );
+
+        let session_id = active_session_id(&app);
+        app.world_mut().trigger(ImeRequestCommit {
+            session_id,
+            cause: ImeCommitCause::Request,
+        });
+        app.world_mut().flush();
+        app.update();
+        let validation_indices = assert_focused_editor_parts(
+            &app,
+            panel,
+            field,
+            &[
+                EDITOR_TEXT_FOCUSED_FILL,
+                EDITOR_CARET_FOCUSED_FILL,
+                EDITOR_TEXT_FOCUSED_FILL,
+                EDITOR_VALIDATION_FOCUSED_FILL,
+            ],
+        );
+
+        let session_id = active_session_id(&app);
+        app.world_mut().trigger(ImeRequestCancel {
+            session_id,
+            cause: ImeCancelCause::Request,
+        });
+        app.world_mut().flush();
+        app.update();
+
+        let restored_slots = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .expect("editable field should retain visual slots after closing the editor");
+        assert!(restored_slots.part_appearances().is_empty());
+        for element_index in selection_indices
+            .into_iter()
+            .chain(insertion_indices)
+            .chain(validation_indices)
+        {
+            assert!(
+                app.world()
+                    .resource::<VisualOverrideIndex>()
+                    .get(panel, element_index)
+                    .is_none(),
+                "closing the editor must remove its generated part override",
+            );
+        }
+    }
+
+    #[test]
+    fn hover_only_editor_selection_declaration_keeps_builtin_fill_at_rest() {
+        let (mut app, window, panel) = inline_editor_visual_app(hover_only_selection_tree());
+        let field = resolve_field_widget(&mut app, panel);
+
+        app.world_mut().trigger(SemanticWidgetIntent::Activate {
+            entity: field,
+            window,
+        });
+        app.world_mut().flush();
+        app.update();
+
+        let selection_index = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .expect("editable field should carry visual slots")
+            .part_appearances()
+            .first()
+            .map(|(element_index, _)| *element_index)
+            .expect("generated selection should retain its hovered appearance");
+        let result = app
+            .world()
+            .get::<crate::ComputedDiegeticPanel>(panel)
+            .and_then(crate::ComputedDiegeticPanel::result)
+            .expect("editable panel should retain its layout result");
+        assert!(result.commands.iter().any(|command| {
+            command.element_idx == selection_index
+                && matches!(
+                    &command.kind,
+                    RenderCommandKind::Rectangle {
+                        color,
+                        source: RectangleSource::Background,
+                    } if *color == EDITOR_SELECTION
+                )
+        }));
+    }
+
+    #[test]
+    fn editor_text_id_is_removed_from_split_fragments() {
+        let (mut app, window, panel) = inline_editor_visual_app(styled_editable_tree());
+        let field = resolve_field_widget(&mut app, panel);
+        activate_styled_inline_editor(&mut app, window, field);
+
+        move_inline_editor_cursor(&mut app, "display".len() / 2);
+        app.update();
+
+        assert!(
+            !app.world()
+                .get::<DiegeticPanel>(panel)
+                .expect("editable panel should remain")
+                .tree()
+                .contains_text_id(&PanelElementId::named("editor-text")),
+        );
     }
 
     #[test]

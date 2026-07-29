@@ -66,7 +66,7 @@
   - **Public opaque types, not leaked private ones.** A `pub` trait whose methods mention `pub(crate)` types trips `private_interfaces` even when the methods live on a sealed trait in a private module; E0446 additionally forbids a public trait exposing a private associated type. Every type reachable from a public associated type — `WidgetBuilder`, `WidgetPart`, `EditableField`, the scope token — is a public opaque type with private fields.
   - **Presentation must not dirty `WidgetVisualOverrides` when resolved values are unchanged.** Compare through an immutable query and take `get_mut` only on inequality; comparing inside a method already reached through `Mut<_>` is too late.
   - **Workspace lints, inherited by both packages** (`[lints] workspace = true` in each `Cargo.toml`): `[lints.rust] missing_docs = "deny"` — every new public item needs a doc comment. `[lints.clippy]` denies the `all` / `cargo` / `nursery` / `pedantic` groups (`priority = -1`) plus `allow_attributes_without_reason`, `expect_used`, `panic`, `self_named_module_files`, `unreachable`, `unwrap_used`. No `.unwrap()` / `.expect()` / `panic!` in non-test code, and any `#[allow(...)]` needs a `reason = "…"`.
-  - **Headless only.** No phase needs a GPU, a window, or a screenshot. Assertions are on resolved `VisualSlotOverride` values, `VisualOverrideIndex` membership, batch-key identity, and entity counts — never on rendered color. Harnesses: `HeadlessLayoutPlugin` (`panel/mod.rs:194`) for layout / reification / cascade resolution; a plain `App` with no render device for retained batching (precedent: `fill_batch.rs` 59 tests, `panel_text/batching.rs` 33, `panel_shapes/batching.rs` 31, `material_table.rs` 31); `trybuild` for typestate boundaries. Baseline: `verify.sh test hana_diegetic` reports **1125 passed / 2 skipped** at Phase 5 completion (was 1107 at Phase 2). Measure with that command, not by counting the workspace — a phase's gate covers this package only. **No phase may land with a lower test count than it inherited.**
+  - **Headless only.** No phase needs a GPU, a window, or a screenshot. Assertions are on resolved `VisualSlotOverride` values, `VisualOverrideIndex` membership, batch-key identity, and entity counts — never on rendered color. Harnesses: `HeadlessLayoutPlugin` (`panel/mod.rs:194`) for layout / reification / cascade resolution; a plain `App` with no render device for retained batching (precedent: `fill_batch.rs` 59 tests, `panel_text/batching.rs` 33, `panel_shapes/batching.rs` 31, `material_table.rs` 31); `trybuild` for typestate boundaries. Baseline: `verify.sh test hana_diegetic` reports **1130 passed / 2 skipped** at Phase 5 completion (was 1107 at Phase 2). Measure with that command, not by counting the workspace — a phase's gate covers this package only. **No phase may land with a lower test count than it inherited.**
 
 ## Phases
 
@@ -580,7 +580,7 @@ builder.with(
 - **Phase 12** was missing a second auto-id minting path, `LayoutTree::tooltip_add_text` (`builder.rs:1790-1807`); without it tooltip content keeps positional ids.
 - **Stale references corrected across the plan:** `validate_tree` does not exist (it is `LayoutTree::validate_widgets`); every `widgets/visual.rs` reference in Phases 8, 10, and 11 was ~22 lines low; `layout/builder.rs` references below ~1240 drifted 10-14 lines, and Phase 11's `disabled_color` forward pointed at the wrong impl block entirely; the Delegation Context still named the deleted `WidgetContainsInteractiveDescendant` variant and described a trybuild driver with two tests, an `#[ignore]`, 14 fixtures, and an `E0599` diagnostic that Phase 4 replaced with one test, no ignore, 18 fixtures, and an `E0277`.
 
-### Phase 5 — Default the state surfaces, delete the four errors · status: done
+### Phase 5 — Default the state surfaces, delete the four errors · status: done (`5b4a72c4`)
 
 #### Work Order
 
@@ -663,7 +663,7 @@ Defaulting happens at **element construction**, on `CommonEl`, not in `LayoutTre
 - **`as-built/widgets.md`** said "state builders affect only the element carrying the widget declaration; child text, icons, images and shapes stay as authored" — false since Phase 4 and contradicting the same file 30 lines earlier. Corrected.
 - **Not changed:** the `validated_element_appearance` mentions inside the Phase 3 and Phase 4 retrospectives and review blocks. Those record what was true when those phases shipped.
 
-### Phase 6 — Generated editable parts · status: todo
+### Phase 6 — Generated editable parts · status: done
 
 #### Work Order
 
@@ -673,23 +673,40 @@ Defaulting happens at **element construction**, on `CommonEl`, not in `LayoutTre
 
 `inline_editor_content_tree` (`src/ime/editor.rs:1132`) builds the editor's text, selection, caret, and validation elements **internally**, and `set_field_editing_content` (`layout/element.rs:1014`) removes the authored display descendants while editing. Without a path in, "any element a widget owns" is false for a focused field — nobody can author an element that does not exist in the source tree.
 
-**Pending decision:** what type carries the four states for each generated part.
+**The authoring input is `El<L, WidgetPart>`** (decided; the pending decision is resolved). It is public and opaque, already carries all four state layers, and rejects a pressed layer **by type** — `.pressed(...)` returns `El<L, PressedPart>`, a distinct type the parameter does not accept — which is the editable-field gate this phase's Phase 4 constraint asks for. It also avoids a new `ElementRole`, which would force another `AcceptsElement` impl plus another dead `with_child_builder` body (see Phase 4's Retrospective). `StateAppearance` is `pub(crate)` (`widgets/appearance.rs:249`) and the "public opaque types, not leaked private ones" invariant forbids naming it in a public signature; a new public bundle type was considered and rejected — it adds public surface for no gain, and `El` reaches every one of the four parts through paths that already exist.
 
-`StateAppearance` is `pub(crate)` (`widgets/appearance.rs:249`) and the "public opaque types, not leaked private ones" invariant forbids naming it in a public signature. `Appearance` covers one state only, so "four fluent methods, one per generated part" would need sixteen methods — recreating the flat builders Phase 1 deleted.
+Add **four fluent methods** on `El<L, WidgetElement<EditableField>>` — the type `El::editable_field` returns — one per generated part, each taking an `El<L2, WidgetPart>`:
 
-Recommendation: take `El<L, WidgetPart>`. It is public, opaque, already carries all four states, and rejects a pressed layer **by type** — `El<L, PressedPart>` is a distinct type — which is precisely the editable-field gate this phase's Phase 4 constraint asks for. It also avoids a new `ElementRole`, which would force another `AcceptsElement` impl plus another dead `with_child_builder` body (see Phase 4's Retrospective). Resolve before dispatching Phase 6.
+- `editor_text` — the committed/preedit text runs (`add_text`, `editor.rs:1264`).
+- `editor_selection` — the selection highlight box (`add_selected_text`, `:1271`).
+- `editor_caret` — the caret box (`add_caret`, `:1285`).
+- `editor_validation` — the validation message run (`append_editor_rows`, `:1148`).
 
-Define **stable authoring inputs** for those four generated parts and copy their bundles into the generated tree. The inputs are authored on the editable field's declaration (they have no `El` of their own to hang on) and are carried through the display↔editor transition so the generated parts receive resolved appearance in the frame they appear.
+Each method replaces what an earlier call to the same method authored, matching the existing state-verb convention (`builder.rs:800`).
+
+**The carrier chain already exists end to end**; add the four bundles to each hop rather than inventing a transport:
+
+`Element` (the editable field's own element, storage beside `appearance`) → `LayoutTree::editable_field_presentation` (`element.rs:539`) → `PanelFieldPresentation` (`panel/field.rs:20`, `pub(crate)`) → `PanelFieldRecord::presentation` (`field.rs:46`) → `inline_editor_presentation` (`editor.rs:937`) → `ImeEditorPresentation` (`editor.rs:269`, private) → `append_editor_rows` / `append_buffer` / the three `add_*` helpers. Neither struct in the middle is public, so nothing leaks.
+
+**Application rule (this is the Phase 5 trap below, restated as the requirement):** each bundle is applied by *reconstructing an `El` from the stored declaration and calling its state verbs on the internal builder before `builder.build()`*. Text and validation take it through `Text::layout(El<L, NextRole>) -> Text<NextRole>` (`builder.rs:294`), which already accepts an element declaration and inherits its role; selection and caret already construct `El::new()`/`El::column()` values the stored declaration becomes the base of. Whatever representation the stored form takes, it must re-enter the generated tree through the normal `CommonEl` → `Element` conversion so `default_state_surfaces` runs on it.
+
+**Geometry the generated code computes wins over an authored one** and this is documented on the four methods: the caret's width (`CARET_WIDTH`) and height (`visible_caret_height`), and the selection box's `Sizing::FIT` sizing, are set after the authored declaration is applied. Everything else the authored `El` carries — background, border, padding, corner radius, and all four state layers — reaches the generated element.
+
+Re-keying across the display↔editor transition is **already free and needs no work here.** The part map is re-derived from `element.appearance` on every compute (`element.rs:895` → `record_owned_widget_element` `:1309`) and replaced wholesale inside `WidgetVisualSlots`; once a bundle is in the regenerated tree it is keyed correctly by construction. Phase 2's `editable_tree_replacement_rekeys_part_appearance_entries` already proves it. This phase's only job is getting the bundles *into* the generated tree.
 
 Re-keying across the transition is **already free and needs no work here.** The part map is re-derived from `element.appearance` on every compute (`element.rs:895` → `record_owned_widget_element` `:1309`) and replaced wholesale inside `WidgetVisualSlots`; once a bundle is in the regenerated tree it is keyed correctly by construction. Phase 2's `editable_tree_replacement_rekeys_part_appearance_entries` already proves it. This phase's only job is getting the bundles *into* the generated tree.
 
 **Files:**
-- `src/ime/editor.rs:1132` — `inline_editor_content_tree` accepts and applies the four generated-part bundles.
-- `src/layout/builder.rs:814` — `El::editable_field` gains the four generated-part authoring inputs. **Shape them as fluent methods on the returned `El`, not as `editable_field` parameters.** `editable_field` (definition at `builder.rs:814`) has roughly **fifteen** call sites — `src/ime/editor.rs:1417`, `src/panel/field.rs:130/149/150`, `src/panel/builder.rs:1194/1309`, four `src/layout/element.rs` tests, `src/widgets/reify.rs:965`, and four trybuild fixtures, two of them added by Phase 4. A parameter-shaped change edits every one and forces a second `.stderr` regeneration; fluent methods leave all of them and the locked diagnostics intact.
+- `src/layout/builder.rs:814` — `El::editable_field` returns the `El` the four new fluent methods hang on. **Shape them as fluent methods on the returned `El`, not as `editable_field` parameters.** `editable_field` (definition at `builder.rs:814`) has roughly **fifteen** call sites — `src/ime/editor.rs:1417`, `src/panel/field.rs:130/149/150`, `src/panel/builder.rs:1194/1309`, four `src/layout/element.rs` tests, `src/widgets/reify.rs:965`, and four trybuild fixtures, two of them added by Phase 4. A parameter-shaped change edits every one and forces a second `.stderr` regeneration; fluent methods leave all of them and the locked diagnostics intact.
+- `src/layout/element.rs:148` — the four bundles are stored on `CommonEl`/`Element` beside `appearance: Option<Box<StateAppearance>>`, in a form that reconstructs into an `El` (the stored `CommonEl` plus its child-layout value — that is all `El` holds).
+- `src/layout/element.rs:539` — `editable_field_presentation` reads them off the element into `PanelFieldPresentation`.
+- `src/panel/field.rs:20` — `PanelFieldPresentation` gains the four bundle fields; it already rides `PanelFieldRecord::presentation` (`:46`) to the editor.
+- `src/ime/editor.rs:269` — `ImeEditorPresentation` gains the four fields; `inline_editor_presentation` (`:937`) copies them across.
+- `src/ime/editor.rs:1148/1264/1271/1285` — `append_editor_rows`, `add_text`, `add_selected_text`, `add_caret` apply the matching bundle **as `El` state verbs before `builder.build()`**. `inline_editor_content_tree` (`:1132`) and `editor_tree` (`:1106`) thread the presentation that carries them; both already take `&ImeEditorPresentation`, so neither signature changes.
+- `src/layout/element.rs:1327` — `classify_element_change` destructures `Element` exhaustively; the new field must be added there or tree-change classification silently ignores it. (The destructure is exhaustive, so the compiler catches an omission — but budget for it.)
+- `tests/trybuild/fail/editable_widget_root_has_no_pressed_state.{rs,stderr}` — new fixture for the root-level `pressed` gate. The existing `editable_widget_*.rs` glob (`tests/trybuild.rs:10`) already matches this name, so **`tests/trybuild.rs` needs no edit** — do not widen a glob.
 - `examples/widgets.rs` — the editable-field call site, if the authoring shape reaches it.
-- `src/layout/element.rs:1014` — `set_field_editing_content` carries the bundles across the transition.
-- `src/layout/element.rs:148` — the bundles are stored on `CommonEl`/`Element` beside `appearance: Option<Box<StateAppearance>>`.
-- `src/layout/element.rs:1327` — `classify_element_change` destructures `Element` exhaustively; a new field must be added there or tree-change classification silently ignores it. (The destructure is exhaustive, so the compiler catches an omission — but budget for it.)
+- **`src/layout/element.rs:1014` (`set_field_editing_content`) needs no change.** It splices an already-built replacement tree; the bundles were applied during `inline_editor_content_tree`'s build, before `builder.build()`, so nothing has to survive the splice as appearance data.
 
 **Constraints from prior phases:**
 - **Phase 4:** `EditableField` is the zero-sized owner marker, `El::editable_field` returns `El<L, WidgetElement<EditableField>>`, and `EditableField` implements `WidgetOwner` but **not** `Widget` — so a pressed layer is rejected on its parts by construction and must stay rejected on the generated ones. Precisely: `.pressed(...)` is *authorable* on any `El`; it is rejected at **insertion**, because `AcceptsElement<PressedPart>` is implemented only for a `Pressable` owner's builder.
@@ -703,11 +720,84 @@ Re-keying across the transition is **already free and needs no work here.** The 
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
-- **Docs (orchestrator-run — see Delegation Context → Docs):** this phase adds four public authoring inputs to `El::editable_field`, so both doc commands must pass before checkpoint.
+- `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic trybuild`
+- **Docs (orchestrator-run — see Delegation Context → Docs):** this phase adds four public authoring methods on `El<L, WidgetElement<EditableField>>`, so both doc commands must pass before checkpoint.
 - A display → editor → display transition asserts the **resolved appearance of each of the four generated editor parts**, in the frame the editor appears and again after it closes.
 - The bundles this phase inserts into the generated tree are emitted in ascending element-index order.
 - A new compile-fail fixture proves `.pressed(...)` is rejected on an editable field's **root**, not only on its parts.
 - A generated part authoring a state **`background`** presents it. `content_color` alone does not discharge this line: it needs no synthesized record, so it would pass even if the bundle were applied after construction, where the defaulting cannot reach it.
+
+**Smoke finding (2026-07-28) — example authoring defect, fixed in this phase.**
+
+Tabbing to the editable field rendered the whole field as an opaque black bar.
+Cause is authoring, not plumbing: `examples/widgets.rs:1286` writes
+`.editor_text(El::new().focused(Appearance::new().background(TEXT_FIELD_TEXT)))`
+where `TEXT_FIELD_TEXT = Color::BLACK` (`widgets.rs:190`). `EditorPart::into_text`
+(`layout/builder.rs:515`) does `Text::new(text, style).layout(el)`, so the authored
+`Appearance` rides on the text element and `background` becomes that element's SDF
+fill rect — an opaque rectangle over its own glyphs.
+
+The author wanted per-state *glyph* color, which `Appearance` does not carry until
+Phase 7 adds `content_color`. The fix applied here is the example only: the
+`.editor_text(...)` call was deleted from `examples/widgets.rs`. Smoke test re-run
+and confirmed correct by the plan owner. Base editor text color already
+works and needs no new API — it flows from the field's own `TextStyle::with_color`
+through `PanelFieldPresentation.text_style` (`panel/field.rs:28`) into
+`ImeEditorPresentation.text_style` (`editor.rs:951`) and on to `add_text`. The
+selection and caret parts are genuine rectangles and correctly keep `background`.
+
+**Correction (Phase 6 review):** `editor_validation` is **also a text leaf**, not a
+rectangle. `append_editor_rows` (`ime/editor.rs:1180`) routes it through `add_text`
+→ `EditorPart::into_text` (`layout/builder.rs:515`), exactly like `editor_text`. The
+example's `.editor_validation(... .background(BUTTON_FILL_DISABLED))` is therefore a
+second instance of the same defect — latent, since it only paints when a validation
+message is present. Phase 6 drops it alongside `editor_text`; Phase 7 restores both
+via `content_color`. Only `editor_selection` and `editor_caret` are true rectangles.
+
+Gate lesson: Phase 6's tests asserted the authored color reaches
+`VisualOverrideIndex.fill_color` for each part. That plumbing is correct. Nothing
+rendered a frame, so "an opaque fill on a text run hides the run" was invisible to
+the gate. A part whose element is a text leaf needs a rendered-appearance check,
+not only an override-index check.
+
+### Retrospective
+
+**What worked:**
+- The carrier chain the Spec named existed end to end; adding the four bundles to each hop was mechanical, exactly as predicted.
+- Fluent methods on the `El` returned by `editable_field` left all ~15 call sites and the locked trybuild diagnostics intact — the parameter-shaped alternative would have churned every one.
+- The Phase 5 trap was avoided: all four parts re-enter through `builder.with(el, …)` / `Text::new(..).layout(el)`, so `default_state_surfaces` runs on each.
+
+**What deviated from the plan:**
+- `EDITOR_SELECTION` and `EDITOR_CARET` are **private** consts, so an authored declaration that omitted a background silently lost the built-in color with no way for an author to restore it. Fixed with `with_background_if_unset` (`layout/builder.rs:487`), applied before the geometry overrides.
+- `scale_editor_part` had to run in **both** scale passes (`element.rs` `scaled` and `screen_source_scaled`), not one.
+- `regenerate_commands` (`panel/diegetic_panel.rs`) had to refresh widget and tooltip records alongside field records.
+- Added a trybuild case (`editable_widget_root_has_no_pressed_state`) rather than only editing the existing one.
+- The example had to **drop** its `editor_text` part entirely — see below.
+
+**Surprises:**
+- **Green gates are not a rendered feature.** The tests asserted each authored color reaches `VisualOverrideIndex.fill_color`, and all four gates passed. The application smoke test then showed the focused field as an opaque black bar: `background` on a text-leaf part is that element's SDF fill, and it paints over its own glyphs. Nothing in the phase ever rendered a frame, so the defect was invisible to the gate.
+- **Base editor text color was never missing.** It flows from the field's own `TextStyle::with_color` through `PanelFieldPresentation.text_style` (`panel/field.rs:28`) into `ImeEditorPresentation.text_style` (`editor.rs:951`) to `add_text`. Only *per-state* glyph color is absent, and Phase 7 already owns it as `content_color`.
+- The delegate reported all gates green twice while lint was in fact failing; three fix passes were needed. Gate output must be verified independently, never taken from the report.
+
+**Implications for remaining phases:**
+- **Phase 7** must restore the example's `editor_text` part using `content_color` — already added to its acceptance gate. Phase 7's existing note that editor text color is unreachable until `content_color` lands is confirmed correct by this phase's smoke test.
+- Any later phase adding a state property to a **text-leaf** part needs a check that the run still renders, not only an override-index assertion. The two are not equivalent.
+
+### Phase 6 Review
+
+- **Phase 7** — example gate rewritten: it said "migrate the `editor_text` part," but Phase 6 deleted that call outright, so the line discharged trivially. Now says *add* `editor_text` **and** `editor_validation`, both on `content_color`; `examples/widgets.rs` added to Files and the example build added to the gate.
+- **Phase 7** — `editor_validation` reclassified as a **text leaf** (`ime/editor.rs:1180` routes it through `add_text`). The Phase 6 smoke-finding block claimed "the other three parts are genuine rectangles"; that was wrong for validation and is corrected in place. Only selection and caret are rectangles.
+- **Phase 7** — render-route Files corrected: glyph override is `panel_text/batching.rs:609`/`:618` (not `:288`/`:435`); shape override is `panel_shapes/batching.rs:1123`/`:1132` (not `:989`, a blank line); `render/image_batch.rs:628` added as the image recipient; `render/analytic_paths/batching.rs` **removed** — it holds zero `VisualSlotOverride` references and consumes an already-resolved color.
+- **Phase 7** — `layout/element.rs` refs corrected +32 (`element_visual_capabilities` `:1317`, `SDF_MATERIAL` derivation `:1326`).
+- **Phase 7** — Phase 6 constraints expanded from one sentence to the facts a fresh implementer needs: where the four fluent methods live, `EditorPart`'s `pub(crate)` helpers, which two parts are text leaves, why the example authors neither, and the up-to-eight `add_text` fan-out from a single `editor_text` declaration.
+- **Phase 7** — acceptance gate now asserts the disabled-field dim on *every* generated run, and adds a headless proxy for the Phase 6 defect class (a text-leaf recipient authoring only `content_color` acquires no `SDF_FILL` capability and no `fill_color` override).
+- **Phase 7** — the existing Pending decision's recommendation (declare it dormant) strengthened: `add_text` early-returns on empty text, so recipient-emission is a runtime predicate, which makes both the build-error and typestate options unimplementable for generated parts.
+- **Phase 7** — deferred to the plan owner: whether phases that change rendered appearance get an orchestrator-run smoke gate, and the matching carve-out in the "Headless only" invariant.
+- **Phase 10** — deferred to the plan owner: after the skip inversion, one widget-level bundle would repaint every caret and selection box in the panel, since both carry `SDF_FILL`. Also recorded `regenerate_commands`'s new full widget-record rebuild on the visual-only path as a second index-growth multiplier, and corrected the merge-walk ref to `:377`.
+- **Phase 11** — `layout/builder.rs` refs corrected ~+200, `widgets/visual.rs` refs +2, and `render/image_batch.rs:628` added to the `color`-removal list (the phase's `rg` gate cannot see `slot_override.color`).
+- **Phase 12** — `layout/builder.rs` refs corrected ~+206, and the editor content tree added as the proving case for structural ids: it is the crate's highest-churn auto-id generator and its elements cannot be named.
+- **Phases 8 and 9** — reviewed, no changes needed. Phase 6 touched none of the files they own.
+- **Delegation Context** — test floor raised 1125 → 1130.
 
 ### Phase 7 — Content color · status: todo
 
@@ -730,9 +820,12 @@ There is no material error left to widen — Phase 5 deleted `StateMaterialRequi
 **Files:**
 - `src/widgets/appearance.rs:98` — fifth property on `Appearance` (impl at `:109`) and its fluent setter. Phase 3 deleted both `layer_onto` methods; per-property layering is now inlined in `WidgetStateCascades::resolve` (`:332`), so compose the fifth property by adding a fifth local plus a `VisualChange::To` arm inside that function's `LAYER_ORDER` loop and a fifth field in the `VisualSlotOverride` it constructs. `Appearance` derives `PartialEq` (`:95`), so the new field is compared automatically — there is no hand-written comparison to edit.
 - `src/widgets/visual.rs:169` — `content_color` on `VisualSlotOverride`, **and extend both `apply` (`:195`) and `apply_element` (`:209`)**. Those two functions enumerate every field explicitly and are the only path by which an element override composes over a slot baseline in `dispatch_visual_overrides` (`:506`); omitting either silently drops a `content_color` element override wherever a slot overlay exists on the same element index.
-- `src/render/panel_text/batching.rs` (`:288`, `:435`), `src/render/panel_shapes/batching.rs:989`, `src/render/analytic_paths/batching.rs:314` — consume `content_color`; images likewise.
+- `src/render/panel_text/batching.rs` — the glyph-color override is `apply_text_visual_override` at **`:609`**, reading `slot_override.color` at **`:618`**. (`:288` is the cascade-read block and `:435` is `apply_routed_text_run_update`; neither is the override site.)
+- `src/render/panel_shapes/batching.rs` — `apply_shape_visual_override` at **`:1123`**, color read at **`:1132`**. (`:989` is a blank line.)
+- `src/render/image_batch.rs:628` — `slot_override.color.map_or(tint, linear_tint)`, the crate's only image tint override and the image `content_color` recipient. Named explicitly; the Spec's "images likewise" pointed at no file.
+- **`src/render/analytic_paths/batching.rs` is NOT an edit site** — the file contains zero `VisualSlotOverride` references. It consumes a color already resolved and stamped by `panel_text/batching.rs`. Dropped from this phase (and re-examine before trusting Phase 11's list).
 - `src/widgets/id.rs:115` — split `CONTENT` into `TEXT` / `IMAGE` / `DRAW`.
-- `src/layout/element.rs:1285` — widen the `SDF_MATERIAL` derivation to any SDF/text/`PanelDraw` record and emit the three new content bits.
+- `src/layout/element.rs:1317` — `element_visual_capabilities`; widen the `SDF_MATERIAL` derivation (now at **`:1326`**) to any SDF/text/`PanelDraw` record and emit the three new content bits. (Phase 6 shifted these ~+32 from the `:1285`/`:1293` the Spec above still cites.)
 - `src/layout/builder.rs` — `CommonEl::default_state_surfaces` takes the `ElementContent` its two callers already hold (`text_leaf_element`, `El::into_element`) and stops emitting a fill for a state material on an element that emits its own material recipient. See the Phase 5 constraint below.
 
 **Constraints from prior phases:**
@@ -740,7 +833,12 @@ There is no material error left to widen — Phase 5 deleted `StateMaterialRequi
 - **Phase 2:** each recipient index carries a property-capability mask (`VisualElementCapabilities`, `widgets/id.rs:115`) so containers and non-content elements stay excluded. Its one `CONTENT` bit conflates text, image, and draw, and `SDF_MATERIAL` is set only for background-or-border — both must change here, per the Spec.
 - **Phase 5:** there is no appearance validation left anywhere. `validated_element_appearance` and its three call sites are deleted; the four `PanelBuildError::State*` variants are deleted. The guarantee is now carried by **record synthesis** — `CommonEl::default_state_surfaces` (`layout/builder.rs`, called from `text_leaf_element` and `El::into_element`) emits the transparent record a state property replaces. Do not go looking for a validator to add a fifth arm to; there is none. `element_visual_capabilities` (`element.rs:1285`) survives and still derives the mask, but nothing consumes it as a rejection gate.
 - **Phase 5, the interaction this phase must handle:** `default_state_surfaces` emits a `Color::NONE` fill for a state `material` whenever the element has no border record. It does not look at `ElementContent`, so a text-only or `PanelDraw`-only part authoring a state material gets an SDF fill it does not need. Today that fill is *load-bearing* — `SDF_MATERIAL` is the only route a state material has. Once this phase widens the derivation to text and `PanelDraw`, it becomes waste (one material-table row plus quad geometry per element). Both conversion sites already have `content` in scope, so passing it into `default_state_surfaces` and skipping the fill when the element emits its own recipient is a small change — but it is this phase's change to make, and this phase's gate must assert the circle-only part carries **no** defaulted fill.
-- **Phase 6:** the four generated editor parts are recipients; editor text is the canonical `content_color` target.
+- **Phase 6:** the four generated editor parts are recipients; editor text is the canonical `content_color` target. Specifically:
+  - The four fluent methods live on `El<L, WidgetElement<EditableField>>` (`layout/builder.rs:1033`–`:1072`).
+  - `EditorPart` is `pub(crate)` (`layout/builder.rs:448`), with `into_text` (`:515`), `with_children` (`:524`), and `with_background_if_unset` (`:487`) — the last supplies the built-in `EDITOR_SELECTION` / `EDITOR_CARET` colors, which are **private consts**, so an authored declaration that omits a background still gets the default.
+  - **`editor_text` and `editor_validation` become text leaves; `editor_selection` and `editor_caret` become rectangles.** Only the latter two can use `background`.
+  - The example currently authors **neither** `editor_text` nor `editor_validation`, because `background` on a text leaf painted an opaque rect over the glyphs. This phase adds both back on `content_color`.
+  - **Fan-out:** one `editor_text` declaration reaches up to **eight** generated text elements — `add_text` is called at `ime/editor.rs:1222`, `:1229`, `:1238`, `:1250`, `:1272`, `:1279`, `:1286`, `:1292` (preedit runs, pre/post-selection runs, and the run inside `add_selected_text`). `into_text` clears `common.id` (`layout/builder.rs:516`), so none can be named individually. One authored `content_color` therefore produces N recipients and N part-map entries.
 
 **Pending decision:** what happens when `content_color` names a recipient the element cannot emit.
 
@@ -752,6 +850,8 @@ Three options:
 - **Gate it out of the type surface** — only a part whose element emits content can name it. Strongest, but `content_color` lives on `Appearance`, which is one type shared by every element; splitting it by capability would need a second appearance type or a typestate parameter, and the plan already rejected typestate for this family.
 
 Recommendation: **declare it dormant**, and add the empty-bundle question (Phase 8) and this one to the same invariant amendment rather than amending it twice. Resolve before dispatching Phase 7.
+
+**Phase 6 strengthens this recommendation and eliminates option 3.** `add_text` early-returns on empty text (`ime/editor.rs:1303`), so whether `editor_text` emits a content recipient at all is decided **at runtime** from the buffer contents — no build error (option 2) and no typestate gate (option 3) can evaluate that predicate for a generated part. Further, `editor_selection` is a rectangle that *contains* the text as a child, so an author will reasonably expect `content_color` there to do something it cannot. Dormancy is the only implementable option for the generated parts.
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
@@ -766,7 +866,41 @@ Recommendation: **declare it dormant**, and add the empty-bundle question (Phase
 - A circle-only part accepts and presents both material and content color, and carries **no** defaulted `Color::NONE` fill (see the Phase 5 interaction constraint).
 - A state material on a text label wins over the `TextMaterial` cascade and restores it when the state clears.
 - An element-level `content_color` survives composition with a slot override on the same element index, proving `apply_element` carries the new field.
-- A disabled editable field dims its editor text. (Moved here from Phase 6 — editor text color is unreachable until this phase adds `content_color`.)
+- A disabled editable field dims its editor text — asserted on **every** generated run, not just the first, given the up-to-eight fan-out recorded in the Phase 6 constraints. (Moved here from Phase 6 — editor text color is unreachable until this phase adds `content_color`.)
+- A **headless proxy for the Phase 6 defect class**: a text-leaf recipient authoring only `content_color` acquires no `SDF_FILL` capability and no `fill_color` override. This is what would have caught the opaque-bar bug without a GPU.
+- `examples/widgets.rs` **adds** an `editor_text` part and an `editor_validation`
+  part, both authoring `content_color` (not `background`). Phase 6 deleted both
+  calls outright, so there is nothing to "migrate" — grepping for `.editor_text(`
+  finds nothing. Both parts are text leaves (`ime/editor.rs:1180` routes validation
+  through `add_text` too), which is why `background` was wrong for them. Verified by
+  `bash ~/.claude/scripts/delegate/verify.sh example hana_diegetic widgets`.
+
+**Pending decision:** whether phases that change rendered appearance get an orchestrator-run smoke gate.
+
+Actual problem:
+Phase 6 passed every gate — lint, 1130 tests, trybuild, example build — while the
+focused field rendered as an opaque black bar. The only thing that caught it was an
+orchestrator-run smoke of the live example with a human at the keyboard. Phases 7 and
+11 both change the example's rendered appearance.
+
+What exists now:
+- The Delegation Context invariant "Headless only" says assertions are "never on
+  rendered color" and "No phase needs a GPU, a window, or a screenshot."
+- That invariant is what made Phase 6's gate blind to its own defect.
+
+What should change:
+- Add an explicit orchestrator-run smoke line to phases 7 and 11, parallel to the
+  existing **Docs** line, and spell out the carve-out in the invariant.
+- Keep the headless proxy assertion already added to Phase 7's gate — it catches the
+  same class without a GPU, but only for capability/override state, not for what a
+  pixel actually looks like.
+
+Recommendation:
+Add both: the headless proxy as the automated gate, and a one-line orchestrator smoke
+as a human check before checkpoint. The smoke costs a launch and a keypress; Phase 6
+shows the alternative costs a shipped-broken feature.
+
+Approve this direction, or modify it?
 
 ### Phase 8 — Per-property merge in the cascade · status: todo
 
@@ -1068,6 +1202,44 @@ Approve this direction, or modify it?
 - **Phase 3's presenter-isolation tests pass unchanged** once the four `Changed<Resolved<…>>` terms are added: `button_press_edges_do_not_rebuild_slider_overrides`, plus the detector that removes `WidgetVisualOverrides` from the peer widget, drives the other, and asserts the peer's component is not re-inserted. Propagating an unchanged bundle must not dirty `Resolved<…>` and must not wake a presenter.
 - `docs/hana_diegetic/widgets-deferred.md` carries none of the four stale statements.
 
+**Pending decision:** whether a widget-level appearance bundle should repaint the generated carets and selection boxes.
+
+Actual problem:
+Phase 10 inverts the skip so every recipient receives the widget-level bundle. The
+generated caret and selection elements are legitimate recipients — both branches of
+`add_caret` / `add_selected_text` give them a background
+(`with_background_if_unset(EDITOR_CARET)` at `ime/editor.rs:1362`, `EDITOR_SELECTION`
+at `:1329`, and the `None` branches at `:1340` / `:1371`), so they carry `SDF_FILL`.
+
+What exists now:
+- After Phase 10, one `widget_focused_appearance(Appearance::new().background(X))`
+  would recolor every caret and selection highlight in the panel.
+- Phase 10 neither names this behavior nor gates it.
+
+What should change:
+- Either accept it and add a gate asserting the cascade reaches the generated parts,
+  or exclude generated parts from the widget-level bundle and gate that exclusion.
+
+Recommendation:
+Accept and gate it — a widget-level bundle reaching everything the widget owns is the
+whole premise of the plan, and the generated parts are owned. But it must be a named,
+tested behavior rather than an emergent one.
+
+Approve this direction, or modify it?
+
+**Ref corrections and added constraints (Phase 6 review):**
+- The merge-walk destructure is at `widgets/visual.rs:377`, not the `:355` this
+  phase's Spec cites; the Files bullet already says `:377` and is correct.
+  `resolve_part_overrides` `:369`, the two `continue` skips `:385` / `:388`, and the
+  default-drop filter `:392` are all still accurate.
+- **Second index-growth multiplier.** Phase 6 added
+  `self.widget_records = tree.computed_widget_records(result)` and the tooltip
+  equivalent to `regenerate_commands` (`panel/diegetic_panel.rs`), so an
+  appearance-only edit — classified `VisualOnly` by `visual_only_properties_changed`
+  (`layout/element.rs`) — now rebuilds every `ComputedWidgetRecord` and re-inserts
+  `WidgetVisualSlots`, waking `dispatch_visual_overrides` into a full index rebuild.
+  Record this alongside recipients-per-widget under "Named risk — index growth".
+
 ### Phase 11 — Remove `Slider::disabled_color` and the subtree channel · status: todo
 
 #### Work Order
@@ -1136,6 +1308,18 @@ Recommendation: **delete it.** A surviving special case in one widget is the kin
 - The example's final resolved overrides for root, track, thumb, and label are asserted **exactly** — the headless harness produces no pixels, so visual equality is not a gate.
 - Material churn: a compatible label/track/thumb transition causes no batch-key move and no batch entity creation; an incompatible one migrates only the affected retained members.
 
+**Ref corrections (Phase 6 review) — `layout/builder.rs` drifted ~+200:**
+- `El<L, WidgetElement<Slider>>::disabled_color` → **`:1251`** (plan says `:1049`)
+- `impl<L> El<L, LayoutOnly>` → **`:917`** (plan says `:738-839`)
+- `LayoutContentBuilder::with` → **`:1569`** (plan says `:1327`)
+- `Text::layout` → **`:297`**
+- `widgets/visual.rs`: `VisualSlotOverride::color` **`:173`**, `with_color` **`:222`**,
+  `subtree_color` **`:267`**, `set_subtree_color` **`:274`**, getter **`:279`**
+- **Add `src/render/image_batch.rs:628`** to the `color`-removal file list. It reads
+  `slot_override.color.map_or(tint, linear_tint)` and this phase's
+  `rg -n 'VisualSlotOverride::color|\.with_color\('` gate cannot see it — only
+  `cargo check` would catch the miss.
+
 ### Phase 12 — Stable material keys: no dropped material rows · status: todo
 
 #### Work Order
@@ -1196,6 +1380,23 @@ Frame 6 is the evidence that capacity ≥ 2× live makes re-keys free. Frame 3 i
 - **Zero drops on panel respawn.** A test that despawns and respawns a panel with the same content asserts zero drops across the transition, since the `panel: Entity` field re-keys every row regardless of element identity.
 - **Element identity survives insertion.** Inserting an element above an existing **unnamed** element leaves that element's resolved material key unchanged. Assert on the key, not on the row count — a stable row count with shifted keys passes by accident.
 - **Warn reachability.** `warn_material_table_drops` (`:1417-1425`) stays a `warn!`, not `warn_once!`. With drops unreachable, one firing is a defect, and demoting it would hide the regression this phase exists to prevent.
+
+**Ref corrections and added constraints (Phase 6 review):**
+- `layout/builder.rs` grew +206 lines in Phase 6. Corrected: `next_auto_id`
+  declaration `:1280` → **`:1486`**; the three constructors `:1408` / `:1417` /
+  `:1475` → **`:1614`** / **`:1623`** / **`:1681`** (their `next_auto_id: 0` inits at
+  `:1614` / `:1639` / `:1693`); `take_auto_id` `:1551` → **`:1757`**;
+  `tooltip_add_text` `:1826-1845` → **`:2032-2046`**. `layout/element.rs:108` / `:679`
+  and the `render/material_table.rs` refs are unaffected.
+- **Add the editor content tree as the proving case.** `inline_editor_content_tree`
+  (`ime/editor.rs`) is now the highest-churn auto-id generator in the crate: it is
+  rebuilt per keystroke with a varying element count (empty runs skipped, selection
+  box present or absent, caret always, validation conditional), so every unnamed
+  element after it re-keys on each edit. `EditorPart::into_text` sets
+  `common.id = None` (`layout/builder.rs:516`), so an author cannot stabilize them
+  with a `Named` id. This phase's Files names only the three `LayoutBuilder`
+  constructors and `tooltip_add_text`; add this path as the case that proves
+  structural ids actually work.
 
 ## Outstanding items
 
