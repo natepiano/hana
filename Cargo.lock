@@ -619,7 +619,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_diagnostic",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "dirs",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -1128,7 +1128,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_kana"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "bevy",
  "bevy_enhanced_input",
@@ -1145,7 +1145,7 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_clerestory",
  "bevy_enhanced_input",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
@@ -1185,7 +1185,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bevy_lagrange",
  "bevy_render",
  "bytemuck",
@@ -2851,7 +2851,7 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_clerestory",
  "bevy_enhanced_input",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bevy_lagrange",
  "hana_diegetic",
  "hana_valence",
@@ -3273,7 +3273,7 @@ name = "hana_conduit"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
@@ -3286,7 +3286,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bevy_lagrange",
  "bitflags 2.13.0",
  "clay-layout",
@@ -3320,7 +3320,7 @@ name = "hana_prosody"
 version = "0.0.1"
 dependencies = [
  "bevy",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bevy_lagrange",
  "bevy_remote",
  "cpal 0.18.1",
@@ -3340,7 +3340,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_enhanced_input",
- "bevy_kana 0.2.0",
+ "bevy_kana 0.3.0-dev",
  "bevy_lagrange",
  "bevy_math",
  "bevy_platform",
