@@ -324,7 +324,19 @@ fn spawn_window_clear_camera(commands: &mut Commands, window: Entity) {
     ));
 }
 
+/// Spawns the inactive `Camera3d` whose `StableTransparency` marker turns OIT on for every
+/// `ScreenSpaceCamera` the probe's panels render through.
+///
+/// Skipped on Linux, where Mesa adapters (e.g. Asahi) expose
+/// `max_storage_buffers_per_shader_stage` below the 9 that Bevy's `pbr_oit_mesh_pipeline` binds:
+/// `StableTransparency` would fail pipeline creation and `bevy_render::error_handler` would quit
+/// the probe during startup, before `remote::http_plugin` opens its port. The camera carries no
+/// other behavior — it is inactive and draws nothing — so omitting it gives up only OIT, which the
+/// probe's head-on `DiegeticPanel::screen()` overlays never depended on.
 pub(super) fn spawn_transparency_camera(mut commands: Commands) {
+    if cfg!(target_os = "linux") {
+        return;
+    }
     commands.spawn((
         ProbeTransparencyCamera,
         Camera3d::default(),
@@ -635,6 +647,11 @@ mod tests {
             With<ProbeTransparencyCamera>,
         >();
         let cameras: Vec<_> = cameras.iter(app.world()).collect();
+        if cfg!(target_os = "linux") {
+            // Linux skips the camera entirely; see `spawn_transparency_camera`.
+            assert!(cameras.is_empty());
+            return;
+        }
         assert_eq!(cameras.len(), 1);
         assert!(!cameras[0].0.is_active);
         assert_eq!(*cameras[0].2, Tonemapping::None);

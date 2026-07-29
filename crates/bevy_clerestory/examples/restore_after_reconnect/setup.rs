@@ -105,6 +105,65 @@ pub(super) enum ControlPlacementState {
     Confirmed,
 }
 
+/// Whether the monitor named by `OnMonitor` agrees with the position the window manager reported
+/// for the window itself.
+///
+/// The two disagree during the frames after a window is created. `OnMonitor` and `CurrentMonitor`
+/// carry winit's `current_monitor()` answer, and under X11 that answer lags: the probe's control
+/// window was reported at `IVec2(2783, 988)` — inside `HDMI-A-1` — while `OnMonitor` still named
+/// `eDP-1`, and only caught up on the following frame. A `WindowPosition::Automatic` window has no
+/// reported position to check at all, so it cannot corroborate anything either.
+///
+/// Both decisions taken from that answer are one-way — a key in [`AcceptedWindowKeys`]
+/// short-circuits [`place_and_register_probe_windows`] and a [`ControlPlacementConfirmed`] control
+/// short-circuits [`place_and_confirm_unregistered_control`] — so a window associated during the
+/// disagreement keeps the wrong monitor for the rest of the run and
+/// `recovery_trace::record_recovery_readiness` never sees its windows on [`ProbeMonitorIndex`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MonitorAgreement {
+    Contradicted,
+    Corroborated,
+}
+
+/// Whether `position` falls inside `monitor`, treating the far edges as belonging to the next
+/// monitor so that adjoining monitors cannot both claim a window.
+fn monitor_contains(monitor: MonitorInfo, position: IVec2) -> bool {
+    let far_corner = monitor.physical_position
+        + IVec2::new(
+            monitor.physical_size.x.to_i32(),
+            monitor.physical_size.y.to_i32(),
+        );
+    position.cmpge(monitor.physical_position).all() && position.cmplt(far_corner).all()
+}
+
+/// Checks `window.position` against the monitor `OnMonitor` names, for [`MonitorAgreement`].
+///
+/// Linux only. macOS and Windows settle a window on its final monitor before the probe's first
+/// `Update`, so there is no disagreement to wait out and gating them would only add latency to
+/// suites that already pass; on those targets the answer is always
+/// [`MonitorAgreement::Corroborated`]. Wayland is excluded on the same footing by
+/// `Platform::position_available`: it never reports a window position, so nothing could ever
+/// corroborate its monitor and the probe would stall forever.
+fn monitor_agreement(
+    platform: Platform,
+    window_position: &WindowPosition,
+    installed_monitor: Option<MonitorInfo>,
+) -> MonitorAgreement {
+    if !cfg!(target_os = "linux") || !platform.position_available() {
+        return MonitorAgreement::Corroborated;
+    }
+    match window_position {
+        WindowPosition::At(position)
+            if installed_monitor.is_some_and(|monitor| monitor_contains(monitor, *position)) =>
+        {
+            MonitorAgreement::Corroborated
+        },
+        WindowPosition::At(_) | WindowPosition::Automatic | WindowPosition::Centered(_) => {
+            MonitorAgreement::Contradicted
+        },
+    }
+}
+
 fn field(name: &str, value: impl std::fmt::Debug) -> (String, String) {
     (name.into(), format!("{value:?}"))
 }
@@ -255,8 +314,9 @@ fn initial_window_action(
     platform: Platform,
     placement_request: Option<&ProbePlacementRequested>,
     selected_monitor: Option<&MonitorInfo>,
+    agreement: MonitorAgreement,
 ) -> Option<InitialWindowAction> {
-    if accepted_window_keys.0.contains(window_key) {
+    if accepted_window_keys.0.contains(window_key) || agreement == MonitorAgreement::Contradicted {
         return None;
     }
     let window_recovery = recovery_policy(window_key)?;
@@ -280,8 +340,11 @@ fn initial_control_action(
     platform: Platform,
     placement_request: Option<&ProbePlacementRequested>,
     selected_monitor: Option<&MonitorInfo>,
+    agreement: MonitorAgreement,
 ) -> Option<InitialControlAction> {
-    if control_placement_state == ControlPlacementState::Confirmed {
+    if control_placement_state == ControlPlacementState::Confirmed
+        || agreement == MonitorAgreement::Contradicted
+    {
         return None;
     }
     let installed_monitor = installed_monitor?;
@@ -323,6 +386,7 @@ pub(super) fn place_and_register_probe_windows(
     monitors: ProbeMonitors,
     windows: Query<(
         Entity,
+        &Window,
         &OnMonitor,
         &CurrentMonitor,
         Option<&PrimaryWindow>,
@@ -332,8 +396,15 @@ pub(super) fn place_and_register_probe_windows(
     mut accepted_window_keys: ResMut<AcceptedWindowKeys>,
     mut commands: Commands,
 ) {
-    for (entity, on_monitor, current_monitor, primary_window, managed_window, placement_request) in
-        &windows
+    for (
+        entity,
+        window,
+        on_monitor,
+        current_monitor,
+        primary_window,
+        managed_window,
+        placement_request,
+    ) in &windows
     {
         let Some(window_key) = canonical_window_key(primary_window, managed_window) else {
             continue;
@@ -351,6 +422,7 @@ pub(super) fn place_and_register_probe_windows(
             *platform,
             placement_request,
             monitors.by_index(monitor_index.0),
+            monitor_agreement(*platform, &window.position, installed_monitor),
         ) {
             Some(InitialWindowAction::RequestPlacement) => {
                 commands
@@ -395,6 +467,7 @@ pub(super) fn place_and_confirm_unregistered_control(
             *platform,
             placement_request,
             monitors.by_index(monitor_index.0),
+            monitor_agreement(*platform, &window.position, installed_monitor),
         ) {
             Some(InitialControlAction::ConfirmAssociation) => {
                 let Some(installed_monitor) = installed_monitor else {
@@ -702,10 +775,14 @@ pub(super) mod tests {
     #[test]
     fn mismatched_control_is_placed_one_update_after_the_request() {
         let (mut app, monitors) = production_system_app();
+        // `monitor_agreement` ignores a control whose reported position does not fall inside the
+        // monitor `OnMonitor` names, so the fixture spawns inside the mismatched monitor rather
+        // than at `WindowPosition::Automatic`.
+        let spawn_position = monitors.mismatched_monitor.physical_position;
         let control = app
             .world_mut()
             .spawn((
-                probe_window(CONTROL_WINDOW_TITLE, WindowPosition::Automatic),
+                probe_window(CONTROL_WINDOW_TITLE, WindowPosition::At(spawn_position)),
                 UnregisteredControl,
                 OnMonitor(monitors.mismatched_entity),
             ))
@@ -713,12 +790,12 @@ pub(super) mod tests {
 
         app.update();
 
-        assert!(matches!(
+        assert_eq!(
             app.world()
                 .get::<Window>(control)
                 .map(|window| &window.position),
-            Some(WindowPosition::Automatic)
-        ));
+            Some(&WindowPosition::At(spawn_position))
+        );
         assert!(
             app.world()
                 .get::<ProbePlacementRequested>(control)
@@ -773,7 +850,12 @@ pub(super) mod tests {
         let control = app
             .world_mut()
             .spawn((
-                probe_window(CONTROL_WINDOW_TITLE, WindowPosition::Automatic),
+                probe_window(
+                    CONTROL_WINDOW_TITLE,
+                    // `monitor_agreement` ignores a control whose reported position does not fall
+                    // inside the monitor `OnMonitor` names.
+                    WindowPosition::At(monitors.selected_monitor.physical_position),
+                ),
                 UnregisteredControl,
                 OnMonitor(monitors.selected_entity),
             ))

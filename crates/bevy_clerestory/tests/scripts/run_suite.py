@@ -51,6 +51,9 @@ WORKSPACE_ROOT = CRATE_ROOT.parent.parent
 CONFIG_DIRECTORY = CRATE_ROOT / "tests" / "config"
 DEFAULT_ARTIFACT_ROOT = WORKSPACE_ROOT / "target" / "clerestory-tests"
 CASE_TIMEOUT_SECONDS = 90.0
+# Set by a Wayland compositor for every client in its session; `run_test.py` leaves it in place for
+# a `backend: wayland` case and clears it only for `backend: x11`.
+WAYLAND_DISPLAY_ENVIRONMENT_VARIABLE = "WAYLAND_DISPLAY"
 BUILD_TIMEOUT_SECONDS = 1800.0
 ASSISTED_ACTION_TIMEOUT_SECONDS = 300.0
 LAUNCH_POSITION_INSET = 100
@@ -119,6 +122,29 @@ def platform_name() -> str:
     if system == "Windows" or system.startswith(("MINGW", "MSYS", "CYGWIN")):
         return "windows"
     raise RuntimeError(f"unsupported platform: {system}")
+
+
+def wayland_case_unavailable(selected_platform: str, test: dict[str, object]) -> bool:
+    """Whether a `backend: wayland` case has no compositor to run against.
+
+    The suite used to decline every one of these cases outright, on the reasoning that a Wayland
+    client cannot ask the compositor to open a window on a chosen output. That is true of the
+    `launch_monitor` precondition but not of what the cases assert: they validate `size`, `mode`
+    and `monitor_index`, never `position`, and `run_test.py` already skips position checks
+    (`validate_window_field`) and downgrades the launch-monitor check to an informational note
+    (`validate_launch_monitor`) when the backend is Wayland. Restoring a window to a named monitor
+    is supported — `SavedWindowMode::to_window_mode` passes `MonitorSelection::Index` for every
+    fullscreen mode precisely so Wayland, which reports every position as (0,0), still lands on the
+    right display.
+
+    What genuinely makes the cases unrunnable is having no Wayland session at all, which is the
+    case under a bare X11 login.
+    """
+    return (
+        selected_platform == "linux"
+        and test.get("backend") == "wayland"
+        and not os.environ.get(WAYLAND_DISPLAY_ENVIRONMENT_VARIABLE)
+    )
 
 
 def source_revision() -> str:
@@ -859,14 +885,17 @@ def requirement_result(
             "requires monitors with different scale factors",
             "different-scales",
         )
-    if selected_platform == "linux" and test.get("backend") == "wayland":
+    if wayland_case_unavailable(selected_platform, test):
         return CaseResult(
             case_id=case_id,
             interaction=case_interaction(test),
             evidence=Evidence.APPLICATION,
             availability=Availability.UNSUPPORTED,
-            availability_reason="Wayland does not provide launch-monitor placement authority",
-            missing_capability="launch-output-control",
+            availability_reason=(
+                f"no Wayland compositor in this session "
+                f"(${WAYLAND_DISPLAY_ENVIRONMENT_VARIABLE} is unset)"
+            ),
+            missing_capability="wayland-session",
         )
     return None
 
@@ -1057,7 +1086,7 @@ def print_inventory(
     for test in tests:
         interaction = case_interaction(test)
         interaction_counts[interaction] += 1
-        unsupported = selected_platform == "linux" and test.get("backend") == "wayland"
+        unsupported = wayland_case_unavailable(selected_platform, test)
         availability = Availability.UNSUPPORTED if unsupported else Availability.AVAILABLE
         availability_counts[availability] += 1
         print(

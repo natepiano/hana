@@ -7,6 +7,7 @@
     {
       "id": "wayland_size_restore_mon0",
       "description": "Size persistence on Monitor 0 (position not available on Wayland)",
+      "note": "There is deliberately no Monitor 1 counterpart. WindowMode::Windowed carries no MonitorSelection, so the only lever for a windowed window is its position, and Wayland gives clients no positioning (Platform::position_available is false). A windowed window stays on whatever output the compositor births it on, which KWin picks as the active screen - that is, wherever the previous case left its window. A windowed monitor-1 case therefore asserts nothing about Clerestory: it passes or fails according to which case ran before it. Cross-monitor restore is covered on Wayland by the borderless cases, which use set_fullscreen(output) and genuinely can move.",
       "automation": "full",
       "backend": "wayland",
       "launch_monitor": 0,
@@ -67,6 +68,7 @@
     {
       "id": "wayland_multi_window_0_0",
       "description": "Primary on Monitor 0, secondary on Monitor 0 (Wayland)",
+      "note": "There is deliberately no Monitor 1 counterpart, for the reason recorded on wayland_size_restore_mon0. The x11_multi_window_1_1 case still covers multi-window monitor-1 restore, which is why multi_window_1_1.ron remains.",
       "automation": "full",
       "backend": "wayland",
       "launch_monitor": 0,
@@ -119,23 +121,6 @@
       }
     },
     {
-      "id": "wayland_size_restore_mon1",
-      "description": "Size persistence on Monitor 1 (position not available on Wayland)",
-      "automation": "full",
-      "backend": "wayland",
-      "launch_monitor": 1,
-      "ron_file": "size_restore_mon1.ron",
-      "mutation": {
-        "target_monitor": 1,
-        "size": [1000, 700]
-      },
-      "windows": {
-        "primary": {
-          "validate": ["size", "mode", "monitor_index"]
-        }
-      }
-    },
-    {
       "id": "wayland_borderless_1_0",
       "description": "Borderless fullscreen restore to Monitor 0 (cross monitor)",
       "automation": "full",
@@ -174,25 +159,6 @@
         "primary": {
           "validate": ["mode", "monitor_index"],
           "expected_mode": "BorderlessFullscreen"
-        }
-      }
-    },
-
-    {
-      "id": "wayland_multi_window_1_1",
-      "description": "Primary on Monitor 1, secondary on Monitor 1 (Wayland)",
-      "automation": "full",
-      "backend": "wayland",
-      "launch_monitor": 1,
-      "requires": {"min_monitors": 2},
-      "ron_file": "multi_window_1_1.ron",
-      "windows": {
-        "primary": {
-          "validate": ["size", "monitor_index", "mode"]
-        },
-        "window-1": {
-          "spawn_event": "restore_window::events::SpawnManagedWindow",
-          "validate": ["size", "monitor_index", "mode"]
         }
       }
     },
