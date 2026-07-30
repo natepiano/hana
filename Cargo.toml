@@ -50,9 +50,9 @@ hana_conduit = { path = "crates/hana_conduit" }
 image = { version = "0.25", default-features = false }
 nonmax = "0.5"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
-rand = "0.10.1"
+rand = "0.10.2"
 smallvec = "1"
-thiserror = "2.0.18"
+thiserror = "2.0.19"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 trybuild = "1"
 ttf-parser = "0.25"
@@ -64,7 +64,7 @@ winit = { version = "0.30.13", default-features = false, features = [
 ] }
 
 # dev-dependencies
-bevy_brp_extras = "0.20.1"
+bevy_brp_extras = "0.22.2"
 bevy_clerestory = { path = "crates/bevy_clerestory" }
 bevy_lagrange   = { path = "crates/bevy_lagrange" }
 clay-layout     = { path = "vendor/clay-layout" }
