@@ -25,6 +25,10 @@ pub enum DiagnosticKind {
     MissingCommandTitle,
     /// A command event has no palette description text.
     MissingCommandDescription,
+    /// A command event declares malformed command ID text.
+    InvalidCommandId,
+    /// A command event has no reflected event trigger handle.
+    CommandEventNotReflected,
 }
 
 /// One keymap problem retained for application diagnostics and BRP inspection.
@@ -115,8 +119,10 @@ mod tests {
             DiagnosticKind::DuplicateCommandId,
             DiagnosticKind::MissingCommandTitle,
             DiagnosticKind::MissingCommandDescription,
+            DiagnosticKind::InvalidCommandId,
+            DiagnosticKind::CommandEventNotReflected,
         ];
 
-        assert_eq!(diagnostic_kinds.len(), 3);
+        assert_eq!(diagnostic_kinds.len(), 5);
     }
 }

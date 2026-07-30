@@ -1,13 +1,18 @@
+use bevy::prelude::Event;
 use bevy::prelude::Reflect;
+use bevy::prelude::World;
 use bevy::reflect::FromType;
+use bevy_enhanced_input::prelude::CustomInput;
 
 use super::Capability;
+use super::HoldPhase;
+use super::registry::register_held_observer;
 
 /// Metadata declaration for a semantic event that can be invoked from a keymap.
 ///
 /// `command!` implements `KeymapCommand` for generated event types. Downstream crates can also
 /// implement this trait for their own reflected semantic events.
-pub trait KeymapCommand: Reflect {
+pub trait KeymapCommand: Event + Reflect {
     /// Command identifier text that satisfies [`CommandId::is_valid`](super::CommandId::is_valid).
     const ID: &'static str;
     /// Palette title text for this command.
@@ -16,28 +21,38 @@ pub trait KeymapCommand: Reflect {
     const DESCRIPTION: &'static str;
     /// Keymap binding capability declared for this command.
     const CAPABILITY: Capability;
+
+    /// Returns the requested transition for a held semantic event.
+    ///
+    /// Every command implements this method. Non-held commands return `None`.
+    /// `command! { held, ... }` returns its `phase` field, and hand-written held commands return
+    /// the transition that drives their [`CustomInput`](bevy_enhanced_input::prelude::CustomInput).
+    #[must_use]
+    fn hold_phase(&self) -> Option<HoldPhase>;
 }
 
 /// Reflection type data retained for each [`KeymapCommand`] event registration.
 #[derive(Clone, Debug)]
 pub struct ReflectKeymapCommand {
     /// Validated command identifier text.
-    pub id:          &'static str,
+    pub id:                            &'static str,
     /// Palette title text.
-    pub title:       &'static str,
+    pub title:                         &'static str,
     /// Palette description text.
-    pub description: &'static str,
+    pub description:                   &'static str,
     /// Keymap binding capability.
-    pub capability:  Capability,
+    pub capability:                    Capability,
+    pub(crate) register_held_observer: fn(&mut World, CustomInput),
 }
 
 impl<T: KeymapCommand> FromType<T> for ReflectKeymapCommand {
     fn from_type() -> Self {
         Self {
-            id:          T::ID,
-            title:       T::TITLE,
-            description: T::DESCRIPTION,
-            capability:  T::CAPABILITY,
+            id:                     T::ID,
+            title:                  T::TITLE,
+            description:            T::DESCRIPTION,
+            capability:             T::CAPABILITY,
+            register_held_observer: register_held_observer::<T>,
         }
     }
 }
@@ -66,10 +81,56 @@ impl<T: KeymapCommand> FromType<T> for ReflectKeymapCommand {
 /// }
 /// ```
 ///
+/// Held commands use the leading `held,` marker and generate an event payload with a
+/// [`HoldPhase`](super::HoldPhase):
+///
+/// ```ignore
+/// command! {
+///     held,
+///     action:      FreezeTrackingAction,
+///     event:       FreezeTracking,
+///     id:          "tracking::freeze",
+///     title:       "Freeze Tracking",
+///     description: "Freezes tracking while the binding remains held.",
+/// }
+/// ```
+///
 /// The expansion reaches `action!` and `event!` through `hana_rubric`'s `$crate` re-exports, so
 /// consumers need only `hana_rubric` rather than a direct `bevy_kana` dependency.
 #[macro_export]
 macro_rules! command {
+    (
+        held,
+        action: $action:ident,
+        event: $event:ident,
+        id: $id:literal,
+        title: $title:literal,
+        description: $description:literal $(,)?
+    ) => {
+        $crate::command!(
+            @declare
+            held,
+            $action,
+            $event,
+            $id,
+            $title,
+            $description,
+            $crate::Capability::Held
+        );
+    };
+    (
+        action: $action:ident,
+        event: $event:ident,
+        id: $id:literal,
+        title: $title:literal,
+        description: $description:literal,
+        capability: Held $(,)?
+    ) => {
+        compile_error!(
+            "declare a hold-to-act command with `command! { held, ... }`; \
+             `capability: Held` expands to an event with no hold phase"
+        );
+    };
     (
         action: $action:ident,
         event: $event:ident,
@@ -80,6 +141,7 @@ macro_rules! command {
     ) => {
         $crate::command!(
             @declare
+            unit,
             $action,
             $event,
             $id,
@@ -97,6 +159,7 @@ macro_rules! command {
     ) => {
         $crate::command!(
             @declare
+            unit,
             $action,
             $event,
             $id,
@@ -105,9 +168,9 @@ macro_rules! command {
             $crate::Capability::OneShot
         );
     };
-    (@declare $action:ident, $event:ident, $id:literal, $title:literal, $description:literal, $capability:path) => {
+    (@declare $event_kind:ident, $action:ident, $event:ident, $id:literal, $title:literal, $description:literal, $capability:path) => {
         $crate::action!($action);
-        $crate::event!($event, reflect: KeymapCommand);
+        $crate::command!(@event $event_kind, $event);
 
         const _: () = assert!($crate::CommandId::is_valid($id));
 
@@ -116,7 +179,20 @@ macro_rules! command {
             const TITLE:       &'static str = $title;
             const DESCRIPTION: &'static str = $description;
             const CAPABILITY:  $crate::Capability = $capability;
+            $crate::command!(@hold_phase $event_kind);
         }
+    };
+    (@hold_phase unit) => {
+        fn hold_phase(&self) -> Option<$crate::HoldPhase> { None }
+    };
+    (@hold_phase held) => {
+        fn hold_phase(&self) -> Option<$crate::HoldPhase> { Some(self.phase) }
+    };
+    (@event unit, $event:ident) => {
+        $crate::event!($event, reflect: KeymapCommand);
+    };
+    (@event held, $event:ident) => {
+        $crate::event!($event { phase: $crate::HoldPhase }, reflect: KeymapCommand);
     };
 }
 
@@ -132,6 +208,7 @@ mod tests {
     use bevy_enhanced_input::prelude::InputAction;
 
     use super::Capability;
+    use super::HoldPhase;
     use super::ReflectKeymapCommand;
 
     crate::command! {
@@ -143,12 +220,12 @@ mod tests {
     }
 
     crate::command! {
+        held,
         action:      CameraFocusHeld,
         event:       CameraFocusHeldEvent,
         id:          "camera::focus_held",
         title:       "Focus Camera",
         description: "Focus the camera while the key is held.",
-        capability: Held,
     }
 
     crate::command! {
@@ -195,6 +272,15 @@ mod tests {
             registered_capability::<CameraFocusHeldEvent>(),
             Some(Capability::Held)
         );
+    }
+
+    #[test]
+    fn held_command_event_carries_the_requested_phase() {
+        let event = CameraFocusHeldEvent {
+            phase: HoldPhase::Begin,
+        };
+
+        assert_eq!(event.phase, HoldPhase::Begin);
     }
 
     #[test]
