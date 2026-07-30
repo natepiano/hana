@@ -33,7 +33,6 @@ pub use attributes::resolved_text_alpha;
 pub use attributes::resolved_text_material;
 pub(crate) use bevy_kana::Cascade;
 pub(crate) use bevy_kana::CascadeAttribute;
-pub(crate) use bevy_kana::CascadeDefault;
 pub(crate) use bevy_kana::CascadeFrom;
 pub(crate) use bevy_kana::CascadePlugin;
 pub(crate) use bevy_kana::Resolved;

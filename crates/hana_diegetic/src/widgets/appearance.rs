@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 
 use bevy::prelude::*;
+use bevy_kana::CascadeRootResource;
 
 use super::VisualSlotOverride;
 use crate::DiegeticPanel;
@@ -229,11 +230,17 @@ static EMPTY_APPEARANCE: LazyLock<Arc<Appearance>> = LazyLock::new(|| Arc::new(A
 /// Hovered-state cascade attribute for one [`Appearance`] bundle.
 ///
 /// [`crate::El::hovered`] creates this opaque attribute from its bundle.
-#[derive(Clone, Debug, Reflect)]
+///
+/// Insert this as a resource to set the hovered appearance every widget
+/// inherits unless something between it and the cascade root overrides it.
+#[derive(Resource, Clone, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct WidgetHoveredAppearance(Arc<Appearance>);
 
 impl WidgetHoveredAppearance {
-    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    /// Wraps one appearance bundle as the hovered-state attribute value.
+    #[must_use]
+    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
     fn appearance(&self) -> &Appearance { &self.0 }
 }
@@ -244,7 +251,15 @@ impl PartialEq for WidgetHoveredAppearance {
     }
 }
 
+impl CascadeRootResource<Self> for WidgetHoveredAppearance {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for WidgetHoveredAppearance {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
 
     fn combine(lower: Self, higher: &Self) -> Self {
@@ -257,11 +272,17 @@ const _: () = assert!(size_of::<WidgetHoveredAppearance>() <= CASCADE_ATTRIBUTE_
 /// Pressed-state cascade attribute for one [`Appearance`] bundle.
 ///
 /// [`crate::El::pressed`] creates this opaque attribute from its bundle.
-#[derive(Clone, Debug, Reflect)]
+///
+/// Insert this as a resource to set the pressed appearance every widget
+/// inherits unless something between it and the cascade root overrides it.
+#[derive(Resource, Clone, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct WidgetPressedAppearance(Arc<Appearance>);
 
 impl WidgetPressedAppearance {
-    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    /// Wraps one appearance bundle as the pressed-state attribute value.
+    #[must_use]
+    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
     fn appearance(&self) -> &Appearance { &self.0 }
 }
@@ -272,7 +293,15 @@ impl PartialEq for WidgetPressedAppearance {
     }
 }
 
+impl CascadeRootResource<Self> for WidgetPressedAppearance {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for WidgetPressedAppearance {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
 
     fn combine(lower: Self, higher: &Self) -> Self {
@@ -285,11 +314,17 @@ const _: () = assert!(size_of::<WidgetPressedAppearance>() <= CASCADE_ATTRIBUTE_
 /// Focused-state cascade attribute for one [`Appearance`] bundle.
 ///
 /// [`crate::El::focused`] creates this opaque attribute from its bundle.
-#[derive(Clone, Debug, Reflect)]
+///
+/// Insert this as a resource to set the focused appearance every widget
+/// inherits unless something between it and the cascade root overrides it.
+#[derive(Resource, Clone, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct WidgetFocusedAppearance(Arc<Appearance>);
 
 impl WidgetFocusedAppearance {
-    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    /// Wraps one appearance bundle as the focused-state attribute value.
+    #[must_use]
+    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
     fn appearance(&self) -> &Appearance { &self.0 }
 }
@@ -300,7 +335,15 @@ impl PartialEq for WidgetFocusedAppearance {
     }
 }
 
+impl CascadeRootResource<Self> for WidgetFocusedAppearance {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for WidgetFocusedAppearance {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
 
     fn combine(lower: Self, higher: &Self) -> Self {
@@ -313,11 +356,17 @@ const _: () = assert!(size_of::<WidgetFocusedAppearance>() <= CASCADE_ATTRIBUTE_
 /// Disabled-state cascade attribute for one [`Appearance`] bundle.
 ///
 /// [`crate::El::disabled`] creates this opaque attribute from its bundle.
-#[derive(Clone, Debug, Reflect)]
+///
+/// Insert this as a resource to set the disabled appearance every widget
+/// inherits unless something between it and the cascade root overrides it.
+#[derive(Resource, Clone, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct WidgetDisabledAppearance(Arc<Appearance>);
 
 impl WidgetDisabledAppearance {
-    pub(crate) fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    /// Wraps one appearance bundle as the disabled-state attribute value.
+    #[must_use]
+    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
     fn appearance(&self) -> &Appearance { &self.0 }
 }
@@ -328,7 +377,15 @@ impl PartialEq for WidgetDisabledAppearance {
     }
 }
 
+impl CascadeRootResource<Self> for WidgetDisabledAppearance {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for WidgetDisabledAppearance {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
 
     fn combine(lower: Self, higher: &Self) -> Self {
@@ -681,18 +738,14 @@ mod tests {
         let pressed = Appearance::new().background(PRESS_FILL);
         let focused = Appearance::new().border_color(FOCUS_BORDER);
         let disabled = Appearance::new().background(DISABLED_BACKGROUND);
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetHoveredAppearance>>()
-            .0 = WidgetHoveredAppearance::new(hovered.clone());
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetPressedAppearance>>()
-            .0 = WidgetPressedAppearance::new(pressed.clone());
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetFocusedAppearance>>()
-            .0 = WidgetFocusedAppearance::new(focused.clone());
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetDisabledAppearance>>()
-            .0 = WidgetDisabledAppearance::new(disabled.clone());
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(hovered.clone());
+        *app.world_mut().resource_mut::<WidgetPressedAppearance>() =
+            WidgetPressedAppearance::new(pressed.clone());
+        *app.world_mut().resource_mut::<WidgetFocusedAppearance>() =
+            WidgetFocusedAppearance::new(focused.clone());
+        *app.world_mut().resource_mut::<WidgetDisabledAppearance>() =
+            WidgetDisabledAppearance::new(disabled.clone());
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .with_tree(two_widget_tree())
@@ -717,18 +770,14 @@ mod tests {
         let global = Appearance::new()
             .background(HIGHER_BACKGROUND)
             .text_color(HIGHER_TEXT);
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetHoveredAppearance>>()
-            .0 = WidgetHoveredAppearance::new(global.clone());
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetPressedAppearance>>()
-            .0 = WidgetPressedAppearance::new(global.clone());
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetFocusedAppearance>>()
-            .0 = WidgetFocusedAppearance::new(global.clone());
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetDisabledAppearance>>()
-            .0 = WidgetDisabledAppearance::new(global.clone());
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(global.clone());
+        *app.world_mut().resource_mut::<WidgetPressedAppearance>() =
+            WidgetPressedAppearance::new(global.clone());
+        *app.world_mut().resource_mut::<WidgetFocusedAppearance>() =
+            WidgetFocusedAppearance::new(global.clone());
+        *app.world_mut().resource_mut::<WidgetDisabledAppearance>() =
+            WidgetDisabledAppearance::new(global.clone());
         let hovered = Appearance::new()
             .background(HOVER_FILL)
             .border_color(HIGHER_BORDER);
@@ -782,11 +831,41 @@ mod tests {
     }
 
     #[test]
+    fn panel_hovered_appearance_preserves_global_properties_through_the_cascade() {
+        let mut app = cascade_test_app();
+        let global = Appearance::new()
+            .background(HIGHER_BACKGROUND)
+            .text_color(HIGHER_TEXT);
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(global);
+        let hovered = Appearance::new().border_color(HIGHER_BORDER);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .widget_hovered_appearance(hovered)
+            .with_tree(two_widget_tree())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "first");
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetHoveredAppearance,
+            Appearance::new()
+                .background(HIGHER_BACKGROUND)
+                .border_color(HIGHER_BORDER)
+                .text_color(HIGHER_TEXT),
+        );
+    }
+
+    #[test]
     fn unchanged_state_appearance_propagation_does_not_dirty_resolved_values() {
         let mut app = cascade_test_app();
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetHoveredAppearance>>()
-            .0 = WidgetHoveredAppearance::new(Appearance::new().background(HOVER_FILL));
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(Appearance::new().background(HOVER_FILL));
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .with_tree(two_widget_tree())

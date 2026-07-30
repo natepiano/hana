@@ -621,7 +621,6 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::WidgetHoveredAppearance;
     use crate::cascade::Cascade;
-    use crate::cascade::CascadeDefault;
     use crate::cascade::Resolved;
     use crate::layout::BoundingBox;
     use crate::layout::PanelCircle;
@@ -994,9 +993,9 @@ mod tests {
     #[test]
     fn global_text_color_default_stays_dormant_on_textless_widget_part() {
         let mut app = widgets_test_app();
-        app.insert_resource(CascadeDefault(WidgetHoveredAppearance::new(
+        app.insert_resource(WidgetHoveredAppearance::new(
             Appearance::new().text_color(TEXT_OVERRIDE_COLOR),
-        )));
+        ));
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button("button"), |children| {
             children.with(El::new().id("container"), |_| {});
