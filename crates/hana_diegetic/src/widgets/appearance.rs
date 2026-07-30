@@ -12,6 +12,7 @@
 
 use core::mem::size_of;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use bevy::prelude::*;
 
@@ -19,6 +20,7 @@ use super::VisualSlotOverride;
 use crate::DiegeticPanel;
 use crate::cascade::CASCADE_ATTRIBUTE_BYTES;
 use crate::cascade::Cascade;
+use crate::cascade::CascadeRoot;
 use crate::layout::Dimension;
 
 /// One widget state's decision for a single visual property.
@@ -128,6 +130,40 @@ impl Appearance {
         }
     }
 
+    /// Merges this bundle from a lower cascade level over `higher` property by property.
+    ///
+    /// Each [`VisualChange::To`] in this bundle replaces the matching property
+    /// from `higher`; an [`VisualChange::Unchanged`] property keeps `higher`'s
+    /// value.
+    pub(crate) fn merge_over(&self, higher: &Self) -> Self {
+        Self {
+            background:   match &self.background {
+                VisualChange::To(value) => VisualChange::To(*value),
+                VisualChange::Unchanged => higher.background.clone(),
+            },
+            border_color: match &self.border_color {
+                VisualChange::To(value) => VisualChange::To(*value),
+                VisualChange::Unchanged => higher.border_color.clone(),
+            },
+            border_width: match &self.border_width {
+                VisualChange::To(value) => VisualChange::To(*value),
+                VisualChange::Unchanged => higher.border_width.clone(),
+            },
+            text_color:   match &self.text_color {
+                VisualChange::To(value) => VisualChange::To(*value),
+                VisualChange::Unchanged => higher.text_color.clone(),
+            },
+            path_color:   match &self.path_color {
+                VisualChange::To(value) => VisualChange::To(*value),
+                VisualChange::Unchanged => higher.path_color.clone(),
+            },
+            material:     match &self.material {
+                VisualChange::To(value) => VisualChange::To(value.clone()),
+                VisualChange::Unchanged => higher.material.clone(),
+            },
+        }
+    }
+
     /// Replaces the root SDF fill color.
     ///
     /// Without [`crate::El::background`], layout emits a [`Color::NONE`] fill
@@ -188,6 +224,8 @@ impl Appearance {
     }
 }
 
+static EMPTY_APPEARANCE: LazyLock<Arc<Appearance>> = LazyLock::new(|| Arc::new(Appearance::new()));
+
 /// Hovered-state cascade attribute for one [`Appearance`] bundle.
 ///
 /// [`crate::El::hovered`] creates this opaque attribute from its bundle.
@@ -203,6 +241,14 @@ impl WidgetHoveredAppearance {
 impl PartialEq for WidgetHoveredAppearance {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0) || self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+impl CascadeRoot for WidgetHoveredAppearance {
+    fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
+
+    fn combine(lower: Self, higher: &Self) -> Self {
+        Self(Arc::new(lower.0.as_ref().merge_over(higher.0.as_ref())))
     }
 }
 
@@ -226,6 +272,14 @@ impl PartialEq for WidgetPressedAppearance {
     }
 }
 
+impl CascadeRoot for WidgetPressedAppearance {
+    fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
+
+    fn combine(lower: Self, higher: &Self) -> Self {
+        Self(Arc::new(lower.0.as_ref().merge_over(higher.0.as_ref())))
+    }
+}
+
 const _: () = assert!(size_of::<WidgetPressedAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
 
 /// Focused-state cascade attribute for one [`Appearance`] bundle.
@@ -246,6 +300,14 @@ impl PartialEq for WidgetFocusedAppearance {
     }
 }
 
+impl CascadeRoot for WidgetFocusedAppearance {
+    fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
+
+    fn combine(lower: Self, higher: &Self) -> Self {
+        Self(Arc::new(lower.0.as_ref().merge_over(higher.0.as_ref())))
+    }
+}
+
 const _: () = assert!(size_of::<WidgetFocusedAppearance>() <= CASCADE_ATTRIBUTE_BYTES);
 
 /// Disabled-state cascade attribute for one [`Appearance`] bundle.
@@ -263,6 +325,14 @@ impl WidgetDisabledAppearance {
 impl PartialEq for WidgetDisabledAppearance {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0) || self.0.as_ref() == other.0.as_ref()
+    }
+}
+
+impl CascadeRoot for WidgetDisabledAppearance {
+    fn root_default() -> Self { Self(Arc::clone(&EMPTY_APPEARANCE)) }
+
+    fn combine(lower: Self, higher: &Self) -> Self {
+        Self(Arc::new(lower.0.as_ref().merge_over(higher.0.as_ref())))
     }
 }
 
@@ -471,6 +541,14 @@ mod tests {
     const PRESS_FILL: Color = Color::srgb(0.4, 0.5, 0.6);
     const HOVER_TEXT: Color = Color::srgb(0.7, 0.5, 0.3);
     const FOCUS_PATH: Color = Color::srgb(0.3, 0.5, 0.7);
+    const HIGHER_BACKGROUND: Color = Color::srgb(0.1, 0.2, 0.3);
+    const LOWER_BACKGROUND: Color = Color::srgb(0.3, 0.2, 0.1);
+    const HIGHER_BORDER: Color = Color::srgb(0.2, 0.3, 0.4);
+    const LOWER_BORDER: Color = Color::srgb(0.4, 0.3, 0.2);
+    const HIGHER_PATH: Color = Color::srgb(0.3, 0.4, 0.5);
+    const LOWER_PATH: Color = Color::srgb(0.5, 0.4, 0.3);
+    const HIGHER_TEXT: Color = Color::srgb(0.4, 0.5, 0.6);
+    const LOWER_TEXT: Color = Color::srgb(0.6, 0.5, 0.4);
 
     fn panel() -> DiegeticPanel {
         DiegeticPanel::world()
@@ -494,6 +572,49 @@ mod tests {
             )),
             ..StateAppearance::default()
         }
+    }
+
+    #[test]
+    fn merge_over_resolves_all_properties_for_each_authorship_combination() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let higher_material = materials.add(StandardMaterial::from(Color::WHITE));
+        let lower_material = materials.add(StandardMaterial::from(Color::BLACK));
+        let higher = Appearance::new()
+            .background(HIGHER_BACKGROUND)
+            .border_color(HIGHER_BORDER)
+            .border_width(Px(1.0))
+            .text_color(HIGHER_TEXT)
+            .path_color(HIGHER_PATH)
+            .material(higher_material);
+        let lower = Appearance::new()
+            .background(LOWER_BACKGROUND)
+            .border_color(LOWER_BORDER)
+            .border_width(Px(2.0))
+            .text_color(LOWER_TEXT)
+            .path_color(LOWER_PATH)
+            .material(lower_material);
+        let empty = Appearance::new();
+
+        assert_eq!(empty.merge_over(&empty), empty);
+        assert_eq!(empty.merge_over(&higher), higher);
+        assert_eq!(lower.merge_over(&empty), lower);
+        assert_eq!(lower.merge_over(&higher), lower);
+    }
+
+    #[test]
+    fn merge_over_preserves_properties_from_each_authored_level() {
+        let global = Appearance::new().background(HIGHER_BACKGROUND);
+        let panel = Appearance::new().text_color(HIGHER_TEXT);
+        let widget = Appearance::new().background(LOWER_BACKGROUND);
+
+        let resolved = widget.merge_over(&panel).merge_over(&global);
+
+        assert_eq!(
+            resolved,
+            Appearance::new()
+                .background(LOWER_BACKGROUND)
+                .text_color(HIGHER_TEXT),
+        );
     }
 
     #[test]

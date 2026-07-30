@@ -43,5 +43,7 @@ pub use defaults::PanelDefaults;
 pub(crate) use resolved::CascadeRoot;
 
 pub(crate) fn cascade_plugin<A: CascadeRoot>() -> CascadePlugin<A, A::Root> {
-    CascadePlugin::new(A::root_default()).with_root_resource()
+    CascadePlugin::new(A::root_default())
+        .with_combine(A::combine)
+        .with_root_resource()
 }

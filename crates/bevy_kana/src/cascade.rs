@@ -237,6 +237,9 @@ impl Deref for CascadeChildren {
 #[reflect(Resource)]
 pub struct CascadeDefault<A: CascadeAttribute>(pub A);
 
+#[derive(Resource)]
+struct CascadeCombine<A: CascadeAttribute>(fn(A, &A) -> A);
+
 /// Resource holding attribute `A`'s root value.
 ///
 /// [`CascadeDefault<A>`] implements this for every attribute. A crate with its own
@@ -281,6 +284,7 @@ pub enum CascadeSet {
 /// caller-owned resource type.
 pub struct CascadePlugin<A: CascadeAttribute, R: CascadeRootResource<A> = CascadeDefault<A>> {
     root:          A,
+    combine:       fn(A, &A) -> A,
     root_resource: PhantomData<R>,
 }
 
@@ -290,15 +294,27 @@ impl<A: CascadeAttribute> CascadePlugin<A, CascadeDefault<A>> {
     pub const fn new(root: A) -> Self {
         Self {
             root,
+            combine:       replace_cascade_value::<A>,
             root_resource: PhantomData,
         }
+    }
+}
+
+impl<A: CascadeAttribute, R: CascadeRootResource<A>> CascadePlugin<A, R> {
+    /// Sets the function that combines a lower authored value with the value
+    /// inherited from the next scope.
+    #[must_use]
+    pub const fn with_combine(mut self, combine: fn(A, &A) -> A) -> Self {
+        self.combine = combine;
+        self
     }
 
     /// Moves the same root value into a caller-supplied root resource type.
     #[must_use]
-    pub fn with_root_resource<R: CascadeRootResource<A>>(self) -> CascadePlugin<A, R> {
+    pub fn with_root_resource<T: CascadeRootResource<A>>(self) -> CascadePlugin<A, T> {
         CascadePlugin {
             root:          self.root,
+            combine:       self.combine,
             root_resource: PhantomData,
         }
     }
@@ -311,6 +327,7 @@ where
     fn default() -> Self {
         Self {
             root:          CascadeDefault::<A>::default().0,
+            combine:       replace_cascade_value::<A>,
             root_resource: PhantomData,
         }
     }
@@ -320,6 +337,9 @@ impl<A: CascadeAttribute, R: CascadeRootResource<A>> Plugin for CascadePlugin<A,
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<R>() {
             app.insert_resource(R::from_root(self.root.clone()));
+        }
+        if !app.world().contains_resource::<CascadeCombine<A>>() {
+            app.insert_resource(CascadeCombine(self.combine));
         }
         app.register_type::<Cascade<A>>()
             .register_type::<Resolved<A>>()
@@ -379,8 +399,13 @@ pub fn resolve_entity_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
     world: &World,
     entity: Entity,
 ) -> Option<A> {
-    let root = world.get_resource::<R>()?;
-    Some(resolve_from_world::<A>(world, entity, root.root()))
+    let root = world.get_resource::<R>()?.root();
+    let combine = world
+        .get_resource::<CascadeCombine<A>>()
+        .map_or(replace_cascade_value::<A> as fn(A, &A) -> A, |resource| {
+            resource.0
+        });
+    Some(resolve_from_world::<A>(world, entity, root, combine))
 }
 
 /// Seeds or refreshes one participant after all commands queued alongside the
@@ -409,6 +434,7 @@ fn resolve_inserted_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
 
 fn propagate_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
     default: Res<R>,
+    combine: Res<CascadeCombine<A>>,
     authored: Query<&Cascade<A>>,
     relationships: Query<&CascadeFrom>,
     children: Query<&CascadeChildren>,
@@ -445,7 +471,13 @@ fn propagate_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
             continue;
         }
 
-        let value = resolve_from_queries(entity, &authored, &relationships, default.root());
+        let value = resolve_from_queries(
+            entity,
+            &authored,
+            &relationships,
+            default.root(),
+            combine.0,
+        );
         if resolved.get(entity).is_ok_and(|current| current.0 == value) {
             continue;
         }
@@ -470,55 +502,86 @@ fn resolve_from_queries<A: CascadeAttribute>(
     authored: &Query<&Cascade<A>>,
     relationships: &Query<&CascadeFrom>,
     root: A,
+    combine: fn(A, &A) -> A,
 ) -> A {
     let mut visited = HashSet::new();
     let mut current = entity;
+    let mut accumulated = None;
 
     for _ in 0..CASCADE_DEPTH_LIMIT {
         if !visited.insert(current) {
-            warn!("cascade relationship cycle reached from {entity:?}; using root default");
-            return root;
+            warn!(
+                "cascade relationship cycle reached from {entity:?}; resolving accumulated overrides with the root default"
+            );
+            return resolve_accumulated(accumulated, root, combine);
         }
         if let Ok(Cascade::Override(value)) = authored.get(current) {
-            return value.clone();
+            accumulated =
+                Some(accumulated.map_or_else(|| value.clone(), |lower| combine(lower, value)));
         }
         let Ok(relationship) = relationships.get(current) else {
-            return root;
+            return resolve_accumulated(accumulated, root, combine);
         };
         current = relationship.target();
     }
 
-    warn!("cascade depth limit reached from {entity:?}; using root default");
-    root
+    warn!(
+        "cascade depth limit reached from {entity:?}; resolving accumulated overrides with the root default"
+    );
+    resolve_accumulated(accumulated, root, combine)
 }
 
-fn resolve_from_world<A: CascadeAttribute>(world: &World, entity: Entity, root: A) -> A {
+fn resolve_from_world<A: CascadeAttribute>(
+    world: &World,
+    entity: Entity,
+    root: A,
+    combine: fn(A, &A) -> A,
+) -> A {
     let mut visited = HashSet::new();
     let mut current = entity;
+    let mut accumulated = None;
 
     for _ in 0..CASCADE_DEPTH_LIMIT {
         if !visited.insert(current) {
-            warn!("cascade relationship cycle reached from {entity:?}; using root default");
-            return root;
+            warn!(
+                "cascade relationship cycle reached from {entity:?}; resolving accumulated overrides with the root default"
+            );
+            return resolve_accumulated(accumulated, root, combine);
         }
         if let Some(Cascade::Override(value)) = world.get::<Cascade<A>>(current) {
-            return value.clone();
+            accumulated =
+                Some(accumulated.map_or_else(|| value.clone(), |lower| combine(lower, value)));
         }
         let Some(relationship) = world.get::<CascadeFrom>(current) else {
-            return root;
+            return resolve_accumulated(accumulated, root, combine);
         };
         current = relationship.target();
     }
 
-    warn!("cascade depth limit reached from {entity:?}; using root default");
-    root
+    warn!(
+        "cascade depth limit reached from {entity:?}; resolving accumulated overrides with the root default"
+    );
+    resolve_accumulated(accumulated, root, combine)
 }
+
+fn resolve_accumulated<A: CascadeAttribute>(
+    accumulated: Option<A>,
+    root: A,
+    combine: fn(A, &A) -> A,
+) -> A {
+    match accumulated {
+        Some(lower) => combine(lower, &root),
+        None => root,
+    }
+}
+
+const fn replace_cascade_value<A>(lower: A, _: &A) -> A { lower }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
+    #[derive(Clone, Debug, Eq, PartialEq, Reflect)]
     struct TestValue(u32);
 
     #[derive(Default, Resource)]
@@ -541,7 +604,11 @@ mod tests {
     }
 
     fn read(app: &App, entity: Entity) -> Option<TestValue> {
-        resolved_cascade(app.world(), entity).copied()
+        resolved_cascade(app.world(), entity).cloned()
+    }
+
+    fn add_test_values(lower: TestValue, higher: &TestValue) -> TestValue {
+        TestValue(lower.0 + higher.0)
     }
 
     #[test]
@@ -615,6 +682,38 @@ mod tests {
 
         assert_eq!(read(&app, parent), Some(TestValue(2)));
         assert_eq!(read(&app, child), Some(TestValue(2)));
+    }
+
+    #[test]
+    fn default_combine_keeps_the_first_override_across_widget_panel_and_root() {
+        let mut app = test_app();
+        let panel = app.world_mut().spawn(Cascade::Override(TestValue(1))).id();
+        let widget = app
+            .world_mut()
+            .spawn((Cascade::Override(TestValue(2)), CascadeFrom::new(panel)))
+            .id();
+        let root_only = app.world_mut().spawn(Cascade::<TestValue>::Inherit).id();
+
+        app.update();
+
+        assert_eq!(read(&app, widget), Some(TestValue(2)));
+        assert_eq!(read(&app, root_only), Some(TestValue(0)));
+    }
+
+    #[test]
+    fn configured_combine_folds_widget_panel_and_root() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CascadePlugin::new(TestValue(1)).with_combine(add_test_values));
+        let panel = app.world_mut().spawn(Cascade::Override(TestValue(2))).id();
+        let widget = app
+            .world_mut()
+            .spawn((Cascade::Override(TestValue(4)), CascadeFrom::new(panel)))
+            .id();
+
+        app.update();
+
+        assert_eq!(read(&app, widget), Some(TestValue(7)));
     }
 
     #[test]
