@@ -63,7 +63,7 @@ winit = { version = "0.30.13", default-features = false, features = [
 ] }
 
 # dev-dependencies
-bevy_brp_extras = "0.20.1"
+bevy_brp_extras = "0.22.2"
 bevy_clerestory = { path = "crates/bevy_clerestory" }
 bevy_lagrange   = { path = "crates/bevy_lagrange" }
 clay-layout     = { path = "vendor/clay-layout" }
