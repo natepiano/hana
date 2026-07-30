@@ -8,6 +8,8 @@ use bevy::pbr::StandardMaterial;
 use bevy::prelude::AlphaMode;
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
+use bevy::prelude::ReflectResource;
+use bevy::prelude::Resource;
 
 use super::Anchor;
 use super::Dimension;
@@ -128,7 +130,8 @@ impl From<GlyphRenderMode> for u32 {
 /// no visible fill (ghost text), spawn a `Cast` glyph and set its fill
 /// color alpha to `0`: the color pass paints nothing while the shadow
 /// pass still writes the full letter silhouette.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[reflect(Resource)]
 pub enum GlyphShadowMode {
     /// Glyph casts no shadow.
     None,
@@ -138,7 +141,8 @@ pub enum GlyphShadowMode {
 }
 
 /// Whether rendered diegetic content casts 3D shadows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[reflect(Resource)]
 pub enum ShadowCasting {
     /// Do not cast 3D shadows.
     Off,
@@ -157,7 +161,8 @@ pub enum ShadowCasting {
 /// `FrontOnly` and `BackOnly` author labels visible from one side only.
 /// Back-only glyphs read mirror-reversed when viewed from behind; a future
 /// reverse-text feature flips them to read correctly.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[reflect(Resource)]
 pub enum Sidedness {
     /// Render both faces with no culling (default).
     #[default]
@@ -173,7 +178,8 @@ pub enum Sidedness {
 /// World text defaults to lit; screen text defaults to unlit. The cascade
 /// carries the contextual default (`Lighting` is a cascade attribute); a
 /// per-label value on [`TextStyle`] overrides it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+#[reflect(Resource)]
 pub enum Lighting {
     /// Use normal PBR lighting.
     #[default]

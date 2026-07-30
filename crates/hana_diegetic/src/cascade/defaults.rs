@@ -7,8 +7,8 @@ use crate::layout::Unit;
 
 /// Non-cascade construction defaults.
 ///
-/// Runtime-propagated cascade defaults are stored in
-/// [`CascadeDefault<A>`](bevy_kana::CascadeDefault) resources.
+/// Runtime-propagated cascade defaults live in per-attribute root resources
+/// such as [`TextAlpha`](super::TextAlpha).
 /// The fields here are read when panels are built or seeded and are not
 /// propagated by the cascade plugin.
 #[derive(Resource, Clone, Copy, Debug, Reflect)]

@@ -50,10 +50,16 @@ pub struct CascadeChildren(Vec<Entity>);
 
 pub struct CascadeDefault<A: CascadeAttribute>(pub A);
 
+pub trait CascadeRootResource<A: CascadeAttribute>: Resource + GetTypeRegistration {
+    fn root(&self) -> A;
+    fn from_root(root: A) -> Self;
+}
+
 pub struct Resolved<A: CascadeAttribute>(pub A);
 
-pub struct CascadePlugin<A: CascadeAttribute> {
-    root: A,
+pub struct CascadePlugin<A: CascadeAttribute, R: CascadeRootResource<A> = CascadeDefault<A>> {
+    root:          A,
+    root_resource: PhantomData<R>,
 }
 
 pub enum CascadeSet {
@@ -104,10 +110,11 @@ commands
     .inherit_cascade::<Opacity>();
 ```
 
-`CascadePlugin<A>`:
+`CascadePlugin<A, R>`:
 
-- installs `CascadeDefault<A>` unless the application already supplied one;
-- registers the authored, resolved, and default types for reflection;
+- installs `R` from the plugin's root value unless the application already
+  supplied it;
+- registers the authored, resolved, and root-resource types for reflection;
 - observes inserted `Cascade<A>` components so their cache is seeded after
   associated commands apply;
 - runs propagation in `Update` under `CascadeSet::Propagate`.
@@ -124,6 +131,27 @@ fn remove_cascade<A>(&mut self) -> &mut Self;
 `inherit_cascade` keeps the entity participating. `remove_cascade` stops
 participation and removes both `Cascade<A>` and `Resolved<A>`.
 
+## Root resources
+
+Every cascade needs one resource holding the attribute's app-wide root value.
+`CascadeRootResource<A>` is the contract for that resource: `root()` reads the
+value out, `from_root()` builds the resource from a value.
+
+`CascadeDefault<A>` implements it for every attribute, so a crate that wants no
+resource type of its own gets one for free. A crate that already has a suitable
+resource implements the trait on that resource instead and passes it to
+`CascadePlugin::with_root_resource::<R>()`. The trait requires no newtype
+relationship between `R` and `A`, which admits two useful arrangements:
+
+- **An attribute type that is its own root resource.** The attribute derives
+  `Resource` and implements the trait on itself: `root` returns `*self`,
+  `from_root` returns its argument. Inserting the attribute type as a resource
+  is then how an application sets the global default.
+- **A resource that supplies the root for one attribute it holds.** The
+  resource returns one field from `root()` and reconstructs itself around a
+  value in `from_root()`. This keeps a resource carrying several related
+  settings intact instead of splitting the cascading one out.
+
 ## Resolution and propagation
 
 For each participating entity, resolution proceeds as follows:
@@ -132,15 +160,15 @@ For each participating entity, resolution proceeds as follows:
 2. Otherwise follow `CascadeFrom::target()`.
 3. At each ancestor, use the first `Cascade::Override`; an absent component or
    `Cascade::Inherit` continues the walk.
-4. Use `CascadeDefault<A>` when the walk reaches a root without finding an
-   override.
+4. Use the root resource's `root()` value when the walk reaches a root without
+   finding an override.
 
 The propagation system reacts to:
 
 - insertion or mutation of `Cascade<A>`;
 - removal of `Cascade<A>`;
 - insertion, retargeting, or removal of `CascadeFrom`;
-- mutation of `CascadeDefault<A>`.
+- mutation of the root resource `R`.
 
 It uses `CascadeChildren` to collect affected descendants. It writes
 `Resolved<A>` only when the effective value changed, preserving meaningful Bevy
@@ -212,8 +240,8 @@ SDF, text, and shape material handles.
 
 `Cascade<T>`, `CascadeFrom`, `Resolved<A>`, and `CascadePlugin<A>` remain
 internal implementation details in `hana_diegetic`. The crate publicly exposes
-its typed verbs and readers, plus the curated `CascadeDefault<A>` and
-`CascadeSet` integration points.
+its typed verbs and readers, plus the per-attribute root resources and its own
+`CascadeSet` integration point.
 
 ## Key files
 

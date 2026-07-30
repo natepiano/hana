@@ -4,6 +4,19 @@
 
 ### Breaking Changes
 
+- Setting an app-wide cascade default no longer goes through
+  `CascadeDefault<T>`. Each attribute type is now itself a Bevy `Resource`, and
+  inserting it sets the value every entity inherits unless something overrides
+  it: `.insert_resource(ShadowCasting::Off)` in place of
+  `.insert_resource(CascadeDefault(ShadowCasting::Off))`. This covers
+  `TextAlpha`, `FontUnit`, `HdrTextCoverageBias`, `SdfMaterial`,
+  `TextMaterial`, `ShapeMaterial`, `Lighting`, `ShadowCasting`,
+  `GlyphShadowMode`, and `Sidedness`. `AntiAlias` was already a resource and
+  is unchanged; `HairlineFade`'s app-wide default is the `fade` field of the
+  existing `HairlineWidth` resource, which also carries the `logical_px`
+  stroke floor. Apps that set no global defaults need no change.
+- `CascadeDefault` is no longer re-exported by `hana_diegetic`. Nothing in the
+  crate's public surface uses it.
 - `Cascade<T>` has moved to `bevy_kana` and is no longer re-exported by
   `hana_diegetic`. Public authored-state getters that returned `Cascade<T>` are
   now internal; use the existing domain builders, typed `override_*` /

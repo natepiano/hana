@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `CascadeRootResource<A>`, letting any resource serve as a cascade's
+  app-wide root value instead of the built-in `CascadeDefault<A>` newtype. A
+  type can implement it for itself, so an attribute type that is already a
+  resource needs no wrapper; a resource can also supply the root for an
+  attribute it holds as one field. `CascadePlugin::with_root_resource` selects
+  the root resource type, and the plugin inserts that resource from the root
+  value given to `CascadePlugin::new` unless the app already inserted it
+
 ## [0.2.0] - 2026-07-29
 
 ### Added

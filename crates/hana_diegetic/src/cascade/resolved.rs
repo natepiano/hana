@@ -6,6 +6,7 @@ use bevy::asset::Handle;
 use bevy::log::warn_once;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
+use bevy_kana::CascadeRootResource;
 
 use super::constants::CASCADE_ATTRIBUTE_BYTES;
 use crate::layout::GlyphShadowMode;
@@ -15,34 +16,79 @@ use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::render::HairlineWidth;
+
+/// Implements [`bevy_kana::CascadeRootResource`] for a `Copy` attribute type
+/// that is its own root resource. The type must derive `Resource`.
+macro_rules! cascade_root_resource {
+    ($name:ident) => {
+        impl bevy_kana::CascadeRootResource<$name> for $name {
+            fn root(&self) -> Self { *self }
+
+            fn from_root(root: Self) -> Self { root }
+        }
+    };
+}
 
 macro_rules! cascade_attribute {
     // Joins an already-declared value type (one whose own name is the
-    // attribute, e.g. `AntiAlias`) to the cascade instead of minting a
-    // wrapper struct. The type must derive `Clone`, `PartialEq`, `Debug`, and
-    // `Reflect`.
-    (existing $name:ty, default = $default:expr) => {
+    // attribute, e.g. `AntiAlias`) to the cascade instead of minting a wrapper
+    // struct. The type must derive `Resource`, `Copy`, `PartialEq`, `Debug`,
+    // and `Reflect`.
+    (existing $name:ident, default = $default:expr) => {
+        cascade_root_resource!($name);
+
         impl $crate::cascade::resolved::CascadeRoot for $name {
+            type Root = Self;
+
             fn root_default() -> Self { $default }
         }
     };
 
+    // Same, for an attribute whose root value is one field of a resource the
+    // crate already exposes. That resource implements
+    // `bevy_kana::CascadeRootResource` where it is declared.
+    (existing $name:ident, root = $root:ty, default = $default:expr) => {
+        impl $crate::cascade::resolved::CascadeRoot for $name {
+            type Root = $root;
+
+            fn root_default() -> Self { $default }
+        }
+    };
+
+    // Mints the wrapper struct, which doubles as its own root resource.
     ($(#[$meta:meta])* $name:ident($value:ty), default = $default:expr, eq) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+        ///
+        /// Insert this as a resource to set the value every entity inherits
+        /// unless something between it and the cascade root overrides it.
+        #[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+        #[reflect(Resource)]
         pub struct $name(pub $value);
 
+        cascade_root_resource!($name);
+
         impl $crate::cascade::resolved::CascadeRoot for $name {
+            type Root = Self;
+
             fn root_default() -> Self { $name($default) }
         }
     };
 
     ($(#[$meta:meta])* $name:ident($value:ty), default = $default:expr) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, PartialEq, Debug, Reflect)]
+        ///
+        /// Insert this as a resource to set the value every entity inherits
+        /// unless something between it and the cascade root overrides it.
+        #[derive(Resource, Clone, Copy, PartialEq, Debug, Reflect)]
+        #[reflect(Resource)]
         pub struct $name(pub $value);
 
+        cascade_root_resource!($name);
+
         impl $crate::cascade::resolved::CascadeRoot for $name {
+            type Root = Self;
+
             fn root_default() -> Self { $name($default) }
         }
     };
@@ -107,10 +153,22 @@ impl HdrTextCoverageBias {
 /// `SdfMaterial` is authored source-material identity. It is not the batched
 /// `SdfExtendedMaterial` render asset and not the migration-only
 /// `LegacySdfExtendedMaterial` render asset.
-#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+///
+/// Insert this as a resource to set the handle every entity inherits unless
+/// something between it and the cascade root overrides it.
+#[derive(Resource, Clone, PartialEq, Eq, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct SdfMaterial(pub Handle<StandardMaterial>);
 
+impl CascadeRootResource<Self> for SdfMaterial {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for SdfMaterial {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Handle::default()) }
 }
 
@@ -120,10 +178,22 @@ const _: () = assert!(size_of::<SdfMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
 ///
 /// `TextMaterial` resolves the authored `StandardMaterial` handle before
 /// analytic text projection. It is not a Bevy render material asset type.
-#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+///
+/// Insert this as a resource to set the handle every entity inherits unless
+/// something between it and the cascade root overrides it.
+#[derive(Resource, Clone, PartialEq, Eq, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct TextMaterial(pub Handle<StandardMaterial>);
 
+impl CascadeRootResource<Self> for TextMaterial {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for TextMaterial {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Handle::default()) }
 }
 
@@ -133,10 +203,22 @@ const _: () = assert!(size_of::<TextMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
 ///
 /// `ShapeMaterial` resolves the authored `StandardMaterial` handle before
 /// analytic panel-shape projection. It is not a Bevy render material asset type.
-#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+///
+/// Insert this as a resource to set the handle every entity inherits unless
+/// something between it and the cascade root overrides it.
+#[derive(Resource, Clone, PartialEq, Eq, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct ShapeMaterial(pub Handle<StandardMaterial>);
 
+impl CascadeRootResource<Self> for ShapeMaterial {
+    fn root(&self) -> Self { self.clone() }
+
+    fn from_root(root: Self) -> Self { root }
+}
+
 impl CascadeRoot for ShapeMaterial {
+    type Root = Self;
+
     fn root_default() -> Self { Self(Handle::default()) }
 }
 
@@ -156,15 +238,17 @@ cascade_attribute!(existing GlyphShadowMode, default = GlyphShadowMode::Cast);
 // the screen-panel construction bridge overrides it to `FrontOnly`. Consumed by
 // both glyph runs and panel lines.
 cascade_attribute!(existing Sidedness, default = Sidedness::BothSides);
-// Anti-alias mode cascade attribute. The `AntiAlias` resource is the
-// authored global; `sync_anti_alias` mirrors it into
-// `CascadeDefault<AntiAlias>` as the cascade root default.
+// Anti-alias mode cascade attribute. The `AntiAlias` resource is both the
+// authored global and the cascade root default.
 cascade_attribute!(existing AntiAlias, default = AntiAlias::Both);
-// Hairline-fade cascade attribute. `HairlineWidth::fade` is the authored
-// global; `sync_hairline_fade` mirrors it into `CascadeDefault<HairlineFade>`
-// as the cascade root default.
-cascade_attribute!(existing HairlineFade, default = HairlineFade::Full);
+// Hairline-fade cascade attribute. The root value is `HairlineWidth::fade`, so
+// the one resource carries both the fade policy and the `logical_px` stroke
+// floor that `sync_hairline_width` sends to `PathUniform::hairline_min_px`.
+cascade_attribute!(existing HairlineFade, root = HairlineWidth, default = HairlineFade::Full);
 
 pub(crate) trait CascadeRoot: bevy_kana::CascadeAttribute {
+    /// Resource holding this attribute's app-wide root value.
+    type Root: bevy_kana::CascadeRootResource<Self>;
+
     fn root_default() -> Self;
 }

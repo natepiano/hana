@@ -45,9 +45,9 @@ mod tests {
     use crate::TextContent;
     use crate::TextStyle;
     use crate::cascade;
-    use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeSet;
     use crate::cascade::Resolved;
+    use crate::cascade::TextAlpha;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
@@ -100,7 +100,7 @@ mod tests {
     fn read_label_alpha(
         resolved_alphas: Query<&Resolved<TextAlpha>, With<TextContent>>,
         labels: Query<Entity, With<TextContent>>,
-        default: Res<CascadeDefault<TextAlpha>>,
+        default: Res<TextAlpha>,
         mut seen: ResMut<SeenLabelAlpha>,
     ) {
         if seen.0.is_some() {
@@ -110,7 +110,7 @@ mod tests {
             seen.0 = Some(
                 resolved_alphas
                     .get(entity)
-                    .map_or(default.0.0, |resolved| resolved.0.0),
+                    .map_or(default.0, |resolved| resolved.0.0),
             );
         }
     }
@@ -165,7 +165,7 @@ mod tests {
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(cascade::cascade_plugin::<TextAlpha>())
-            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Blend)))
+            .insert_resource(TextAlpha(AlphaMode::Blend))
             .add_observer(seed_panel_text_child_alpha)
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
 
@@ -200,9 +200,7 @@ mod tests {
         );
         assert_eq!(single_label_alpha(&mut app), AlphaMode::Add);
 
-        app.world_mut()
-            .resource_mut::<CascadeDefault<TextAlpha>>()
-            .0 = TextAlpha(AlphaMode::AlphaToCoverage);
+        app.world_mut().resource_mut::<TextAlpha>().0 = AlphaMode::AlphaToCoverage;
         {
             let mut commands = app.world_mut().commands();
             commands.entity(panel).inherit_text_alpha();
@@ -243,7 +241,7 @@ mod tests {
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(cascade::cascade_plugin::<TextAlpha>())
-            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Multiply)))
+            .insert_resource(TextAlpha(AlphaMode::Multiply))
             .add_observer(seed_panel_text_child_alpha);
 
         // Panel authors no `text_alpha_mode`, so it carries no `Cascade<TextAlpha>`.
@@ -258,7 +256,7 @@ mod tests {
 
         // `seed_panel_text_child_alpha` inserts `CascadeFrom(panel)`. Because
         // the panel has no override, `CascadePlugin<TextAlpha>` uses
-        // `CascadeDefault<TextAlpha>`.
+        // `TextAlpha`.
         let label = app
             .world_mut()
             .spawn((TextContent::new("label"), ChildOf(panel_entity)))
@@ -282,7 +280,7 @@ mod tests {
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(cascade::cascade_plugin::<TextAlpha>())
-            .insert_resource(CascadeDefault(TextAlpha(AlphaMode::AlphaToCoverage)))
+            .insert_resource(TextAlpha(AlphaMode::AlphaToCoverage))
             .add_observer(seed_panel_text_child_alpha);
 
         let panel = DiegeticPanel::screen()

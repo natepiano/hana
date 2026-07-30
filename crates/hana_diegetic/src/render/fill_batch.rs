@@ -73,7 +73,6 @@ use super::material_table::SdfPaintMaterial;
 use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
 use crate::DrawZIndex;
-use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
 use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
@@ -984,7 +983,7 @@ pub(crate) fn append_sdf_record_materials(
     panel_sidedness: Sidedness,
     materials: &Assets<StandardMaterial>,
     asset_server: &AssetServer,
-    default_material: &CascadeDefault<SdfMaterial>,
+    default_material: &SdfMaterial,
 ) -> Option<SdfRecordMaterialSlots> {
     let rollback_row_count = builder.row_count();
     let fill = append_sdf_role(
@@ -1084,7 +1083,7 @@ fn append_sdf_role(
     panel_sidedness: Sidedness,
     materials: &Assets<StandardMaterial>,
     asset_server: &AssetServer,
-    default_material: &CascadeDefault<SdfMaterial>,
+    default_material: &SdfMaterial,
 ) -> SdfRoleAppend {
     let material = match role {
         SdfMaterialRole::Fill => &surface.fill_material,
@@ -1099,9 +1098,9 @@ fn append_sdf_role(
     let handle = material
         .base_material
         .cloned()
-        .unwrap_or_else(|| default_material.0.0.clone());
+        .unwrap_or_else(|| default_material.0.clone());
     let Some(base_material) =
-        material::material_asset_for_frame(materials, asset_server, &handle, &default_material.0.0)
+        material::material_asset_for_frame(materials, asset_server, &handle, &default_material.0)
     else {
         return SdfRoleAppend::Held;
     };
@@ -1243,9 +1242,9 @@ fn route_sdf_batch_records(
     mut surfaces: ResMut<ResolvedSdfSurfaceRegistry>,
     standard_materials: Res<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
-    sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
-    lighting_default: Res<CascadeDefault<Lighting>>,
-    sidedness_default: Res<CascadeDefault<Sidedness>>,
+    sdf_material_default: Res<SdfMaterial>,
+    lighting_default: Res<Lighting>,
+    sidedness_default: Res<Sidedness>,
     panels: Query<(
         &DiegeticPanel,
         Option<&RenderLayers>,
@@ -1278,8 +1277,8 @@ fn route_sdf_batch_records(
         if matches!(panel_visibility, Some(Visibility::Hidden)) {
             continue;
         }
-        let panel_lighting = resolved_lighting.map_or(lighting_default.0, |resolved| resolved.0);
-        let panel_sidedness = resolved_sidedness.map_or(sidedness_default.0, |resolved| resolved.0);
+        let panel_lighting = resolved_lighting.map_or(*lighting_default, |resolved| resolved.0);
+        let panel_sidedness = resolved_sidedness.map_or(*sidedness_default, |resolved| resolved.0);
         let panel_shadow_casting =
             resolved_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0);
         resolved_surfaces.push((
@@ -1746,9 +1745,9 @@ mod tests {
             .world_mut()
             .resource_mut::<Assets<StandardMaterial>>()
             .add(material::default_panel_material());
-        app.insert_resource(CascadeDefault(SdfMaterial(default_material)));
-        app.insert_resource(CascadeDefault(Lighting::Lit));
-        app.insert_resource(CascadeDefault(Sidedness::BothSides));
+        app.insert_resource(SdfMaterial(default_material));
+        app.insert_resource(Lighting::Lit);
+        app.insert_resource(Sidedness::BothSides);
         app
     }
 
@@ -3838,13 +3837,13 @@ mod tests {
         material: StandardMaterial,
     ) -> (
         Assets<StandardMaterial>,
-        CascadeDefault<SdfMaterial>,
+        SdfMaterial,
         Handle<StandardMaterial>,
     ) {
         let mut materials = Assets::<StandardMaterial>::default();
         let default = materials.add(material::default_panel_material());
         let material = materials.add(material);
-        (materials, CascadeDefault(SdfMaterial(default)), material)
+        (materials, SdfMaterial(default), material)
     }
 
     fn asset_server_for_test() -> AssetServer {

@@ -66,6 +66,7 @@ use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_kana::CascadeRootResource;
 pub(crate) use dirty::Dirty;
 pub(crate) use draw_order::CommandIndex;
 pub(crate) use draw_order::DrawOrder;
@@ -108,7 +109,6 @@ pub use world_text::WorldTextReady;
 pub(crate) use world_text::emit_computed_world_text;
 
 use crate::cascade;
-use crate::cascade::CascadeDefault;
 use crate::cascade::CascadeSet;
 use crate::cascade::SdfMaterial;
 use crate::cascade::ShapeMaterial;
@@ -144,9 +144,8 @@ pub(crate) enum PanelChildSystems {
 ///
 /// The variants are the useful points on that quality/cost ladder.
 ///
-/// This resource is the cascade root default: `sync_anti_alias` mirrors
-/// it into `CascadeDefault<AntiAlias>`, and entities override it per
-/// panel or per label via
+/// This type is its own cascade root resource: insert it to set the mode every
+/// entity inherits, and override it per
 /// [`override_anti_alias`](crate::cascade::CascadeEntityCommandsExt::override_anti_alias)
 /// (line elements override via [`El::anti_alias`](crate::El::anti_alias)).
 ///
@@ -210,21 +209,14 @@ impl AntiAlias {
     }
 }
 
-/// Mirrors [`AntiAlias`] into every text material's `supersample` and
-/// `aa_band` uniforms and into the attribute's cascade root default whenever
-/// the setting changes. The cascade write re-resolves every participant's
-/// `Resolved<AntiAlias>`, which re-packs run records — per-record
-/// `aa_flags` cannot be refreshed by rewriting a material uniform.
-fn sync_anti_alias(
-    setting: Res<AntiAlias>,
-    mut cascade_default: ResMut<CascadeDefault<AntiAlias>>,
-    mut materials: ResMut<Assets<PathExtendedMaterial>>,
-) {
+/// Mirrors [`AntiAlias`] into every text material's `supersample` and `aa_band`
+/// uniforms whenever the setting changes. Per-record `aa_flags` are not
+/// refreshed here: `AntiAlias` is its own cascade root resource, so changing it
+/// re-resolves every participant's `Resolved<AntiAlias>` and re-packs their run
+/// records.
+fn sync_anti_alias(setting: Res<AntiAlias>, mut materials: ResMut<Assets<PathExtendedMaterial>>) {
     if !setting.is_changed() {
         return;
-    }
-    if cascade_default.0 != *setting {
-        cascade_default.0 = *setting;
     }
     for (_, material) in materials.iter_mut() {
         analytic_paths::set_path_material_anti_alias(material, *setting);
@@ -245,13 +237,23 @@ pub struct HairlineWidth {
     pub logical_px: f32,
     /// What happens to a stroke whose natural width falls below the floor.
     ///
-    /// The cascade root default: `sync_hairline_fade` mirrors it into
-    /// `CascadeDefault<HairlineFade>`, and line elements override it per
-    /// panel via
+    /// This field is the [`HairlineFade`] cascade root value — the policy every
+    /// entity inherits. Line elements override it per panel via
     /// [`override_hairline_fade`](crate::cascade::CascadeEntityCommandsExt::override_hairline_fade),
     /// per element via [`El::hairline_fade`](crate::El::hairline_fade), or
     /// per line via [`PanelLine::hairline_fade`](crate::PanelLine::hairline_fade).
     pub fade:       HairlineFade,
+}
+
+impl CascadeRootResource<HairlineFade> for HairlineWidth {
+    fn root(&self) -> HairlineFade { self.fade }
+
+    fn from_root(root: HairlineFade) -> Self {
+        Self {
+            fade: root,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for HairlineWidth {
@@ -316,22 +318,6 @@ const HAIRLINE_MIN_DEVICE_PX_HIGH_DPI: f32 = 1.5;
 /// are few device pixels per stroke.
 const HAIRLINE_MIN_DEVICE_PX_LOW_DPI: f32 = 1.0;
 
-/// Mirrors [`HairlineWidth::fade`] into the attribute's cascade root default
-/// whenever the resource changes. The cascade write re-resolves every
-/// participant's `Resolved<HairlineFade>`, which re-packs line outlines (fade
-/// is per-curve data in `CurveRecord::fade_exponent`).
-fn sync_hairline_fade(
-    hairline_width: Res<HairlineWidth>,
-    mut cascade_default: ResMut<CascadeDefault<HairlineFade>>,
-) {
-    if !hairline_width.is_changed() {
-        return;
-    }
-    if cascade_default.0 != hairline_width.fade {
-        cascade_default.0 = hairline_width.fade;
-    }
-}
-
 /// Mirrors [`HairlineWidth`] × window scale factor into every text material's
 /// `hairline_min_px` uniform: all materials when the applied value changes,
 /// plus newly added materials (which carry a constructor default).
@@ -382,13 +368,47 @@ pub(crate) fn seed_default_material_cascades(app: &mut App) {
     if !app.world().contains_resource::<Assets<StandardMaterial>>() {
         app.init_asset::<StandardMaterial>();
     }
+    // `CascadePlugin::build` has already inserted each of these roots holding
+    // the empty handle that `CascadeRoot::root_default` returns. Seeding
+    // replaces only that empty handle, so a consumer that inserted its own root
+    // material before `DiegeticUiPlugin` keeps it.
+    let seed_sdf = holds_empty_handle(
+        app.world()
+            .get_resource::<SdfMaterial>()
+            .map(|root| &root.0),
+    );
+    let seed_text = holds_empty_handle(
+        app.world()
+            .get_resource::<TextMaterial>()
+            .map(|root| &root.0),
+    );
+    let seed_shape = holds_empty_handle(
+        app.world()
+            .get_resource::<ShapeMaterial>()
+            .map(|root| &root.0),
+    );
+    if !(seed_sdf || seed_text || seed_shape) {
+        return;
+    }
     let default_material = app
         .world_mut()
         .resource_mut::<Assets<StandardMaterial>>()
         .add(default_panel_material());
-    app.insert_resource(CascadeDefault(SdfMaterial(default_material.clone())));
-    app.insert_resource(CascadeDefault(TextMaterial(default_material.clone())));
-    app.insert_resource(CascadeDefault(ShapeMaterial(default_material)));
+    if seed_sdf {
+        app.insert_resource(SdfMaterial(default_material.clone()));
+    }
+    if seed_text {
+        app.insert_resource(TextMaterial(default_material.clone()));
+    }
+    if seed_shape {
+        app.insert_resource(ShapeMaterial(default_material));
+    }
+}
+
+/// Reports whether a material cascade root is absent or still holds the empty
+/// handle it was built with.
+fn holds_empty_handle(current: Option<&Handle<StandardMaterial>>) -> bool {
+    current.is_none_or(|handle| *handle == Handle::default())
 }
 
 impl Plugin for RenderPlugin {
@@ -415,12 +435,11 @@ impl Plugin for RenderPlugin {
         // Bevy registers the OIT type without `ReflectComponent`; this enables
         // reflection-based (BRP) edits of OIT settings on a live camera.
         .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
-        // The cascade-root mirrors must land before propagation so a global
+        // The material-uniform writes must land before propagation so a global
         // change reaches every `Resolved<A>` the same frame.
         .add_systems(
             Update,
-            (sync_anti_alias, sync_hairline_fade, sync_hairline_width)
-                .before(CascadeSet::Propagate),
+            (sync_anti_alias, sync_hairline_width).before(CascadeSet::Propagate),
         )
         .add_observer(transparency::on_stable_transparency_added)
         .add_observer(transparency::on_stable_transparency_removed)

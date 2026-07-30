@@ -61,8 +61,9 @@ assert_eq!(
 - `CascadeFrom` points at the next inheritance source; Bevy maintains the
   reverse `CascadeChildren` collection without linked despawn.
 - `Resolved<A>` is the cached result for one participating entity.
-- `CascadeDefault<A>` is the public root-default resource.
-- `CascadePlugin<A>` installs initial resolution and later propagation for
+- each attribute's root default lives in a resource implementing
+  `bevy_kana::CascadeRootResource<A>`; see "Root resources" below.
+- `CascadePlugin<A, R>` installs initial resolution and later propagation for
   `Resolved<A>`.
 - `bevy_kana::CascadeEntityCommandsExt` supplies generic authored-value
   commands; `hana_diegetic::CascadeEntityCommandsExt` supplies typed domain
@@ -74,7 +75,7 @@ For an entity and attribute `A`, resolution chooses:
 
 1. the entity's own `Cascade::Override(value)`, when present;
 2. otherwise the first override found by following `CascadeFrom`;
-3. otherwise `CascadeDefault<A>`.
+3. otherwise the attribute's root resource value.
 
 An entity without `Cascade<A>` does not participate in that attribute, but it
 is transparent when another entity's relationship walk reaches it.
@@ -104,11 +105,40 @@ shared engine.
 | `ShadowCasting` | `ShadowCasting` | `ShadowCasting::On` | Common shadow-casting policy. |
 | `GlyphShadowMode` | `GlyphShadowMode` | `GlyphShadowMode::Cast` | Text silhouette shadow policy. |
 | `Sidedness` | `Sidedness` | `Sidedness::BothSides` | Text and panel-shape sidedness policy. |
-| `AntiAlias` | `AntiAlias` | `AntiAlias::Both` | Mirrors the authored `AntiAlias` resource into the root default. |
-| `HairlineFade` | `HairlineFade` | `HairlineFade::Full` | Mirrors `HairlineWidth::fade` into the root default. |
+| `AntiAlias` | `AntiAlias` | `AntiAlias::Both` | Text and panel-shape anti-alias mode. |
+| `HairlineFade` | `HairlineFade` | `HairlineFade::Full` | Thin-stroke fade policy. |
 
 `cascade_attribute!` declares wrapper values and each attribute's local
 `CascadeRoot` choice. Registration constructs the shared plugin from that root.
+
+### Root resources
+
+Every attribute above is itself a Bevy `Resource`, and inserting it sets the
+value every entity inherits unless something between it and the cascade root
+overrides it:
+
+```rust
+app.insert_resource(ShadowCasting::Off);
+```
+
+The attribute types implement `bevy_kana::CascadeRootResource` for themselves,
+so there is no separate default-wrapper type to name. `CascadePlugin` inserts
+each root from the table's default value when the application has not already
+inserted it, so an application that wants the defaults writes nothing. Ordering
+is free: insert before `add_plugins` and the plugin leaves the value alone;
+insert after and it replaces the value, which propagates on the next change
+detection pass.
+
+`HairlineFade` is the one exception. Its root value is the `fade` field of the
+`HairlineWidth` resource, which also carries `logical_px` — a global stroke
+floor that cannot cascade per entity because `sync_hairline_width` sends it to
+a single `PathUniform::hairline_min_px` shader uniform. Setting the app-wide
+fade therefore means inserting `HairlineWidth`, not `HairlineFade`.
+
+The three material roots (`SdfMaterial`, `TextMaterial`, `ShapeMaterial`)
+default to an empty `Handle::default()`. `seed_default_material_cascades`
+replaces exactly that empty handle with the real `default_panel_material()`
+asset, so an application that inserted its own handle first keeps it.
 
 ## Domain authoring
 
@@ -139,7 +169,7 @@ runtime changes use typed entity commands such as `override_sdf_material`,
 Panel font units are the deliberate construction exception: when the builder
 omits one, the initial bridge seeds an override from
 `PanelDefaults::panel_font_unit`. An explicit `inherit_font_unit` command then
-switches the live component to the registered `CascadeDefault<FontUnit>`. A
+switches the live component to the `FontUnit` root resource value. A
 caller never constructs or matches `Cascade<T>` through the `hana_diegetic`
 API.
 

@@ -31,7 +31,6 @@ use super::PanelTextLayout;
 use super::PreparedPanelText;
 use super::layout::PanelTextDrawZIndex;
 use super::layout::PanelTextDrawZIndexRank;
-use crate::cascade::CascadeDefault;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
@@ -98,13 +97,13 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
     materials: Query<'w, 's, &'static Resolved<TextMaterial>, With<TextContent>>,
     hdr_text_coverage_biases:
         Query<'w, 's, &'static Resolved<HdrTextCoverageBias>, With<TextContent>>,
-    alpha_default:                  Res<'w, CascadeDefault<TextAlpha>>,
-    lighting_default:               Res<'w, CascadeDefault<Lighting>>,
-    sidedness_default:              Res<'w, CascadeDefault<Sidedness>>,
-    shadow_casting_default:         Res<'w, CascadeDefault<ShadowCasting>>,
-    glyph_shadow_mode_default:      Res<'w, CascadeDefault<GlyphShadowMode>>,
-    anti_alias_default:             Res<'w, CascadeDefault<AntiAlias>>,
-    hdr_text_coverage_bias_default: Res<'w, CascadeDefault<HdrTextCoverageBias>>,
+    alpha_default:                  Res<'w, TextAlpha>,
+    lighting_default:               Res<'w, Lighting>,
+    sidedness_default:              Res<'w, Sidedness>,
+    shadow_casting_default:         Res<'w, ShadowCasting>,
+    glyph_shadow_mode_default:      Res<'w, GlyphShadowMode>,
+    anti_alias_default:             Res<'w, AntiAlias>,
+    hdr_text_coverage_bias_default: Res<'w, HdrTextCoverageBias>,
     placement_changed: Query<
         'w,
         's,
@@ -150,30 +149,30 @@ impl PathBatchKeyCascades<'_, '_> {
     fn alpha(&self, label: Entity) -> AlphaMode {
         self.alphas
             .get(label)
-            .map_or(self.alpha_default.0.0, |resolved| resolved.0.0)
+            .map_or(self.alpha_default.0, |resolved| resolved.0.0)
     }
 
     fn lighting(&self, label: Entity) -> Lighting {
         self.lightings
             .get(label)
-            .map_or(self.lighting_default.0, |resolved| resolved.0)
+            .map_or(*self.lighting_default, |resolved| resolved.0)
     }
 
     fn sidedness(&self, label: Entity) -> Sidedness {
         self.sidednesses
             .get(label)
-            .map_or(self.sidedness_default.0, |resolved| resolved.0)
+            .map_or(*self.sidedness_default, |resolved| resolved.0)
     }
 
     fn visual_shadow(&self, label: Entity) -> VisualShadow {
         let shadow_casting = self
             .shadow_castings
             .get(label)
-            .map_or(self.shadow_casting_default.0, |resolved| resolved.0);
+            .map_or(*self.shadow_casting_default, |resolved| resolved.0);
         let glyph_shadow_mode = self
             .glyph_shadow_modes
             .get(label)
-            .map_or(self.glyph_shadow_mode_default.0, |resolved| resolved.0);
+            .map_or(*self.glyph_shadow_mode_default, |resolved| resolved.0);
         match shadow_casting {
             ShadowCasting::Off => VisualShadow::None,
             ShadowCasting::On => glyph_shadow_mode.into(),
@@ -183,23 +182,19 @@ impl PathBatchKeyCascades<'_, '_> {
     fn anti_alias(&self, label: Entity) -> AntiAlias {
         self.anti_aliases
             .get(label)
-            .map_or(self.anti_alias_default.0, |resolved| resolved.0)
+            .map_or(*self.anti_alias_default, |resolved| resolved.0)
     }
 
     fn hdr_text_coverage_bias(&self, label: Entity) -> HdrTextCoverageBias {
         self.hdr_text_coverage_biases
             .get(label)
-            .map_or(self.hdr_text_coverage_bias_default.0, |resolved| resolved.0)
+            .map_or(*self.hdr_text_coverage_bias_default, |resolved| resolved.0)
     }
 
-    fn material(
-        &self,
-        label: Entity,
-        default: &CascadeDefault<TextMaterial>,
-    ) -> Handle<StandardMaterial> {
+    fn material(&self, label: Entity, default: &TextMaterial) -> Handle<StandardMaterial> {
         self.materials
             .get(label)
-            .map_or_else(|_| default.0.0.clone(), |resolved| resolved.0.0.clone())
+            .map_or_else(|_| default.0.clone(), |resolved| resolved.0.0.clone())
     }
 }
 
@@ -232,7 +227,7 @@ pub(super) fn update_panel_text_batches(
     mut materials: ResMut<Assets<PathExtendedMaterial>>,
     standard_materials: Res<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
-    text_material_default: Res<CascadeDefault<TextMaterial>>,
+    text_material_default: Res<TextMaterial>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut material_table: ResMut<FrameMaterialTableBuild>,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -549,13 +544,13 @@ fn text_material_candidate_for_frame(
     sidedness: Sidedness,
     standard_materials: &Assets<StandardMaterial>,
     asset_server: &AssetServer,
-    text_material_default: &CascadeDefault<TextMaterial>,
+    text_material_default: &TextMaterial,
 ) -> Option<MaterialSlotCandidate> {
     let base = render::material_asset_for_frame(
         standard_materials,
         asset_server,
         handle,
-        &text_material_default.0.0,
+        &text_material_default.0,
     )?;
     let base = strip_tangent_dependent_maps(base);
     Some(render::analytic_material_slot_candidate(
@@ -1196,7 +1191,6 @@ mod tests {
     use crate::Mm;
     use crate::cascade;
     use crate::cascade::CascadeEntityCommandsExt;
-    use crate::cascade::HdrTextCoverageBias;
     use crate::cascade::TextMaterial;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::DrawZIndex;
@@ -1459,10 +1453,7 @@ mod tests {
     #[test]
     fn production_pipeline_routes_panel_alpha_on_first_frame() {
         let mut app = pipeline_app();
-        assert_eq!(
-            app.world().resource::<CascadeDefault<TextAlpha>>().0.0,
-            AlphaMode::Blend
-        );
+        assert_eq!(app.world().resource::<TextAlpha>().0, AlphaMode::Blend);
         app.world_mut().spawn(
             DiegeticPanel::world()
                 .size(Mm(100.0), Mm(50.0))
@@ -1751,9 +1742,7 @@ mod tests {
         assert_eq!(store_stats(&app), (1, 2, 9));
         assert_eq!(text_run_coverage_biases(&app), vec![0.0, 0.0]);
 
-        app.world_mut()
-            .resource_mut::<CascadeDefault<HdrTextCoverageBias>>()
-            .0 = HdrTextCoverageBias(2.0);
+        app.world_mut().resource_mut::<HdrTextCoverageBias>().0 = 2.0;
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (1, 2, 9));
@@ -2081,9 +2070,7 @@ mod tests {
         assert_eq!(store_stats(&app), (1, 2, 9));
 
         // The live sequence: default change + rebuild in the same frame.
-        app.world_mut()
-            .resource_mut::<CascadeDefault<TextAlpha>>()
-            .0 = TextAlpha(AlphaMode::Multiply);
+        app.world_mut().resource_mut::<TextAlpha>().0 = AlphaMode::Multiply;
         app.world_mut().entity_mut(panel).despawn();
         spawn_pinned_panel(&mut app);
         settle(&mut app);

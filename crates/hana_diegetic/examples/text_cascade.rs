@@ -3,7 +3,8 @@
 //! The cascade rule is: **my own override, else my parent's override, else the
 //! global default**. This example shows that rule from both sides:
 //!
-//! - authoring values with `CascadeDefault<A>`, `override_*`, and `inherit_*`;
+//! - authoring values with the per-attribute root resources (`TextAlpha`, `FontUnit`),
+//!   `override_*`, and `inherit_*`;
 //! - reading values back with `resolved_text_alpha` and `resolved_font_unit`.
 //!
 //! Hotkeys:
@@ -29,7 +30,6 @@ use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
-use hana_diegetic::CascadeDefault;
 use hana_diegetic::CascadeEntityCommandsExt;
 use hana_diegetic::CascadeSet;
 use hana_diegetic::CornerRadius;
@@ -184,8 +184,8 @@ fn main() {
         .offset_px(HOME_OFFSET_PX)
         .with_title_bar(TitleBar::new().with_title(EXAMPLE_TITLE))
         .with_camera_control_panel()
-        .insert_resource(CascadeDefault(TextAlpha(GLOBAL_ALPHA_A)))
-        .insert_resource(CascadeDefault(FontUnit(GLOBAL_UNIT_A)))
+        .insert_resource(TextAlpha(GLOBAL_ALPHA_A))
+        .insert_resource(FontUnit(GLOBAL_UNIT_A))
         .init_resource::<CascadeDemoState>()
         .init_resource::<HudSnapshotCache>()
         .add_systems(Startup, setup)
@@ -546,21 +546,15 @@ fn build_panel_layout(builder: &mut LayoutBuilder, snapshot: &HudSnapshot) {
 }
 
 /// `G` — cycles the global `TextAlpha` default every entity inherits.
-fn cycle_global_alpha(
-    mut state: ResMut<CascadeDemoState>,
-    mut alpha_default: ResMut<CascadeDefault<TextAlpha>>,
-) {
+fn cycle_global_alpha(mut state: ResMut<CascadeDemoState>, mut alpha_default: ResMut<TextAlpha>) {
     state.global_alpha = next_alpha_default(state.global_alpha);
-    alpha_default.0 = TextAlpha(state.global_alpha);
+    alpha_default.0 = state.global_alpha;
 }
 
 /// `U` — cycles the global `FontUnit` default every entity inherits.
-fn cycle_global_unit(
-    mut state: ResMut<CascadeDemoState>,
-    mut unit_default: ResMut<CascadeDefault<FontUnit>>,
-) {
+fn cycle_global_unit(mut state: ResMut<CascadeDemoState>, mut unit_default: ResMut<FontUnit>) {
     state.global_unit = next_unit_default(state.global_unit);
-    unit_default.0 = FontUnit(state.global_unit);
+    unit_default.0 = state.global_unit;
 }
 
 /// `P` — toggles whether the panel overrides or inherits text alpha.

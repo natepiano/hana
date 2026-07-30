@@ -22,8 +22,8 @@ use crate::render::HairlineFade;
 ///
 /// `override_*` writes this entity's authored value. `inherit_*` writes
 /// `Cascade::Inherit` so the entity remains participating and resolves through
-/// `CascadeFrom` or the global
-/// [`CascadeDefault<A>`](bevy_kana::CascadeDefault). Schedule writes before
+/// `CascadeFrom` or the attribute's root resource, such as
+/// [`TextAlpha`]. Schedule writes before
 /// [`CascadeSet::Propagate`](super::CascadeSet::Propagate) and reads after it
 /// for same-frame observation.
 pub trait CascadeEntityCommandsExt {
@@ -324,5 +324,5 @@ where
     if let Some(value) = bevy_kana::resolved_cascade::<A>(world, entity) {
         return value.clone();
     }
-    bevy_kana::resolve_entity_cascade::<A>(world, entity).unwrap_or_else(A::root_default)
+    bevy_kana::resolve_entity_cascade::<A, A::Root>(world, entity).unwrap_or_else(A::root_default)
 }
