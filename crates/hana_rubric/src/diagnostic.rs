@@ -19,6 +19,12 @@ pub enum DiagnosticKind {
     Disk,
     /// A companion file could not be published.
     Companion,
+    /// Multiple command events declare the same command ID.
+    DuplicateCommandId,
+    /// A command event has no palette title text.
+    MissingCommandTitle,
+    /// A command event has no palette description text.
+    MissingCommandDescription,
 }
 
 /// One keymap problem retained for application diagnostics and BRP inspection.
@@ -43,6 +49,11 @@ pub struct Diagnostic {
     pub command_id:         String,
     /// Failure category reported for this source location.
     pub kind:               DiagnosticKind,
+    /// Human-readable sentence explaining this failure.
+    ///
+    /// Unlike [`Self::suggestions`], this is not machine-applicable replacement text. This
+    /// required field uses an empty string when no message applies.
+    pub message:            String,
     /// Text replacements that can repair the keymap source.
     pub suggestions:        Vec<String>,
 }
@@ -79,6 +90,7 @@ mod tests {
             original_keystroke: String::from("cmd-k"),
             command_id:         String::from("camera::home"),
             kind:               DiagnosticKind::Command,
+            message:            String::from("The command is unavailable."),
             suggestions:        vec![String::from("camera::home")],
         };
         let keymap_load_failures = KeymapLoadFailures {
@@ -91,7 +103,20 @@ mod tests {
         let _: &String = &diagnostic.context;
         let _: &String = &diagnostic.original_keystroke;
         let _: &String = &diagnostic.command_id;
+        let _: &String = &diagnostic.message;
+        assert_eq!(diagnostic.message, "The command is unavailable.");
         let _: &Vec<String> = &diagnostic.suggestions;
         let _: &Vec<Diagnostic> = &keymap_load_failures.diagnostics;
+    }
+
+    #[test]
+    fn diagnostic_kind_includes_command_registry_failures() {
+        let diagnostic_kinds = [
+            DiagnosticKind::DuplicateCommandId,
+            DiagnosticKind::MissingCommandTitle,
+            DiagnosticKind::MissingCommandDescription,
+        ];
+
+        assert_eq!(diagnostic_kinds.len(), 3);
     }
 }
