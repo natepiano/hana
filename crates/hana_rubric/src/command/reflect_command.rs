@@ -95,8 +95,7 @@ impl<T: KeymapCommand> FromType<T> for ReflectKeymapCommand {
 /// }
 /// ```
 ///
-/// The expansion reaches `action!` and `event!` through `hana_rubric`'s `$crate` re-exports, so
-/// consumers need only `hana_rubric` rather than a direct `bevy_kana` dependency.
+/// The expansion reaches the local `$crate::action!` and `$crate::event!` macros.
 #[macro_export]
 macro_rules! command {
     (
@@ -197,6 +196,10 @@ macro_rules! command {
 }
 
 #[cfg(test)]
+#[allow(
+    dead_code,
+    reason = "command tests declare input action marker types without constructing them"
+)]
 mod tests {
     use std::any::TypeId;
 

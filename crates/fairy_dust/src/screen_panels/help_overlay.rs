@@ -2,9 +2,6 @@
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_kana::action;
-use bevy_kana::bind_action_system;
-use bevy_kana::event;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
@@ -15,6 +12,9 @@ use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_rubric::action;
+use hana_rubric::bind_action_system;
+use hana_rubric::event;
 
 use super::ControlActivation;
 use super::TitleBarControlState;

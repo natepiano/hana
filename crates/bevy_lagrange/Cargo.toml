@@ -44,6 +44,7 @@ bevy_clerestory = { workspace = true }
 fairy_dust      = { workspace = true }
 float-cmp       = { workspace = true }
 hana_diegetic   = { workspace = true }
+hana_rubric     = { workspace = true }
 
 [[example]]
 name              = "showcase"

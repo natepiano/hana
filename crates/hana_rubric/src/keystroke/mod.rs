@@ -18,7 +18,7 @@ pub use sequence::KeystrokeSequenceParseError;
 pub use sequence_matcher::MatchOutcome;
 pub use sequence_matcher::SequenceMatcher;
 
-use super::platform_shortcut_mode::PlatformShortcutMode;
+use crate::platform_shortcut_mode::PlatformShortcutMode;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

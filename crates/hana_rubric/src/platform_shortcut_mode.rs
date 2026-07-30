@@ -1,13 +1,13 @@
 /// Selects whether the platform's primary shortcut modifier is `Cmd` (macOS)
 /// or `Ctrl` (everywhere else).
 #[derive(Clone, Copy)]
-pub(super) enum PlatformShortcutMode {
+pub(crate) enum PlatformShortcutMode {
     Command,
     Control,
 }
 
 impl PlatformShortcutMode {
-    pub(super) const fn current() -> Self {
+    pub(crate) const fn current() -> Self {
         if cfg!(target_os = "macos") {
             Self::Command
         } else {

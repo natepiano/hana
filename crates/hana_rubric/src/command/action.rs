@@ -3,7 +3,7 @@
 /// # Examples
 ///
 /// ```ignore
-/// use bevy_kana::action;
+/// use hana_rubric::action;
 ///
 /// action!(CameraHome);
 /// ```
@@ -16,6 +16,7 @@
 /// pub struct CameraHome;
 /// ```
 #[macro_export]
+#[doc(hidden)]
 macro_rules! action {
     ($(#[$meta:meta])* $action:ident) => {
         $(#[$meta])*

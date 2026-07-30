@@ -355,6 +355,10 @@ fn registry_diagnostic(kind: DiagnosticKind, command_id: &str, message: String) 
 
 #[cfg(test)]
 #[allow(
+    dead_code,
+    reason = "command tests declare input action marker types without constructing them"
+)]
+#[allow(
     clippy::expect_used,
     reason = "tests should panic on unexpected values"
 )]

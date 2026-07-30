@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_kana::Keybindings;
+use hana_rubric::Keybindings;
 use hana_valence::FoldCommand;
 use hana_valence::FoldCommandEvent;
 use hana_valence::FoldDirection;

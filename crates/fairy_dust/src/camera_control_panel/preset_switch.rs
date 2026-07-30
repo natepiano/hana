@@ -11,9 +11,6 @@
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_kana::action;
-use bevy_kana::bind_action_system;
-use bevy_kana::event;
 use bevy_lagrange::CameraBasis;
 use bevy_lagrange::CameraHomePending;
 use bevy_lagrange::FreeCam;
@@ -32,6 +29,9 @@ use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::OrbitCamPresetKind;
 use bevy_lagrange::ResolvedCameraInputRoute;
+use hana_rubric::action;
+use hana_rubric::bind_action_system;
+use hana_rubric::event;
 
 use super::CameraGuidancePanel;
 use super::CameraGuidanceRevealPending;

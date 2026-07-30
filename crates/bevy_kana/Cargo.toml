@@ -1,10 +1,10 @@
 [package]
 authors.workspace    = true
 categories           = ["game-development", "game-engines"]
-description          = "Ergonomic, opinionated utilities for Bevy — type-safe math, input wiring, and more"
+description          = "Ergonomic, opinionated utilities for Bevy — type-safe math and cascade values"
 edition.workspace    = true
 homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_kana"
-keywords             = ["bevy", "ecs", "gamedev", "input", "math"]
+keywords             = ["bevy", "ecs", "gamedev", "math"]
 license.workspace    = true
 name                 = "bevy_kana"
 readme               = "README.md"
@@ -16,13 +16,10 @@ workspace = true
 
 [features]
 default = ["math"]
-input   = ["dep:bevy_enhanced_input"]
 math    = []
 
 [dependencies]
-bevy                = { workspace = true, features = ["bevy_log", "keyboard"] }
-bevy_enhanced_input = { workspace = true, optional = true }
-bitflags            = { workspace = true }
+bevy = { workspace = true, features = ["bevy_log"] }
 
 [dev-dependencies]
 bevy          = { workspace = true, features = ["3d"] }

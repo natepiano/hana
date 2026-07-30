@@ -10,7 +10,7 @@
 //!   H — home the camera
 
 use bevy::prelude::*;
-use bevy_kana::event;
+use hana_rubric::event;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;

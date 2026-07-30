@@ -5,11 +5,11 @@
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_kana::action;
-use bevy_kana::bind_action_system;
-use bevy_kana::event;
 use hana_diegetic::ScreenSpaceCamera;
 use hana_diegetic::ScreenSpaceLight;
+use hana_rubric::action;
+use hana_rubric::bind_action_system;
+use hana_rubric::event;
 
 use crate::ensure_plugin;
 

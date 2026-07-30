@@ -9,7 +9,7 @@
 /// Unit event:
 ///
 /// ```ignore
-/// use bevy_kana::event;
+/// use hana_rubric::event;
 ///
 /// event!(PauseEvent);
 /// ```
@@ -17,7 +17,7 @@
 /// Payload event:
 ///
 /// ```ignore
-/// use bevy_kana::event;
+/// use hana_rubric::event;
 ///
 /// event!(ZoomToTarget { entity: Entity });
 /// ```
@@ -25,11 +25,12 @@
 /// Event with additional reflected trait data:
 ///
 /// ```ignore
-/// use bevy_kana::event;
+/// use hana_rubric::event;
 ///
 /// event!(PauseEvent, reflect: PauseMetadata);
 /// ```
 #[macro_export]
+#[doc(hidden)]
 macro_rules! event {
     ($(#[$meta:meta])* $event:ident, reflect: $($extra:ident),+ $(,)?) => {
         $(#[$meta])*

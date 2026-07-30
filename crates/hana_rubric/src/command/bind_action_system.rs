@@ -15,9 +15,9 @@
 /// # Examples
 ///
 /// ```ignore
-/// use bevy_kana::action;
-/// use bevy_kana::bind_action_system;
-/// use bevy_kana::event;
+/// use hana_rubric::action;
+/// use hana_rubric::bind_action_system;
+/// use hana_rubric::event;
 ///
 /// action!(PauseToggle);
 /// event!(PauseEvent);
@@ -27,6 +27,7 @@
 /// }
 /// ```
 #[macro_export]
+#[doc(hidden)]
 macro_rules! bind_action_system {
     ($app:expr, $action:ty, $event:ty, $command:path) => {{
         use bevy_enhanced_input::action::events::Start;

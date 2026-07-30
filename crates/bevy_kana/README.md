@@ -4,7 +4,7 @@
 
 # bevy_kana
 
-**Ergonomic, opinionated utilities for Bevy — type-safe math, input wiring, and more.**
+**Ergonomic, opinionated utilities for Bevy — type-safe math and cascade values.**
 
 [![CI](https://github.com/natepiano/hana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/hana/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/bevy_kana.svg)](https://crates.io/crates/bevy_kana)

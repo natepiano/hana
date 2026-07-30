@@ -17,7 +17,7 @@ workspace = true
 [dependencies]
 bevy = { workspace = true, features = ["bevy_log", "bevy_state", "keyboard", "std"] }
 bevy_enhanced_input.workspace = true
-bevy_kana = { workspace = true, features = ["input"] }
+bitflags.workspace = true
 dirs.workspace = true
 notify.workspace = true
 serde.workspace = true

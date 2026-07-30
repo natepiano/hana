@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 
-use super::platform_shortcut_mode::PlatformShortcutMode;
+use crate::platform_shortcut_mode::PlatformShortcutMode;
 
 struct ModifierBlockers {
     all_entities:       Vec<Entity>,
@@ -53,7 +53,7 @@ impl ModifierBlockers {
 /// # Examples
 ///
 /// ```ignore
-/// use bevy_kana::Keybindings;
+/// use hana_rubric::Keybindings;
 ///
 /// fn setup_bindings(action_spawner: &mut ActionSpawner<MyContext>) {
 ///     let keybindings = Keybindings::new::<ShiftAction>(action_spawner, ActionSettings::default());

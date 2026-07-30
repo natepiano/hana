@@ -2,13 +2,13 @@
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_kana::action;
-use bevy_kana::bind_action_system;
-use bevy_kana::event;
 use bevy_lagrange::FreeCamInputMode;
 use bevy_lagrange::FreeCamLookPitch;
 use bevy_lagrange::FreeCamPreset;
 use bevy_lagrange::ResolvedCameraInputRoute;
+use hana_rubric::action;
+use hana_rubric::bind_action_system;
+use hana_rubric::event;
 
 use super::CameraGuidancePanel;
 use crate::ensure_plugin;
