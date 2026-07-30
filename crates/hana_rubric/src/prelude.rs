@@ -6,6 +6,7 @@ pub use super::CommandRegistry;
 pub use super::ConditionName;
 pub use super::Diagnostic;
 pub use super::DiagnosticKind;
+pub use super::DiagnosticSeverity;
 pub use super::EmptyKeystrokeSequenceError;
 pub use super::HoldPhase;
 pub use super::Keybindings;

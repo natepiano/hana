@@ -20,6 +20,7 @@ use super::KeymapCommand;
 use super::ReflectKeymapCommand;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticSeverity;
 
 /// A read-only table that resolves declared command IDs to their runtime registrations.
 #[derive(Resource)]
@@ -100,18 +101,18 @@ impl CommandRegistry {
 
     /// Iterates over declared command metadata in ascending [`CommandId`] order.
     pub fn iter(&self) -> impl Iterator<Item = CommandInfo<'_>> {
-        let mut commands = self
-            .entries
-            .iter()
-            .map(|(command_id, entry)| CommandInfo {
-                id:          command_id,
-                title:       entry.title,
-                description: entry.description,
-                capability:  entry.capability,
-            })
-            .collect::<Vec<_>>();
-        commands.sort_by(|left, right| left.id.as_str().cmp(right.id.as_str()));
-        commands.into_iter()
+        self.iter_entries().map(|(command_id, entry)| CommandInfo {
+            id:          command_id,
+            title:       entry.title,
+            description: entry.description,
+            capability:  entry.capability,
+        })
+    }
+
+    pub(crate) fn iter_entries(&self) -> impl Iterator<Item = (&CommandId, &CommandEntry)> {
+        let mut entries = self.entries.iter().collect::<Vec<_>>();
+        entries.sort_by(|(left_id, _), (right_id, _)| left_id.as_str().cmp(right_id.as_str()));
+        entries.into_iter()
     }
 
     /// Returns the authored title for `command_id`.
@@ -189,6 +190,7 @@ pub(crate) fn register_held_observer<T: KeymapCommand>(
     );
 }
 
+#[derive(Clone)]
 pub(crate) struct CommandEntry {
     title:         &'static str,
     description:   &'static str,
@@ -197,6 +199,11 @@ pub(crate) struct CommandEntry {
     invocation:    Invocation,
 }
 
+impl CommandEntry {
+    pub(crate) const fn invocation(&self) -> Invocation { self.invocation }
+}
+
+#[derive(Clone, Copy)]
 pub(crate) enum Invocation {
     OneShot,
     Held(CustomInput),
@@ -348,6 +355,7 @@ fn registry_diagnostic(kind: DiagnosticKind, command_id: &str, message: String) 
         original_keystroke: String::new(),
         command_id: command_id.to_owned(),
         kind,
+        severity: DiagnosticSeverity::Failure,
         message,
         suggestions: Vec::new(),
     }

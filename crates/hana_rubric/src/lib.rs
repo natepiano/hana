@@ -32,6 +32,7 @@ pub use condition::ConditionName;
 pub use condition::KeymapContext;
 pub use diagnostic::Diagnostic;
 pub use diagnostic::DiagnosticKind;
+pub use diagnostic::DiagnosticSeverity;
 pub use diagnostic::KeymapLoadFailures;
 pub use keymap_plugin::KeymapPlugin;
 pub use keymap_plugin::KeymapSystems;

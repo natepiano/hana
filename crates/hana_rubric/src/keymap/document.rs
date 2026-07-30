@@ -18,6 +18,7 @@ use crate::CommandId;
 use crate::ConditionName;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticSeverity;
 use crate::KeystrokeSequence;
 use crate::KeystrokeSequenceParseError;
 
@@ -135,10 +136,15 @@ fn parse_block(
     condition_names: &mut HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<KeymapBlock, Vec<Diagnostic>> {
+    let IndexedBlock {
+        context: indexed_context,
+        bindings: indexed_bindings,
+        unrecognized_members,
+    } = indexed_block;
     let (context, context_source) = parse_context(
         source_path,
         wire_block.context,
-        indexed_block.context,
+        indexed_context,
         block_index,
         condition_names,
         diagnostics,
@@ -153,16 +159,27 @@ fn parse_block(
         source_path,
         source,
         wire_block.bindings,
-        indexed_block.bindings,
+        indexed_bindings,
         block_index,
         context_text,
         diagnostics,
     )?;
+    let unrecognized_members = unrecognized_members
+        .into_iter()
+        .map(|member| UnrecognizedBlockMember {
+            name: member.name,
+            byte_range: member.location.byte_range,
+            line: member.location.line,
+            column: member.location.column,
+            block_index,
+        })
+        .collect();
 
     Ok(KeymapBlock {
         context,
         context_source,
         bindings,
+        unrecognized_members,
     })
 }
 
@@ -184,9 +201,10 @@ fn parse_context(
                 block_index,
                 String::new(),
                 DiagnosticKind::Syntax,
+                DiagnosticSeverity::Failure,
                 "A keymap block `context` value must be a string, not null.".to_owned(),
             ));
-            return (None, None);
+            return (None, context_source);
         },
         WireContext::Text(context) => context,
     };
@@ -198,6 +216,7 @@ fn parse_context(
             block_index,
             context.clone(),
             DiagnosticKind::Context,
+            DiagnosticSeverity::Advisory,
             format!("Condition `{context}` appears in more than one keymap block."),
         ));
     }
@@ -212,7 +231,7 @@ fn parse_bindings(
     source_path: &str,
     source: &str,
     wire_bindings: WireBindings,
-    locations: Vec<SourceLocation>,
+    locations: Vec<IndexedBinding>,
     block_index: usize,
     context: String,
     diagnostics: &mut Vec<Diagnostic>,
@@ -234,9 +253,11 @@ fn parse_bindings(
     let mut binding_names = HashSet::new();
     let mut bindings = Vec::with_capacity(wire_bindings.0.len());
 
-    for ((original_keystroke, wire_value), location) in wire_bindings.0.into_iter().zip(locations) {
+    for ((original_keystroke, wire_value), locations) in wire_bindings.0.into_iter().zip(locations)
+    {
         let binding_source = BindingSource::new(
-            location,
+            locations.key,
+            locations.value,
             block_index,
             context.clone(),
             original_keystroke.clone(),
@@ -247,6 +268,7 @@ fn parse_bindings(
                 source_path,
                 String::new(),
                 DiagnosticKind::Syntax,
+                DiagnosticSeverity::Advisory,
                 format!(
                     "Keymap block {block_index} declares `{original_keystroke}` more than once."
                 ),
@@ -281,9 +303,20 @@ fn parse_bindings(
 /// One ordered block from a [`KeymapDocument`].
 #[derive(Debug)]
 pub(super) struct KeymapBlock {
-    pub(super) context:        Option<ContextExpr>,
-    pub(super) context_source: Option<ContextSource>,
-    pub(super) bindings:       Vec<Binding>,
+    pub(super) context:              Option<ContextExpr>,
+    pub(super) context_source:       Option<ContextSource>,
+    pub(super) bindings:             Vec<Binding>,
+    pub(super) unrecognized_members: Vec<UnrecognizedBlockMember>,
+}
+
+/// One unrecognized keymap block member retained for advisory diagnostics.
+#[derive(Clone, Debug)]
+pub(super) struct UnrecognizedBlockMember {
+    pub(super) name:        String,
+    pub(super) byte_range:  Range<usize>,
+    pub(super) line:        usize,
+    pub(super) column:      usize,
+    pub(super) block_index: usize,
 }
 
 /// One parsed keymap binding and its location in the source document.
@@ -333,12 +366,11 @@ impl ContextSource {
     }
 }
 
-/// The retained source location for one authored binding key.
+/// The retained source locations for one authored binding key and command value.
 #[derive(Clone, Debug)]
 pub(super) struct BindingSource {
-    pub(super) byte_range:         Range<usize>,
-    pub(super) line:               usize,
-    pub(super) column:             usize,
+    key:                           SourceLocation,
+    value:                         SourceLocation,
     pub(super) block_index:        usize,
     pub(super) context:            String,
     pub(super) original_keystroke: String,
@@ -346,38 +378,70 @@ pub(super) struct BindingSource {
 
 impl BindingSource {
     const fn new(
-        location: SourceLocation,
+        key: SourceLocation,
+        value: SourceLocation,
         block_index: usize,
         context: String,
         original_keystroke: String,
     ) -> Self {
         Self {
-            byte_range: location.byte_range,
-            line: location.line,
-            column: location.column,
+            key,
+            value,
             block_index,
             context,
             original_keystroke,
         }
     }
 
-    fn diagnostic(
+    pub(super) fn diagnostic(
         &self,
         source_path: &str,
         command_id: String,
         kind: DiagnosticKind,
+        severity: DiagnosticSeverity,
+        message: String,
+    ) -> Diagnostic {
+        self.diagnostic_at(&self.key, source_path, command_id, kind, severity, message)
+    }
+
+    pub(super) fn command_diagnostic(
+        &self,
+        source_path: &str,
+        command_id: String,
+        kind: DiagnosticKind,
+        severity: DiagnosticSeverity,
+        message: String,
+    ) -> Diagnostic {
+        self.diagnostic_at(
+            &self.value,
+            source_path,
+            command_id,
+            kind,
+            severity,
+            message,
+        )
+    }
+
+    fn diagnostic_at(
+        &self,
+        location: &SourceLocation,
+        source_path: &str,
+        command_id: String,
+        kind: DiagnosticKind,
+        severity: DiagnosticSeverity,
         message: String,
     ) -> Diagnostic {
         Diagnostic {
             source_path: source_path.to_owned(),
-            byte_range: self.byte_range.clone(),
-            line: self.line,
-            column: self.column,
+            byte_range: location.byte_range.clone(),
+            line: location.line,
+            column: location.column,
             block_index: self.block_index,
             context: self.context.clone(),
             original_keystroke: self.original_keystroke.clone(),
             command_id,
             kind,
+            severity,
             message,
             suggestions: Vec::new(),
         }
@@ -394,11 +458,13 @@ impl BindingSource {
                 source_path,
                 String::new(),
                 DiagnosticKind::Keystroke,
+                DiagnosticSeverity::Failure,
                 "A binding key must contain at least one keystroke.".to_owned(),
             ),
             KeystrokeSequenceParseError::Keystroke(error) => {
-                let start = (self.byte_range.start + error.offset()).min(self.byte_range.end);
-                let byte_range = start..(start + error.token().len()).min(self.byte_range.end);
+                let start =
+                    (self.key.byte_range.start + error.offset()).min(self.key.byte_range.end);
+                let byte_range = start..(start + error.token().len()).min(self.key.byte_range.end);
                 let (line, column) = line_and_column(source, start);
 
                 Diagnostic {
@@ -411,6 +477,7 @@ impl BindingSource {
                     original_keystroke: self.original_keystroke.clone(),
                     command_id: String::new(),
                     kind: DiagnosticKind::Keystroke,
+                    severity: DiagnosticSeverity::Failure,
                     message: format!("Unrecognized keystroke token `{}`.", error.token()),
                     suggestions: Vec::new(),
                 }
@@ -432,10 +499,11 @@ fn parse_binding_edit(
     match wire_value {
         Value::String(command_id) => match CommandId::try_from(command_id.as_str()) {
             Ok(command_id) => BindingEditResult::Edit(BindingEdit::Bind(command_id)),
-            Err(_) => BindingEditResult::Diagnostic(binding_source.diagnostic(
+            Err(_) => BindingEditResult::Diagnostic(binding_source.command_diagnostic(
                 source_path,
                 command_id.clone(),
                 DiagnosticKind::Command,
+                DiagnosticSeverity::Failure,
                 format!(
                     "Command ID `{command_id}` requires one :: separator and snake-case segments."
                 ),
@@ -446,12 +514,14 @@ fn parse_binding_edit(
             source_path,
             String::new(),
             DiagnosticKind::Syntax,
+            DiagnosticSeverity::Failure,
             "Binding arguments are not yet supported.".to_owned(),
         )),
         _ => BindingEditResult::Diagnostic(binding_source.diagnostic(
             source_path,
             String::new(),
             DiagnosticKind::Syntax,
+            DiagnosticSeverity::Failure,
             "Binding values must be command ID strings or null.".to_owned(),
         )),
     }
@@ -463,6 +533,7 @@ fn context_diagnostic(
     block_index: usize,
     context: String,
     kind: DiagnosticKind,
+    severity: DiagnosticSeverity,
     message: String,
 ) -> Diagnostic {
     let (byte_range, line, column, block_index) = context_source.map_or_else(
@@ -487,6 +558,7 @@ fn context_diagnostic(
         original_keystroke: String::new(),
         command_id: String::new(),
         kind,
+        severity,
         message,
         suggestions: Vec::new(),
     }
@@ -527,6 +599,7 @@ fn document_diagnostic(
         original_keystroke: String::new(),
         command_id: String::new(),
         kind,
+        severity: DiagnosticSeverity::Failure,
         message,
         suggestions: Vec::new(),
     }
@@ -711,11 +784,22 @@ impl SourceIndex {
 }
 
 struct IndexedBlock {
-    context:  Option<SourceLocation>,
-    bindings: Vec<SourceLocation>,
+    context:              Option<SourceLocation>,
+    bindings:             Vec<IndexedBinding>,
+    unrecognized_members: Vec<IndexedBlockMember>,
 }
 
-#[derive(Clone)]
+struct IndexedBinding {
+    key:   SourceLocation,
+    value: SourceLocation,
+}
+
+struct IndexedBlockMember {
+    name:     String,
+    location: SourceLocation,
+}
+
+#[derive(Clone, Debug)]
 struct SourceLocation {
     byte_range: Range<usize>,
     line:       usize,
@@ -776,11 +860,13 @@ impl<'source> JsoncScanner<'source> {
         self.skip_trivia()?;
         let mut context = None;
         let mut bindings = None;
+        let mut unrecognized_members = Vec::new();
 
         if self.consume_byte(b'}') {
             return Ok(IndexedBlock {
                 context,
                 bindings: Vec::new(),
+                unrecognized_members,
             });
         }
 
@@ -790,12 +876,19 @@ impl<'source> JsoncScanner<'source> {
             self.expect_byte(b':', "Expected `:` after a block member name.")?;
             self.skip_trivia()?;
 
-            match self.string_value(&key)?.as_str() {
+            let member_name = self.string_value(&key)?;
+            match member_name.as_str() {
                 "context" => context = Some(self.parse_context_location()?),
                 "bindings" if self.peek_byte() == Some(b'{') => {
                     bindings = Some(self.parse_binding_locations()?);
                 },
-                _ => self.skip_value()?,
+                _ => {
+                    unrecognized_members.push(IndexedBlockMember {
+                        name:     member_name,
+                        location: SourceLocation::from_token(self.source, key),
+                    });
+                    self.skip_value()?;
+                },
             }
 
             self.skip_trivia()?;
@@ -812,13 +905,14 @@ impl<'source> JsoncScanner<'source> {
         Ok(IndexedBlock {
             context,
             bindings: bindings.unwrap_or_default(),
+            unrecognized_members,
         })
     }
 
-    fn parse_binding_locations(&mut self) -> Result<Vec<SourceLocation>, SourceIndexError> {
+    fn parse_binding_locations(&mut self) -> Result<Vec<IndexedBinding>, SourceIndexError> {
         self.expect_byte(b'{', "Expected a bindings object.")?;
         self.skip_trivia()?;
-        let mut bindings = Vec::new();
+        let mut bindings = Vec::<IndexedBinding>::new();
 
         if self.consume_byte(b'}') {
             return Ok(bindings);
@@ -826,10 +920,20 @@ impl<'source> JsoncScanner<'source> {
 
         loop {
             let key = self.parse_string()?;
-            bindings.push(SourceLocation::from_token(self.source, key));
             self.skip_trivia()?;
             self.expect_byte(b':', "Expected `:` after a binding key.")?;
-            self.skip_value()?;
+            self.skip_trivia()?;
+            let value = if self.peek_byte() == Some(b'"') {
+                SourceLocation::from_token(self.source, self.parse_string()?)
+            } else {
+                let start = self.offset;
+                self.skip_value()?;
+                SourceLocation::from_range(self.source, start..self.offset)
+            };
+            bindings.push(IndexedBinding {
+                key: SourceLocation::from_token(self.source, key),
+                value,
+            });
             self.skip_trivia()?;
             if self.consume_byte(b'}') {
                 break;
@@ -1073,7 +1177,10 @@ mod tests {
         let source_index = SourceIndex::parse(source).expect("source index parses binding source");
         let binding_location = &source_index.blocks[0].bindings[binding_index];
 
-        assert_eq!(&source[binding_location.byte_range.clone()], expected_key,);
+        assert_eq!(
+            &source[binding_location.key.byte_range.clone()],
+            expected_key,
+        );
     }
 
     #[test]

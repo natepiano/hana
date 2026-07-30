@@ -29,6 +29,21 @@ pub enum DiagnosticKind {
     InvalidCommandId,
     /// A command event has no reflected event trigger handle.
     CommandEventNotReflected,
+    /// A hold-to-act command was bound to a multi-keystroke sequence.
+    HeldCommandInSequence,
+    /// A permanently registered recovery command appeared in a keymap file.
+    UnremappableCommand,
+    /// A keymap sequence begins with a protected recovery keystroke.
+    ReservedKeystroke,
+}
+
+/// Describes whether a keymap diagnostic prevents its binding from loading.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
+pub enum DiagnosticSeverity {
+    /// The affected binding or document cannot be loaded.
+    Failure,
+    /// The document loaded, but the authored source should be corrected.
+    Advisory,
 }
 
 /// One keymap problem retained for application diagnostics and BRP inspection.
@@ -51,9 +66,11 @@ pub struct Diagnostic {
     pub original_keystroke: String,
     /// Command ID text from the binding.
     pub command_id:         String,
-    /// Failure category reported for this source location.
+    /// Diagnostic category reported for this source location.
     pub kind:               DiagnosticKind,
-    /// Human-readable sentence explaining this failure.
+    /// Whether this diagnostic prevents the affected binding from loading.
+    pub severity:           DiagnosticSeverity,
+    /// Human-readable sentence describing this diagnostic.
     ///
     /// Unlike [`Self::suggestions`], this is not machine-applicable replacement text. This
     /// required field uses an empty string when no message applies.
@@ -62,15 +79,14 @@ pub struct Diagnostic {
     pub suggestions:        Vec<String>,
 }
 
-/// Diagnostics from the most recent unsuccessful keymap load.
+/// Problems reported by the most recent keymap load.
 ///
-/// A failed reload replaces [`Self::diagnostics`]. A successful reload clears
-/// the collection, allowing applications to keep failure information visible
-/// while the invalid source remains on disk.
+/// A later reload transaction retains advisory diagnostics after a successful
+/// load so keymap editors can continue to present source corrections.
 #[derive(Clone, Debug, Default, Reflect, Resource)]
 #[reflect(Resource)]
 pub struct KeymapLoadFailures {
-    /// All diagnostics retained from the unsuccessful keymap load.
+    /// All diagnostics retained from the most recent keymap load.
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -80,6 +96,7 @@ mod tests {
 
     use super::Diagnostic;
     use super::DiagnosticKind;
+    use super::DiagnosticSeverity;
     use super::KeymapLoadFailures;
 
     #[test]
@@ -94,6 +111,7 @@ mod tests {
             original_keystroke: String::from("cmd-k"),
             command_id:         String::from("camera::home"),
             kind:               DiagnosticKind::Command,
+            severity:           DiagnosticSeverity::Failure,
             message:            String::from("The command is unavailable."),
             suggestions:        vec![String::from("camera::home")],
         };
@@ -107,6 +125,7 @@ mod tests {
         let _: &String = &diagnostic.context;
         let _: &String = &diagnostic.original_keystroke;
         let _: &String = &diagnostic.command_id;
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Failure);
         let _: &String = &diagnostic.message;
         assert_eq!(diagnostic.message, "The command is unavailable.");
         let _: &Vec<String> = &diagnostic.suggestions;

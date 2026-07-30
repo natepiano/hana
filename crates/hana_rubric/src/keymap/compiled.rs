@@ -1,0 +1,185 @@
+//! Matcher construction from a semantically resolved keymap.
+
+#![expect(
+    dead_code,
+    reason = "keymap routing reads compiled matchers after the input runtime is added"
+)]
+
+use std::collections::HashMap;
+
+use bevy::prelude::Resource;
+
+use super::MergedKeymap;
+use crate::CommandRegistry;
+use crate::SequenceMatcher;
+use crate::command::CommandEntry;
+use crate::command::Invocation;
+use crate::condition::ConditionHandle;
+
+/// A monotonically increasing keymap replacement identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Generation(pub(crate) usize);
+
+/// An opaque index into [`CompiledKeymap`]'s resolved command table.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CommandHandle(usize);
+
+/// One complete set of matchers and command handles for a keymap generation.
+#[derive(Resource)]
+pub(crate) struct CompiledKeymap {
+    pub(super) generation: Generation,
+    pub(super) global:     SequenceMatcher<CommandHandle>,
+    pub(super) commands:   Vec<CommandEntry>,
+    pub(super) matchers:   HashMap<ConditionHandle, SequenceMatcher<CommandHandle>>,
+}
+
+impl CompiledKeymap {
+    /// Builds a replacement keymap with one resolved matcher for every registered condition.
+    #[must_use]
+    pub(crate) fn from_merged(
+        generation: Generation,
+        merged_keymap: &MergedKeymap,
+        command_registry: &CommandRegistry,
+    ) -> Self {
+        let command_entries = command_registry
+            .iter_entries()
+            .map(|(command_id, command_entry)| (command_id.clone(), command_entry.clone()))
+            .collect::<Vec<_>>();
+        let command_handles = command_entries
+            .iter()
+            .enumerate()
+            .map(|(index, (command_id, _))| (command_id.clone(), CommandHandle(index)))
+            .collect::<HashMap<_, _>>();
+        let global = SequenceMatcher::new(merged_keymap.global().iter().filter_map(
+            |(keystroke_sequence, command_id)| {
+                command_handles
+                    .get(command_id)
+                    .copied()
+                    .map(|command_handle| (keystroke_sequence.clone(), command_handle))
+            },
+        ));
+        let matchers = merged_keymap
+            .conditions
+            .iter()
+            .map(|(condition_handle, bindings)| {
+                let sequences = bindings
+                    .iter()
+                    .filter_map(|(keystroke_sequence, command_id)| {
+                        command_handles
+                            .get(command_id)
+                            .copied()
+                            .map(|command_handle| (keystroke_sequence.clone(), command_handle))
+                    });
+
+                (*condition_handle, SequenceMatcher::new(sequences))
+            })
+            .collect();
+        let commands = command_entries
+            .into_iter()
+            .map(|(_, command_entry)| command_entry)
+            .collect();
+
+        Self {
+            generation,
+            global,
+            commands,
+            matchers,
+        }
+    }
+
+    pub(crate) fn invocation(&self, command_handle: CommandHandle) -> Option<Invocation> {
+        self.commands
+            .get(command_handle.0)
+            .map(CommandEntry::invocation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use bevy::prelude::Event;
+    use bevy::prelude::Reflect;
+    use bevy::prelude::ReflectEvent;
+    use bevy::reflect::TypeRegistry;
+    use bevy_enhanced_input::prelude::CustomInputs;
+
+    use super::CompiledKeymap;
+    use super::Generation;
+    use crate::Capability;
+    use crate::CommandRegistry;
+    use crate::HoldPhase;
+    use crate::KeymapCommand;
+    use crate::KeystrokeSequence;
+    use crate::MatchOutcome;
+    use crate::ReflectKeymapCommand;
+    use crate::command::Invocation;
+    use crate::condition::ConditionRegistry;
+    use crate::keymap::MergedKeymap;
+
+    const DEFAULTS_PATH: &str = "defaults.jsonc";
+    const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
+
+    #[derive(Default, Event, Reflect)]
+    #[reflect(Event, KeymapCommand)]
+    struct CompiledGlobal;
+
+    impl KeymapCommand for CompiledGlobal {
+        const ID: &'static str = "compiled::global";
+        const TITLE: &'static str = "Compiled Global";
+        const DESCRIPTION: &'static str = "A global command used by the compiled keymap test.";
+        const CAPABILITY: Capability = Capability::OneShot;
+
+        fn hold_phase(&self) -> Option<HoldPhase> { None }
+    }
+
+    fn command_registry() -> Result<CommandRegistry, String> {
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<CompiledGlobal>();
+        let mut custom_inputs = CustomInputs::default();
+
+        CommandRegistry::build(&type_registry, &mut custom_inputs)
+            .map_err(|diagnostics| format!("command registry errors: {diagnostics:?}"))
+    }
+
+    #[test]
+    fn global_binding_compiles_without_registered_conditions() -> Result<(), String> {
+        let command_registry = command_registry()?;
+        let condition_registry = ConditionRegistry::default();
+        let (merged_keymap, diagnostics) = MergedKeymap::from_sources(
+            DEFAULTS_PATH,
+            r#"{ "bindings": [{ "bindings": { "g": "compiled::global" } }] }"#,
+            None,
+            &command_registry,
+            &condition_registry,
+            &[],
+        )
+        .map_err(|diagnostics| format!("keymap parse errors: {diagnostics:?}"))?;
+        let mut compiled_keymap =
+            CompiledKeymap::from_merged(Generation(0), &merged_keymap, &command_registry);
+        let keystroke = "g"
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid test sequence: {error}"))?
+            .first();
+
+        assert!(diagnostics.is_empty());
+        assert!(compiled_keymap.matchers.is_empty());
+        let command_handle =
+            match compiled_keymap
+                .global
+                .match_keystroke(keystroke, Instant::now(), MATCH_TIMEOUT)
+            {
+                MatchOutcome::Matched(command_handle) => command_handle,
+                match_outcome => {
+                    return Err(format!("expected a global match, got {match_outcome:?}"));
+                },
+            };
+        assert!(matches!(
+            compiled_keymap.invocation(command_handle),
+            Some(Invocation::OneShot)
+        ));
+
+        Ok(())
+    }
+}

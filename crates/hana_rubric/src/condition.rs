@@ -19,6 +19,7 @@ use strum::IntoEnumIterator;
 
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticSeverity;
 use crate::KeymapLoadFailures;
 use crate::KeymapSystems;
 
@@ -225,6 +226,7 @@ fn condition_diagnostic(condition_name: &str, message: String) -> Diagnostic {
         original_keystroke: String::new(),
         command_id: String::new(),
         kind: DiagnosticKind::Context,
+        severity: DiagnosticSeverity::Failure,
         message,
         suggestions: Vec::new(),
     }

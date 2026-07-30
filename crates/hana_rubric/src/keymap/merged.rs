@@ -1,0 +1,1177 @@
+//! Semantic keymap layering before matcher construction.
+
+#![expect(
+    dead_code,
+    reason = "keymap reload constructs merged keymaps after the loading transaction is added"
+)]
+
+use std::collections::HashMap;
+
+use super::CompiledKeymap;
+use super::Generation;
+use super::KeymapDocument;
+use super::document::BindingEdit;
+use super::document::BindingSource;
+use super::document::ContextExpr;
+use super::document::ContextSource;
+use crate::Capability;
+use crate::CommandId;
+use crate::CommandRegistry;
+use crate::Diagnostic;
+use crate::DiagnosticKind;
+use crate::DiagnosticSeverity;
+use crate::Keystroke;
+use crate::KeystrokeSequence;
+use crate::condition::ConditionHandle;
+use crate::condition::ConditionRegistry;
+
+/// The exact valid edits that remain after defaults and user keymaps are layered.
+#[derive(Default)]
+pub(crate) struct ResolvedEdits {
+    entries: HashMap<Option<ConditionHandle>, HashMap<KeystrokeSequence, ResolvedEdit>>,
+}
+
+impl ResolvedEdits {
+    fn insert(
+        &mut self,
+        condition_handle: Option<ConditionHandle>,
+        keystroke_sequence: KeystrokeSequence,
+        resolved_edit: ResolvedEdit,
+    ) {
+        self.entries
+            .entry(condition_handle)
+            .or_default()
+            .insert(keystroke_sequence, resolved_edit);
+    }
+
+    fn global(&self) -> Option<&HashMap<KeystrokeSequence, ResolvedEdit>> {
+        self.entries.get(&None)
+    }
+
+    fn for_condition(
+        &self,
+        condition_handle: ConditionHandle,
+    ) -> Option<&HashMap<KeystrokeSequence, ResolvedEdit>> {
+        self.entries.get(&Some(condition_handle))
+    }
+}
+
+#[derive(Clone)]
+enum ResolvedEdit {
+    Bind(CommandId),
+    Tombstone,
+}
+
+enum ContextResolution {
+    Global,
+    Condition(ConditionHandle),
+    Invalid,
+}
+
+/// Live command bindings after global fallback and per-condition tombstones are resolved.
+pub(crate) struct MergedKeymap {
+    global:                Vec<(KeystrokeSequence, CommandId)>,
+    pub(super) conditions: HashMap<ConditionHandle, Vec<(KeystrokeSequence, CommandId)>>,
+}
+
+impl MergedKeymap {
+    const MAX_COMMAND_EDIT_DISTANCE: usize = 3;
+    const MAX_COMMAND_SUGGESTIONS: usize = 3;
+    const RECOGNIZED_BLOCK_MEMBERS: [&str; 2] = ["bindings", "context"];
+
+    /// Parses, validates, and layers defaults followed by an optional user keymap.
+    ///
+    /// # Errors
+    ///
+    /// Returns every diagnostic collected before a document-level parse failure, followed by the
+    /// failing document's own diagnostics.
+    /// Per-binding diagnostics are returned with the successfully merged keymap.
+    pub(crate) fn from_sources(
+        defaults_source_path: &str,
+        defaults_source: &str,
+        user_source: Option<(&str, &str)>,
+        command_registry: &CommandRegistry,
+        condition_registry: &ConditionRegistry,
+        protected_keystrokes: &[Keystroke],
+    ) -> Result<(Self, Vec<Diagnostic>), Vec<Diagnostic>> {
+        let (defaults, mut diagnostics) =
+            KeymapDocument::parse(defaults_source_path, defaults_source)?;
+        let user = match user_source {
+            Some((source_path, source)) => {
+                let (user, user_diagnostics) = match KeymapDocument::parse(source_path, source) {
+                    Ok(parsed) => parsed,
+                    Err(mut user_diagnostics) => {
+                        diagnostics.append(&mut user_diagnostics);
+                        return Err(diagnostics);
+                    },
+                };
+                diagnostics.extend(user_diagnostics);
+                Some(user)
+            },
+            None => None,
+        };
+        let (merged_keymap, merge_diagnostics) = Self::from_documents(
+            &defaults,
+            user.as_ref(),
+            command_registry,
+            condition_registry,
+            protected_keystrokes,
+        );
+        diagnostics.extend(merge_diagnostics);
+
+        Ok((merged_keymap, diagnostics))
+    }
+
+    /// Validates and layers already parsed defaults followed by an optional user keymap.
+    #[must_use]
+    pub(crate) fn from_documents(
+        defaults: &KeymapDocument,
+        user: Option<&KeymapDocument>,
+        command_registry: &CommandRegistry,
+        condition_registry: &ConditionRegistry,
+        protected_keystrokes: &[Keystroke],
+    ) -> (Self, Vec<Diagnostic>) {
+        let mut diagnostics = Vec::new();
+        let mut resolved_edits = ResolvedEdits::default();
+
+        Self::apply_document(
+            defaults,
+            &mut resolved_edits,
+            &mut diagnostics,
+            command_registry,
+            condition_registry,
+            protected_keystrokes,
+        );
+        if let Some(user) = user {
+            Self::apply_document(
+                user,
+                &mut resolved_edits,
+                &mut diagnostics,
+                command_registry,
+                condition_registry,
+                protected_keystrokes,
+            );
+        }
+
+        (
+            Self::from_resolved_edits(resolved_edits, condition_registry),
+            diagnostics,
+        )
+    }
+
+    /// Constructs the matchers and command table for one replacement generation.
+    #[must_use]
+    pub(crate) fn compile(
+        &self,
+        generation: Generation,
+        command_registry: &CommandRegistry,
+    ) -> CompiledKeymap {
+        CompiledKeymap::from_merged(generation, self, command_registry)
+    }
+
+    fn apply_document(
+        document: &KeymapDocument,
+        resolved_edits: &mut ResolvedEdits,
+        diagnostics: &mut Vec<Diagnostic>,
+        command_registry: &CommandRegistry,
+        condition_registry: &ConditionRegistry,
+        protected_keystrokes: &[Keystroke],
+    ) {
+        for block in &document.blocks {
+            diagnostics.extend(block.unrecognized_members.iter().map(|member| {
+                let suggestion = Self::closest_block_member(&member.name);
+
+                Diagnostic {
+                    source_path:        document.source_path.clone(),
+                    byte_range:         member.byte_range.clone(),
+                    line:               member.line,
+                    column:             member.column,
+                    block_index:        member.block_index,
+                    context:            String::new(),
+                    original_keystroke: String::new(),
+                    command_id:         String::new(),
+                    kind:               DiagnosticKind::Syntax,
+                    severity:           DiagnosticSeverity::Advisory,
+                    message:            format!(
+                        "Unrecognized keymap block member `{}`. Did you mean `{suggestion}`?",
+                        member.name
+                    ),
+                    suggestions:        vec![suggestion.to_owned()],
+                }
+            }));
+
+            let condition_handle = match Self::resolve_context(
+                block.context.as_ref(),
+                block.context_source.as_ref(),
+                document,
+                condition_registry,
+                diagnostics,
+            ) {
+                ContextResolution::Global => None,
+                ContextResolution::Condition(condition_handle) => Some(condition_handle),
+                ContextResolution::Invalid => continue,
+            };
+
+            for binding in &block.bindings {
+                let Some(resolved_edit) = Self::resolve_binding(
+                    binding.edit.clone(),
+                    &binding.keystroke_sequence,
+                    &binding.source,
+                    &document.source_path,
+                    command_registry,
+                    protected_keystrokes,
+                    diagnostics,
+                ) else {
+                    continue;
+                };
+
+                resolved_edits.insert(
+                    condition_handle,
+                    binding.keystroke_sequence.clone(),
+                    resolved_edit,
+                );
+            }
+        }
+    }
+
+    fn resolve_context(
+        context: Option<&ContextExpr>,
+        context_source: Option<&ContextSource>,
+        document: &KeymapDocument,
+        condition_registry: &ConditionRegistry,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> ContextResolution {
+        match (context, context_source) {
+            (None, None) => ContextResolution::Global,
+            (None, Some(_)) => ContextResolution::Invalid,
+            (Some(ContextExpr::Name(condition_name)), Some(context_source)) => {
+                if let Some(condition_handle) = condition_registry.resolve(condition_name.as_str())
+                {
+                    ContextResolution::Condition(condition_handle)
+                } else {
+                    let names = condition_registry
+                        .iter()
+                        .map(|condition_info| condition_info.name.as_str())
+                        .collect::<Vec<_>>();
+                    let message = if names.is_empty() {
+                        format!(
+                            "Keymap context `{}` is not registered by the application.",
+                            condition_name.as_str()
+                        )
+                    } else {
+                        format!(
+                            "Keymap context `{}` is not registered. Registered contexts: {}.",
+                            condition_name.as_str(),
+                            names.join(", ")
+                        )
+                    };
+
+                    diagnostics.push(Diagnostic {
+                        source_path: document.source_path.clone(),
+                        byte_range: context_source.byte_range.clone(),
+                        line: context_source.line,
+                        column: context_source.column,
+                        block_index: context_source.block_index,
+                        context: condition_name.as_str().to_owned(),
+                        original_keystroke: String::new(),
+                        command_id: String::new(),
+                        kind: DiagnosticKind::Context,
+                        severity: DiagnosticSeverity::Failure,
+                        message,
+                        suggestions: names.into_iter().map(str::to_owned).collect(),
+                    });
+
+                    ContextResolution::Invalid
+                }
+            },
+            (Some(ContextExpr::Name(condition_name)), None) => {
+                diagnostics.push(Diagnostic {
+                    source_path:        document.source_path.clone(),
+                    byte_range:         0..0,
+                    line:               0,
+                    column:             0,
+                    block_index:        0,
+                    context:            condition_name.as_str().to_owned(),
+                    original_keystroke: String::new(),
+                    command_id:         String::new(),
+                    kind:               DiagnosticKind::Context,
+                    severity:           DiagnosticSeverity::Failure,
+                    message:            format!(
+                        "Keymap context `{}` has no source location.",
+                        condition_name.as_str()
+                    ),
+                    suggestions:        Vec::new(),
+                });
+
+                ContextResolution::Invalid
+            },
+        }
+    }
+
+    fn resolve_binding(
+        edit: BindingEdit,
+        keystroke_sequence: &KeystrokeSequence,
+        binding_source: &BindingSource,
+        source_path: &str,
+        command_registry: &CommandRegistry,
+        protected_keystrokes: &[Keystroke],
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<ResolvedEdit> {
+        if let Some(protected_keystroke) = protected_keystrokes
+            .iter()
+            .find(|protected_keystroke| **protected_keystroke == keystroke_sequence.first())
+        {
+            diagnostics.push(
+                binding_source.diagnostic(
+                    source_path,
+                    String::new(),
+                    DiagnosticKind::ReservedKeystroke,
+                    DiagnosticSeverity::Failure,
+                    format!(
+                        "Keystroke 1 `{protected_keystroke}` is reserved for the application's recovery command and cannot start a keymap sequence."
+                    ),
+                ),
+            );
+
+            return None;
+        }
+
+        match edit {
+            BindingEdit::Unbind => Some(ResolvedEdit::Tombstone),
+            BindingEdit::Bind(command_id) => {
+                let Some(capability) = command_registry.capability(&command_id) else {
+                    let suggestions = Self::closest_command_ids(&command_id, command_registry);
+                    let message = suggestions.first().map_or_else(
+                        || format!("Command `{command_id}` is not registered."),
+                        |suggestion| {
+                            format!(
+                                "Command `{command_id}` is not registered. Did you mean `{suggestion}`?"
+                            )
+                        },
+                    );
+                    let mut diagnostic = binding_source.command_diagnostic(
+                        source_path,
+                        command_id.to_string(),
+                        DiagnosticKind::Command,
+                        DiagnosticSeverity::Failure,
+                        message,
+                    );
+                    diagnostic.suggestions = suggestions;
+                    diagnostics.push(diagnostic);
+
+                    return None;
+                };
+
+                if capability == Capability::Held && keystroke_sequence.len() > 1 {
+                    diagnostics.push(binding_source.diagnostic(
+                        source_path,
+                        command_id.to_string(),
+                        DiagnosticKind::HeldCommandInSequence,
+                        DiagnosticSeverity::Failure,
+                        format!(
+                            "Hold-to-act command `{command_id}` must use exactly one keystroke."
+                        ),
+                    ));
+
+                    return None;
+                }
+
+                if capability == Capability::Unremappable {
+                    diagnostics.push(binding_source.diagnostic(
+                        source_path,
+                        command_id.to_string(),
+                        DiagnosticKind::UnremappableCommand,
+                        DiagnosticSeverity::Failure,
+                        format!("Command `{command_id}` is reserved for recovery."),
+                    ));
+
+                    return None;
+                }
+
+                Some(ResolvedEdit::Bind(command_id))
+            },
+        }
+    }
+
+    fn from_resolved_edits(
+        resolved_edits: ResolvedEdits,
+        condition_registry: &ConditionRegistry,
+    ) -> Self {
+        let global = Self::live_bindings(resolved_edits.global());
+        let mut conditions = HashMap::new();
+
+        for condition_info in condition_registry.iter() {
+            let Some(condition_handle) = condition_registry.resolve(condition_info.name.as_str())
+            else {
+                continue;
+            };
+            let mut bindings = global.clone();
+
+            if let Some(condition_edits) = resolved_edits.for_condition(condition_handle) {
+                for (keystroke_sequence, resolved_edit) in condition_edits {
+                    match resolved_edit {
+                        ResolvedEdit::Bind(command_id) => {
+                            bindings.insert(keystroke_sequence.clone(), command_id.clone());
+                        },
+                        ResolvedEdit::Tombstone => {
+                            bindings.remove(keystroke_sequence);
+                        },
+                    }
+                }
+            }
+
+            conditions.insert(condition_handle, bindings.into_iter().collect());
+        }
+
+        Self {
+            global: global.into_iter().collect(),
+            conditions,
+        }
+    }
+
+    fn live_bindings(
+        edits: Option<&HashMap<KeystrokeSequence, ResolvedEdit>>,
+    ) -> HashMap<KeystrokeSequence, CommandId> {
+        edits.map_or_else(HashMap::new, |edits| {
+            edits
+                .iter()
+                .filter_map(|(keystroke_sequence, resolved_edit)| match resolved_edit {
+                    ResolvedEdit::Bind(command_id) => {
+                        Some((keystroke_sequence.clone(), command_id.clone()))
+                    },
+                    ResolvedEdit::Tombstone => None,
+                })
+                .collect()
+        })
+    }
+
+    fn closest_block_member(member_name: &str) -> &'static str {
+        Self::RECOGNIZED_BLOCK_MEMBERS
+            .iter()
+            .min_by_key(|candidate| levenshtein(member_name, candidate))
+            .copied()
+            .unwrap_or("bindings")
+    }
+
+    fn closest_command_ids(
+        command_id: &CommandId,
+        command_registry: &CommandRegistry,
+    ) -> Vec<String> {
+        let mut candidates = command_registry
+            .iter()
+            .filter_map(|command_info| {
+                bounded_levenshtein(
+                    command_id.as_str(),
+                    command_info.id.as_str(),
+                    Self::MAX_COMMAND_EDIT_DISTANCE,
+                )
+                .map(|distance| (distance, command_info.id.as_str()))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+
+        candidates
+            .into_iter()
+            .take(Self::MAX_COMMAND_SUGGESTIONS)
+            .map(|(_, candidate)| candidate.to_owned())
+            .collect()
+    }
+
+    pub(super) fn global(&self) -> &[(KeystrokeSequence, CommandId)] { &self.global }
+
+    pub(super) fn for_condition(
+        &self,
+        condition_handle: ConditionHandle,
+    ) -> Option<&[(KeystrokeSequence, CommandId)]> {
+        self.conditions.get(&condition_handle).map(Vec::as_slice)
+    }
+}
+
+fn levenshtein(left: &str, right: &str) -> usize {
+    bounded_levenshtein(left, right, usize::MAX).unwrap_or(usize::MAX)
+}
+
+fn bounded_levenshtein(left: &str, right: &str, maximum_distance: usize) -> Option<usize> {
+    if left.len().abs_diff(right.len()) > maximum_distance {
+        return None;
+    }
+
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    let mut current = vec![0; right.len() + 1];
+
+    for (left_index, left_byte) in left.bytes().enumerate() {
+        current[0] = left_index + 1;
+        let mut smallest = current[0];
+
+        for (right_index, right_byte) in right.bytes().enumerate() {
+            let substitution_cost = usize::from(left_byte != right_byte);
+            let insertion = current[right_index] + 1;
+            let deletion = previous[right_index + 1] + 1;
+            let substitution = previous[right_index] + substitution_cost;
+            let distance = insertion.min(deletion).min(substitution);
+            current[right_index + 1] = distance;
+            smallest = smallest.min(distance);
+        }
+
+        if smallest > maximum_distance {
+            return None;
+        }
+
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    let distance = previous[right.len()];
+    (distance <= maximum_distance).then_some(distance)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use bevy::prelude::Event;
+    use bevy::prelude::Reflect;
+    use bevy::prelude::ReflectEvent;
+    use bevy::reflect::TypeRegistry;
+    use bevy_enhanced_input::prelude::CustomInputs;
+    use strum::AsRefStr;
+    use strum::EnumIter;
+    use strum::EnumMessage;
+
+    use super::Generation;
+    use super::MergedKeymap;
+    use crate::Capability;
+    use crate::CommandRegistry;
+    use crate::Diagnostic;
+    use crate::DiagnosticKind;
+    use crate::DiagnosticSeverity;
+    use crate::HoldPhase;
+    use crate::KeymapCommand;
+    use crate::Keystroke;
+    use crate::KeystrokeSequence;
+    use crate::MatchOutcome;
+    use crate::ReflectKeymapCommand;
+    use crate::condition::ConditionHandle;
+    use crate::condition::ConditionRegistry;
+
+    const DEFAULTS_PATH: &str = "defaults.jsonc";
+    const USER_PATH: &str = "keymap.jsonc";
+    const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
+
+    #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
+    #[strum(serialize_all = "snake_case")]
+    enum TestContext {
+        #[strum(message = "While a dimension lock is active")]
+        DimensionLock,
+    }
+
+    #[derive(Default, Event, Reflect)]
+    #[reflect(Event, KeymapCommand)]
+    struct CameraHome;
+
+    impl KeymapCommand for CameraHome {
+        const ID: &'static str = "camera::home";
+        const TITLE: &'static str = "Camera Home";
+        const DESCRIPTION: &'static str = "Returns the camera to its home position.";
+        const CAPABILITY: Capability = Capability::OneShot;
+
+        fn hold_phase(&self) -> Option<HoldPhase> { None }
+    }
+
+    #[derive(Default, Event, Reflect)]
+    #[reflect(Event, KeymapCommand)]
+    struct CameraReset;
+
+    impl KeymapCommand for CameraReset {
+        const ID: &'static str = "camera::reset";
+        const TITLE: &'static str = "Camera Reset";
+        const DESCRIPTION: &'static str = "Resets the camera position.";
+        const CAPABILITY: Capability = Capability::OneShot;
+
+        fn hold_phase(&self) -> Option<HoldPhase> { None }
+    }
+
+    #[derive(Event, Reflect)]
+    #[reflect(Event, KeymapCommand)]
+    struct CameraHold;
+
+    impl KeymapCommand for CameraHold {
+        const ID: &'static str = "camera::hold";
+        const TITLE: &'static str = "Camera Hold";
+        const DESCRIPTION: &'static str = "Holds the camera action active.";
+        const CAPABILITY: Capability = Capability::Held;
+
+        fn hold_phase(&self) -> Option<HoldPhase> { Some(HoldPhase::Begin) }
+    }
+
+    #[derive(Default, Event, Reflect)]
+    #[reflect(Event, KeymapCommand)]
+    struct RecoveryOpen;
+
+    impl KeymapCommand for RecoveryOpen {
+        const ID: &'static str = "recovery::open";
+        const TITLE: &'static str = "Recovery Open";
+        const DESCRIPTION: &'static str = "Opens the recovery command.";
+        const CAPABILITY: Capability = Capability::Unremappable;
+
+        fn hold_phase(&self) -> Option<HoldPhase> { None }
+    }
+
+    fn command_registry() -> Result<CommandRegistry, String> {
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<CameraHold>();
+        type_registry.register::<CameraHome>();
+        type_registry.register::<CameraReset>();
+        type_registry.register::<RecoveryOpen>();
+        let mut custom_inputs = CustomInputs::default();
+
+        CommandRegistry::build(&type_registry, &mut custom_inputs)
+            .map_err(|diagnostics| format!("command registry errors: {diagnostics:?}"))
+    }
+
+    fn condition_registry() -> Result<ConditionRegistry, String> {
+        let mut condition_registry = ConditionRegistry::default();
+        condition_registry
+            .register::<TestContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+
+        Ok(condition_registry)
+    }
+
+    fn merged_keymap(
+        defaults: &str,
+        user: Option<&str>,
+        protected_keystrokes: &[Keystroke],
+    ) -> Result<
+        (
+            MergedKeymap,
+            Vec<Diagnostic>,
+            CommandRegistry,
+            ConditionRegistry,
+        ),
+        String,
+    > {
+        let command_registry = command_registry()?;
+        let condition_registry = condition_registry()?;
+        let (merged_keymap, diagnostics) = MergedKeymap::from_sources(
+            DEFAULTS_PATH,
+            defaults,
+            user.map(|source| (USER_PATH, source)),
+            &command_registry,
+            &condition_registry,
+            protected_keystrokes,
+        )
+        .map_err(|diagnostics| format!("keymap parse errors: {diagnostics:?}"))?;
+
+        Ok((
+            merged_keymap,
+            diagnostics,
+            command_registry,
+            condition_registry,
+        ))
+    }
+
+    fn dimension_lock_handle(
+        condition_registry: &ConditionRegistry,
+    ) -> Result<ConditionHandle, String> {
+        condition_registry
+            .resolve("dimension_lock")
+            .ok_or_else(|| String::from("dimension_lock condition was not registered"))
+    }
+
+    fn command_for_sequence<'bindings>(
+        bindings: &'bindings [(KeystrokeSequence, crate::CommandId)],
+        source: &str,
+    ) -> Result<Option<&'bindings str>, String> {
+        let keystroke_sequence = source
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid test sequence: {error}"))?;
+
+        Ok(bindings
+            .iter()
+            .find(|(binding_sequence, _)| *binding_sequence == keystroke_sequence)
+            .map(|(_, command_id)| command_id.as_str()))
+    }
+
+    fn condition_bindings(
+        merged_keymap: &MergedKeymap,
+        condition_handle: ConditionHandle,
+    ) -> Result<&[(KeystrokeSequence, crate::CommandId)], String> {
+        merged_keymap
+            .for_condition(condition_handle)
+            .ok_or_else(|| String::from("condition matcher bindings were not compiled"))
+    }
+
+    #[test]
+    fn user_edit_overrides_the_default_at_the_same_conditioned_identity() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "context": "dimension_lock",
+                "bindings": { "space": "camera::home" }
+            }]
+        }"#;
+        let user = r#"{
+            "bindings": [{
+                "context": "dimension_lock",
+                "bindings": { "space": "camera::reset" }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, condition_registry) =
+            merged_keymap(defaults, Some(user), &[])?;
+        let condition_handle = dimension_lock_handle(&condition_registry)?;
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            command_for_sequence(
+                condition_bindings(&merged_keymap, condition_handle)?,
+                "space"
+            )?,
+            Some("camera::reset")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_user_edit_leaves_the_default_binding_in_place() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "g": "camera::home" } }] }"#;
+        let user = r#"{ "bindings": [{ "bindings": { "g": "camera::missing" } }] }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::Command
+                && diagnostic.severity == DiagnosticSeverity::Failure
+                && diagnostic.command_id == "camera::missing"
+        }));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "g")?,
+            Some("camera::home")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn user_document_failure_keeps_earlier_defaults_diagnostics() -> Result<(), String> {
+        let command_registry = command_registry()?;
+        let condition_registry = condition_registry()?;
+        let defaults = r#"{ "bindings": [{ "bindings": { "g": "camera:missing" } }] }"#;
+        let user = r#"{ "bindings": [}"#;
+        let Err(diagnostics) = MergedKeymap::from_sources(
+            DEFAULTS_PATH,
+            defaults,
+            Some((USER_PATH, user)),
+            &command_registry,
+            &condition_registry,
+            &[],
+        ) else {
+            return Err(String::from("invalid user document unexpectedly loaded"));
+        };
+
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(diagnostics[0].source_path, DEFAULTS_PATH);
+        assert_eq!(diagnostics[0].kind, DiagnosticKind::Command);
+        assert_eq!(diagnostics[0].command_id, "camera:missing");
+        assert_eq!(diagnostics[1].source_path, USER_PATH);
+        assert_eq!(diagnostics[1].kind, DiagnosticKind::Syntax);
+
+        Ok(())
+    }
+
+    #[test]
+    fn context_tombstone_suppresses_global_fallback() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "space": "camera::home" } }] }"#;
+        let user = r#"{
+            "bindings": [{
+                "context": "dimension_lock",
+                "bindings": { "space": null }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, condition_registry) =
+            merged_keymap(defaults, Some(user), &[])?;
+        let condition_handle = dimension_lock_handle(&condition_registry)?;
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "space")?,
+            Some("camera::home")
+        );
+        assert_eq!(
+            command_for_sequence(
+                condition_bindings(&merged_keymap, condition_handle)?,
+                "space"
+            )?,
+            None
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn sequence_tombstones_change_only_the_complete_sequence() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "g": "camera::home",
+                    "g g": "camera::reset"
+                }
+            }]
+        }"#;
+        let user = r#"{ "bindings": [{ "bindings": { "g": null } }] }"#;
+        let (merged_keymap, diagnostics, command_registry, condition_registry) =
+            merged_keymap(defaults, Some(user), &[])?;
+        let condition_handle = dimension_lock_handle(&condition_registry)?;
+        let mut compiled_keymap = merged_keymap.compile(Generation(1), &command_registry);
+        let matcher = compiled_keymap
+            .matchers
+            .get_mut(&condition_handle)
+            .ok_or_else(|| String::from("dimension lock matcher is missing"))?;
+        let now = Instant::now();
+        let first = "g"
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid test sequence: {error}"))?
+            .first();
+        let second = first;
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(command_for_sequence(merged_keymap.global(), "g")?, None);
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "g g")?,
+            Some("camera::reset")
+        );
+        assert!(matches!(
+            matcher.match_keystroke(first, now, MATCH_TIMEOUT),
+            MatchOutcome::Pending
+        ));
+        assert!(matches!(
+            matcher.match_keystroke(second, now, MATCH_TIMEOUT),
+            MatchOutcome::Matched(_)
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn tombstoning_a_longer_sequence_leaves_the_shorter_sequence_immediate() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "g": "camera::home",
+                    "g g": "camera::reset"
+                }
+            }]
+        }"#;
+        let user = r#"{ "bindings": [{ "bindings": { "g g": null } }] }"#;
+        let (merged_keymap, diagnostics, command_registry, condition_registry) =
+            merged_keymap(defaults, Some(user), &[])?;
+        let condition_handle = dimension_lock_handle(&condition_registry)?;
+        let mut compiled_keymap = merged_keymap.compile(Generation(1), &command_registry);
+        let matcher = compiled_keymap
+            .matchers
+            .get_mut(&condition_handle)
+            .ok_or_else(|| String::from("dimension lock matcher is missing"))?;
+        let keystroke = "g"
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid test sequence: {error}"))?
+            .first();
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(command_for_sequence(merged_keymap.global(), "g g")?, None);
+        assert!(matches!(
+            matcher.match_keystroke(keystroke, Instant::now(), MATCH_TIMEOUT),
+            MatchOutcome::Matched(_)
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn timeout_carries_a_short_binding_through_an_unbound_intermediate_prefix() -> Result<(), String>
+    {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "g": "camera::home",
+                    "g g g": "camera::reset"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, command_registry, condition_registry) =
+            merged_keymap(defaults, None, &[])?;
+        let condition_handle = dimension_lock_handle(&condition_registry)?;
+        let mut compiled_keymap = merged_keymap.compile(Generation(1), &command_registry);
+        let matcher = compiled_keymap
+            .matchers
+            .get_mut(&condition_handle)
+            .ok_or_else(|| String::from("dimension lock matcher is missing"))?;
+        let keystroke = "g"
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid test sequence: {error}"))?
+            .first();
+        let now = Instant::now();
+
+        assert!(diagnostics.is_empty());
+        assert!(matches!(
+            matcher.match_keystroke(keystroke, now, MATCH_TIMEOUT),
+            MatchOutcome::Deferred(_)
+        ));
+        assert!(matches!(
+            matcher.match_keystroke(keystroke, now, MATCH_TIMEOUT),
+            MatchOutcome::Pending
+        ));
+        assert!(
+            matcher
+                .resolve_timeout(now + MATCH_TIMEOUT, MATCH_TIMEOUT)
+                .is_some()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn conditioned_binding_replaces_an_unconditioned_binding() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "g": "camera::home" } }] }"#;
+        let user = r#"{
+            "bindings": [{
+                "context": "dimension_lock",
+                "bindings": { "g": "camera::reset" }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, condition_registry) =
+            merged_keymap(defaults, Some(user), &[])?;
+        let condition_handle = dimension_lock_handle(&condition_registry)?;
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "g")?,
+            Some("camera::home")
+        );
+        assert_eq!(
+            command_for_sequence(condition_bindings(&merged_keymap, condition_handle)?, "g")?,
+            Some("camera::reset")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_commands_offer_nearby_registered_ids() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "g": "camera::hume" } }] }"#;
+        let (_, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.command_id == "camera::hume")
+            .ok_or_else(|| String::from("unknown command diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.kind, DiagnosticKind::Command);
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Failure);
+        assert!(diagnostic.suggestions.iter().any(|id| id == "camera::home"));
+        assert_eq!(&defaults[diagnostic.byte_range.clone()], "camera::hume");
+
+        Ok(())
+    }
+
+    #[test]
+    fn held_and_unremappable_commands_are_rejected() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "g f": "camera::hold",
+                    "r": "recovery::open"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::HeldCommandInSequence
+                && diagnostic.command_id == "camera::hold"
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::UnremappableCommand
+                && diagnostic.command_id == "recovery::open"
+        }));
+        assert!(merged_keymap.global().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn unresolved_context_does_not_override_global_bindings() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "space": "camera::home" } }] }"#;
+        let user = r#"{
+            "bindings": [{
+                "context": "unknown_context",
+                "bindings": { "space": "camera::reset" }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::Context
+                && diagnostic.severity == DiagnosticSeverity::Failure
+                && diagnostic.context == "unknown_context"
+        }));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "space")?,
+            Some("camera::home")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn null_context_does_not_override_global_bindings() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "space": "camera::home" } }] }"#;
+        let user = r#"{
+            "bindings": [{
+                "context": null,
+                "bindings": { "space": "camera::reset" }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::Syntax
+                && diagnostic.severity == DiagnosticSeverity::Failure
+                && diagnostic.message.contains("must be a string")
+        }));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "space")?,
+            Some("camera::home")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn unrecognized_members_and_duplicate_binding_keys_are_advisories() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "contxt": "dimension_lock",
+                "bindings": {
+                    "g": "camera::home",
+                    "g": "camera::reset"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Advisory
+                && diagnostic.message.contains("contxt")
+                && diagnostic.suggestions == ["context"]
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Advisory
+                && diagnostic.original_keystroke == "g"
+        }));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "g")?,
+            Some("camera::reset")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn protected_keystroke_aliases_reject_bare_and_prefix_bindings() -> Result<(), String> {
+        let protected_keystroke = "cmd-p"
+            .parse::<Keystroke>()
+            .map_err(|error| format!("invalid protected keystroke: {error}"))?;
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "cmd-p": "camera::home",
+                    "super-p x": "camera::home",
+                    "win-p": "camera::home",
+                    "cmd-left-p": "camera::home",
+                    "cmd-right-p": "camera::home"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) =
+            merged_keymap(defaults, None, &[protected_keystroke])?;
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.kind == DiagnosticKind::ReservedKeystroke)
+                .count(),
+            5
+        );
+        let recovery_diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::ReservedKeystroke)
+            .ok_or_else(|| String::from("reserved keystroke diagnostic is missing"))?;
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                recovery_diagnostic.message,
+                "Keystroke 1 `platform-p` is reserved for the application's recovery command and cannot start a keymap sequence."
+            );
+        } else {
+            assert_eq!(
+                recovery_diagnostic.message,
+                "Keystroke 1 `ctrl-p` is reserved for the application's recovery command and cannot start a keymap sequence."
+            );
+        }
+        assert!(merged_keymap.global().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn protected_keystroke_modifier_order_aliases_are_rejected() -> Result<(), String> {
+        let protected_keystroke = "cmd-shift-p"
+            .parse::<Keystroke>()
+            .map_err(|error| format!("invalid protected keystroke: {error}"))?;
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "shift-cmd-p": "camera::home",
+                    "shift-super-p x": "camera::home",
+                    "win-shift-p": "camera::home"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) =
+            merged_keymap(defaults, None, &[protected_keystroke])?;
+
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.kind == DiagnosticKind::ReservedKeystroke)
+                .count(),
+            3
+        );
+        assert!(merged_keymap.global().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn control_p_is_platform_specific_against_a_protected_platform_chord() -> Result<(), String> {
+        let protected_keystroke = "cmd-p"
+            .parse::<Keystroke>()
+            .map_err(|error| format!("invalid protected keystroke: {error}"))?;
+        let defaults = r#"{ "bindings": [{ "bindings": { "ctrl-p": "camera::home" } }] }"#;
+        let (merged_keymap, diagnostics, _, _) =
+            merged_keymap(defaults, None, &[protected_keystroke])?;
+
+        if cfg!(target_os = "macos") {
+            assert!(diagnostics.is_empty());
+            assert_eq!(
+                command_for_sequence(merged_keymap.global(), "ctrl-p")?,
+                Some("camera::home")
+            );
+        } else {
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.kind == DiagnosticKind::ReservedKeystroke
+                    && diagnostic.severity == DiagnosticSeverity::Failure
+            }));
+            assert!(merged_keymap.global().is_empty());
+        }
+
+        Ok(())
+    }
+}

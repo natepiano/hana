@@ -14,5 +14,7 @@ pub use id::CommandIdParseError;
 pub use keybindings::Keybindings;
 pub use reflect_command::KeymapCommand;
 pub use reflect_command::ReflectKeymapCommand;
+pub(crate) use registry::CommandEntry;
 pub use registry::CommandInfo;
 pub use registry::CommandRegistry;
+pub(crate) use registry::Invocation;
