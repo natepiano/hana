@@ -3341,6 +3341,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hana_rigging"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "ron",
+ "serde",
+ "thiserror 2.0.19",
+ "trybuild",
+]
+
+[[package]]
 name = "hana_valence"
 version = "0.1.0"
 dependencies = [

@@ -47,10 +47,13 @@ bitflags = "2"
 bytemuck = "1"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 hana_conduit = { path = "crates/hana_conduit" }
+hana_rigging = { version = "0.1", path = "crates/hana_rigging" }
 image = { version = "0.25", default-features = false }
 nonmax = "0.5"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
 rand = "0.10.2"
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "2.0.19"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
