@@ -67,9 +67,13 @@ use crate::widgets::SliderCaptures;
 use crate::widgets::SliderDrag;
 use crate::widgets::TooltipControllerIndex;
 use crate::widgets::TooltipFor;
+use crate::widgets::WidgetDisabledAppearance;
 use crate::widgets::WidgetFocusAuthority;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetOf;
+use crate::widgets::WidgetPressedAppearance;
 
 /// Identifies the panel role that created and owns one runtime entity.
 #[derive(Clone, Copy, Component)]
@@ -775,6 +779,10 @@ fn remove_owned_component_now<T: Component>(
 fn teardown_owned_shared_state(world: &mut World, panel: Entity) {
     restore_render_layers(world, panel);
     remove_seeded_cascade::<WidgetInteractivity>(world, panel);
+    remove_seeded_cascade::<WidgetHoveredAppearance>(world, panel);
+    remove_seeded_cascade::<WidgetPressedAppearance>(world, panel);
+    remove_seeded_cascade::<WidgetFocusedAppearance>(world, panel);
+    remove_seeded_cascade::<WidgetDisabledAppearance>(world, panel);
     remove_seeded_cascade::<TextAlpha>(world, panel);
     remove_seeded_cascade::<FontUnit>(world, panel);
     remove_seeded_cascade::<HdrTextCoverageBias>(world, panel);
@@ -887,6 +895,7 @@ mod tests {
     use super::panel_owned_despawn_roots;
     use super::write_owned_cascade;
     use super::write_owned_render_layers;
+    use crate::Appearance;
     use crate::ArrangedPanel;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands as _;
@@ -907,7 +916,11 @@ mod tests {
     use crate::TextStyle;
     use crate::Tooltip;
     use crate::Unit;
+    use crate::WidgetDisabledAppearance;
+    use crate::WidgetFocusedAppearance;
+    use crate::WidgetHoveredAppearance;
     use crate::WidgetOf;
+    use crate::WidgetPressedAppearance;
     use crate::cascade::Cascade;
     use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeFrom;
@@ -1534,6 +1547,199 @@ mod tests {
             app.world()
                 .get::<PreservedResolved<TextAlpha>>(panel)
                 .is_none(),
+        );
+    }
+
+    fn appearance_seed_panel(
+        hovered: Appearance,
+        pressed: Appearance,
+        focused: Appearance,
+        disabled: Appearance,
+    ) -> DiegeticPanel {
+        DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .widget_hovered_appearance(hovered)
+            .widget_pressed_appearance(pressed)
+            .widget_focused_appearance(focused)
+            .widget_disabled_appearance(disabled)
+            .layout(|_| {})
+            .build()
+            .expect("appearance seed panel should build")
+    }
+
+    fn assert_resolved_widget_appearances(
+        app: &App,
+        panel: Entity,
+        expected: &(Appearance, Appearance, Appearance, Appearance),
+    ) {
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetHoveredAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetHoveredAppearance::new(expected.0.clone())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetPressedAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetPressedAppearance::new(expected.1.clone())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetFocusedAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetFocusedAppearance::new(expected.2.clone())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetDisabledAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetDisabledAppearance::new(expected.3.clone())),
+        );
+    }
+
+    #[test]
+    fn widget_appearance_seeds_teardown_with_the_role_and_readd_with_the_new_panel() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin));
+        let initial = (
+            Appearance::new().background(Color::srgb(0.1, 0.2, 0.3)),
+            Appearance::new().background(Color::srgb(0.3, 0.2, 0.1)),
+            Appearance::new().background(Color::srgb(0.2, 0.3, 0.1)),
+            Appearance::new().background(Color::srgb(0.1, 0.3, 0.2)),
+        );
+        let panel = app
+            .world_mut()
+            .spawn(appearance_seed_panel(
+                initial.0.clone(),
+                initial.1.clone(),
+                initial.2.clone(),
+                initial.3.clone(),
+            ))
+            .id();
+        app.update();
+
+        assert_resolved_widget_appearances(&app, panel, &initial);
+
+        app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<Cascade<WidgetHoveredAppearance>>(panel)
+                .is_none(),
+        );
+        assert!(
+            app.world()
+                .get::<Cascade<WidgetPressedAppearance>>(panel)
+                .is_none(),
+        );
+        assert!(
+            app.world()
+                .get::<Cascade<WidgetFocusedAppearance>>(panel)
+                .is_none(),
+        );
+        assert!(
+            app.world()
+                .get::<Cascade<WidgetDisabledAppearance>>(panel)
+                .is_none(),
+        );
+
+        let replacement = (
+            Appearance::new().background(Color::srgb(0.8, 0.7, 0.6)),
+            Appearance::new().background(Color::srgb(0.6, 0.7, 0.8)),
+            Appearance::new().background(Color::srgb(0.7, 0.8, 0.6)),
+            Appearance::new().background(Color::srgb(0.6, 0.8, 0.7)),
+        );
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(appearance_seed_panel(
+                replacement.0.clone(),
+                replacement.1.clone(),
+                replacement.2.clone(),
+                replacement.3.clone(),
+            ));
+        app.update();
+
+        assert_resolved_widget_appearances(&app, panel, &replacement);
+    }
+
+    #[test]
+    fn application_owned_widget_appearance_cascades_and_caches_survive_role_removal() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin));
+        let appearances = (
+            WidgetHoveredAppearance::new(Appearance::new().background(Color::srgb(0.1, 0.2, 0.3))),
+            WidgetPressedAppearance::new(Appearance::new().background(Color::srgb(0.3, 0.2, 0.1))),
+            WidgetFocusedAppearance::new(Appearance::new().background(Color::srgb(0.2, 0.3, 0.1))),
+            WidgetDisabledAppearance::new(Appearance::new().background(Color::srgb(0.1, 0.3, 0.2))),
+        );
+        let panel = app
+            .world_mut()
+            .spawn((
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .layout(|_| {})
+                    .build()
+                    .expect("application-owned appearance panel should build"),
+                Cascade::Override(appearances.0.clone()),
+                Cascade::Override(appearances.1.clone()),
+                Cascade::Override(appearances.2.clone()),
+                Cascade::Override(appearances.3.clone()),
+                Resolved(appearances.0.clone()),
+                Resolved(appearances.1.clone()),
+                Resolved(appearances.2.clone()),
+                Resolved(appearances.3.clone()),
+            ))
+            .id();
+        app.update();
+
+        app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<Cascade<WidgetHoveredAppearance>>(panel),
+            Some(&Cascade::Override(appearances.0.clone())),
+        );
+        assert_eq!(
+            app.world().get::<Cascade<WidgetPressedAppearance>>(panel),
+            Some(&Cascade::Override(appearances.1.clone())),
+        );
+        assert_eq!(
+            app.world().get::<Cascade<WidgetFocusedAppearance>>(panel),
+            Some(&Cascade::Override(appearances.2.clone())),
+        );
+        assert_eq!(
+            app.world().get::<Cascade<WidgetDisabledAppearance>>(panel),
+            Some(&Cascade::Override(appearances.3.clone())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetHoveredAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(appearances.0),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetPressedAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(appearances.1),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetFocusedAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(appearances.2),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetDisabledAppearance>>(panel)
+                .map(|resolved| resolved.0.clone()),
+            Some(appearances.3),
         );
     }
 

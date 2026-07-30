@@ -36,7 +36,12 @@ use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 use crate::layout::Unit;
 use crate::widgets;
+use crate::widgets::Appearance;
 use crate::widgets::PanelPicking;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
+use crate::widgets::WidgetPressedAppearance;
 
 /// Error returned by [`DiegeticPanelBuilder::build`].
 ///
@@ -187,22 +192,26 @@ pub struct Ready;
 
 #[derive(Default)]
 pub(super) struct BuilderData {
-    width:                  f32,
-    height:                 f32,
-    layout_unit:            Unit,
-    font_unit:              Cascade<Unit>,
-    anchor:                 Option<Anchor>,
-    world_width:            Option<f32>,
-    world_height:           Option<f32>,
-    shadow_casting:         Cascade<ShadowCasting>,
-    material:               Cascade<Handle<StandardMaterial>>,
-    text_material:          Cascade<Handle<StandardMaterial>>,
-    shape_material:         Cascade<Handle<StandardMaterial>>,
-    text_alpha_mode:        Cascade<AlphaMode>,
-    hdr_text_coverage_bias: Cascade<f32>,
-    picking:                PanelPicking,
-    tree:                   Option<LayoutTree>,
-    coordinate_space:       CoordinateSpace,
+    width:                      f32,
+    height:                     f32,
+    layout_unit:                Unit,
+    font_unit:                  Cascade<Unit>,
+    anchor:                     Option<Anchor>,
+    world_width:                Option<f32>,
+    world_height:               Option<f32>,
+    shadow_casting:             Cascade<ShadowCasting>,
+    widget_hovered_appearance:  Cascade<WidgetHoveredAppearance>,
+    widget_pressed_appearance:  Cascade<WidgetPressedAppearance>,
+    widget_focused_appearance:  Cascade<WidgetFocusedAppearance>,
+    widget_disabled_appearance: Cascade<WidgetDisabledAppearance>,
+    material:                   Cascade<Handle<StandardMaterial>>,
+    text_material:              Cascade<Handle<StandardMaterial>>,
+    shape_material:             Cascade<Handle<StandardMaterial>>,
+    text_alpha_mode:            Cascade<AlphaMode>,
+    hdr_text_coverage_bias:     Cascade<f32>,
+    picking:                    PanelPicking,
+    tree:                       Option<LayoutTree>,
+    coordinate_space:           CoordinateSpace,
 }
 
 /// Builder for [`DiegeticPanel`].
@@ -405,6 +414,38 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     #[must_use]
     pub const fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
         self.data.shadow_casting = Cascade::Override(shadow_casting);
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while they are hovered.
+    #[must_use]
+    pub fn widget_hovered_appearance(mut self, appearance: Appearance) -> Self {
+        self.data.widget_hovered_appearance =
+            Cascade::Override(WidgetHoveredAppearance::new(appearance));
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while they are pressed.
+    #[must_use]
+    pub fn widget_pressed_appearance(mut self, appearance: Appearance) -> Self {
+        self.data.widget_pressed_appearance =
+            Cascade::Override(WidgetPressedAppearance::new(appearance));
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while their focus indicator is visible.
+    #[must_use]
+    pub fn widget_focused_appearance(mut self, appearance: Appearance) -> Self {
+        self.data.widget_focused_appearance =
+            Cascade::Override(WidgetFocusedAppearance::new(appearance));
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while they are disabled.
+    #[must_use]
+    pub fn widget_disabled_appearance(mut self, appearance: Appearance) -> Self {
+        self.data.widget_disabled_appearance =
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 }
@@ -935,6 +976,10 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
     panel.world_width = data.world_width;
     panel.world_height = data.world_height;
     panel.shadow_casting = data.shadow_casting;
+    panel.widget_hovered_appearance = data.widget_hovered_appearance;
+    panel.widget_pressed_appearance = data.widget_pressed_appearance;
+    panel.widget_focused_appearance = data.widget_focused_appearance;
+    panel.widget_disabled_appearance = data.widget_disabled_appearance;
     panel.material = data.material;
     panel.text_material = data.text_material;
     panel.shape_material = data.shape_material;

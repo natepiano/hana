@@ -622,6 +622,7 @@ mod tests {
     use crate::WidgetHoveredAppearance;
     use crate::cascade::Cascade;
     use crate::cascade::CascadeDefault;
+    use crate::cascade::Resolved;
     use crate::layout::BoundingBox;
     use crate::layout::PanelCircle;
     use crate::layout::PanelDraw;
@@ -1010,6 +1011,14 @@ mod tests {
         let panel = app.world_mut().spawn(panel).id();
         app.update();
         let widget = resolve_widget(&mut app, panel, "button");
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetHoveredAppearance>>(widget)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetHoveredAppearance::new(
+                Appearance::new().text_color(TEXT_OVERRIDE_COLOR),
+            )),
+        );
 
         app.world_mut()
             .entity_mut(widget)

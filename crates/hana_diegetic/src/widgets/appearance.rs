@@ -523,18 +523,30 @@ fn render_border_widths(width: Dimension, panel: &DiegeticPanel) -> Option<[f32;
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
 
     use super::Appearance;
     use super::StateAppearance;
+    use super::WidgetDisabledAppearance;
     use super::WidgetFocusedAppearance;
     use super::WidgetHoveredAppearance;
     use super::WidgetPressedAppearance;
     use super::WidgetState;
+    use crate::CascadeDefault;
     use crate::DiegeticPanel;
+    use crate::DiegeticTextMeasurer;
+    use crate::El;
+    use crate::HeadlessLayoutPlugin;
+    use crate::LayoutBuilder;
+    use crate::LayoutTree;
     use crate::Mm;
+    use crate::PanelElementId;
+    use crate::PanelWidgetReader;
     use crate::Px;
     use crate::cascade::Cascade;
+    use crate::cascade::Resolved;
+    use crate::widgets::WidgetsPlugin;
 
     const HOVER_FILL: Color = Color::srgb(0.1, 0.2, 0.3);
     const FOCUS_BORDER: Color = Color::srgb(0.9, 0.8, 0.2);
@@ -549,6 +561,51 @@ mod tests {
     const LOWER_PATH: Color = Color::srgb(0.5, 0.4, 0.3);
     const HIGHER_TEXT: Color = Color::srgb(0.4, 0.5, 0.6);
     const LOWER_TEXT: Color = Color::srgb(0.6, 0.5, 0.4);
+    const DISABLED_BACKGROUND: Color = Color::srgb(0.2, 0.2, 0.2);
+    const DISABLED_BORDER: Color = Color::srgb(0.8, 0.1, 0.1);
+
+    macro_rules! assert_resolved_appearance {
+        ($app:expr, $widget:expr, $attribute:ty, $expected:expr $(,)?) => {{
+            let expected = $expected;
+            assert_eq!(
+                $app.world()
+                    .get::<Resolved<$attribute>>($widget)
+                    .map(|resolved| resolved.0.appearance()),
+                Some(&expected),
+            );
+        }};
+    }
+
+    fn cascade_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin));
+        app
+    }
+
+    fn two_widget_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("first"), |_| {});
+        builder.with(El::new().button("second"), |_| {});
+        builder.build()
+    }
+
+    fn resolve_widget(app: &mut App, panel: Entity, id: &'static str) -> Entity {
+        let id = PanelElementId::named(id);
+        let result = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| reader.entity(panel, &id));
+        assert!(result.is_ok());
+        let Ok(widget) = result else {
+            return Entity::PLACEHOLDER;
+        };
+        assert!(widget.is_some());
+        let Some(widget) = widget else {
+            return Entity::PLACEHOLDER;
+        };
+        widget
+    }
 
     fn panel() -> DiegeticPanel {
         DiegeticPanel::world()
@@ -615,6 +672,169 @@ mod tests {
                 .background(LOWER_BACKGROUND)
                 .text_color(HIGHER_TEXT),
         );
+    }
+
+    #[test]
+    fn global_state_appearance_defaults_reach_every_widget_without_state_authoring() {
+        let mut app = cascade_test_app();
+        let hovered = Appearance::new().background(HOVER_FILL);
+        let pressed = Appearance::new().background(PRESS_FILL);
+        let focused = Appearance::new().border_color(FOCUS_BORDER);
+        let disabled = Appearance::new().background(DISABLED_BACKGROUND);
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetHoveredAppearance>>()
+            .0 = WidgetHoveredAppearance::new(hovered.clone());
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetPressedAppearance>>()
+            .0 = WidgetPressedAppearance::new(pressed.clone());
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetFocusedAppearance>>()
+            .0 = WidgetFocusedAppearance::new(focused.clone());
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetDisabledAppearance>>()
+            .0 = WidgetDisabledAppearance::new(disabled.clone());
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(two_widget_tree())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        for id in ["first", "second"] {
+            let widget = resolve_widget(&mut app, panel, id);
+            assert_resolved_appearance!(&app, widget, WidgetHoveredAppearance, hovered.clone());
+            assert_resolved_appearance!(&app, widget, WidgetPressedAppearance, pressed.clone());
+            assert_resolved_appearance!(&app, widget, WidgetFocusedAppearance, focused.clone());
+            assert_resolved_appearance!(&app, widget, WidgetDisabledAppearance, disabled.clone());
+        }
+    }
+
+    #[test]
+    fn panel_state_appearances_merge_with_globals_in_the_reification_frame() {
+        let mut app = cascade_test_app();
+        let global = Appearance::new()
+            .background(HIGHER_BACKGROUND)
+            .text_color(HIGHER_TEXT);
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetHoveredAppearance>>()
+            .0 = WidgetHoveredAppearance::new(global.clone());
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetPressedAppearance>>()
+            .0 = WidgetPressedAppearance::new(global.clone());
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetFocusedAppearance>>()
+            .0 = WidgetFocusedAppearance::new(global.clone());
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetDisabledAppearance>>()
+            .0 = WidgetDisabledAppearance::new(global.clone());
+        let hovered = Appearance::new()
+            .background(HOVER_FILL)
+            .border_color(HIGHER_BORDER);
+        let pressed = Appearance::new()
+            .background(PRESS_FILL)
+            .border_color(LOWER_BORDER);
+        let focused = Appearance::new()
+            .background(LOWER_BACKGROUND)
+            .border_color(FOCUS_BORDER);
+        let disabled = Appearance::new()
+            .background(DISABLED_BACKGROUND)
+            .border_color(DISABLED_BORDER);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .widget_hovered_appearance(hovered.clone())
+            .widget_pressed_appearance(pressed.clone())
+            .widget_focused_appearance(focused.clone())
+            .widget_disabled_appearance(disabled.clone())
+            .with_tree(two_widget_tree())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "first");
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetHoveredAppearance,
+            hovered.merge_over(&global),
+        );
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetPressedAppearance,
+            pressed.merge_over(&global),
+        );
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetFocusedAppearance,
+            focused.merge_over(&global),
+        );
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetDisabledAppearance,
+            disabled.merge_over(&global),
+        );
+    }
+
+    #[test]
+    fn unchanged_state_appearance_propagation_does_not_dirty_resolved_values() {
+        let mut app = cascade_test_app();
+        app.world_mut()
+            .resource_mut::<CascadeDefault<WidgetHoveredAppearance>>()
+            .0 = WidgetHoveredAppearance::new(Appearance::new().background(HOVER_FILL));
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(two_widget_tree())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "first");
+        let before = (
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetHoveredAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetPressedAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetFocusedAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetDisabledAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+        );
+
+        app.update();
+
+        let after = (
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetHoveredAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetPressedAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetFocusedAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+            app.world()
+                .entity(widget)
+                .get_ref::<Resolved<WidgetDisabledAppearance>>()
+                .map(|resolved| resolved.last_changed()),
+        );
+        assert_eq!(after, before);
     }
 
     #[test]

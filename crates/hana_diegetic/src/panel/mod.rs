@@ -135,8 +135,12 @@ use crate::layout::ShapedTextCache;
 use crate::layout::Sidedness;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::WidgetDisabledAppearance;
 use crate::widgets::WidgetFocusAuthority;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
 use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetPressedAppearance;
 
 /// System sets for ordering panel work and its cross-module dependencies.
 ///
@@ -177,6 +181,29 @@ macro_rules! add_cascade_ownership_observers {
     };
 }
 
+fn register_cascade_ownership_observers(app: &mut App) {
+    add_cascade_ownership_observers!(
+        app,
+        FontUnit,
+        AntiAlias,
+        HairlineFade,
+        HdrTextCoverageBias,
+        ShadowCasting,
+        WidgetInteractivity,
+        WidgetHoveredAppearance,
+        WidgetPressedAppearance,
+        WidgetFocusedAppearance,
+        WidgetDisabledAppearance,
+        TextAlpha,
+        Lighting,
+        Sidedness,
+        GlyphShadowMode,
+        SdfMaterial,
+        TextMaterial,
+        ShapeMaterial,
+    );
+}
+
 /// Headless layout runner — schedules `compute_panel_layouts` on `Update`
 /// and initializes the resources it consumes (diagnostics, perf stats,
 /// shaped-text cache).
@@ -204,22 +231,7 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_observer(diegetic_panel::seed_panel_overrides)
             .add_observer(diegetic_panel::sync_panel_picking_on_insert);
 
-        add_cascade_ownership_observers!(
-            app,
-            FontUnit,
-            AntiAlias,
-            HairlineFade,
-            HdrTextCoverageBias,
-            ShadowCasting,
-            WidgetInteractivity,
-            TextAlpha,
-            Lighting,
-            Sidedness,
-            GlyphShadowMode,
-            SdfMaterial,
-            TextMaterial,
-            ShapeMaterial,
-        );
+        register_cascade_ownership_observers(app);
 
         app.add_observer(
             lifecycle::finalize_panel_widgets_before_despawn

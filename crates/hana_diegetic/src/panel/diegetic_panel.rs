@@ -70,8 +70,12 @@ use crate::widgets::PanelPicking;
 use crate::widgets::PanelWidget;
 use crate::widgets::PanelWidgetIndex;
 use crate::widgets::TooltipControllerIndex;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
 use crate::widgets::WidgetInteractivity;
 use crate::widgets::WidgetOf;
+use crate::widgets::WidgetPressedAppearance;
 
 /// Source tree plus the revision token used by derived tree caches.
 #[derive(Clone, Default)]
@@ -197,55 +201,67 @@ impl From<TreeRevision> for u64 {
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    tree:                              PanelTree,
+    tree:                                  PanelTree,
     /// Panel width in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) width:                  f32,
+    pub(super) width:                      f32,
     /// Panel height in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) height:                 f32,
+    pub(super) height:                     f32,
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
-    pub(super) layout_unit:            Unit,
+    pub(super) layout_unit:                Unit,
     /// Construction seed for the panel's font-unit cascade.
     #[reflect(ignore)]
-    pub(super) font_unit:              Cascade<Unit>,
+    pub(super) font_unit:                  Cascade<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
-    pub(super) anchor:                 Anchor,
+    pub(super) anchor:                     Anchor,
     /// Target world width in meters. When set, the panel is uniformly scaled
     /// so its width matches this value (height follows aspect ratio).
     /// If both `world_width` and `world_height` are set, non-uniform scaling
     /// is applied.
-    pub(super) world_width:            Option<f32>,
+    pub(super) world_width:                Option<f32>,
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
-    pub(super) world_height:           Option<f32>,
+    pub(super) world_height:               Option<f32>,
     /// Construction seed for the panel's shadow-casting cascade.
     #[reflect(ignore)]
-    pub(super) shadow_casting:         Cascade<ShadowCasting>,
+    pub(super) shadow_casting:             Cascade<ShadowCasting>,
+    /// Construction seed for the panel's hovered widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_hovered_appearance:  Cascade<WidgetHoveredAppearance>,
+    /// Construction seed for the panel's pressed widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_pressed_appearance:  Cascade<WidgetPressedAppearance>,
+    /// Construction seed for the panel's focused widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_focused_appearance:  Cascade<WidgetFocusedAppearance>,
+    /// Construction seed for the panel's disabled widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_disabled_appearance: Cascade<WidgetDisabledAppearance>,
     /// Construction seed for the panel's SDF source-material cascade.
     ///
     /// Individual elements can override via `El::material`; `base_color` is
     /// overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub(super) material:               Cascade<Handle<StandardMaterial>>,
+    pub(super) material:                   Cascade<Handle<StandardMaterial>>,
     /// Construction seed for the panel's text source-material cascade.
     ///
     /// `base_color` is overridden by `TextStyle::color` when set.
     #[reflect(ignore)]
-    pub(super) text_material:          Cascade<Handle<StandardMaterial>>,
+    pub(super) text_material:              Cascade<Handle<StandardMaterial>>,
     /// Construction seed for the panel primitive source-material cascade.
     ///
     /// Shape-local colors override `base_color` before projection.
     #[reflect(ignore)]
-    pub(super) shape_material:         Cascade<Handle<StandardMaterial>>,
+    pub(super) shape_material:             Cascade<Handle<StandardMaterial>>,
     /// Construction seed for the panel's text [`AlphaMode`] cascade.
     #[reflect(ignore)]
-    pub(super) text_alpha_mode:        Cascade<AlphaMode>,
+    pub(super) text_alpha_mode:            Cascade<AlphaMode>,
     /// Construction seed for the panel's HDR text coverage-bias cascade.
     #[reflect(ignore)]
-    pub(super) hdr_text_coverage_bias: Cascade<f32>,
+    pub(super) hdr_text_coverage_bias:     Cascade<f32>,
     /// Builder-provided initial value for the sibling [`PanelPicking`]
     /// component. Applied by
     /// [`sync_panel_picking_on_insert`] only when the entity has no live
@@ -255,9 +271,9 @@ pub struct DiegeticPanel {
     /// and is removed with the panel role unless application code has
     /// replaced or mutated it.
     #[reflect(ignore)]
-    pub(super) picking:                PanelPicking,
+    pub(super) picking:                    PanelPicking,
     /// Whether the panel is world-space or screen-space.
-    pub(super) coordinate_space:       CoordinateSpace,
+    pub(super) coordinate_space:           CoordinateSpace,
     /// Maps each text run's [`PanelElementId`](crate::PanelElementId) to the entity
     /// reification created for it, so
     /// [`text_child`](Self::text_child) resolves a named run in O(1).
@@ -267,29 +283,33 @@ pub struct DiegeticPanel {
     /// non-identical [`set_tree`](DiegeticPanelCommands::set_tree) replacement
     /// clears it so a stale id stops resolving when the replacement applies.
     #[reflect(ignore)]
-    pub(crate) text_index:             HashMap<crate::PanelElementId, Entity>,
+    pub(crate) text_index:                 HashMap<crate::PanelElementId, Entity>,
 }
 
 impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
-            tree:                   PanelTree::default(),
-            width:                  0.0,
-            height:                 0.0,
-            layout_unit:            Unit::Meters,
-            font_unit:              Cascade::Inherit,
-            anchor:                 Anchor::TopLeft,
-            world_width:            None,
-            world_height:           None,
-            shadow_casting:         Cascade::Inherit,
-            material:               Cascade::Inherit,
-            text_material:          Cascade::Inherit,
-            shape_material:         Cascade::Inherit,
-            text_alpha_mode:        Cascade::Inherit,
-            hdr_text_coverage_bias: Cascade::Inherit,
-            picking:                PanelPicking::default(),
-            coordinate_space:       CoordinateSpace::default(),
-            text_index:             HashMap::new(),
+            tree:                       PanelTree::default(),
+            width:                      0.0,
+            height:                     0.0,
+            layout_unit:                Unit::Meters,
+            font_unit:                  Cascade::Inherit,
+            anchor:                     Anchor::TopLeft,
+            world_width:                None,
+            world_height:               None,
+            shadow_casting:             Cascade::Inherit,
+            widget_hovered_appearance:  Cascade::Inherit,
+            widget_pressed_appearance:  Cascade::Inherit,
+            widget_focused_appearance:  Cascade::Inherit,
+            widget_disabled_appearance: Cascade::Inherit,
+            material:                   Cascade::Inherit,
+            text_material:              Cascade::Inherit,
+            shape_material:             Cascade::Inherit,
+            text_alpha_mode:            Cascade::Inherit,
+            hdr_text_coverage_bias:     Cascade::Inherit,
+            picking:                    PanelPicking::default(),
+            coordinate_space:           CoordinateSpace::default(),
+            text_index:                 HashMap::new(),
         }
     }
 }
@@ -456,6 +476,18 @@ impl DiegeticPanel {
         // the assignments below retain the existing entity's cascade seeds.
         panel.font_unit = self.font_unit;
         panel.shadow_casting = self.shadow_casting;
+        panel
+            .widget_hovered_appearance
+            .clone_from(&self.widget_hovered_appearance);
+        panel
+            .widget_pressed_appearance
+            .clone_from(&self.widget_pressed_appearance);
+        panel
+            .widget_focused_appearance
+            .clone_from(&self.widget_focused_appearance);
+        panel
+            .widget_disabled_appearance
+            .clone_from(&self.widget_disabled_appearance);
         panel.material.clone_from(&self.material);
         panel.text_material.clone_from(&self.text_material);
         panel.shape_material.clone_from(&self.shape_material);
@@ -1580,6 +1612,10 @@ pub(super) fn seed_panel_overrides(
     let text_alpha = panel.text_alpha_mode.map(TextAlpha);
     let hdr_text_coverage_bias = panel.hdr_text_coverage_bias.map(HdrTextCoverageBias);
     let shadow_casting = panel.shadow_casting;
+    let widget_hovered_appearance = panel.widget_hovered_appearance.clone();
+    let widget_pressed_appearance = panel.widget_pressed_appearance.clone();
+    let widget_focused_appearance = panel.widget_focused_appearance.clone();
+    let widget_disabled_appearance = panel.widget_disabled_appearance.clone();
     let (lighting, sidedness) = if panel.coordinate_space().is_screen() {
         (
             Cascade::Override(Lighting::Unlit),
@@ -1597,6 +1633,10 @@ pub(super) fn seed_panel_overrides(
         seed_panel_value(world, entity, text_alpha);
         seed_panel_value(world, entity, hdr_text_coverage_bias);
         seed_panel_value(world, entity, shadow_casting);
+        seed_panel_value(world, entity, widget_hovered_appearance);
+        seed_panel_value(world, entity, widget_pressed_appearance);
+        seed_panel_value(world, entity, widget_focused_appearance);
+        seed_panel_value(world, entity, widget_disabled_appearance);
         seed_panel_value(world, entity, Cascade::<AntiAlias>::Inherit);
         seed_panel_value(world, entity, Cascade::<HairlineFade>::Inherit);
         seed_panel_value(world, entity, lighting);
@@ -2091,10 +2131,20 @@ mod tests {
         let mut helper = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .font_unit(Unit::Millimeters)
+            .widget_hovered_appearance(Appearance::new().background(Color::srgb(0.1, 0.2, 0.3)))
+            .widget_pressed_appearance(Appearance::new().background(Color::srgb(0.3, 0.2, 0.1)))
+            .widget_focused_appearance(Appearance::new().background(Color::srgb(0.2, 0.3, 0.1)))
+            .widget_disabled_appearance(Appearance::new().background(Color::srgb(0.1, 0.3, 0.2)))
             .world_height(0.5)
             .with_tree(test_tree("Blend"))
             .build()
             .expect("helper panel should build");
+        let appearance_seeds = (
+            helper.widget_hovered_appearance.clone(),
+            helper.widget_pressed_appearance.clone(),
+            helper.widget_focused_appearance.clone(),
+            helper.widget_disabled_appearance.clone(),
+        );
         let mut cache = ScaledLayoutTreeCache::default();
 
         let scaled = cache.get_or_update(helper.tree_source(), 1.0, 1.0);
@@ -2104,6 +2154,10 @@ mod tests {
         let next = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .font_unit(Unit::Millimeters)
+            .widget_hovered_appearance(Appearance::new().background(Color::srgb(0.8, 0.7, 0.6)))
+            .widget_pressed_appearance(Appearance::new().background(Color::srgb(0.6, 0.7, 0.8)))
+            .widget_focused_appearance(Appearance::new().background(Color::srgb(0.7, 0.8, 0.6)))
+            .widget_disabled_appearance(Appearance::new().background(Color::srgb(0.6, 0.8, 0.7)))
             .world_height(0.5)
             .with_tree(test_tree("Add"))
             .build()
@@ -2115,6 +2169,15 @@ mod tests {
         assert_eq!(scaled.element_text(1), Some("Add"));
         assert_eq!(cache.hits(), 0);
         assert_eq!(cache.misses(), 2);
+        assert_eq!(
+            (
+                helper.widget_hovered_appearance,
+                helper.widget_pressed_appearance,
+                helper.widget_focused_appearance,
+                helper.widget_disabled_appearance,
+            ),
+            appearance_seeds,
+        );
     }
 
     #[test]

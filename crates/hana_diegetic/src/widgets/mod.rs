@@ -232,6 +232,10 @@ impl Plugin for WidgetsPlugin {
             .add_message::<WidgetInput>()
             .add_plugins((
                 cascade::cascade_plugin::<WidgetInteractivity>(),
+                cascade::cascade_plugin::<WidgetHoveredAppearance>(),
+                cascade::cascade_plugin::<WidgetPressedAppearance>(),
+                cascade::cascade_plugin::<WidgetFocusedAppearance>(),
+                cascade::cascade_plugin::<WidgetDisabledAppearance>(),
                 SliderPlugin,
                 TooltipPlugin,
             ))

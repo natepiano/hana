@@ -17,7 +17,12 @@ use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::Appearance;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
 use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetPressedAppearance;
 
 /// Typed cascade commands for entity-local authored values.
 ///
@@ -43,6 +48,70 @@ pub trait CascadeEntityCommandsExt {
     /// use [`PanelWidgetWriter`](crate::PanelWidgetWriter) for durable
     /// widget-local edits.
     fn inherit_widget_interactivity(&mut self) -> &mut Self;
+
+    /// Authors this entity's durable hovered widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn override_widget_hovered_appearance(&mut self, appearance: Appearance) -> &mut Self;
+
+    /// Makes this entity durably inherit the hovered widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn inherit_widget_hovered_appearance(&mut self) -> &mut Self;
+
+    /// Authors this entity's durable pressed widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn override_widget_pressed_appearance(&mut self, appearance: Appearance) -> &mut Self;
+
+    /// Makes this entity durably inherit the pressed widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn inherit_widget_pressed_appearance(&mut self) -> &mut Self;
+
+    /// Authors this entity's durable focused widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn override_widget_focused_appearance(&mut self, appearance: Appearance) -> &mut Self;
+
+    /// Makes this entity durably inherit the focused widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn inherit_widget_focused_appearance(&mut self) -> &mut Self;
+
+    /// Authors this entity's durable disabled widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn override_widget_disabled_appearance(&mut self, appearance: Appearance) -> &mut Self;
+
+    /// Makes this entity durably inherit the disabled widget appearance.
+    ///
+    /// Use this for panels and other ECS-authored ancestors. A direct command
+    /// on a reified widget entity may be replaced by reification; author a
+    /// durable widget or part appearance in the panel's
+    /// [`LayoutTree`](crate::LayoutTree).
+    fn inherit_widget_disabled_appearance(&mut self) -> &mut Self;
 
     /// Author this entity's text alpha mode.
     fn override_text_alpha(&mut self, alpha_mode: AlphaMode) -> &mut Self;
@@ -128,6 +197,38 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_widget_interactivity(&mut self) -> &mut Self {
         remove_cascade_override::<WidgetInteractivity>(self)
+    }
+
+    fn override_widget_hovered_appearance(&mut self, appearance: Appearance) -> &mut Self {
+        apply_cascade_override(self, WidgetHoveredAppearance::new(appearance))
+    }
+
+    fn inherit_widget_hovered_appearance(&mut self) -> &mut Self {
+        remove_cascade_override::<WidgetHoveredAppearance>(self)
+    }
+
+    fn override_widget_pressed_appearance(&mut self, appearance: Appearance) -> &mut Self {
+        apply_cascade_override(self, WidgetPressedAppearance::new(appearance))
+    }
+
+    fn inherit_widget_pressed_appearance(&mut self) -> &mut Self {
+        remove_cascade_override::<WidgetPressedAppearance>(self)
+    }
+
+    fn override_widget_focused_appearance(&mut self, appearance: Appearance) -> &mut Self {
+        apply_cascade_override(self, WidgetFocusedAppearance::new(appearance))
+    }
+
+    fn inherit_widget_focused_appearance(&mut self) -> &mut Self {
+        remove_cascade_override::<WidgetFocusedAppearance>(self)
+    }
+
+    fn override_widget_disabled_appearance(&mut self, appearance: Appearance) -> &mut Self {
+        apply_cascade_override(self, WidgetDisabledAppearance::new(appearance))
+    }
+
+    fn inherit_widget_disabled_appearance(&mut self) -> &mut Self {
+        remove_cascade_override::<WidgetDisabledAppearance>(self)
     }
 
     fn override_text_alpha(&mut self, alpha_mode: AlphaMode) -> &mut Self {
@@ -350,4 +451,125 @@ where
         return value.clone();
     }
     bevy_kana::resolve_entity_cascade::<A, A::Root>(world, entity).unwrap_or_else(A::root_default)
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+
+    use super::CascadeEntityCommandsExt;
+    use super::WidgetDisabledAppearance;
+    use super::WidgetFocusedAppearance;
+    use super::WidgetHoveredAppearance;
+    use super::WidgetPressedAppearance;
+    use crate::Appearance;
+    use crate::DiegeticTextMeasurer;
+    use crate::HeadlessLayoutPlugin;
+    use crate::cascade::Cascade;
+    use crate::cascade::Resolved;
+    use crate::widgets::WidgetsPlugin;
+
+    const HOVERED: Color = Color::srgb(0.1, 0.2, 0.3);
+    const PRESSED: Color = Color::srgb(0.3, 0.2, 0.1);
+    const FOCUSED: Color = Color::srgb(0.2, 0.3, 0.1);
+    const DISABLED: Color = Color::srgb(0.1, 0.3, 0.2);
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin));
+        app
+    }
+
+    #[test]
+    fn widget_appearance_commands_override_and_restore_inheritance() {
+        let mut app = test_app();
+        let entity = app
+            .world_mut()
+            .spawn((
+                Cascade::<WidgetHoveredAppearance>::Inherit,
+                Cascade::<WidgetPressedAppearance>::Inherit,
+                Cascade::<WidgetFocusedAppearance>::Inherit,
+                Cascade::<WidgetDisabledAppearance>::Inherit,
+            ))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .commands()
+            .entity(entity)
+            .override_widget_hovered_appearance(Appearance::new().background(HOVERED))
+            .override_widget_pressed_appearance(Appearance::new().background(PRESSED))
+            .override_widget_focused_appearance(Appearance::new().background(FOCUSED))
+            .override_widget_disabled_appearance(Appearance::new().background(DISABLED));
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetHoveredAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetHoveredAppearance::new(
+                Appearance::new().background(HOVERED),
+            )),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetPressedAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetPressedAppearance::new(
+                Appearance::new().background(PRESSED),
+            )),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetFocusedAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetFocusedAppearance::new(
+                Appearance::new().background(FOCUSED),
+            )),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetDisabledAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetDisabledAppearance::new(
+                Appearance::new().background(DISABLED),
+            )),
+        );
+
+        app.world_mut()
+            .commands()
+            .entity(entity)
+            .inherit_widget_hovered_appearance()
+            .inherit_widget_pressed_appearance()
+            .inherit_widget_focused_appearance()
+            .inherit_widget_disabled_appearance();
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetHoveredAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetHoveredAppearance::new(Appearance::new())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetPressedAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetPressedAppearance::new(Appearance::new())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetFocusedAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetFocusedAppearance::new(Appearance::new())),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetDisabledAppearance>>(entity)
+                .map(|resolved| resolved.0.clone()),
+            Some(WidgetDisabledAppearance::new(Appearance::new())),
+        );
+    }
 }
