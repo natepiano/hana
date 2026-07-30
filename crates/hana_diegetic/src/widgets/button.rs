@@ -22,13 +22,10 @@ use bevy::prelude::*;
 
 use super::PanelWidget;
 use super::SemanticWidgetIntent;
-use super::VisualSlotId;
-use super::VisualSlotOverride;
 use super::WidgetDisabled;
 use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
-use super::WidgetStateCascades;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
 use super::appearance::WidgetState;
@@ -37,7 +34,7 @@ use super::capture::WidgetCaptures;
 use super::visual;
 use crate::DiegeticPanel;
 use crate::PanelElementId;
-use crate::cascade::Cascade;
+use crate::cascade::Resolved;
 use crate::ime;
 use crate::ime::ImeBlurIntent;
 use crate::ime::ImeEditorState;
@@ -141,10 +138,10 @@ pub(super) fn present_button_state(
         (
             With<WidgetOf>,
             Or<(
-                Changed<Cascade<super::WidgetHoveredAppearance>>,
-                Changed<Cascade<super::WidgetPressedAppearance>>,
-                Changed<Cascade<super::WidgetFocusedAppearance>>,
-                Changed<Cascade<super::WidgetDisabledAppearance>>,
+                Changed<Resolved<super::WidgetHoveredAppearance>>,
+                Changed<Resolved<super::WidgetPressedAppearance>>,
+                Changed<Resolved<super::WidgetFocusedAppearance>>,
+                Changed<Resolved<super::WidgetDisabledAppearance>>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
                 Changed<WidgetFocusVisible>,
@@ -156,10 +153,10 @@ pub(super) fn present_button_state(
     buttons: Query<
         (
             Entity,
-            &Cascade<super::WidgetHoveredAppearance>,
-            &Cascade<super::WidgetPressedAppearance>,
-            &Cascade<super::WidgetFocusedAppearance>,
-            &Cascade<super::WidgetDisabledAppearance>,
+            &Resolved<super::WidgetHoveredAppearance>,
+            &Resolved<super::WidgetPressedAppearance>,
+            &Resolved<super::WidgetFocusedAppearance>,
+            &Resolved<super::WidgetDisabledAppearance>,
             &WidgetOf,
             &WidgetVisualSlots,
             Option<&PickingInteraction>,
@@ -216,20 +213,17 @@ pub(super) fn present_button_state(
             disabled.then_some(WidgetState::Disabled),
         ];
         let panel = panels.get(widget_of.panel()).ok();
-        let appearance = WidgetStateCascades::new(
+        let mut desired = WidgetVisualOverrides::default();
+        visual::resolve_part_overrides(
+            &mut desired,
+            slots,
             hovered,
             pressed_appearance,
             focused_appearance,
             disabled_appearance,
+            &active,
+            panel,
         );
-        let mut desired = WidgetVisualOverrides::default();
-        if slots.element_index(VisualSlotId::BUTTON_ROOT).is_some() {
-            let root_override = appearance.resolve(&active, panel);
-            if root_override != VisualSlotOverride::default() {
-                desired.set(VisualSlotId::BUTTON_ROOT, root_override);
-            }
-        }
-        visual::resolve_part_overrides(&mut desired, slots, &active, panel);
         visual::write_widget_overrides(entity, desired, &mut overrides, &mut commands);
     }
 }
@@ -2986,9 +2980,17 @@ mod tests {
     }
 
     fn root_override(app: &App, widget: Entity) -> Option<VisualSlotOverride> {
+        let slots = app.world().get::<WidgetVisualSlots>(widget)?;
+        let element_index = slots.element_index(VisualSlotId::BUTTON_ROOT)?;
         app.world()
             .get::<WidgetVisualOverrides>(widget)
-            .and_then(|overrides| overrides.get(VisualSlotId::BUTTON_ROOT).cloned())
+            .and_then(|overrides| {
+                overrides
+                    .element_overrides()
+                    .iter()
+                    .find(|(index, _)| *index == element_index)
+                    .map(|(_, value)| value.clone())
+            })
     }
 
     fn root_element_index(app: &App, widget: Entity) -> Option<usize> {

@@ -5,7 +5,7 @@
 //! and [`El::material`](crate::El::material). A widget element adds a
 //! [`StateAppearance`]: one [`Appearance`] per [`WidgetState`], naming only the
 //! properties that state replaces on the widget's retained recipients.
-//! [`WidgetStateCascades::resolve`] layers the active states in
+//! [`ResolvedWidgetStateAppearances::resolve`] layers the active states in
 //! [`WidgetState::LAYER_ORDER`] and returns the [`VisualSlotOverride`] the
 //! retained routes apply, so state presentation patches records layout already
 //! emitted and never re-authors layout.
@@ -242,7 +242,8 @@ impl WidgetHoveredAppearance {
     #[must_use]
     pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
-    fn appearance(&self) -> &Appearance { &self.0 }
+    /// Borrows this hovered-state bundle.
+    pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
 }
 
 impl PartialEq for WidgetHoveredAppearance {
@@ -284,7 +285,8 @@ impl WidgetPressedAppearance {
     #[must_use]
     pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
-    fn appearance(&self) -> &Appearance { &self.0 }
+    /// Borrows this pressed-state bundle.
+    pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
 }
 
 impl PartialEq for WidgetPressedAppearance {
@@ -326,7 +328,8 @@ impl WidgetFocusedAppearance {
     #[must_use]
     pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
-    fn appearance(&self) -> &Appearance { &self.0 }
+    /// Borrows this focused-state bundle.
+    pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
 }
 
 impl PartialEq for WidgetFocusedAppearance {
@@ -368,7 +371,8 @@ impl WidgetDisabledAppearance {
     #[must_use]
     pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
 
-    fn appearance(&self) -> &Appearance { &self.0 }
+    /// Borrows this disabled-state bundle.
+    pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
 }
 
 impl PartialEq for WidgetDisabledAppearance {
@@ -449,7 +453,8 @@ impl<'a> WidgetStateCascades<'a> {
             || self.disabled.as_override().is_some()
     }
 
-    fn layer(&self, state: WidgetState) -> Option<&Appearance> {
+    /// Borrows this state channel's authored override, if it has one.
+    pub(crate) fn layer(&self, state: WidgetState) -> Option<&Appearance> {
         match state {
             WidgetState::Focused => self
                 .focused
@@ -477,62 +482,107 @@ impl<'a> WidgetStateCascades<'a> {
             .any(|state| self.layer(state).is_some_and(&authored))
     }
 
-    /// Composes the root-slot override for the active state set.
-    ///
-    /// Layers apply in [`WidgetState::LAYER_ORDER`] however `active` orders its
-    /// entries: each property resolves independently, a state that leaves a
-    /// property [`VisualChange::Unchanged`] keeps the prior layer's value, and a
-    /// property no active state replaces stays at the element's authored value.
-    /// `panel` supplies the unit conversion a border-width replacement needs;
-    /// without it the width stays authored while every other property still
-    /// resolves.
+    /// Composes authored active-state layers for focused unit tests.
+    #[cfg(test)]
     pub(crate) fn resolve(
         &self,
         active: &[Option<WidgetState>],
         panel: Option<&DiegeticPanel>,
     ) -> VisualSlotOverride {
-        let mut background = None;
-        let mut border_color = None;
-        let mut border_width = None;
-        let mut text_color = None;
-        let mut path_color = None;
-        let mut material = None;
-        for state in WidgetState::LAYER_ORDER {
-            if active.contains(&Some(state))
-                && let Some(layer) = self.layer(state)
-            {
-                if let VisualChange::To(value) = &layer.background {
-                    background = Some(value);
-                }
-                if let VisualChange::To(value) = &layer.border_color {
-                    border_color = Some(value);
-                }
-                if let VisualChange::To(value) = &layer.border_width {
-                    border_width = Some(value);
-                }
-                if let VisualChange::To(value) = &layer.text_color {
-                    text_color = Some(value);
-                }
-                if let VisualChange::To(value) = &layer.path_color {
-                    path_color = Some(value);
-                }
-                if let VisualChange::To(value) = &layer.material {
-                    material = Some(value);
-                }
+        resolve_active_layers(active, panel, |state| self.layer(state))
+    }
+}
+
+/// Borrowed resolved appearance bundles for the four widget states.
+pub(crate) struct ResolvedWidgetStateAppearances<'a> {
+    hovered:  &'a Appearance,
+    pressed:  &'a Appearance,
+    focused:  &'a Appearance,
+    disabled: &'a Appearance,
+}
+
+impl<'a> ResolvedWidgetStateAppearances<'a> {
+    /// Borrows each state bundle after global, panel, and widget cascade resolution.
+    pub(crate) const fn new(
+        hovered: &'a Appearance,
+        pressed: &'a Appearance,
+        focused: &'a Appearance,
+        disabled: &'a Appearance,
+    ) -> Self {
+        Self {
+            hovered,
+            pressed,
+            focused,
+            disabled,
+        }
+    }
+
+    /// Borrows one resolved state bundle.
+    pub(crate) const fn layer(&self, state: WidgetState) -> &'a Appearance {
+        match state {
+            WidgetState::Focused => self.focused,
+            WidgetState::Hovered => self.hovered,
+            WidgetState::Pressed => self.pressed,
+            WidgetState::Disabled => self.disabled,
+        }
+    }
+
+    /// Composes the resolved active-state layers into one record override.
+    pub(crate) fn resolve(
+        &self,
+        active: &[Option<WidgetState>],
+        panel: Option<&DiegeticPanel>,
+    ) -> VisualSlotOverride {
+        resolve_active_layers(active, panel, |state| Some(self.layer(state)))
+    }
+}
+
+fn resolve_active_layers<'a>(
+    active: &[Option<WidgetState>],
+    panel: Option<&DiegeticPanel>,
+    layer: impl Fn(WidgetState) -> Option<&'a Appearance>,
+) -> VisualSlotOverride {
+    let mut background = None;
+    let mut border_color = None;
+    let mut border_width = None;
+    let mut text_color = None;
+    let mut path_color = None;
+    let mut material = None;
+    for state in WidgetState::LAYER_ORDER {
+        if active.contains(&Some(state))
+            && let Some(layer) = layer(state)
+        {
+            if let VisualChange::To(value) = &layer.background {
+                background = Some(value);
+            }
+            if let VisualChange::To(value) = &layer.border_color {
+                border_color = Some(value);
+            }
+            if let VisualChange::To(value) = &layer.border_width {
+                border_width = Some(value);
+            }
+            if let VisualChange::To(value) = &layer.text_color {
+                text_color = Some(value);
+            }
+            if let VisualChange::To(value) = &layer.path_color {
+                path_color = Some(value);
+            }
+            if let VisualChange::To(value) = &layer.material {
+                material = Some(value);
             }
         }
-        let border_widths = border_width
-            .zip(panel)
-            .and_then(|(width, panel)| render_border_widths(*width, panel));
-        VisualSlotOverride {
-            fill_color: background.copied(),
-            border_color: border_color.copied(),
-            border_widths,
-            text_color: text_color.copied(),
-            path_color: path_color.copied(),
-            material: material.cloned(),
-            ..VisualSlotOverride::default()
-        }
+    }
+    let border_widths = border_width
+        .zip(panel)
+        .and_then(|(width, panel)| render_border_widths(*width, panel));
+    VisualSlotOverride {
+        fill_color: background.copied(),
+        border_color: border_color.copied(),
+        border_widths,
+        text_color: text_color.copied(),
+        path_color: path_color.copied(),
+        material: material.cloned(),
+        ..VisualSlotOverride::default()
     }
 }
 
@@ -550,7 +600,7 @@ pub(crate) enum WidgetState {
 }
 
 impl WidgetState {
-    /// Layering order for [`WidgetStateCascades::resolve`]: a later state replaces
+    /// Layering order for [`ResolvedWidgetStateAppearances::resolve`]: a later state replaces
     /// the properties it authors over an earlier one.
     pub(crate) const LAYER_ORDER: [Self; 4] =
         [Self::Focused, Self::Hovered, Self::Pressed, Self::Disabled];
@@ -777,7 +827,7 @@ mod tests {
         *app.world_mut().resource_mut::<WidgetFocusedAppearance>() =
             WidgetFocusedAppearance::new(global.clone());
         *app.world_mut().resource_mut::<WidgetDisabledAppearance>() =
-            WidgetDisabledAppearance::new(global.clone());
+            WidgetDisabledAppearance::new(global);
         let hovered = Appearance::new()
             .background(HOVER_FILL)
             .border_color(HIGHER_BORDER);
@@ -792,10 +842,10 @@ mod tests {
             .border_color(DISABLED_BORDER);
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
-            .widget_hovered_appearance(hovered.clone())
-            .widget_pressed_appearance(pressed.clone())
-            .widget_focused_appearance(focused.clone())
-            .widget_disabled_appearance(disabled.clone())
+            .widget_hovered_appearance(hovered)
+            .widget_pressed_appearance(pressed)
+            .widget_focused_appearance(focused)
+            .widget_disabled_appearance(disabled)
             .with_tree(two_widget_tree())
             .build()
             .expect("a sized panel should build");
@@ -808,25 +858,37 @@ mod tests {
             &app,
             widget,
             WidgetHoveredAppearance,
-            hovered.merge_over(&global),
+            Appearance::new()
+                .background(HOVER_FILL)
+                .border_color(HIGHER_BORDER)
+                .text_color(HIGHER_TEXT),
         );
         assert_resolved_appearance!(
             &app,
             widget,
             WidgetPressedAppearance,
-            pressed.merge_over(&global),
+            Appearance::new()
+                .background(PRESS_FILL)
+                .border_color(LOWER_BORDER)
+                .text_color(HIGHER_TEXT),
         );
         assert_resolved_appearance!(
             &app,
             widget,
             WidgetFocusedAppearance,
-            focused.merge_over(&global),
+            Appearance::new()
+                .background(LOWER_BACKGROUND)
+                .border_color(FOCUS_BORDER)
+                .text_color(HIGHER_TEXT),
         );
         assert_resolved_appearance!(
             &app,
             widget,
             WidgetDisabledAppearance,
-            disabled.merge_over(&global),
+            Appearance::new()
+                .background(DISABLED_BACKGROUND)
+                .border_color(DISABLED_BORDER)
+                .text_color(HIGHER_TEXT),
         );
     }
 

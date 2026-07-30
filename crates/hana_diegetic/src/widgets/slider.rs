@@ -21,7 +21,6 @@ use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetSpec;
-use super::WidgetStateCascades;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
 use super::appearance::WidgetState;
@@ -32,7 +31,7 @@ use super::constants::THUMB_HIT_SLOP_POINTS;
 use super::visual;
 use crate::DiegeticPanel;
 use crate::PanelElementId;
-use crate::cascade::Cascade;
+use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
 use crate::render;
 use crate::render::CapturedCameraRay;
@@ -905,15 +904,15 @@ pub(super) struct SliderWidget {
 }
 
 /// Everything [`present_slider_state`] reads from one slider entity: the
-/// authored declaration, the four state-appearance cascades, the applied value,
+/// authored declaration, the four resolved state-appearance bundles, the applied value,
 /// the solved slots, and the live hover / focus / disabled / dragging flags.
 #[derive(QueryData)]
 pub(super) struct SliderPresentation {
     authored:            &'static WidgetSpec,
-    hovered:             &'static Cascade<super::WidgetHoveredAppearance>,
-    pressed:             &'static Cascade<super::WidgetPressedAppearance>,
-    focused_appearance:  &'static Cascade<super::WidgetFocusedAppearance>,
-    disabled_appearance: &'static Cascade<super::WidgetDisabledAppearance>,
+    hovered:             &'static Resolved<super::WidgetHoveredAppearance>,
+    pressed:             &'static Resolved<super::WidgetPressedAppearance>,
+    focused_appearance:  &'static Resolved<super::WidgetFocusedAppearance>,
+    disabled_appearance: &'static Resolved<super::WidgetDisabledAppearance>,
     kind:                &'static WidgetKind,
     owner:               &'static WidgetOf,
     state:               &'static SliderState,
@@ -1125,10 +1124,10 @@ pub(super) fn present_slider_state(
             With<WidgetOf>,
             Or<(
                 Changed<WidgetSpec>,
-                Changed<Cascade<super::WidgetHoveredAppearance>>,
-                Changed<Cascade<super::WidgetPressedAppearance>>,
-                Changed<Cascade<super::WidgetFocusedAppearance>>,
-                Changed<Cascade<super::WidgetDisabledAppearance>>,
+                Changed<Resolved<super::WidgetHoveredAppearance>>,
+                Changed<Resolved<super::WidgetPressedAppearance>>,
+                Changed<Resolved<super::WidgetFocusedAppearance>>,
+                Changed<Resolved<super::WidgetDisabledAppearance>>,
                 Changed<WidgetVisualSlots>,
                 Changed<PickingInteraction>,
                 Changed<WidgetFocusVisible>,
@@ -1187,19 +1186,16 @@ pub(super) fn present_slider_state(
             disabled.then_some(WidgetState::Disabled),
         ];
         let panel = panels.get(present.owner.panel()).ok();
-        let appearance = WidgetStateCascades::new(
+        visual::resolve_part_overrides(
+            &mut desired,
+            slots,
             present.hovered,
             present.pressed,
             present.focused_appearance,
             present.disabled_appearance,
+            &active,
+            panel,
         );
-        if slots.element_index(VisualSlotId::SLIDER_ROOT).is_some() {
-            let root_override = appearance.resolve(&active, panel);
-            if root_override != VisualSlotOverride::default() {
-                desired.set(VisualSlotId::SLIDER_ROOT, root_override);
-            }
-        }
-        visual::resolve_part_overrides(&mut desired, slots, &active, panel);
         // Always resolve the thumb slot so a same-id slider re-authored from a
         // marked thumb to no thumb clears its stale translation through the
         // shared `write_widget_overrides` replacement path. The layout-frame
@@ -5105,9 +5101,17 @@ mod tests {
     }
 
     fn root_override(app: &App, widget: Entity) -> Option<VisualSlotOverride> {
+        let slots = app.world().get::<WidgetVisualSlots>(widget)?;
+        let element_index = slots.element_index(VisualSlotId::SLIDER_ROOT)?;
         app.world()
             .get::<WidgetVisualOverrides>(widget)
-            .and_then(|overrides| overrides.get(VisualSlotId::SLIDER_ROOT).cloned())
+            .and_then(|overrides| {
+                overrides
+                    .element_overrides()
+                    .iter()
+                    .find(|(index, _)| *index == element_index)
+                    .map(|(_, value)| value.clone())
+            })
     }
 
     fn thumb_offset(app: &App, widget: Entity) -> Option<Vec2> {

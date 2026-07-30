@@ -47,6 +47,7 @@ use crate::PanelFieldRecord;
 use crate::PanelScreenBounds;
 use crate::Px;
 use crate::Sizing;
+use crate::Text;
 use crate::TextStyle;
 use crate::layout::FieldDisplayTextUpdate;
 use crate::panel::PanelFieldPresentation;
@@ -1310,7 +1311,7 @@ fn add_text(
     }
     match declaration {
         Some(declaration) => builder.text(declaration.clone().into_text(text, style)),
-        None => builder.text((text, style.clone())),
+        None => builder.text(Text::new(text, style.clone()).generated_editor_part()),
     };
 }
 
@@ -1335,6 +1336,7 @@ fn add_selected_text(
         None => {
             builder.with(
                 El::new()
+                    .generated_editor_part()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
                     .background(EDITOR_SELECTION)
@@ -1366,6 +1368,7 @@ fn add_caret(
             None => {
                 builder.with(
                     El::new()
+                        .generated_editor_part()
                         .width(Sizing::fixed(CARET_WIDTH))
                         .height(Sizing::fixed(caret_height))
                         .background(EDITOR_CARET),

@@ -294,7 +294,7 @@ impl<A: CascadeAttribute> CascadePlugin<A, CascadeDefault<A>> {
     pub const fn new(root: A) -> Self {
         Self {
             root,
-            combine:       replace_cascade_value::<A>,
+            combine: replace_cascade_value::<A>,
             root_resource: PhantomData,
         }
     }
@@ -471,13 +471,8 @@ fn propagate_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
             continue;
         }
 
-        let value = resolve_from_queries(
-            entity,
-            &authored,
-            &relationships,
-            default.root(),
-            combine.0,
-        );
+        let value =
+            resolve_from_queries(entity, &authored, &relationships, default.root(), combine.0);
         if resolved.get(entity).is_ok_and(|current| current.0 == value) {
             continue;
         }

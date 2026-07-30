@@ -233,6 +233,7 @@ pub(super) fn reify_widgets(
             let anchor_rect = WidgetAnchorRect::new(panel, record.rect());
             let visual_slots = WidgetVisualSlots::new(record.visual_slots().to_vec())
                 .with_elements(record.visual_elements().to_vec())
+                .with_generated_editor_elements(record.generated_editor_elements().to_vec())
                 .with_part_appearances(record.part_appearances().to_vec());
             let entity = match existing_by_id.get(record.id()).copied() {
                 None => spawn_widget(

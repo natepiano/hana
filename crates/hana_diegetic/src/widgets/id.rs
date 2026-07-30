@@ -140,18 +140,19 @@ impl WidgetSpec {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ComputedWidgetRecord {
-    id:               PanelElementId,
-    kind:             WidgetKind,
-    preorder:         usize,
-    authored:         WidgetSpec,
-    appearance:       StateAppearance,
-    part_appearances: Vec<(usize, StateAppearance)>,
-    interactivity:    Cascade<super::WidgetInteractivity>,
-    rect:             BoundingBox,
-    clipped_rect:     Option<BoundingBox>,
-    interaction_rank: usize,
-    visual_elements:  Vec<(usize, VisualElementCapabilities)>,
-    visual_slots:     Vec<super::ComputedVisualSlot>,
+    id:                        PanelElementId,
+    kind:                      WidgetKind,
+    preorder:                  usize,
+    authored:                  WidgetSpec,
+    appearance:                StateAppearance,
+    part_appearances:          Vec<(usize, StateAppearance)>,
+    interactivity:             Cascade<super::WidgetInteractivity>,
+    rect:                      BoundingBox,
+    clipped_rect:              Option<BoundingBox>,
+    interaction_rank:          usize,
+    generated_editor_elements: Vec<usize>,
+    visual_elements:           Vec<(usize, VisualElementCapabilities)>,
+    visual_slots:              Vec<super::ComputedVisualSlot>,
 }
 
 impl ComputedWidgetRecord {
@@ -176,6 +177,7 @@ impl ComputedWidgetRecord {
             rect,
             clipped_rect,
             interaction_rank: 0,
+            generated_editor_elements: Vec::new(),
             visual_elements: Vec::new(),
             visual_slots: Vec::new(),
         }
@@ -207,6 +209,18 @@ impl ComputedWidgetRecord {
 
     pub(crate) fn visual_elements(&self) -> &[(usize, VisualElementCapabilities)] {
         &self.visual_elements
+    }
+
+    /// Returns the editor-generated element indices owned by this widget.
+    pub(crate) fn generated_editor_elements(&self) -> &[usize] { &self.generated_editor_elements }
+
+    /// Records one editor-generated element index.
+    pub(crate) fn push_generated_editor_element(&mut self, element_index: usize) {
+        let insertion_index = self
+            .generated_editor_elements
+            .partition_point(|existing_index| *existing_index < element_index);
+        self.generated_editor_elements
+            .insert(insertion_index, element_index);
     }
 
     pub(crate) fn push_visual_element(

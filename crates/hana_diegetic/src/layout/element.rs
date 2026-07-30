@@ -147,6 +147,9 @@ pub(super) struct Element {
     /// slot. Boxed so an ordinary element pays one pointer rather than four
     /// appearance layers.
     pub(super) appearance:        Option<Box<StateAppearance>>,
+    /// Whether the editor created this element at runtime rather than from the
+    /// panel's authored tree.
+    pub(super) editor_origin:     EditorElementOrigin,
     /// Authored declaration for generated committed and preedit text runs.
     pub(super) editor_text:       Option<Box<EditorPart>>,
     /// Authored declaration for the generated selection highlight box.
@@ -173,6 +176,16 @@ pub(super) struct Element {
     pub(super) precompose:        PrecomposeMode,
     /// Content of this element.
     pub(super) content:           ElementContent,
+}
+
+/// Distinguishes authored layout elements from editor-generated elements.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum EditorElementOrigin {
+    /// The panel author declared this element in the layout tree.
+    #[default]
+    Authored,
+    /// The inline editor created this element from its current buffer state.
+    Generated,
 }
 
 /// What an element contains.
@@ -236,6 +249,7 @@ impl Default for Element {
             editable:          None,
             widget:            None,
             appearance:        None,
+            editor_origin:     EditorElementOrigin::Authored,
             editor_text:       None,
             editor_selection:  None,
             editor_caret:      None,
@@ -1383,6 +1397,9 @@ fn record_owned_widget_element(
     element_index: usize,
     is_widget_root: bool,
 ) {
+    if element.editor_origin == EditorElementOrigin::Generated {
+        record.push_generated_editor_element(element_index);
+    }
     let visual_element_capabilities = element_visual_capabilities(element);
     if !visual_element_capabilities.is_empty() {
         record.push_visual_element(element_index, visual_element_capabilities);
@@ -1414,6 +1431,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         editable,
         widget: _,
         appearance: _,
+        editor_origin: _,
         editor_text: _,
         editor_selection: _,
         editor_caret: _,
@@ -1446,6 +1464,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         editable: n_editable,
         widget: _,
         appearance: _,
+        editor_origin: _,
         editor_text: _,
         editor_selection: _,
         editor_caret: _,

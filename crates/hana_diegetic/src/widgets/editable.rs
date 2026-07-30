@@ -5,19 +5,16 @@ use std::collections::HashSet;
 use bevy::picking::hover::PickingInteraction;
 use bevy::prelude::*;
 
-use super::VisualSlotId;
-use super::VisualSlotOverride;
 use super::WidgetDisabled;
 use super::WidgetFocusVisible;
 use super::WidgetKind;
 use super::WidgetOf;
 use super::WidgetState;
-use super::WidgetStateCascades;
 use super::WidgetVisualOverrides;
 use super::WidgetVisualSlots;
 use super::visual;
 use crate::DiegeticPanel;
-use crate::cascade::Cascade;
+use crate::cascade::Resolved;
 
 /// Maps each changed editable field's live state onto its retained visual overrides.
 ///
@@ -33,10 +30,10 @@ pub(super) fn present_editable_state(
         (
             With<WidgetOf>,
             Or<(
-                Changed<Cascade<super::WidgetHoveredAppearance>>,
-                Changed<Cascade<super::WidgetPressedAppearance>>,
-                Changed<Cascade<super::WidgetFocusedAppearance>>,
-                Changed<Cascade<super::WidgetDisabledAppearance>>,
+                Changed<Resolved<super::WidgetHoveredAppearance>>,
+                Changed<Resolved<super::WidgetPressedAppearance>>,
+                Changed<Resolved<super::WidgetFocusedAppearance>>,
+                Changed<Resolved<super::WidgetDisabledAppearance>>,
                 Changed<WidgetVisualSlots>,
                 Changed<WidgetFocusVisible>,
                 Changed<PickingInteraction>,
@@ -48,10 +45,10 @@ pub(super) fn present_editable_state(
         (
             Entity,
             &WidgetKind,
-            &Cascade<super::WidgetHoveredAppearance>,
-            &Cascade<super::WidgetPressedAppearance>,
-            &Cascade<super::WidgetFocusedAppearance>,
-            &Cascade<super::WidgetDisabledAppearance>,
+            &Resolved<super::WidgetHoveredAppearance>,
+            &Resolved<super::WidgetPressedAppearance>,
+            &Resolved<super::WidgetFocusedAppearance>,
+            &Resolved<super::WidgetDisabledAppearance>,
             &WidgetOf,
             &WidgetVisualSlots,
             Option<&PickingInteraction>,
@@ -108,17 +105,18 @@ pub(super) fn present_editable_state(
             .then_some(WidgetState::Hovered),
             disabled.then_some(WidgetState::Disabled),
         ];
-        let appearance =
-            WidgetStateCascades::new(hovered, pressed, focused_appearance, disabled_appearance);
         let panel = panels.get(widget_of.panel()).ok();
         let mut desired = WidgetVisualOverrides::default();
-        if slots.element_index(VisualSlotId::EDITABLE_ROOT).is_some() {
-            let root_override = appearance.resolve(&active, panel);
-            if root_override != VisualSlotOverride::default() {
-                desired.set(VisualSlotId::EDITABLE_ROOT, root_override);
-            }
-        }
-        visual::resolve_part_overrides(&mut desired, slots, &active, panel);
+        visual::resolve_part_overrides(
+            &mut desired,
+            slots,
+            hovered,
+            pressed,
+            focused_appearance,
+            disabled_appearance,
+            &active,
+            panel,
+        );
         visual::write_widget_overrides(entity, desired, &mut overrides, &mut commands);
     }
 }
@@ -144,6 +142,8 @@ mod tests {
     use crate::RequestWidgetFocus;
     use crate::WidgetInteractivity;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetsPlugin;
 
     const FIELD_ID: &str = "editable";
@@ -242,9 +242,17 @@ mod tests {
     }
 
     fn root_override(app: &App, widget: Entity) -> Option<VisualSlotOverride> {
+        let slots = app.world().get::<WidgetVisualSlots>(widget)?;
+        let element_index = slots.element_index(VisualSlotId::EDITABLE_ROOT)?;
         app.world()
             .get::<WidgetVisualOverrides>(widget)
-            .and_then(|overrides| overrides.get(VisualSlotId::EDITABLE_ROOT).cloned())
+            .and_then(|overrides| {
+                overrides
+                    .element_overrides()
+                    .iter()
+                    .find(|(index, _)| *index == element_index)
+                    .map(|(_, value)| value.clone())
+            })
     }
 
     #[test]

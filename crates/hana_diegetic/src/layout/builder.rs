@@ -53,6 +53,7 @@ use super::TextStyle;
 use super::TextWrap;
 use super::child_layout::ChildLayout;
 use super::element::ChildOverflow;
+use super::element::EditorElementOrigin;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
@@ -276,6 +277,12 @@ impl Text<LayoutOnly> {
 }
 
 impl<Role> Text<Role> {
+    /// Marks this text leaf as an inline-editor generated part.
+    pub(crate) const fn generated_editor_part(mut self) -> Self {
+        self.layout.editor_origin = EditorElementOrigin::Generated;
+        self
+    }
+
     /// Assigns a panel-local id so this run can be addressed at runtime.
     pub fn id(mut self, id: impl Into<PanelElementId>) -> Self {
         self.layout.id = Some(id.into());
@@ -425,6 +432,7 @@ struct CommonEl {
     /// Boxed so the per-state appearance a widget element authors does not
     /// widen every ordinary element declaration.
     appearance:        Option<Box<StateAppearance>>,
+    editor_origin:     EditorElementOrigin,
     editor_text:       Option<Box<EditorPart>>,
     editor_selection:  Option<Box<EditorPart>>,
     editor_caret:      Option<Box<EditorPart>>,
@@ -514,6 +522,7 @@ impl EditorPart {
 
     pub(crate) fn into_text(mut self, text: &str, style: &TextStyle) -> Text {
         self.common.id = None;
+        self.common.editor_origin = EditorElementOrigin::Generated;
         match self.into_declaration() {
             EditorPartDeclaration::Row(el) => Text::new(text, style.clone()).layout(el),
             EditorPartDeclaration::Column(el) => Text::new(text, style.clone()).layout(el),
@@ -522,10 +531,11 @@ impl EditorPart {
     }
 
     pub(crate) fn with_children(
-        self,
+        mut self,
         builder: &mut LayoutBuilder,
         children: impl FnOnce(&mut LayoutBuilder),
     ) {
+        self.common.editor_origin = EditorElementOrigin::Generated;
         match self.into_declaration() {
             EditorPartDeclaration::Row(el) => {
                 builder.with(el, children);
@@ -632,6 +642,7 @@ impl Default for CommonEl {
             editable:          None,
             widget:            None,
             appearance:        None,
+            editor_origin:     EditorElementOrigin::Authored,
             editor_text:       None,
             editor_selection:  None,
             editor_caret:      None,
@@ -668,6 +679,7 @@ fn text_leaf_element(mut common: CommonEl, content: ElementContent) -> Element {
         editable: common.editable,
         widget: common.widget,
         appearance: common.appearance,
+        editor_origin: common.editor_origin,
         editor_text: common.editor_text,
         editor_selection: common.editor_selection,
         editor_caret: common.editor_caret,
@@ -694,6 +706,14 @@ where
             child_layout: L::default(),
             role:         PhantomData,
         }
+    }
+}
+
+impl<L, Role> El<L, Role> {
+    /// Marks this element as an inline-editor generated part.
+    pub(crate) const fn generated_editor_part(mut self) -> Self {
+        self.common.editor_origin = EditorElementOrigin::Generated;
+        self
     }
 }
 
@@ -1373,6 +1393,7 @@ impl<L, Role> El<L, Role> {
             editable: common.editable,
             widget: common.widget,
             appearance: common.appearance,
+            editor_origin: common.editor_origin,
             editor_text: common.editor_text,
             editor_selection: common.editor_selection,
             editor_caret: common.editor_caret,

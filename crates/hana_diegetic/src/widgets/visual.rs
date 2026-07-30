@@ -22,13 +22,21 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use bevy::prelude::*;
+use smallvec::SmallVec;
 
+use super::Appearance;
 use super::PanelWidget;
+use super::ResolvedWidgetStateAppearances;
 use super::StateAppearance;
 use super::VisualElementCapabilities;
+use super::WidgetDisabledAppearance;
+use super::WidgetFocusedAppearance;
+use super::WidgetHoveredAppearance;
 use super::WidgetKind;
 use super::WidgetOf;
+use super::WidgetPressedAppearance;
 use crate::DiegeticPanel;
+use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
 
 /// Stable private id for one widget-owned visual slot.
@@ -83,9 +91,10 @@ pub(crate) struct ComputedVisualSlot {
 /// Reified slot-to-record references owned by one widget entity.
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct WidgetVisualSlots {
-    slots:            Vec<ComputedVisualSlot>,
-    elements:         Vec<(usize, VisualElementCapabilities)>,
-    part_appearances: Vec<(usize, StateAppearance)>,
+    slots:                     Vec<ComputedVisualSlot>,
+    elements:                  Vec<(usize, VisualElementCapabilities)>,
+    generated_editor_elements: Vec<usize>,
+    part_appearances:          Vec<(usize, StateAppearance)>,
 }
 
 impl WidgetVisualSlots {
@@ -94,6 +103,7 @@ impl WidgetVisualSlots {
         Self {
             slots,
             elements: Vec::new(),
+            generated_editor_elements: Vec::new(),
             part_appearances: Vec::new(),
         }
     }
@@ -104,6 +114,16 @@ impl WidgetVisualSlots {
         elements: Vec<(usize, VisualElementCapabilities)>,
     ) -> Self {
         self.elements = elements;
+        self
+    }
+
+    #[must_use]
+    /// Stores sorted editor-generated indices excluded from widget-level inheritance.
+    pub(crate) fn with_generated_editor_elements(
+        mut self,
+        generated_editor_elements: Vec<usize>,
+    ) -> Self {
+        self.generated_editor_elements = generated_editor_elements;
         self
     }
 
@@ -119,6 +139,13 @@ impl WidgetVisualSlots {
     /// Returns every retained-record recipient owned by the widget declaration.
     #[must_use]
     pub(crate) fn elements(&self) -> &[(usize, VisualElementCapabilities)] { &self.elements }
+
+    /// Whether this retained recipient came from inline-editor generation.
+    fn is_generated_editor_element(&self, element_index: usize) -> bool {
+        self.generated_editor_elements
+            .binary_search(&element_index)
+            .is_ok()
+    }
 
     /// Returns every descendant with an explicitly authored state appearance.
     #[must_use]
@@ -221,6 +248,26 @@ impl VisualSlotOverride {
         if offset.is_some() {
             self.offset = offset;
         }
+    }
+
+    fn for_capabilities(mut self, capabilities: VisualElementCapabilities) -> Self {
+        if !capabilities.contains(VisualElementCapabilities::SDF_FILL) {
+            self.fill_color = None;
+        }
+        if !capabilities.contains(VisualElementCapabilities::SDF_BORDER) {
+            self.border_color = None;
+            self.border_widths = None;
+        }
+        if !capabilities.contains(VisualElementCapabilities::TEXT) {
+            self.text_color = None;
+        }
+        if !capabilities.contains(VisualElementCapabilities::DRAW) {
+            self.path_color = None;
+        }
+        if !capabilities.contains(VisualElementCapabilities::SDF_MATERIAL) {
+            self.material = None;
+        }
+        self
     }
 }
 
@@ -358,7 +405,7 @@ impl WidgetVisualOverrides {
         self.slots.iter().map(|(slot, value)| (*slot, value))
     }
 
-    fn element_overrides(&self) -> &[(usize, VisualSlotOverride)] { &self.elements }
+    pub(crate) fn element_overrides(&self) -> &[(usize, VisualSlotOverride)] { &self.elements }
 }
 
 /// Collects the widgets of `kind` whose presentation inputs moved this frame.
@@ -390,30 +437,76 @@ pub(crate) fn dirty_widgets(
 pub(crate) fn resolve_part_overrides(
     desired: &mut WidgetVisualOverrides,
     slots: &WidgetVisualSlots,
+    hovered: &Resolved<WidgetHoveredAppearance>,
+    pressed: &Resolved<WidgetPressedAppearance>,
+    focused: &Resolved<WidgetFocusedAppearance>,
+    disabled: &Resolved<WidgetDisabledAppearance>,
     active: &[Option<super::WidgetState>],
     panel: Option<&DiegeticPanel>,
 ) {
+    let widget_appearances = ResolvedWidgetStateAppearances::new(
+        hovered.0.appearance(),
+        pressed.0.appearance(),
+        focused.0.appearance(),
+        disabled.0.appearance(),
+    );
     let part_appearances = slots.part_appearances();
     let mut part_cursor = 0;
-    for &(element_index, _) in slots.elements() {
+    for &(element_index, capabilities) in slots.elements() {
         while part_appearances
             .get(part_cursor)
             .is_some_and(|(part_index, _)| *part_index < element_index)
         {
             part_cursor += 1;
         }
-        let Some((part_index, appearance)) = part_appearances.get(part_cursor) else {
-            continue;
-        };
-        if *part_index != element_index {
-            continue;
+        let part_appearance =
+            part_appearances
+                .get(part_cursor)
+                .and_then(|(part_index, appearance)| {
+                    (*part_index == element_index).then_some(appearance)
+                });
+        if part_appearance.is_some() {
+            part_cursor += 1;
         }
-        part_cursor += 1;
-        let resolved = appearance.cascades().resolve(active, panel);
+        let part_cascades = part_appearance.map(StateAppearance::cascades);
+        let widget_level_applies = !slots.is_generated_editor_element(element_index);
+        let merge_state = |state| {
+            let mut levels = SmallVec::<[&Appearance; 2]>::new();
+            if widget_level_applies {
+                levels.push(widget_appearances.layer(state));
+            }
+            if let Some(part_layer) = part_cascades
+                .as_ref()
+                .and_then(|appearance| appearance.layer(state))
+            {
+                levels.push(part_layer);
+            }
+            merge_levels(&levels)
+        };
+        let hovered = merge_state(super::WidgetState::Hovered);
+        let pressed = merge_state(super::WidgetState::Pressed);
+        let focused = merge_state(super::WidgetState::Focused);
+        let disabled = merge_state(super::WidgetState::Disabled);
+        let resolved = ResolvedWidgetStateAppearances::new(&hovered, &pressed, &focused, &disabled)
+            .resolve(active, panel)
+            .for_capabilities(capabilities);
         if resolved != VisualSlotOverride::default() {
             desired.set_element(element_index, resolved);
         }
     }
+}
+
+/// Reduces one state channel's authored levels into a single bundle.
+///
+/// `levels` is ordered lowest precedence first, so the last entry wins per
+/// property. A recipient currently supplies its widget result and, when it
+/// has one, its own part bundle.
+fn merge_levels(levels: &[&Appearance]) -> Appearance {
+    levels
+        .iter()
+        .rev()
+        .copied()
+        .fold(Appearance::new(), |lower, higher| lower.merge_over(higher))
 }
 
 /// Replaces one widget's complete desired presentation override, touching
@@ -599,6 +692,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::picking::hover::PickingInteraction;
     use bevy::prelude::*;
+    use bevy::window::WindowRef;
 
     use super::ComputedVisualSlot;
     use super::StateAppearance;
@@ -608,18 +702,24 @@ mod tests {
     use super::VisualSlotOverride;
     use super::WidgetVisualOverrides;
     use super::WidgetVisualSlots;
+    use super::merge_levels;
     use crate::Appearance;
+    use crate::Border;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::LayoutBuilder;
     use crate::Mm;
     use crate::PanelElementId;
     use crate::PanelWidgetReader;
+    use crate::Px;
     use crate::WidgetHoveredAppearance;
+    use crate::WidgetPressedAppearance;
     use crate::cascade::Cascade;
     use crate::cascade::Resolved;
     use crate::layout::BoundingBox;
@@ -628,9 +728,13 @@ mod tests {
     use crate::layout::Text;
     use crate::layout::TextStyle;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::ButtonPress;
     use crate::widgets::PanelWidget;
+    use crate::widgets::SemanticWidgetIntent;
     use crate::widgets::Slider;
+    use crate::widgets::WidgetDisabled;
     use crate::widgets::WidgetOf;
+    use crate::widgets::WidgetState;
     use crate::widgets::WidgetsPlugin;
 
     const SLOT: VisualSlotId = VisualSlotId::new(7);
@@ -641,6 +745,180 @@ mod tests {
     const PART_HOVER_FILL: Color = Color::srgb(0.3, 0.7, 0.2);
     const TEXT_OVERRIDE_COLOR: Color = Color::srgb(0.3, 0.2, 0.7);
     const PATH_OVERRIDE_COLOR: Color = Color::srgb(0.7, 0.2, 0.3);
+    const PART_NORMAL_FILL: Color = Color::srgb(0.08, 0.12, 0.16);
+    const PART_NORMAL_BORDER: Color = Color::srgb(0.18, 0.24, 0.30);
+    const WIDGET_PROPERTY_COLOR: Color = Color::srgb(0.82, 0.16, 0.28);
+    const PART_PROPERTY_COLOR: Color = Color::srgb(0.12, 0.68, 0.42);
+    const GLOBAL_PROPERTY_COLOR: Color = Color::srgb(0.14, 0.30, 0.74);
+    const PANEL_PROPERTY_COLOR: Color = Color::srgb(0.72, 0.38, 0.12);
+
+    #[derive(Clone, Copy)]
+    enum MergeProperty {
+        Background,
+        BorderColor,
+        BorderWidth,
+        TextColor,
+        PathColor,
+        Material,
+    }
+
+    impl MergeProperty {
+        const ALL: [Self; 6] = [
+            Self::Background,
+            Self::BorderColor,
+            Self::BorderWidth,
+            Self::TextColor,
+            Self::PathColor,
+            Self::Material,
+        ];
+
+        fn widget_appearance(self, material: Handle<StandardMaterial>) -> Appearance {
+            match self {
+                Self::Background => Appearance::new().background(WIDGET_PROPERTY_COLOR),
+                Self::BorderColor => Appearance::new().border_color(WIDGET_PROPERTY_COLOR),
+                Self::BorderWidth => Appearance::new().border_width(Px(2.0)),
+                Self::TextColor => Appearance::new().text_color(WIDGET_PROPERTY_COLOR),
+                Self::PathColor => Appearance::new().path_color(WIDGET_PROPERTY_COLOR),
+                Self::Material => Appearance::new().material(material),
+            }
+        }
+
+        fn part_appearance(self, material: Handle<StandardMaterial>) -> Appearance {
+            match self {
+                Self::Background => Appearance::new().background(PART_PROPERTY_COLOR),
+                Self::BorderColor => Appearance::new().border_color(PART_PROPERTY_COLOR),
+                Self::BorderWidth => Appearance::new().border_width(Px(4.0)),
+                Self::TextColor => Appearance::new().text_color(PART_PROPERTY_COLOR),
+                Self::PathColor => Appearance::new().path_color(PART_PROPERTY_COLOR),
+                Self::Material => Appearance::new().material(material),
+            }
+        }
+
+        fn expected_override(
+            self,
+            widget_names_property: bool,
+            part_names_property: bool,
+            points_to_world: f32,
+            widget_material: Handle<StandardMaterial>,
+            part_material: Handle<StandardMaterial>,
+        ) -> Option<VisualSlotOverride> {
+            let part_wins = part_names_property;
+            let widget_wins = widget_names_property && !part_names_property;
+            if !part_wins && !widget_wins {
+                return None;
+            }
+            Some(match self {
+                Self::Background => VisualSlotOverride {
+                    fill_color: Some(if part_wins {
+                        PART_PROPERTY_COLOR
+                    } else {
+                        WIDGET_PROPERTY_COLOR
+                    }),
+                    ..VisualSlotOverride::default()
+                },
+                Self::BorderColor => VisualSlotOverride {
+                    border_color: Some(if part_wins {
+                        PART_PROPERTY_COLOR
+                    } else {
+                        WIDGET_PROPERTY_COLOR
+                    }),
+                    ..VisualSlotOverride::default()
+                },
+                Self::BorderWidth => {
+                    let points = if part_wins { 4.0 } else { 2.0 };
+                    VisualSlotOverride {
+                        border_widths: Some([points * 0.75 * points_to_world; 4]),
+                        ..VisualSlotOverride::default()
+                    }
+                },
+                Self::TextColor => VisualSlotOverride {
+                    text_color: Some(if part_wins {
+                        PART_PROPERTY_COLOR
+                    } else {
+                        WIDGET_PROPERTY_COLOR
+                    }),
+                    ..VisualSlotOverride::default()
+                },
+                Self::PathColor => VisualSlotOverride {
+                    path_color: Some(if part_wins {
+                        PART_PROPERTY_COLOR
+                    } else {
+                        WIDGET_PROPERTY_COLOR
+                    }),
+                    ..VisualSlotOverride::default()
+                },
+                Self::Material => VisualSlotOverride {
+                    material: Some(if part_wins {
+                        part_material
+                    } else {
+                        widget_material
+                    }),
+                    ..VisualSlotOverride::default()
+                },
+            })
+        }
+    }
+
+    #[test]
+    fn merge_levels_accepts_zero_through_three_authored_levels() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let lowest_material = materials.add(StandardMaterial::default());
+        let middle_material = materials.add(StandardMaterial::default());
+        let highest_material = materials.add(StandardMaterial::default());
+        let lowest = Appearance::new()
+            .background(Color::BLACK)
+            .border_color(Color::WHITE)
+            .border_width(Px(1.0))
+            .text_color(Color::BLACK)
+            .path_color(Color::WHITE)
+            .material(lowest_material.clone());
+        let middle = Appearance::new()
+            .background(Color::WHITE)
+            .border_color(Color::BLACK)
+            .border_width(Px(2.0))
+            .text_color(Color::WHITE)
+            .path_color(Color::BLACK)
+            .material(middle_material.clone());
+        let highest = Appearance::new()
+            .background(Color::srgb(0.2, 0.4, 0.6))
+            .border_color(Color::srgb(0.6, 0.4, 0.2))
+            .border_width(Px(3.0))
+            .text_color(Color::srgb(0.3, 0.5, 0.7))
+            .path_color(Color::srgb(0.7, 0.5, 0.3))
+            .material(highest_material.clone());
+
+        assert_eq!(merge_levels(&[]), Appearance::new());
+        assert_eq!(
+            merge_levels(&[&lowest]),
+            Appearance::new()
+                .background(Color::BLACK)
+                .border_color(Color::WHITE)
+                .border_width(Px(1.0))
+                .text_color(Color::BLACK)
+                .path_color(Color::WHITE)
+                .material(lowest_material),
+        );
+        assert_eq!(
+            merge_levels(&[&lowest, &middle]),
+            Appearance::new()
+                .background(Color::WHITE)
+                .border_color(Color::BLACK)
+                .border_width(Px(2.0))
+                .text_color(Color::WHITE)
+                .path_color(Color::BLACK)
+                .material(middle_material),
+        );
+        assert_eq!(
+            merge_levels(&[&lowest, &middle, &highest]),
+            Appearance::new()
+                .background(Color::srgb(0.2, 0.4, 0.6))
+                .border_color(Color::srgb(0.6, 0.4, 0.2))
+                .border_width(Px(3.0))
+                .text_color(Color::srgb(0.3, 0.5, 0.7))
+                .path_color(Color::srgb(0.7, 0.5, 0.3))
+                .material(highest_material),
+        );
+    }
 
     fn computed_slot(slot: VisualSlotId, element_index: usize) -> ComputedVisualSlot {
         ComputedVisualSlot {
@@ -880,6 +1158,916 @@ mod tests {
             styled_unauthored_index,
             structural_container_index,
         )
+    }
+
+    fn state_channel_appearance(
+        active_state: WidgetState,
+        channel: WidgetState,
+        appearance: &Appearance,
+    ) -> Appearance {
+        if active_state == channel {
+            appearance.clone()
+        } else {
+            Appearance::new()
+        }
+    }
+
+    fn rich_part(
+        active_state: WidgetState,
+        appearance: Appearance,
+    ) -> crate::El<crate::Row, crate::PressedPart> {
+        El::new()
+            .background(PART_NORMAL_FILL)
+            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+            .material(Handle::<StandardMaterial>::default())
+            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+            .focused(state_channel_appearance(
+                active_state,
+                WidgetState::Focused,
+                &appearance,
+            ))
+            .hovered(state_channel_appearance(
+                active_state,
+                WidgetState::Hovered,
+                &appearance,
+            ))
+            .pressed(state_channel_appearance(
+                active_state,
+                WidgetState::Pressed,
+                &appearance,
+            ))
+            .disabled(state_channel_appearance(
+                active_state,
+                WidgetState::Disabled,
+                &appearance,
+            ))
+    }
+
+    fn activate_widget_state(app: &mut App, widget: Entity, state: WidgetState) {
+        match state {
+            WidgetState::Hovered => {
+                app.world_mut()
+                    .entity_mut(widget)
+                    .insert(PickingInteraction::Hovered);
+            },
+            WidgetState::Pressed => {
+                app.world_mut().entity_mut(widget).insert(ButtonPress);
+            },
+            WidgetState::Focused => {
+                let window = app.world_mut().spawn(Window::default()).id();
+                app.world_mut()
+                    .trigger(crate::RequestWidgetFocus { window, widget });
+                app.world_mut().flush();
+            },
+            WidgetState::Disabled => {
+                app.world_mut()
+                    .entity_mut(widget)
+                    .insert(WidgetDisabled::test_marker());
+            },
+        }
+    }
+
+    fn part_override(app: &App, panel: Entity, element_index: usize) -> Option<VisualSlotOverride> {
+        app.world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, element_index)
+            .cloned()
+    }
+
+    fn inline_editor_visual_app(tree: crate::LayoutTree) -> (App, Entity, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, crate::ime::ImePlugin));
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(40.0))
+            .window(WindowRef::Entity(window))
+            .with_tree(tree)
+            .build()
+            .expect("editor panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        app.update();
+        (app, window, panel)
+    }
+
+    fn editable_tree_with_widget_focus_and_optional_caret(
+        text: &str,
+        caret_appearance: Option<Appearance>,
+    ) -> crate::LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
+        let field = El::new()
+            .background(PART_NORMAL_FILL)
+            .editable_field("field", field)
+            .focused(Appearance::new().background(WIDGET_PROPERTY_COLOR));
+        let field = match caret_appearance {
+            Some(appearance) => field.editor_caret(El::new().focused(appearance)),
+            None => field,
+        };
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(field, |children| {
+            children.text((text, TextStyle::new(10.0)));
+        });
+        builder.build()
+    }
+
+    fn activate_inline_editor(app: &mut App, window: Entity, field: Entity) {
+        app.world_mut().trigger(crate::RequestWidgetFocus {
+            window,
+            widget: field,
+        });
+        app.world_mut().flush();
+        app.update();
+        app.world_mut().trigger(SemanticWidgetIntent::Activate {
+            entity: field,
+            window,
+        });
+        app.world_mut().flush();
+        app.update();
+    }
+
+    #[test]
+    fn widget_to_part_merge_matrix_covers_each_property_and_state() {
+        // The upper cascade hops are covered by
+        // `global_state_appearance_defaults_reach_every_widget_without_state_authoring`,
+        // `panel_state_appearances_merge_with_globals_in_the_reification_frame`, and
+        // `panel_hovered_appearance_preserves_global_properties_through_the_cascade`.
+        for property in MergeProperty::ALL {
+            for state in WidgetState::LAYER_ORDER {
+                for (widget_names_property, part_names_property) in
+                    [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    let mut app = widgets_test_app();
+                    let mut materials = Assets::<StandardMaterial>::default();
+                    let widget_material = materials.add(StandardMaterial::default());
+                    let part_material = materials.add(StandardMaterial::default());
+                    let widget_appearance = if widget_names_property {
+                        property.widget_appearance(widget_material.clone())
+                    } else {
+                        Appearance::new()
+                    };
+                    let part_appearance = if part_names_property {
+                        property.part_appearance(part_material.clone())
+                    } else {
+                        Appearance::new()
+                    };
+                    let mut builder = LayoutBuilder::new(100.0, 50.0);
+                    builder.with(
+                        El::new()
+                            .background(PART_NORMAL_FILL)
+                            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                            .material(Handle::<StandardMaterial>::default())
+                            .button("button")
+                            .focused(state_channel_appearance(
+                                state,
+                                WidgetState::Focused,
+                                &widget_appearance,
+                            ))
+                            .hovered(state_channel_appearance(
+                                state,
+                                WidgetState::Hovered,
+                                &widget_appearance,
+                            ))
+                            .pressed(state_channel_appearance(
+                                state,
+                                WidgetState::Pressed,
+                                &widget_appearance,
+                            ))
+                            .disabled(state_channel_appearance(
+                                state,
+                                WidgetState::Disabled,
+                                &widget_appearance,
+                            )),
+                        |children| {
+                            children.text(
+                                Text::new("part", TextStyle::new(10.0))
+                                    .layout(rich_part(state, part_appearance)),
+                            );
+                        },
+                    );
+                    let tree = builder.build();
+                    let part_index = tree.len() - 1;
+                    let panel = spawn_widget_panel(&mut app, tree);
+                    app.update();
+                    let widget = resolve_widget(&mut app, panel, "button");
+                    activate_widget_state(&mut app, widget, state);
+                    app.update();
+
+                    let points_to_world = app
+                        .world()
+                        .get::<DiegeticPanel>(panel)
+                        .map_or(0.0, DiegeticPanel::points_to_world);
+                    let expected = property.expected_override(
+                        widget_names_property,
+                        part_names_property,
+                        points_to_world,
+                        widget_material,
+                        part_material,
+                    );
+                    assert_eq!(part_override(&app, panel, part_index), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn widget_focus_appearance_excludes_generated_editor_selection() {
+        let (mut app, window, panel) = inline_editor_visual_app(
+            editable_tree_with_widget_focus_and_optional_caret("display", None),
+        );
+        let field = resolve_widget(&mut app, panel, "field");
+        activate_inline_editor(&mut app, window, field);
+
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .expect("editable field visual slots");
+        let root_index = slots
+            .element_index(VisualSlotId::EDITABLE_ROOT)
+            .expect("editable field root index");
+        assert_eq!(
+            part_override(&app, panel, root_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(WIDGET_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+        let selection_index = slots
+            .elements()
+            .iter()
+            .find_map(|(element_index, capabilities)| {
+                (slots
+                    .generated_editor_elements
+                    .binary_search(element_index)
+                    .is_ok()
+                    && capabilities.contains(VisualElementCapabilities::SDF_FILL))
+                .then_some(*element_index)
+            })
+            .expect("selected editor text should generate an SDF-fill selection recipient");
+        assert_eq!(
+            part_override(&app, panel, selection_index),
+            None,
+            "the generated selection has no widget-level VisualOverrideIndex entry",
+        );
+    }
+
+    #[test]
+    fn widget_focus_appearance_excludes_generated_editor_caret() {
+        let (mut app, window, panel) =
+            inline_editor_visual_app(editable_tree_with_widget_focus_and_optional_caret("", None));
+        let field = resolve_widget(&mut app, panel, "field");
+        activate_inline_editor(&mut app, window, field);
+
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .expect("editable field visual slots");
+        let root_index = slots
+            .element_index(VisualSlotId::EDITABLE_ROOT)
+            .expect("editable field root index");
+        assert_eq!(
+            part_override(&app, panel, root_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(WIDGET_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+        let caret_index = slots
+            .elements()
+            .iter()
+            .find_map(|(element_index, capabilities)| {
+                (slots
+                    .generated_editor_elements
+                    .binary_search(element_index)
+                    .is_ok()
+                    && capabilities.contains(VisualElementCapabilities::SDF_FILL))
+                .then_some(*element_index)
+            })
+            .expect("empty editor text should generate an SDF-fill caret recipient");
+        assert_eq!(
+            part_override(&app, panel, caret_index),
+            None,
+            "the generated caret has no widget-level VisualOverrideIndex entry",
+        );
+    }
+
+    #[test]
+    fn declared_editor_caret_part_still_overrides_the_generated_caret() {
+        let (mut app, window, panel) =
+            inline_editor_visual_app(editable_tree_with_widget_focus_and_optional_caret(
+                "",
+                Some(Appearance::new().background(PART_PROPERTY_COLOR)),
+            ));
+        let field = resolve_widget(&mut app, panel, "field");
+        activate_inline_editor(&mut app, window, field);
+
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .expect("editable field visual slots");
+        let caret_index = slots
+            .part_appearances()
+            .iter()
+            .find_map(|(element_index, _)| {
+                slots
+                    .generated_editor_elements
+                    .binary_search(element_index)
+                    .is_ok()
+                    .then_some(*element_index)
+            })
+            .expect("the declared editor caret should generate a styled part");
+        assert_eq!(
+            part_override(&app, panel, caret_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(PART_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn part_hovered_border_preserves_the_widget_hovered_background() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                .button("button")
+                .hovered(
+                    Appearance::new()
+                        .background(WIDGET_PROPERTY_COLOR)
+                        .border_color(WIDGET_PROPERTY_COLOR),
+                ),
+            |children| {
+                children.with(
+                    El::new()
+                        .background(PART_NORMAL_FILL)
+                        .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                        .hovered(Appearance::new().border_color(PART_PROPERTY_COLOR)),
+                    |_| {},
+                );
+            },
+        );
+        let tree = builder.build();
+        let part_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            part_override(&app, panel, part_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(WIDGET_PROPERTY_COLOR),
+                border_color: Some(PART_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn part_hovered_background_preserves_the_part_normal_fill_against_the_widget_bundle() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .button("button")
+                .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.with(
+                    El::new()
+                        .background(PART_NORMAL_FILL)
+                        .hovered(Appearance::new().background(PART_NORMAL_FILL)),
+                    |_| {},
+                );
+            },
+        );
+        let tree = builder.build();
+        let part_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            part_override(&app, panel, part_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(PART_NORMAL_FILL),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn explicit_empty_part_bundle_inherits_the_widget_bundle_like_no_part_entry() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .button("button")
+                .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.with(
+                    El::new()
+                        .background(PART_NORMAL_FILL)
+                        .hovered(Appearance::new()),
+                    |_| {},
+                );
+                children.with(El::new().background(PART_NORMAL_FILL), |_| {});
+            },
+        );
+        let tree = builder.build();
+        let explicit_empty_index = tree.len() - 2;
+        let undeclared_part_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("button visual slots");
+        assert!(
+            slots
+                .part_appearances()
+                .iter()
+                .any(|(element_index, _)| *element_index == explicit_empty_index),
+            "the explicit empty bundle must reach the post-inversion part channel",
+        );
+        assert!(
+            !slots
+                .part_appearances()
+                .iter()
+                .any(|(element_index, _)| *element_index == undeclared_part_index),
+            "the comparison recipient must have no part entry",
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        let expected = Some(VisualSlotOverride {
+            fill_color: Some(WIDGET_PROPERTY_COLOR),
+            ..VisualSlotOverride::default()
+        });
+        assert_eq!(part_override(&app, panel, explicit_empty_index), expected);
+        assert_eq!(part_override(&app, panel, undeclared_part_index), expected);
+    }
+
+    #[test]
+    fn global_panel_widget_and_part_hovered_appearances_compose_at_a_part() {
+        let mut app = widgets_test_app();
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(Appearance::new().background(GLOBAL_PROPERTY_COLOR));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                .button("button")
+                .hovered(Appearance::new().text_color(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.text(
+                    Text::new("part", TextStyle::new(10.0)).layout(
+                        El::new()
+                            .background(PART_NORMAL_FILL)
+                            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                            .hovered(Appearance::new().path_color(PART_PROPERTY_COLOR)),
+                    ),
+                );
+            },
+        );
+        let tree = builder.build();
+        let part_index = tree.len() - 1;
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .widget_hovered_appearance(Appearance::new().border_color(PANEL_PROPERTY_COLOR))
+            .with_tree(tree)
+            .build()
+            .expect("appearance composition panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            part_override(&app, panel, part_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(GLOBAL_PROPERTY_COLOR),
+                text_color: Some(WIDGET_PROPERTY_COLOR),
+                path_color: Some(PART_PROPERTY_COLOR),
+                border_color: Some(PANEL_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn widget_border_color_stays_dormant_on_a_text_only_label() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .button("button")
+                .hovered(Appearance::new().border_color(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.text(Text::new("label", TextStyle::new(10.0)).layout(El::new()));
+            },
+        );
+        let tree = builder.build();
+        let label_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        let label_capabilities = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .and_then(|slots| {
+                slots
+                    .elements()
+                    .iter()
+                    .find(|(element_index, _)| *element_index == label_index)
+                    .map(|(_, capabilities)| *capabilities)
+            })
+            .expect("text label visual recipient");
+        assert!(!label_capabilities.contains(VisualElementCapabilities::SDF_BORDER));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(part_override(&app, panel, label_index), None);
+    }
+
+    #[test]
+    fn widget_material_stays_dormant_on_an_image_only_element() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .button("button")
+                .hovered(Appearance::new().material(Handle::<StandardMaterial>::default())),
+            |children| {
+                children.image(El::new(), Handle::<Image>::default(), Color::WHITE);
+            },
+        );
+        let tree = builder.build();
+        let image_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        let image_capabilities = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .and_then(|slots| {
+                slots
+                    .elements()
+                    .iter()
+                    .find(|(element_index, _)| *element_index == image_index)
+                    .map(|(_, capabilities)| *capabilities)
+            })
+            .expect("image visual recipient");
+        assert!(!image_capabilities.contains(VisualElementCapabilities::SDF_MATERIAL));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(part_override(&app, panel, image_index), None);
+    }
+
+    #[test]
+    fn widget_background_stays_dormant_on_a_text_only_label_without_background() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .button("button")
+                .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.text(Text::new("label", TextStyle::new(10.0)).layout(El::new()));
+            },
+        );
+        let tree = builder.build();
+        let label_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        let label_capabilities = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .and_then(|slots| {
+                slots
+                    .elements()
+                    .iter()
+                    .find(|(element_index, _)| *element_index == label_index)
+                    .map(|(_, capabilities)| *capabilities)
+            })
+            .expect("text label visual recipient");
+        assert!(!label_capabilities.contains(VisualElementCapabilities::SDF_FILL));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(part_override(&app, panel, label_index), None);
+    }
+
+    #[test]
+    fn state_layer_order_wins_across_global_panel_widget_and_part_levels() {
+        let mut app = widgets_test_app();
+        *app.world_mut()
+            .resource_mut::<crate::WidgetDisabledAppearance>() =
+            crate::WidgetDisabledAppearance::new(
+                Appearance::new().background(GLOBAL_PROPERTY_COLOR),
+            );
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .button("button")
+                .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.with(
+                    El::new()
+                        .background(PART_NORMAL_FILL)
+                        .focused(Appearance::new()),
+                    |_| {},
+                );
+            },
+        );
+        let tree = builder.build();
+        let part_index = tree.len() - 1;
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .widget_pressed_appearance(Appearance::new().background(PANEL_PROPERTY_COLOR))
+            .with_tree(tree)
+            .build()
+            .expect("layered state panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        activate_widget_state(&mut app, widget, WidgetState::Focused);
+        app.world_mut().entity_mut(widget).insert((
+            PickingInteraction::Hovered,
+            ButtonPress,
+            WidgetDisabled::test_marker(),
+        ));
+        app.update();
+
+        assert_eq!(
+            part_override(&app, panel, part_index),
+            // Resolving levels first keeps the global disabled value; the interleaved
+            // level-first state algorithm would instead produce `WIDGET_PROPERTY_COLOR`.
+            Some(VisualSlotOverride {
+                fill_color: Some(GLOBAL_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn runtime_global_and_panel_hover_mutations_repaint_live_widget_kinds() {
+        let mut app = widgets_test_app();
+        let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().background(PART_NORMAL_FILL).button("button"),
+            |_| {},
+        );
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .widget("slider", Slider::new(0.0..=1.0)),
+            |_| {},
+        );
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .editable_field("field", field),
+            |_| {},
+        );
+        let panel = spawn_widget_panel(&mut app, builder.build());
+        app.update();
+        let button = resolve_widget(&mut app, panel, "button");
+        let slider = resolve_widget(&mut app, panel, "slider");
+        let editable = resolve_widget(&mut app, panel, "field");
+        for widget in [button, slider, editable] {
+            app.world_mut()
+                .entity_mut(widget)
+                .insert(PickingInteraction::Hovered);
+        }
+        app.update();
+
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(Appearance::new().background(GLOBAL_PROPERTY_COLOR));
+        app.update();
+        for (widget, slot) in [
+            (button, VisualSlotId::BUTTON_ROOT),
+            (slider, VisualSlotId::SLIDER_ROOT),
+            (editable, VisualSlotId::EDITABLE_ROOT),
+        ] {
+            let root_index = app
+                .world()
+                .get::<WidgetVisualSlots>(widget)
+                .and_then(|slots| slots.element_index(slot))
+                .expect("widget root index");
+            assert_eq!(
+                part_override(&app, panel, root_index),
+                Some(VisualSlotOverride {
+                    fill_color: Some(GLOBAL_PROPERTY_COLOR),
+                    ..VisualSlotOverride::default()
+                }),
+            );
+        }
+
+        *app.world_mut()
+            .get_mut::<Cascade<WidgetHoveredAppearance>>(panel)
+            .expect("panel hovered appearance cascade") = Cascade::Override(
+            WidgetHoveredAppearance::new(Appearance::new().background(PANEL_PROPERTY_COLOR)),
+        );
+        app.update();
+        for (widget, slot) in [
+            (button, VisualSlotId::BUTTON_ROOT),
+            (slider, VisualSlotId::SLIDER_ROOT),
+            (editable, VisualSlotId::EDITABLE_ROOT),
+        ] {
+            let root_index = app
+                .world()
+                .get::<WidgetVisualSlots>(widget)
+                .and_then(|slots| slots.element_index(slot))
+                .expect("widget root index");
+            assert_eq!(
+                part_override(&app, panel, root_index),
+                Some(VisualSlotOverride {
+                    fill_color: Some(PANEL_PROPERTY_COLOR),
+                    ..VisualSlotOverride::default()
+                }),
+            );
+        }
+    }
+
+    #[test]
+    fn editable_field_never_presents_a_pressed_appearance() {
+        let mut app = widgets_test_app();
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(Appearance::new().background(GLOBAL_PROPERTY_COLOR));
+        let field = ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("test"));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .editable_field("field", field),
+            |_| {},
+        );
+        let panel = spawn_widget_panel(&mut app, builder.build());
+        app.update();
+        let field = resolve_widget(&mut app, panel, "field");
+        let root_index = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .and_then(|slots| slots.element_index(VisualSlotId::EDITABLE_ROOT))
+            .expect("editable field root index");
+
+        app.world_mut()
+            .entity_mut(field)
+            .insert((ButtonPress, PickingInteraction::Hovered));
+        *app.world_mut().resource_mut::<WidgetPressedAppearance>() =
+            WidgetPressedAppearance::new(Appearance::new().background(WIDGET_PROPERTY_COLOR));
+        app.update();
+
+        assert_eq!(
+            part_override(&app, panel, root_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(GLOBAL_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+            "the hovered override proves present_editable_state ran after the pressed root changed",
+        );
+        assert_ne!(
+            part_override(&app, panel, root_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(WIDGET_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+            "an editable field must not present the pressed appearance",
+        );
+    }
+
+    #[test]
+    fn first_update_reifies_global_panel_widget_and_part_hovered_appearances() {
+        let mut app = widgets_test_app();
+        *app.world_mut().resource_mut::<WidgetHoveredAppearance>() =
+            WidgetHoveredAppearance::new(Appearance::new().background(GLOBAL_PROPERTY_COLOR));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(PART_NORMAL_FILL)
+                .button("button")
+                .hovered(Appearance::new().text_color(WIDGET_PROPERTY_COLOR)),
+            |children| {
+                children.text(
+                    Text::new("part", TextStyle::new(10.0)).layout(
+                        El::new()
+                            .background(PART_NORMAL_FILL)
+                            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                            .hovered(Appearance::new().path_color(PART_PROPERTY_COLOR)),
+                    ),
+                );
+            },
+        );
+        let tree = builder.build();
+        let part_index = tree.len() - 1;
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .widget_hovered_appearance(Appearance::new().border_color(PANEL_PROPERTY_COLOR))
+            .with_tree(tree)
+            .build()
+            .expect("first-update panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "button");
+        assert_eq!(
+            app.world()
+                .get::<Resolved<WidgetHoveredAppearance>>(widget)
+                .map(|resolved| resolved.0.appearance()),
+            Some(
+                &Appearance::new()
+                    .background(GLOBAL_PROPERTY_COLOR)
+                    .border_color(PANEL_PROPERTY_COLOR)
+                    .text_color(WIDGET_PROPERTY_COLOR),
+            ),
+        );
+        let world = app.world();
+        let slots = world
+            .get::<WidgetVisualSlots>(widget)
+            .expect("first update widget visual slots");
+        assert!(
+            slots
+                .part_appearances()
+                .iter()
+                .any(|(element_index, _)| *element_index == part_index),
+            "the first reification frame must retain the authored part appearance",
+        );
+        let hovered = world
+            .get::<Resolved<WidgetHoveredAppearance>>(widget)
+            .expect("resolved hovered appearance");
+        let pressed = world
+            .get::<Resolved<WidgetPressedAppearance>>(widget)
+            .expect("resolved pressed appearance");
+        let focused = world
+            .get::<Resolved<crate::WidgetFocusedAppearance>>(widget)
+            .expect("resolved focused appearance");
+        let disabled = world
+            .get::<Resolved<crate::WidgetDisabledAppearance>>(widget)
+            .expect("resolved disabled appearance");
+        let panel_component = world.get::<DiegeticPanel>(panel);
+        let mut desired = WidgetVisualOverrides::default();
+        super::resolve_part_overrides(
+            &mut desired,
+            slots,
+            hovered,
+            pressed,
+            focused,
+            disabled,
+            &[Some(WidgetState::Hovered)],
+            panel_component,
+        );
+        assert_eq!(
+            desired
+                .element_overrides()
+                .iter()
+                .find(|(element_index, _)| *element_index == part_index)
+                .map(|(_, override_value)| override_value),
+            Some(&VisualSlotOverride {
+                fill_color: Some(GLOBAL_PROPERTY_COLOR),
+                text_color: Some(WIDGET_PROPERTY_COLOR),
+                path_color: Some(PART_PROPERTY_COLOR),
+                border_color: Some(PANEL_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
     }
 
     #[test]

@@ -15,13 +15,13 @@ mod tooltip;
 mod visual;
 
 pub use appearance::Appearance;
+pub(crate) use appearance::ResolvedWidgetStateAppearances;
 pub(crate) use appearance::StateAppearance;
 pub use appearance::WidgetDisabledAppearance;
 pub use appearance::WidgetFocusedAppearance;
 pub use appearance::WidgetHoveredAppearance;
 pub use appearance::WidgetPressedAppearance;
 pub(crate) use appearance::WidgetState;
-pub(crate) use appearance::WidgetStateCascades;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::picking::PickingSettings;
@@ -220,6 +220,42 @@ fn add_mesh_anchor_systems(app: &mut App) {
     );
 }
 
+fn configure_widget_system_sets(app: &mut App) {
+    app.configure_sets(
+        Update,
+        (
+            WidgetSystems::Reify
+                .after(PanelSystems::ComputeLayout)
+                .after(PanelSystems::ResolveWorldFit)
+                .after(ScreenSpaceSystems::ResolveDimensions),
+            WidgetSystems::ReifyCommandsApplied.after(WidgetSystems::Reify),
+            TooltipSystems::ReifyControllers.after(WidgetSystems::ReifyCommandsApplied),
+            TooltipSystems::ControllerCommandsApplied
+                .after(TooltipSystems::ReifyControllers)
+                .before(PanelSystems::ResolvePanelAttachments),
+            WidgetSystems::ResolveInteractivity
+                .after(WidgetSystems::ReifyCommandsApplied)
+                .before(WidgetSystems::InteractivityCommandsApplied),
+            WidgetSystems::InteractivityCommandsApplied
+                .after(WidgetSystems::ResolveInteractivity)
+                .before(WidgetSystems::Focus),
+            WidgetSystems::Focus
+                .after(ImeSystemSet::PublishInputBlockers)
+                .before(WidgetSystems::SemanticInput),
+            WidgetSystems::SemanticInput
+                .after(WidgetSystems::Focus)
+                .before(PanelSystems::ResolvePanelAttachments),
+            WidgetSystems::FocusCommandsApplied
+                .after(WidgetSystems::SemanticInput)
+                .before(ImeSystemSet::Input),
+            WidgetSystems::PresentationCommandsApplied
+                .after(WidgetSystems::FocusCommandsApplied)
+                .after(WidgetSystems::ReifyCommandsApplied)
+                .after(cascade::CascadeSet::Propagate),
+        ),
+    );
+}
+
 impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MeshPickingSettings>()
@@ -238,82 +274,56 @@ impl Plugin for WidgetsPlugin {
                 cascade::cascade_plugin::<WidgetDisabledAppearance>(),
                 SliderPlugin,
                 TooltipPlugin,
-            ))
-            .configure_sets(
-                Update,
-                (
-                    WidgetSystems::Reify
-                        .after(PanelSystems::ComputeLayout)
-                        .after(PanelSystems::ResolveWorldFit)
-                        .after(ScreenSpaceSystems::ResolveDimensions),
-                    WidgetSystems::ReifyCommandsApplied.after(WidgetSystems::Reify),
-                    TooltipSystems::ReifyControllers.after(WidgetSystems::ReifyCommandsApplied),
-                    TooltipSystems::ControllerCommandsApplied
-                        .after(TooltipSystems::ReifyControllers)
-                        .before(PanelSystems::ResolvePanelAttachments),
-                    WidgetSystems::ResolveInteractivity
-                        .after(WidgetSystems::ReifyCommandsApplied)
-                        .before(WidgetSystems::InteractivityCommandsApplied),
-                    WidgetSystems::InteractivityCommandsApplied
-                        .after(WidgetSystems::ResolveInteractivity)
-                        .before(WidgetSystems::Focus),
-                    WidgetSystems::Focus
-                        .after(ImeSystemSet::PublishInputBlockers)
-                        .before(WidgetSystems::SemanticInput),
-                    WidgetSystems::SemanticInput
-                        .after(WidgetSystems::Focus)
-                        .before(PanelSystems::ResolvePanelAttachments),
-                    WidgetSystems::FocusCommandsApplied
-                        .after(WidgetSystems::SemanticInput)
-                        .before(ImeSystemSet::Input),
-                    WidgetSystems::PresentationCommandsApplied
-                        .after(WidgetSystems::FocusCommandsApplied),
-                ),
-            )
-            .add_systems(
-                PreUpdate,
-                picking::update_hits
-                    .run_if(resource_exists::<RayMap>.and_then(resource_exists::<Assets<Mesh>>))
-                    .in_set(PickingSystems::Backend),
-            )
-            .add_systems(
-                PreUpdate,
-                capture::reconcile_pointer_input
-                    .run_if(
-                        resource_exists::<Messages<PointerInput>>
-                            .and_then(resource_exists::<PointerState>)
-                            .and_then(resource_exists::<HoverMap>)
-                            .and_then(resource_exists::<PickingSettings>),
-                    )
-                    .in_set(PickingSystems::Last),
-            )
-            .add_systems(
-                Update,
-                (
-                    reify::reify_widgets.in_set(WidgetSystems::Reify),
-                    ApplyDeferred.in_set(WidgetSystems::ReifyCommandsApplied),
-                    reify::reify_tooltip_controllers.in_set(TooltipSystems::ReifyControllers),
-                    ApplyDeferred.in_set(TooltipSystems::ControllerCommandsApplied),
-                    interactivity::resolve_interactivity
-                        .in_set(WidgetSystems::ResolveInteractivity),
-                    ApplyDeferred.in_set(WidgetSystems::InteractivityCommandsApplied),
-                    focus::cleanup_removed_focus_participants.in_set(WidgetSystems::Focus),
-                    input::route_semantic_input.in_set(WidgetSystems::SemanticInput),
-                    ApplyDeferred.in_set(WidgetSystems::FocusCommandsApplied),
-                    button::present_button_state
-                        .after(WidgetSystems::FocusCommandsApplied)
-                        .before(WidgetSystems::PresentationCommandsApplied),
-                    editable::present_editable_state
-                        .after(WidgetSystems::FocusCommandsApplied)
-                        .before(WidgetSystems::PresentationCommandsApplied),
-                    slider::present_slider_state
-                        .after(WidgetSystems::FocusCommandsApplied)
-                        .before(WidgetSystems::PresentationCommandsApplied),
-                    ApplyDeferred.in_set(WidgetSystems::PresentationCommandsApplied),
-                    visual::dispatch_visual_overrides
-                        .after(WidgetSystems::PresentationCommandsApplied),
-                ),
-            );
+            ));
+        configure_widget_system_sets(app);
+        app.add_systems(
+            PreUpdate,
+            picking::update_hits
+                .run_if(resource_exists::<RayMap>.and_then(resource_exists::<Assets<Mesh>>))
+                .in_set(PickingSystems::Backend),
+        )
+        .add_systems(
+            PreUpdate,
+            capture::reconcile_pointer_input
+                .run_if(
+                    resource_exists::<Messages<PointerInput>>
+                        .and_then(resource_exists::<PointerState>)
+                        .and_then(resource_exists::<HoverMap>)
+                        .and_then(resource_exists::<PickingSettings>),
+                )
+                .in_set(PickingSystems::Last),
+        )
+        .add_systems(
+            Update,
+            (
+                reify::reify_widgets.in_set(WidgetSystems::Reify),
+                ApplyDeferred.in_set(WidgetSystems::ReifyCommandsApplied),
+                reify::reify_tooltip_controllers.in_set(TooltipSystems::ReifyControllers),
+                ApplyDeferred.in_set(TooltipSystems::ControllerCommandsApplied),
+                interactivity::resolve_interactivity.in_set(WidgetSystems::ResolveInteractivity),
+                ApplyDeferred.in_set(WidgetSystems::InteractivityCommandsApplied),
+                focus::cleanup_removed_focus_participants.in_set(WidgetSystems::Focus),
+                input::route_semantic_input.in_set(WidgetSystems::SemanticInput),
+                ApplyDeferred.in_set(WidgetSystems::FocusCommandsApplied),
+                button::present_button_state
+                    .after(WidgetSystems::FocusCommandsApplied)
+                    .after(WidgetSystems::ReifyCommandsApplied)
+                    .after(cascade::CascadeSet::Propagate)
+                    .before(WidgetSystems::PresentationCommandsApplied),
+                editable::present_editable_state
+                    .after(WidgetSystems::FocusCommandsApplied)
+                    .after(WidgetSystems::ReifyCommandsApplied)
+                    .after(cascade::CascadeSet::Propagate)
+                    .before(WidgetSystems::PresentationCommandsApplied),
+                slider::present_slider_state
+                    .after(WidgetSystems::FocusCommandsApplied)
+                    .after(WidgetSystems::ReifyCommandsApplied)
+                    .after(cascade::CascadeSet::Propagate)
+                    .before(WidgetSystems::PresentationCommandsApplied),
+                ApplyDeferred.in_set(WidgetSystems::PresentationCommandsApplied),
+                visual::dispatch_visual_overrides.after(WidgetSystems::PresentationCommandsApplied),
+            ),
+        );
         add_widget_observers(app);
         add_mesh_anchor_systems(app);
     }
