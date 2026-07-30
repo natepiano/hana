@@ -38,10 +38,10 @@
 //!         panel_font_unit: Unit::Millimeters,
 //!         ..default()
 //!     })
-//!     .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Add)))
+//!     .insert_resource(TextAlpha(AlphaMode::Add))
 //!     // Optional: compensate analytic glyph coverage when HDR makes dark text
 //!     // look too thin on light backgrounds. The default is no compensation.
-//!     .insert_resource(CascadeDefault(HdrTextCoverageBias(2.0)))
+//!     .insert_resource(HdrTextCoverageBias(2.0))
 //!     .add_plugins(DiegeticUiPlugin);
 //! ```
 
@@ -75,7 +75,6 @@ use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
-pub use cascade::CascadeDefault;
 pub use cascade::CascadeEntityCommandsExt;
 pub use cascade::CascadeSet;
 pub use cascade::FontUnit;
@@ -328,9 +327,11 @@ use text::TextPlugin;
 /// Bevy plugin that adds diegetic UI panel support.
 ///
 /// Composes layout, rendering, text, and screen-space overlay
-/// support into a single plugin. Insert [`PanelDefaults`] or
-/// [`CascadeDefault<A>`](CascadeDefault) resources before adding this plugin;
-/// they take effect through the child plugins at build time.
+/// support into a single plugin. Insert [`PanelDefaults`] before adding this
+/// plugin; it takes effect through the child plugins at build time. A cascade
+/// root resource such as [`TextAlpha`] can go on either side: inserted first it
+/// is left alone, inserted afterwards it replaces the plugin's default and
+/// propagates to every entity that inherits.
 ///
 /// # Quick start
 ///
@@ -357,6 +358,10 @@ impl Plugin for DiegeticUiPlugin {
         embedded_asset!(app, "shaders/image_panel.wgsl");
 
         app.init_resource::<PanelDefaults>();
+        app.configure_sets(
+            Update,
+            bevy_kana::CascadeSet::Propagate.in_set(CascadeSet::Propagate),
+        );
         app.add_plugins((
             TextPlugin,
             PanelPlugin,

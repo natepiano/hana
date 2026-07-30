@@ -1102,9 +1102,9 @@ fn apply_panel_world_conversion_now(
 /// [`PanelDefaults::panel_font_unit`]. Thus `panel_font_unit` is the normal
 /// construction-time seed rather than the cascade root. A later explicit
 /// `inherit_font_unit` command can replace that seed with `Cascade::Inherit`, in
-/// which case the panel resolves through `CascadeDefault<FontUnit>`.
+/// which case the panel resolves through `FontUnit`.
 /// `text_alpha_mode` supplies the panel value inherited by its labels; when it
-/// inherits, both panel and labels resolve to `CascadeDefault<TextAlpha>`.
+/// inherits, both panel and labels resolve to `TextAlpha`.
 /// `CascadePlugin<TextAlpha>` maintains the panel's `Resolved<TextAlpha>`
 /// cache, while labels follow `CascadeFrom` to the panel's authored
 /// `Cascade<TextAlpha>`. This is the panel equivalent of the standalone

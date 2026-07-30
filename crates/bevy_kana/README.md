@@ -15,7 +15,7 @@
 
 ---
 
-> **Work in progress.** This crate is in active development (v0.2.0) and not
+> **Work in progress.** This crate is in active development (v0.3.0) and not
 > subject to semver stability guarantees. APIs will change without notice
 > between commits. Do not depend on this in production code yet.
 
@@ -140,6 +140,35 @@ It handles root-default changes, local authoring changes, relationship
 retargeting and removal, participant removal, multi-level propagation, cycle
 and depth termination, and change-guarded cache writes.
 
+The root value lives in a resource. `CascadePlugin::new` installs
+`CascadeDefault<A>` for it. A crate that already has a suitable resource
+implements `CascadeRootResource<A>` on that type and selects it instead, which
+lets an attribute serve as its own root:
+
+```rust
+use bevy_kana::CascadeRootResource;
+
+#[derive(Clone, Copy, Debug, PartialEq, Reflect, Resource)]
+#[reflect(Resource)]
+struct Opacity(f32);
+
+impl CascadeRootResource<Self> for Opacity {
+    fn root(&self) -> Self {
+        *self
+    }
+
+    fn from_root(root: Self) -> Self {
+        root
+    }
+}
+
+fn register(app: &mut App) {
+    app.add_plugins(CascadePlugin::new(Opacity(1.0)).with_root_resource::<Opacity>());
+}
+```
+
+`insert_resource(Opacity(0.8))` then sets the app-wide default.
+
 Run the interactive generic cascade example:
 
 ```bash
@@ -154,6 +183,7 @@ cargo run --example cascade
 
 | bevy_kana | Bevy |
 |-----------|------|
+| 0.3.0 | 0.19 |
 | 0.2.0 | 0.19 |
 | 0.1.0 | 0.19 |
 | 0.0.6 | 0.18 |
@@ -164,7 +194,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy_kana = "0.2.0"
+bevy_kana = "0.3.0"
 ```
 
 Run the example:

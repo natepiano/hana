@@ -20,7 +20,6 @@ use fairy_dust::CameraHomeTarget;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
-use hana_diegetic::CascadeDefault;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticText;
 use hana_diegetic::El;
@@ -70,7 +69,7 @@ struct ControlsState {
 
 impl Default for ControlsState {
     fn default() -> Self {
-        // Matches `CascadeDefault<TextAlpha>::default()`.
+        // Matches the `TextAlpha` the cascade installs.
         Self {
             alpha_mode: AlphaMode::Blend,
         }
@@ -271,7 +270,7 @@ fn select_alpha_opaque(mut state: ResMut<ControlsState>) { state.alpha_mode = AL
 fn apply_state_and_rebuild_hud(
     state: Res<ControlsState>,
     mut commands: Commands,
-    mut alpha_default: ResMut<CascadeDefault<TextAlpha>>,
+    mut alpha_default: ResMut<TextAlpha>,
     hud_panels: Query<Entity, With<HudPanel>>,
     info_panels: Query<Entity, With<InfoPanel>>,
 ) {
@@ -279,7 +278,7 @@ fn apply_state_and_rebuild_hud(
         return;
     }
 
-    alpha_default.0 = TextAlpha(state.alpha_mode);
+    alpha_default.0 = state.alpha_mode;
 
     for e in &hud_panels {
         commands.entity(e).despawn();

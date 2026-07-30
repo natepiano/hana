@@ -583,7 +583,8 @@ Acceptance:
   evaluations in that mode only.
 - `CascadePlugin::<AntiAlias>` / `::<HairlineFade>` are registered in
   `HeadlessLayoutPlugin` (not `RenderPlugin`) because `seed_panel_overrides`
-  reads their `CascadeDefault<A>` resources in headless layout apps.
+  reads their root resources (`AntiAlias`, `HairlineWidth`) in headless layout
+  apps.
 - Per-label text AA authoring is the `override_anti_alias` verb on the
   label entity; no `TextStyle::with_anti_alias` capture was added (not a doc
   deliverable — record here so it is a deliberate gap, not an omission).
@@ -593,11 +594,10 @@ Acceptance:
 - The alpha-epsilon-before-OIT deliverable was already satisfied: the
   `DISCARD_ALPHA` discard has always preceded `oit_draw` in the fragment
   entry; Phase C only documented the ordering.
-- Two global resources now mirror into `CascadeDefault<A>` roots
-  (`sync_anti_alias`, `sync_hairline_fade`), ordered
-  `.before(CascadeSet::Propagate)` so a global change re-resolves and re-packs
-  the same frame; the headless integration test proves the whole chain
-  (element override survives a global flip, batch count stays 1).
+- The two global resources `AntiAlias` and `HairlineWidth` are themselves the
+  cascade roots, so a global change re-resolves and re-packs the same frame
+  with no mirroring system in between; the headless integration test proves the
+  whole chain (element override survives a global flip, batch count stays 1).
 
 **Implications for remaining phases:**
 

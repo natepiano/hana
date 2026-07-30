@@ -39,6 +39,7 @@ pub use cascade::CascadeDefault;
 pub use cascade::CascadeEntityCommandsExt;
 pub use cascade::CascadeFrom;
 pub use cascade::CascadePlugin;
+pub use cascade::CascadeRootResource;
 pub use cascade::CascadeSet;
 pub use cascade::Resolved;
 pub use cascade::resolve_cascade;

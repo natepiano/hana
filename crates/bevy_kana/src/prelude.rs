@@ -5,6 +5,7 @@ pub use super::CascadeDefault;
 pub use super::CascadeEntityCommandsExt;
 pub use super::CascadeFrom;
 pub use super::CascadePlugin;
+pub use super::CascadeRootResource;
 pub use super::CascadeSet;
 #[cfg(feature = "math")]
 pub use super::Displacement;

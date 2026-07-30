@@ -5,6 +5,7 @@
 //! diegetic attributes and exposes domain-specific command and reader names.
 
 mod attributes;
+mod cascade_set;
 mod constants;
 mod defaults;
 mod resolved;
@@ -32,14 +33,13 @@ pub use attributes::resolved_text_alpha;
 pub use attributes::resolved_text_material;
 pub(crate) use bevy_kana::Cascade;
 pub(crate) use bevy_kana::CascadeAttribute;
-pub use bevy_kana::CascadeDefault;
 pub(crate) use bevy_kana::CascadeFrom;
 pub(crate) use bevy_kana::CascadePlugin;
-pub use bevy_kana::CascadeSet;
 pub(crate) use bevy_kana::Resolved;
+pub use cascade_set::CascadeSet;
 pub use defaults::PanelDefaults;
 pub(crate) use resolved::CascadeRoot;
 
-pub(crate) fn cascade_plugin<A: CascadeRoot>() -> CascadePlugin<A> {
-    CascadePlugin::new(A::root_default())
+pub(crate) fn cascade_plugin<A: CascadeRoot>() -> CascadePlugin<A, A::Root> {
+    CascadePlugin::new(A::root_default()).with_root_resource()
 }

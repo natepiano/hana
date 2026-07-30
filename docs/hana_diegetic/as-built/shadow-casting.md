@@ -65,7 +65,8 @@ domain values chosen by `hana_diegetic`, with roots `ShadowCasting::On` and
   reacts to authored changes/removal, relationship insertion/retargeting/
   removal, and root-default changes, then updates affected descendants.
 - Resolution follows `CascadeFrom` until it finds an override, otherwise it
-  uses `CascadeDefault<A>`. Cycles and excessive depth use the root default.
+  uses the attribute's root resource value — for `ShadowCasting`, the
+  `ShadowCasting` resource. Cycles and excessive depth use the root default.
   `Resolved<A>` is written only when the effective value changes.
 
 Panel construction conditionally seeds its private authored slot as

@@ -23,7 +23,6 @@ use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrder;
 use super::material_table::MaterialTableAppendReady;
-use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
 use crate::layout::BoundingBox;
@@ -190,7 +189,7 @@ fn build_panel_geometry(
     old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
-    sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
+    sdf_material_default: Res<SdfMaterial>,
     mut resolved_surfaces: ResMut<ResolvedSdfSurfaceRegistry>,
     mut commands: Commands,
 ) {
@@ -212,7 +211,7 @@ fn build_panel_geometry(
             shadow_casting: panel_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0),
             layer: panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
             sdf_material: panel_sdf_material.map_or_else(
-                || sdf_material_default.0.0.clone(),
+                || sdf_material_default.0.clone(),
                 |resolved| resolved.0.0.clone(),
             ),
         };

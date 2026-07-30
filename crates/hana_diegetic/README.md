@@ -56,7 +56,7 @@ The `AlphaMode` you pick determines how that coverage is composited:
 | `Mask(t)` | ❌ | Thresholds coverage to 0/1 — jagged edges |
 | `Opaque` | ❌ | Ignores coverage — glyph rectangles |
 
-Set the app-wide default via `CascadeDefault<TextAlpha>`, per-panel via
+Set the app-wide default via `TextAlpha`, per-panel via
 `DiegeticPanel::text_alpha_mode`, per-label via
 `TextStyle::with_alpha_mode`, or per-standalone entity via
 `override_text_alpha`.
@@ -70,7 +70,7 @@ commands.spawn(Camera3d::default());
 
 ```rust
 // MSAA scene — switch the app-wide default to AlphaToCoverage:
-commands.insert_resource(CascadeDefault(TextAlpha(AlphaMode::AlphaToCoverage)));
+commands.insert_resource(TextAlpha(AlphaMode::AlphaToCoverage));
 commands.spawn((Camera3d::default(), Msaa::Sample4));
 ```
 

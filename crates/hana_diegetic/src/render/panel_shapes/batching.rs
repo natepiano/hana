@@ -33,7 +33,6 @@ use super::relationship::PanelShapeMaterialSourceKey;
 use super::relationship::PanelShapeOf;
 use super::relationship::PanelShapeSource;
 use super::relationship::PanelShapes;
-use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::ShapeMaterial;
 use crate::layout::BoundingBox;
@@ -55,6 +54,7 @@ use crate::render::BatchRenderLayers;
 use crate::render::Dirty;
 use crate::render::GeometryDirty;
 use crate::render::HairlineFade;
+use crate::render::HairlineWidth;
 use crate::render::MaterialDirty;
 use crate::render::PathAtlas;
 use crate::render::PathBatchKey;
@@ -544,7 +544,7 @@ struct PanelShapeReconcileContext<'a> {
     /// Current `StandardMaterial` assets used to project source handles.
     standard_materials:   &'a Assets<StandardMaterial>,
     /// Seeded shape-material cascade default used as the final source handle.
-    shape_default:        &'a CascadeDefault<ShapeMaterial>,
+    shape_default:        &'a ShapeMaterial,
     /// Panel's cascade-resolved panel-shape material handle.
     shape_material:       Handle<StandardMaterial>,
     asset_server:         &'a AssetServer,
@@ -571,7 +571,7 @@ struct PanelShapeReconcileContext<'a> {
 pub(super) struct PanelShapeMaterialAssets<'w> {
     standard_materials: Res<'w, Assets<StandardMaterial>>,
     asset_server:       Res<'w, AssetServer>,
-    shape_default:      Res<'w, CascadeDefault<ShapeMaterial>>,
+    shape_default:      Res<'w, ShapeMaterial>,
 }
 
 struct ShapePrimitiveSource<'a> {
@@ -734,11 +734,10 @@ pub(super) fn reconcile_panel_line_batches(
     shape_sources: Query<&PanelShapeSource>,
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
-    anti_alias: Res<AntiAlias>,
-    lighting_default: Res<CascadeDefault<Lighting>>,
-    sidedness_default: Res<CascadeDefault<Sidedness>>,
-    anti_alias_default: Res<CascadeDefault<AntiAlias>>,
-    hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
+    lighting_default: Res<Lighting>,
+    sidedness_default: Res<Sidedness>,
+    anti_alias_default: Res<AntiAlias>,
+    hairline_fade_default: Res<HairlineWidth>,
     material_assets: PanelShapeMaterialAssets,
     mut material_table: ResMut<FrameMaterialTableBuild>,
     mut store: ResMut<ShapeBatchStore>,
@@ -786,7 +785,7 @@ pub(super) fn reconcile_panel_line_batches(
             standard_materials: &material_assets.standard_materials,
             shape_default: &material_assets.shape_default,
             shape_material: panel_shape_material.map_or_else(
-                || material_assets.shape_default.0.0.clone(),
+                || material_assets.shape_default.0.clone(),
                 |resolved| resolved.0.0.clone(),
             ),
             asset_server: &material_assets.asset_server,
@@ -799,11 +798,11 @@ pub(super) fn reconcile_panel_line_batches(
             panel_shadow_casting: panel_shadow_casting
                 .map_or(ShadowCasting::On, |resolved| resolved.0),
             layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
-            panel_lighting: panel_lighting.map_or(lighting_default.0, |resolved| resolved.0),
-            panel_sidedness: panel_sidedness.map_or(sidedness_default.0, |resolved| resolved.0),
-            panel_anti_alias: panel_anti_alias.map_or(anti_alias_default.0, |resolved| resolved.0),
+            panel_lighting: panel_lighting.map_or(*lighting_default, |resolved| resolved.0),
+            panel_sidedness: panel_sidedness.map_or(*sidedness_default, |resolved| resolved.0),
+            panel_anti_alias: panel_anti_alias.map_or(*anti_alias_default, |resolved| resolved.0),
             panel_hairline_fade: panel_hairline_fade
-                .map_or(hairline_fade_default.0, |resolved| resolved.0),
+                .map_or(hairline_fade_default.fade, |resolved| resolved.0),
         };
         let records = collect_panel_records(
             &context,
@@ -825,7 +824,7 @@ pub(super) fn reconcile_panel_line_batches(
     let atlas = store.commit_path_atlas(&mut storage_buffers, &mut materials);
     reconcile_batch_entities(
         atlas.as_ref(),
-        *anti_alias,
+        *anti_alias_default,
         &mut store,
         &mut meshes,
         &mut materials,
@@ -1013,7 +1012,7 @@ fn build_panel_line_group(
         context.standard_materials,
         context.asset_server,
         material_handle,
-        &context.shape_default.0.0,
+        &context.shape_default.0,
     )?;
     let base = strip_tangent_dependent_maps(base);
     let key = PanelShapeRenderKey {
@@ -1587,7 +1586,7 @@ mod tests {
     /// Headless app wired with panel layout, the AA/fade cascade plugins
     /// (via [`HeadlessLayoutPlugin`]), the lighting/sidedness cascade plugins
     /// (which `RenderPlugin` gets from `TextRenderPlugin`), the production
-    /// cascade-root sync systems, and the panel-line reconcile.
+    /// anti-alias material sync, and the panel-line reconcile.
     fn line_batch_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1612,11 +1611,7 @@ mod tests {
             .init_asset::<ShaderBuffer>()
             .add_systems(
                 Update,
-                (
-                    crate::render::sync_anti_alias,
-                    crate::render::sync_hairline_fade,
-                )
-                    .before(CascadeSet::Propagate),
+                crate::render::sync_anti_alias.before(CascadeSet::Propagate),
             )
             .add_systems(
                 PostUpdate,

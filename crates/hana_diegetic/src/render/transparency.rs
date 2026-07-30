@@ -96,7 +96,7 @@ const OIT_FRAGMENTS_PER_PIXEL_AVERAGE: f32 = 8.0;
 /// the default Blend path. Pair with `AlphaMode::Blend` or
 /// `AlphaMode::Premultiplied` on text (the cascade default; `Opaque`/`Mask`
 /// bypass OIT), configured via
-/// `CascadeDefault<TextAlpha>`, per-panel
+/// `TextAlpha`, per-panel
 /// override ([`DiegeticPanel`](crate::DiegeticPanel)), or per-style
 /// override ([`TextStyle`](crate::TextStyle) /
 /// [`TextStyle`](crate::TextStyle)).

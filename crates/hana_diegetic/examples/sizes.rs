@@ -426,7 +426,7 @@ fn build_commentary() -> hana_diegetic::LayoutTree {
             b.text((
                 "Bare 18.0 uses the contextual default: panel text \
                  inherits font_unit from the panel (Points by default). \
-                 WorldText resolves font_unit from CascadeDefault<FontUnit> \
+                 WorldText resolves font_unit from the FontUnit resource \
                  (Meters by default).",
                 note_style.clone(),
             ));

@@ -1,5 +1,6 @@
 //! Authored cascade values and relationship-backed ECS propagation.
 
+use std::marker::PhantomData;
 use std::ops::Deref;
 
 use bevy::ecs::system::EntityCommands;
@@ -236,6 +237,25 @@ impl Deref for CascadeChildren {
 #[reflect(Resource)]
 pub struct CascadeDefault<A: CascadeAttribute>(pub A);
 
+/// Resource holding attribute `A`'s root value.
+///
+/// [`CascadeDefault<A>`] implements this for every attribute. A crate with its own
+/// root resource type implements this for that type and passes it to
+/// [`CascadePlugin`].
+pub trait CascadeRootResource<A: CascadeAttribute>: Resource + GetTypeRegistration {
+    /// Returns the root value.
+    fn root(&self) -> A;
+
+    /// Builds this resource from a root value.
+    fn from_root(root: A) -> Self;
+}
+
+impl<A: CascadeAttribute> CascadeRootResource<A> for CascadeDefault<A> {
+    fn root(&self) -> A { self.0.clone() }
+
+    fn from_root(root: A) -> Self { Self(root) }
+}
+
 /// Cached effective value for a participating cascade attribute.
 #[derive(Clone, Component, Debug, Reflect)]
 #[reflect(Component)]
@@ -255,33 +275,60 @@ pub enum CascadeSet {
 }
 
 /// Installs propagation for one cascade attribute.
-pub struct CascadePlugin<A: CascadeAttribute> {
-    root: A,
+///
+/// `R` holds the attribute's root value. [`CascadePlugin::new`] uses
+/// [`CascadeDefault<A>`]; [`CascadePlugin::with_root_resource`] swaps in a
+/// caller-owned resource type.
+pub struct CascadePlugin<A: CascadeAttribute, R: CascadeRootResource<A> = CascadeDefault<A>> {
+    root:          A,
+    root_resource: PhantomData<R>,
 }
 
-impl<A: CascadeAttribute> CascadePlugin<A> {
+impl<A: CascadeAttribute> CascadePlugin<A, CascadeDefault<A>> {
     /// Creates an attribute plugin with `root` as its default value.
     #[must_use]
-    pub const fn new(root: A) -> Self { Self { root } }
+    pub const fn new(root: A) -> Self {
+        Self {
+            root,
+            root_resource: PhantomData,
+        }
+    }
+
+    /// Moves the same root value into a caller-supplied root resource type.
+    #[must_use]
+    pub fn with_root_resource<R: CascadeRootResource<A>>(self) -> CascadePlugin<A, R> {
+        CascadePlugin {
+            root:          self.root,
+            root_resource: PhantomData,
+        }
+    }
 }
 
-impl<A: CascadeAttribute> Default for CascadePlugin<A>
+impl<A: CascadeAttribute, R: CascadeRootResource<A>> Default for CascadePlugin<A, R>
 where
     CascadeDefault<A>: Default,
 {
-    fn default() -> Self { Self::new(CascadeDefault::<A>::default().0) }
+    fn default() -> Self {
+        Self {
+            root:          CascadeDefault::<A>::default().0,
+            root_resource: PhantomData,
+        }
+    }
 }
 
-impl<A: CascadeAttribute> Plugin for CascadePlugin<A> {
+impl<A: CascadeAttribute, R: CascadeRootResource<A>> Plugin for CascadePlugin<A, R> {
     fn build(&self, app: &mut App) {
-        if !app.world().contains_resource::<CascadeDefault<A>>() {
-            app.insert_resource(CascadeDefault(self.root.clone()));
+        if !app.world().contains_resource::<R>() {
+            app.insert_resource(R::from_root(self.root.clone()));
         }
         app.register_type::<Cascade<A>>()
             .register_type::<Resolved<A>>()
-            .register_type::<CascadeDefault<A>>()
-            .add_observer(resolve_inserted_cascade::<A>)
-            .add_systems(Update, propagate_cascade::<A>.in_set(CascadeSet::Propagate));
+            .register_type::<R>()
+            .add_observer(resolve_inserted_cascade::<A, R>)
+            .add_systems(
+                Update,
+                propagate_cascade::<A, R>.in_set(CascadeSet::Propagate),
+            );
     }
 }
 
@@ -326,17 +373,19 @@ pub fn resolved_cascade<A: CascadeAttribute>(world: &World, entity: Entity) -> O
 
 /// Resolves an entity directly from current authored components and resources.
 ///
-/// Returns `None` when [`CascadePlugin<A>`] has not installed a
-/// [`CascadeDefault<A>`] resource.
+/// Returns `None` when [`CascadePlugin`] has not installed the `R` resource.
 #[must_use]
-pub fn resolve_entity_cascade<A: CascadeAttribute>(world: &World, entity: Entity) -> Option<A> {
-    let root = world.get_resource::<CascadeDefault<A>>()?;
-    Some(resolve_from_world::<A>(world, entity, root.0.clone()))
+pub fn resolve_entity_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
+    world: &World,
+    entity: Entity,
+) -> Option<A> {
+    let root = world.get_resource::<R>()?;
+    Some(resolve_from_world::<A>(world, entity, root.root()))
 }
 
 /// Seeds or refreshes one participant after all commands queued alongside the
 /// authored insert have applied.
-fn resolve_inserted_cascade<A: CascadeAttribute>(
+fn resolve_inserted_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
     inserted: On<Insert, Cascade<A>>,
     mut commands: Commands,
 ) {
@@ -345,7 +394,7 @@ fn resolve_inserted_cascade<A: CascadeAttribute>(
         if world.get::<Cascade<A>>(entity).is_none() {
             return;
         }
-        let Some(value) = resolve_entity_cascade::<A>(world, entity) else {
+        let Some(value) = resolve_entity_cascade::<A, R>(world, entity) else {
             return;
         };
         if world
@@ -358,8 +407,8 @@ fn resolve_inserted_cascade<A: CascadeAttribute>(
     });
 }
 
-fn propagate_cascade<A: CascadeAttribute>(
-    default: Res<CascadeDefault<A>>,
+fn propagate_cascade<A: CascadeAttribute, R: CascadeRootResource<A>>(
+    default: Res<R>,
     authored: Query<&Cascade<A>>,
     relationships: Query<&CascadeFrom>,
     children: Query<&CascadeChildren>,
@@ -396,7 +445,7 @@ fn propagate_cascade<A: CascadeAttribute>(
             continue;
         }
 
-        let value = resolve_from_queries(entity, &authored, &relationships, default.0.clone());
+        let value = resolve_from_queries(entity, &authored, &relationships, default.root());
         if resolved.get(entity).is_ok_and(|current| current.0 == value) {
             continue;
         }

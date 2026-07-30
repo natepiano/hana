@@ -43,7 +43,6 @@ use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::BatchSummary;
 use hana_diegetic::Border;
 use hana_diegetic::CalloutCap;
-use hana_diegetic::CascadeDefault;
 use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
@@ -660,7 +659,7 @@ fn main() {
             TEXT_COVERAGE_TARGET_VALUE_SEGMENT,
             |_selection| ControlActivation::Active,
         )
-        .wire_chip_to_state::<CascadeDefault<HdrTextCoverageBias>, _>(
+        .wire_chip_to_state::<HdrTextCoverageBias, _>(
             TEXT_COVERAGE_ACTIVE_VALUE_SEGMENT,
             |_active_bias| ControlActivation::Active,
         )
@@ -956,11 +955,11 @@ fn adjust_text_coverage_bias(
 fn apply_text_coverage_bias_default(
     selection: Res<HdrTextCoverageSelection>,
     features: Res<RenderFeatures>,
-    mut cascade_default: ResMut<CascadeDefault<HdrTextCoverageBias>>,
+    mut cascade_default: ResMut<HdrTextCoverageBias>,
 ) {
     let bias = selection.active_for(*features);
-    if (cascade_default.0.0 - bias).abs() > f32::EPSILON {
-        cascade_default.0 = HdrTextCoverageBias(bias);
+    if (cascade_default.0 - bias).abs() > f32::EPSILON {
+        cascade_default.0 = bias;
     }
 }
 
@@ -1037,13 +1036,13 @@ fn apply_tonemapping_selection(
 
 fn update_text_coverage_title_bar(
     selection: Res<HdrTextCoverageSelection>,
-    cascade_default: Res<CascadeDefault<HdrTextCoverageBias>>,
+    cascade_default: Res<HdrTextCoverageBias>,
     mut title_bars: Query<&mut TitleBar>,
 ) {
     if !selection.is_changed() && !cascade_default.is_changed() {
         return;
     }
-    let next_title_bar = batch_validation_title_bar(selection.selected, cascade_default.0.0);
+    let next_title_bar = batch_validation_title_bar(selection.selected, cascade_default.0);
     for mut title_bar in &mut title_bars {
         *title_bar = next_title_bar.clone();
     }

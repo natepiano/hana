@@ -16,8 +16,8 @@ Any new attribute that inherits through the entity tree must use `src/cascade/`:
 - global default → entity override → `CascadePlugin<A>`
 
 Readers query `&Resolved<A>` internally or use the typed public `resolved_*`
-reader. Global defaults live in per-attribute `CascadeDefault<A>` resources, not
-as fields on `PanelDefaults`.
+reader. Each attribute type is itself the resource holding its global default,
+not a field on `PanelDefaults`.
 
 ### Anti-patterns — flag in review
 
