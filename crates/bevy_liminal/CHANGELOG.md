@@ -4,7 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.0.5] - 2026-07-29
+
+### Changed
+
+- Requires `bevy_kana` 0.2.0 (was 0.1.0), so dependents that also use
+  `bevy_kana` 0.2 no longer resolve two incompatible copies of it
 
 ## [0.0.4] - 2026-07-10
 
