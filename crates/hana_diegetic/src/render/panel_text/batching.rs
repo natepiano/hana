@@ -594,7 +594,7 @@ const fn is_hidden(visibility: Option<&Visibility>) -> bool {
 /// Applies one widget visual-slot override to a routed text run.
 ///
 /// Runs inside `update_panel_text_batches` before the frame material row is
-/// appended: a replacement `color` patches only the run's material-table row
+/// appended: a replacement `text_color` patches only the run's material-table row
 /// values, while a replacement `material` that changes
 /// `PipelineCompatibility`/`ResourceCompatibility` changes the computed
 /// `PathBatchKey` and `TextRunBatchStore::upsert_run` moves the run to its
@@ -610,7 +610,7 @@ fn apply_text_visual_override(
         return (fill_color, material);
     };
     (
-        slot_override.color.unwrap_or(fill_color),
+        slot_override.text_color.unwrap_or(fill_color),
         slot_override.material.clone().unwrap_or(material),
     )
 }
@@ -1321,10 +1321,13 @@ mod tests {
     use bevy::asset::AssetPlugin;
     use bevy::ecs::change_detection::Tick;
     use bevy::image::Image;
+    use bevy::picking::hover::PickingInteraction;
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
     use super::*;
+    use crate::Appearance;
+    use crate::Border;
     use crate::Mm;
     use crate::PanelWidget;
     use crate::cascade;
@@ -1355,9 +1358,11 @@ mod tests {
     use crate::render::text_shaping::TextShapingContext;
     use crate::text::DiegeticTextMeasurer;
     use crate::text::FontRegistry;
+    use crate::widgets::VisualElementCapabilities;
     use crate::widgets::VisualSlotId;
     use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
 
     const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
@@ -2556,6 +2561,50 @@ mod tests {
         builder.build()
     }
 
+    fn hovered_caption_tree(appearance: Appearance) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().background(Color::WHITE).button("styled"),
+            |builder| {
+                builder.text(
+                    Text::new("Alpha", TextStyle::new(10.0)).layout(El::new().hovered(appearance)),
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn hovered_text_surface_tree(appearance: Appearance) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("styled"), |builder| {
+            builder.text(
+                Text::new("Alpha", TextStyle::new(10.0)).layout(
+                    El::new()
+                        .background(Color::WHITE)
+                        .border(Border::all(1.0, Color::BLACK))
+                        .hovered(appearance),
+                ),
+            );
+        });
+        builder.build()
+    }
+
+    fn text_recipient_index(app: &App, widget: Entity) -> usize {
+        app.world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("widget should carry visual slots")
+            .elements()
+            .iter()
+            .find(|(_, capabilities)| capabilities.contains(VisualElementCapabilities::TEXT))
+            .map(|(element_index, _)| *element_index)
+            .expect("widget should retain a text recipient")
+    }
+
+    fn linear_base_color(color: Color) -> Vec4 {
+        let linear = color.to_linear();
+        Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
+    }
+
     fn styled_widget(app: &mut App) -> Entity {
         let mut query = app
             .world_mut()
@@ -2587,6 +2636,134 @@ mod tests {
     }
 
     #[test]
+    fn hovered_button_caption_brightens_without_a_fill_override() {
+        let mut app = widget_pipeline_app();
+        let panel = spawn_panel(
+            &mut app,
+            hovered_caption_tree(Appearance::new().text_color(TEXT_OVERRIDE_COLOR)),
+        );
+        settle(&mut app);
+        let authored_colors = run_material_base_colors(&app);
+        assert_eq!(authored_colors.len(), 1);
+        let widget = styled_widget(&mut app);
+        let text_index = text_recipient_index(&app, widget);
+        let fill_index = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("widget should carry visual slots")
+            .elements()
+            .iter()
+            .find(|(_, capabilities)| capabilities.contains(VisualElementCapabilities::SDF_FILL))
+            .map(|(element_index, _)| *element_index)
+            .expect("button root should retain its authored fill");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            run_material_base_colors(&app),
+            vec![linear_base_color(TEXT_OVERRIDE_COLOR)]
+        );
+        let index = app.world().resource::<VisualOverrideIndex>();
+        assert_eq!(index.get(panel, fill_index), None);
+        assert_eq!(
+            index
+                .get(panel, text_index)
+                .and_then(|override_value| override_value.fill_color),
+            None
+        );
+    }
+
+    #[test]
+    fn text_state_color_leaves_its_authored_background_and_border_unchanged() {
+        let mut app = widget_pipeline_app();
+        let panel = spawn_panel(
+            &mut app,
+            hovered_text_surface_tree(Appearance::new().text_color(TEXT_OVERRIDE_COLOR)),
+        );
+        settle(&mut app);
+        let authored_colors = run_material_base_colors(&app);
+        assert_eq!(authored_colors.len(), 1);
+        let widget = styled_widget(&mut app);
+        let text_index = text_recipient_index(&app, widget);
+        let capabilities = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("widget should carry visual slots")
+            .elements()
+            .iter()
+            .find(|(element_index, _)| *element_index == text_index)
+            .map(|(_, capabilities)| *capabilities)
+            .expect("text surface should retain its visual recipient");
+        assert!(capabilities.contains(VisualElementCapabilities::SDF_FILL));
+        assert!(capabilities.contains(VisualElementCapabilities::SDF_BORDER));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            run_material_base_colors(&app),
+            vec![linear_base_color(TEXT_OVERRIDE_COLOR)]
+        );
+        let override_value = app
+            .world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, text_index)
+            .expect("hovered text surface should receive an override");
+        assert_eq!(override_value.text_color, Some(TEXT_OVERRIDE_COLOR));
+        assert_eq!(override_value.fill_color, None);
+        assert_eq!(override_value.border_color, None);
+    }
+
+    #[test]
+    fn state_material_overrides_panel_text_material_and_restores_it() {
+        let mut app = widget_pipeline_app();
+        let panel_material = material_with_metallic(&mut app, 0.22);
+        let state_material = material_with_metallic(&mut app, 0.77);
+        let tree = hovered_caption_tree(Appearance::new().material(state_material));
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .text_material(panel_material)
+                    .with_tree(tree)
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        settle(&mut app);
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.22_f32.to_bits()
+        );
+
+        let widget = styled_widget(&mut app);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.77_f32.to_bits()
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .remove::<PickingInteraction>();
+        app.update();
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.22_f32.to_bits()
+        );
+        assert!(app.world().get_entity(panel).is_ok());
+    }
+
+    #[test]
     fn text_color_override_patches_material_row_without_rerouting() {
         let mut app = widget_pipeline_app();
         spawn_panel(&mut app, slotted_text_tree());
@@ -2603,7 +2780,7 @@ mod tests {
         set_text_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(TEXT_OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_text_color(TEXT_OVERRIDE_COLOR),
         );
         app.update();
 
@@ -2643,6 +2820,24 @@ mod tests {
             run_material_base_colors(&app),
             vec![authored_color, authored_color],
         );
+    }
+
+    #[test]
+    fn path_color_override_leaves_text_material_rows_authored() {
+        let mut app = widget_pipeline_app();
+        spawn_panel(&mut app, slotted_text_tree());
+        settle(&mut app);
+        let authored_colors = run_material_base_colors(&app);
+        let widget = styled_widget(&mut app);
+
+        set_text_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_path_color(TEXT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        assert_eq!(run_material_base_colors(&app), authored_colors);
     }
 
     #[test]

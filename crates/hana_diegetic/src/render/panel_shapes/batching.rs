@@ -1113,7 +1113,7 @@ const fn path_quad_record(path: &PanelShapePath) -> PathQuadRecord {
 /// Applies one widget visual-slot override to a routed panel-line group.
 ///
 /// Runs inside `build_panel_line_group` before the frame material row is
-/// appended: a replacement `color` patches only the group's material-table
+/// appended: a replacement `path_color` patches only the group's material-table
 /// row values, while a replacement `material` that changes
 /// `PipelineCompatibility`/`ResourceCompatibility` changes the computed
 /// `PathBatchKey` and `ShapeBatchStore::upsert_panel` moves the group to its
@@ -1128,7 +1128,7 @@ fn apply_shape_visual_override<'a>(
         return (fill_color, material);
     };
     (
-        slot_override.color.unwrap_or(fill_color),
+        slot_override.path_color.unwrap_or(fill_color),
         slot_override.material.as_ref().unwrap_or(material),
     )
 }
@@ -1621,8 +1621,10 @@ mod tests {
     use bevy::asset::AssetPlugin;
     use bevy::color::Color;
     use bevy::math::Vec4;
+    use bevy::picking::hover::PickingInteraction;
 
     use super::*;
+    use crate::Appearance;
     use crate::CalloutCap;
     use crate::El;
     use crate::Mm;
@@ -1639,8 +1641,10 @@ mod tests {
     use crate::layout::PanelShapePrimitiveGeometry;
     use crate::layout::PanelShapePrimitiveKey;
     use crate::layout::PanelShapePrimitiveKind;
+    use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::layout::TextStyle;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::BatchAlphaMode;
@@ -1653,9 +1657,11 @@ mod tests {
     use crate::render::material_table::MaterialTableAppendReady;
     use crate::render::material_table::MaterialTablePlugin;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::VisualElementCapabilities;
     use crate::widgets::VisualSlotId;
     use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
 
     const SHAPE_OVERRIDE_COLOR: Color = Color::srgb(0.2, 0.8, 0.4);
@@ -3105,6 +3111,23 @@ mod tests {
         app.world_mut().spawn((panel, transform)).id()
     }
 
+    fn spawn_stateful_text_and_draw_panel(app: &mut App) -> Entity {
+        let mut builder = LayoutBuilder::with_widget_root(
+            El::new()
+                .size(40.0, 20.0)
+                .draw(PanelDraw::lines([horizontal_line()]))
+                .button("styled")
+                .hovered(Appearance::new().path_color(SHAPE_OVERRIDE_COLOR)),
+        );
+        builder.text(Text::new("Alpha", TextStyle::new(10.0)));
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .with_tree(builder.build())
+            .build()
+            .unwrap_or_else(|error| panic!("text and draw panel should build: {error:?}"));
+        app.world_mut().spawn((panel, Transform::default())).id()
+    }
+
     fn styled_widget(app: &mut App) -> Entity {
         let mut query = app
             .world_mut()
@@ -3129,7 +3152,7 @@ mod tests {
     }
 
     #[test]
-    fn shape_color_override_patches_material_row_without_rekeying() {
+    fn shape_path_color_override_patches_material_row_without_rekeying() {
         let mut app = widget_line_batch_app();
         spawn_slotted_widget_line_panel(&mut app, Transform::default());
         settle(&mut app);
@@ -3143,7 +3166,7 @@ mod tests {
         set_shape_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(SHAPE_OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_path_color(SHAPE_OVERRIDE_COLOR),
         );
         app.update();
 
@@ -3166,6 +3189,64 @@ mod tests {
             first_shape_material_values(&app).base_color,
             material_base_color(Color::WHITE),
         );
+    }
+
+    #[test]
+    fn text_color_override_leaves_shape_material_rows_authored() {
+        let mut app = widget_line_batch_app();
+        spawn_slotted_widget_line_panel(&mut app, Transform::default());
+        settle(&mut app);
+        let widget = styled_widget(&mut app);
+
+        set_shape_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_text_color(SHAPE_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(Color::WHITE),
+        );
+    }
+
+    #[test]
+    fn state_path_color_updates_the_draw_row_without_a_text_override() {
+        let mut app = widget_line_batch_app();
+        let panel = spawn_stateful_text_and_draw_panel(&mut app);
+        settle(&mut app);
+        let widget = styled_widget(&mut app);
+        let Some(slots) = app.world().get::<WidgetVisualSlots>(widget) else {
+            panic!("widget should carry visual slots");
+        };
+        let Some((element_index, _)) = slots
+            .elements()
+            .iter()
+            .find(|(_, capabilities)| capabilities.contains(VisualElementCapabilities::DRAW))
+        else {
+            panic!("draw recipient should remain in visual slots");
+        };
+        let element_index = *element_index;
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(SHAPE_OVERRIDE_COLOR),
+        );
+        let Some(override_value) = app
+            .world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, element_index)
+        else {
+            panic!("hovered draw recipient should receive an override");
+        };
+        assert_eq!(override_value.path_color, Some(SHAPE_OVERRIDE_COLOR));
+        assert_eq!(override_value.text_color, None);
     }
 
     #[test]

@@ -66,6 +66,12 @@ pub enum PanelBuildError {
     /// A slider authored a focused thumb border color without a bordered thumb.
     #[error("slider `{0}` focused thumb border color requires an authored thumb border")]
     SliderFocusedThumbBorderColorRequiresThumbBorder(PanelElementId),
+    /// A widget part named a state text color without emitting text itself.
+    #[error("widget part `{0}` state text color requires text; add a text child")]
+    StateTextColorRequiresText(PanelElementId),
+    /// A widget part named a state path color without emitting a panel draw itself.
+    #[error("widget part `{0}` state path color requires a draw; add a draw")]
+    StatePathColorRequiresDraw(PanelElementId),
     /// A slider's authored range, value, or step failed validation.
     #[error("slider `{0}`: {1}")]
     SliderConfig(PanelElementId, #[source] SliderConfigError),

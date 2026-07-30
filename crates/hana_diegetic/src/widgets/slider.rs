@@ -5305,6 +5305,18 @@ mod tests {
                         .and_then(|value| value.color),
                     Some(STATE_DISABLED_COLOR)
                 );
+                assert_eq!(
+                    index
+                        .get(panel, element_index)
+                        .and_then(|value| value.text_color),
+                    Some(STATE_DISABLED_COLOR)
+                );
+                assert_eq!(
+                    index
+                        .get(panel, element_index)
+                        .and_then(|value| value.path_color),
+                    Some(STATE_DISABLED_COLOR)
+                );
             }
         }
 
@@ -5322,6 +5334,18 @@ mod tests {
                 index
                     .get(panel, element_index)
                     .and_then(|value| value.color),
+                None
+            );
+            assert_eq!(
+                index
+                    .get(panel, element_index)
+                    .and_then(|value| value.text_color),
+                None
+            );
+            assert_eq!(
+                index
+                    .get(panel, element_index)
+                    .and_then(|value| value.path_color),
                 None
             );
         }

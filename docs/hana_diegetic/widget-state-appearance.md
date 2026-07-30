@@ -25,20 +25,20 @@
 
 - **Key files** (line refs re-verified after Phase 2; files neither Phase 1 nor Phase 2 touched still carry `HEAD` = `64f8bdc0` refs):
   - `src/layout/builder.rs` (1944 lines) — `El<L, Role>`; roles `WidgetPart` (`:105`), `PressedPart` (`:109`), sealed `ElementRole` (`:112`); owner kinds `WidgetOwner` (`:127`), `Widget` (`:143`), `Pressable` (`:187`); `El::editable_field` (`:814`); the four state verbs in four blocks — `El<L, LayoutOnly>` (`:740`-`:765`, `pressed` yields `PressedPart`), `El<L, WidgetElement<W>>` (`:853`-`:873` plus `pressed` at `:888` under `Pressable`), `El<L, WidgetPart>` (`:898`-`:923`, `pressed` upgrades the role), `El<L, PressedPart>` (`:933`-`:958`, all role-preserving); `El::disabled_color` (`:1049`); `WidgetBuilder<'a, W>` (`:1240`); `AcceptsElement` (`:1295`) and its five impls (`:1582`-`:1658`); `LayoutContentBuilder` (`:1314`); `LayoutBuilder::with_root` (`:1455`), `with_widget_root` (`:1467`), `with` (`:1460`); `WidgetBuilder::with` (`:1685`); `Text::layout` (`:265`).
-  - `src/layout/element.rs` — `CommonEl`/`Element`, `appearance` field (`:148`); `LayoutTree::validate_widgets` (`:765`, walk body `:776-829`), the **only** appearance-reachable walk that returns `Result<_, PanelBuildError>`, calling `validated_element_widget_owner`; `computed_widget_records` (`:830`, returns `Vec<ComputedWidgetRecord>` — **no `Result`**) and its owning-record walk (`:895`) calling `record_owned_widget_element` (`:1309`) and `element_visual_capabilities` (`:1285`); `set_field_editing_content` (`:1014`); `validated_element_widget_owner` (`:1255`); `classify_element_change`'s exhaustive `Element` destructure (`:1327`); `set_element_state_appearance` (`:461`, `#[cfg(test)]`). **`PanelBuildError::WidgetContainsInteractiveDescendant` is gone** — Phase 4 removed the variant, its producer, and its two tests; nesting is now a compile error. **The four `PanelBuildError::State*` variants and `validated_element_appearance` are gone** — Phase 5 replaced them with `CommonEl::default_state_surfaces` (`layout/builder.rs`), which emits a transparent fill or border at element construction so a state property always has a record to replace.
+  - `src/layout/element.rs` — `CommonEl`/`Element`, `appearance` field (`:148`); `LayoutTree::validate_widgets` (`:782`, walk body `:793-846`), the **only** appearance-reachable walk that returns `Result<_, PanelBuildError>`, calling `validated_element_widget_owner`; `computed_widget_records` (`:849`, returns `Vec<ComputedWidgetRecord>` — **no `Result`**) and its owning-record walk (`:914`) calling `record_owned_widget_element` (`:1380`) and `element_visual_capabilities` (`:1319`); `set_field_editing_content` (`:1033`); `validated_element_widget_owner` (`:1289`); `classify_element_change`'s exhaustive `Element` destructure (`:1398`); `set_element_state_appearance` (`:475`, `#[cfg(test)]`). **`PanelBuildError::WidgetContainsInteractiveDescendant` is gone** — Phase 4 removed the variant, its producer, and its two tests; nesting is now a compile error. **The four `PanelBuildError::State*` variants and `validated_element_appearance` are gone** — Phase 5 replaced them with `CommonEl::default_state_surfaces` (`layout/builder.rs`), which emits a transparent fill or border at element construction so a state property always has a record to replace.
   - `src/layout/draw.rs:11` — `PanelDraw`. `src/layout/line.rs:42` — `PanelShape` enum; `PanelCircle` struct at `:64`.
   - `src/ime/editor.rs` (1968 lines) — `inline_editor_content_tree` **definition at `:1132`** (the earlier `:665` / later `:1184` sites are callers/helpers, not the def).
-  - `src/widgets/appearance.rs` — `VisualChange<T>` (`:26`); `Appearance` (`:98`, derives `PartialEq`) with its impl block (`:109`); the four `Widget*Appearance` wrappers with size assertions at `:179`/`:199`/`:219`/`:239`; `StateAppearance` (`:249`, **not a `Component`**); `WidgetStateCascades<'a>` (`:264`) with `any_overridden` (`:288`), `layer` (`:295`), `any` (`:317`), `resolve` (`:332`); `WidgetState` (`:368`), `LAYER_ORDER` (`:388`). **`layer`/`any`/`resolve` live on `WidgetStateCascades`, not on `StateAppearance`.** **Phase 3 DELETED both `layer_onto` methods** — per-property layering is now inlined in `resolve`, which matches `VisualChange::To` per property inside the `LAYER_ORDER` loop (`:335`) and constructs the `VisualSlotOverride` directly.
-  - `src/widgets/visual.rs` — `VisualSlotOverride` (`:169`) with the generic `color` field (`:171`), `fill_color` (`:173`), `border_color` (`:175`); **`apply` (`:195`) and `apply_element` (`:209`)**, which enumerate every field explicitly and are the only path composing an element override over a slot baseline — any new `VisualSlotOverride` field must be added to both. `WidgetVisualSlots` (`:82`) with `with_elements` (`:99`) / `with_part_appearances` (`:108`) / `elements()` (`:120`) / `part_appearances()` (`:124`, **no longer `#[cfg(test)]`**). `WidgetVisualOverrides` (`:264`), `subtree_color` field (`:265`) / `set_subtree_color` (`:272`) / getter (`:277`), **`set_element` (`:320`)** and **`element_overrides` (`:338`)** — the Phase 3 element-index-keyed channel. `write_widget_overrides` (`:400`) replaces the whole component and **compares immutably first, returning without writing when the resolved value is unchanged**. `VisualOverrideIndex` (`:434`), `dispatch_visual_overrides` (`:506`), the subtree seeding read (`:513`). **`write_slot_override` was DELETED in Phase 3** — all writes go through `write_widget_overrides`.
-  - **The three presenters (rewritten in Phase 3).** `presentation_inputs_changed` was **DELETED** in all three; each presenter now builds its own kind-filtered dirty-entity set from `Changed`/`RemovedComponents` terms it owns directly, and writes the whole component via `write_widget_overrides`. `src/widgets/button.rs` — `present_button_state` (`:139`), `Changed<WidgetVisualSlots>` dirty term (`:149`), write (`:236`). `src/widgets/editable.rs` — `present_editable_state` (`:30`), `Changed<WidgetVisualSlots>` (`:40`), write (`:122`). `src/widgets/slider.rs` — `present_slider_state` (`:1141`), `Changed<WidgetVisualSlots>` (`:1152`), subtree seeding (`:1228`), write (`:1277`); `disabled_color` field `:172` / default `:191` / builder `:233` / crate-internal setter `:255`. **`ButtonPress` is an `Or<>` term in the button presenter but not the slider's** — inserting/removing it on a slider wakes exactly one presenter, the cross-kind isolation discriminator.
-  - `src/widgets/id.rs` — `WidgetKind` (`:98`), `VisualElementCapabilities` bitflags (`:115`, one `CONTENT` bit covering text **and** image **and** non-empty `PanelDraw` together), `ComputedWidgetRecord` (`:138`) with `appearance` field (`:143`) and `part_appearances` (`:144`), `appearance()` (`:188`), `push_visual_element` (`:208`), `part_appearances()` (`:220`), `push_part_appearance` (`:222`). The `CONTENT` bit is at `:123`.
+  - `src/widgets/appearance.rs` — `VisualChange<T>` (`:26`); `Appearance` (`:103`, derives `PartialEq`, **six** `VisualChange` fields since Phase 7: `background`, `border_color`, `border_width`, `text_color`, `path_color`, `material`) with its impl block (`:118`); the four `Widget*Appearance` wrappers with size assertions at `:209`/`:229`/`:249`/`:269`; `StateAppearance` (`:279`, **not a `Component`**); `WidgetStateCascades<'a>` (`:294`) with `any_overridden` (`:318`), `layer` (`:325`), `any` (`:347`), `resolve` (`:362`); `WidgetState` (`:398`), `LAYER_ORDER` (`:428`). **`layer`/`any`/`resolve` live on `WidgetStateCascades`, not on `StateAppearance`.** **Phase 3 DELETED both `layer_onto` methods** — per-property layering is now inlined in `resolve`, which matches `VisualChange::To` per property inside the `LAYER_ORDER` loop (`:365`) and constructs the `VisualSlotOverride` directly.
+  - `src/widgets/visual.rs` — `VisualSlotOverride` (`:172`) with the generic `color` field (`:174`), plus the two Phase 7 role-scoped fields `text_color` and `path_color`, then `fill_color` / `border_color`; the size assertion is `assert!(size_of::<VisualSlotOverride>() <= 184)` (`:199`) — an **upper bound**, so it cannot catch a field being dropped. **`apply` (`:202`) is the only method that names color fields**; `apply_element` (`:218`) saves `offset`, delegates to `apply`, and restores `offset`, so a new field is added to `apply` alone. `with_color` (`:231`) is `#[cfg(test)]`. `WidgetVisualSlots` (`:82`) with `with_elements` (`:99`) / `with_part_appearances` (`:108`) / `elements()` (`:120`) / `part_appearances()` (`:124`, **no longer `#[cfg(test)]`**). `WidgetVisualOverrides` (`:287`), `subtree_color` field (`:288`) / `set_subtree_color` (`:295`) / getter (`:300`), **`set_element` (`:341`)** and **`element_overrides` (`:361`)** — the Phase 3 element-index-keyed channel. `resolve_part_overrides` (`:390`) with its two `continue`s (`:406`/`:409`) and default-drop filter (`:413`). `write_widget_overrides` replaces the whole component and **compares immutably first, returning without writing when the resolved value is unchanged**. `dispatch_visual_overrides` (`:527`); its **subtree-seeding branch (`:556-568`) is the sole writer of the generic `color`** and since Phase 7 writes `color`, `text_color`, and `path_color` together — dropping any of the three silently un-dims `Slider::disabled_color`, which is why `slider.rs:5305`/`:5336` now assert all three. **`write_slot_override` was DELETED in Phase 3** — all writes go through `write_widget_overrides`.
+  - **The three presenters (rewritten in Phase 3).** `presentation_inputs_changed` was **DELETED** in all three; each presenter now builds its own kind-filtered dirty-entity set from `Changed`/`RemovedComponents` terms it owns directly, and writes the whole component via `write_widget_overrides`. `src/widgets/button.rs` — `present_button_state` (`:139`), `Changed<WidgetVisualSlots>` dirty term (`:149`), write (`:232`). `src/widgets/editable.rs` — `present_editable_state` (`:30`), `Changed<WidgetVisualSlots>` (`:40`), write (`:121`). `src/widgets/slider.rs` — `present_slider_state` (`:1141`), `Changed<WidgetVisualSlots>` (`:1152`), subtree seeding (`:1178`), write (`:1202`); `disabled_color` field `:172` / default `:191` / builder `:233` / crate-internal setter `:255`. **`ButtonPress` is an `Or<>` term in the button presenter but not the slider's** — inserting/removing it on a slider wakes exactly one presenter, the cross-kind isolation discriminator.
+  - `src/widgets/id.rs` — `WidgetKind` (`:98`), `VisualElementCapabilities` bitflags (`:115`), `ComputedWidgetRecord` (`:138`) with `appearance` field (`:143`) and `part_appearances` (`:144`), `appearance()` (`:188`), `push_visual_element` (`:208`), `part_appearances()` (`:220`), `push_part_appearance` (`:222`). **Phase 7 SPLIT the single `CONTENT` bit** into three: `TEXT` (`:123`, `1 << 3`), `IMAGE` (`:125`, `1 << 4`), `DRAW` (`:127`, `1 << 5`). One bit could not express "material accepts text and draw but rejects image-only". Any phase adding a per-role property adds a capability bit alongside it — the part-local build error has nothing to test without one.
   - `src/widgets/reify.rs` — `reify_widgets` (`:184`, gated on `Changed<ComputedDiegeticPanel>` at `:194`), its existing-widget query (`:196-211`), `spawn_widget` (`:296`), `update_widget` (`:352`) with the `WidgetVisualSlots` inequality guard (`:445`), `update_widget_appearance` (`:482`).
   - `src/widgets/mod.rs` — `WidgetSystems` enum (`:143`), ordering `Reify → ReifyCommandsApplied → ResolveInteractivity → InteractivityCommandsApplied → Focus → SemanticInput → FocusCommandsApplied → PresentationCommandsApplied`; `WidgetsPlugin` (`impl Plugin` `:223`) with `add_plugins` (`:233-237`) including `cascade::cascade_plugin::<WidgetInteractivity>()` (`:234`), `configure_sets` (`:238-267`), `add_systems` where the three presenters are registered — `present_button_state` (`:299`), `present_editable_state` (`:302`), `present_slider_state` (`:305`) — **with no `.run_if(...)` on any of them**, since Phase 3 moved the change detection into the systems themselves; `mod appearance;` stays **private** (`:1`) — the public surface comes from the `pub use appearance::…` re-exports, so no phase needs `pub mod` here.
   - `src/cascade/mod.rs:44` — `cascade_plugin<A: CascadeRoot>()`.
   - `src/widgets/interactivity.rs` (529 lines) — `Cascade<WidgetInteractivity>`, the pattern every cascade step mirrors.
   - `src/cascade/attributes.rs` (353 lines) — `CascadeEntityCommandsExt` (`:30`), `resolved_*` fns (`:223-322`), `apply_cascade_override` (`:326`), `remove_cascade_override` (`:336`), `resolved_cascade` (`:345`). `src/cascade/constants.rs:7` — `CASCADE_ATTRIBUTE_BYTES: usize = 32`. `src/cascade/resolved.rs` (177 lines) — `cascade_attribute!` (`:20`), `SdfMaterial`/`TextMaterial`/`ShapeMaterial` (`:112`/`:125`/`:138`) with their per-attribute size assertions at `:118`/`:131`/`:144`, `CascadeRoot` (`:175`).
   - `crates/bevy_kana/src/cascade.rs` (676 lines) — `Cascade<T>` (`:23`); `resolve_cascade` (`:146`) and `resolve_cascade_ref` (`:161`), unbounded-generic public helpers with **no `hana_diegetic` call site** (only the `:502` unit test and the `lib.rs:41-42` / `prelude.rs:36-37` re-exports); **`CascadeAttribute` trait def (`:174`) with a blanket impl over its bounds (`:179`) — this is why a per-type method override is impossible**; `CascadeFrom` (`:197`), `CascadeDefault<A>` (`:237`, `#[reflect(Resource)]`), `Resolved<A>` (`:242`), `CascadeSet` (`:252`) with `Propagate` (`:254`), `CascadePlugin<A>` (`:258`) with `new` (`:265`) and `Plugin::build` (`:276`) registering `resolve_inserted_cascade` (`:283`, observer body `:339`), `resolve_entity_cascade` (`:332`), `propagate_cascade` (`:361`, calls the resolver at `:399`), `resolve_from_queries` (`:419`, first-override early return at `:433`), `resolve_from_world` (`:446`).
-  - `src/panel/builder.rs` (1271 lines) — `PanelBuildError` (`:45`), `BuilderData` (`:183`). `src/panel/diegetic_panel.rs` (2432 lines) — `replace_from_precompose_helper` (`:451`), `seed_panel_overrides` (`:1566`). `src/panel/lifecycle.rs` (2089 lines) — `PanelCascadeOwnership` (`:122`), `teardown_owned_shared_state` (`:775`). `src/panel/mod.rs` (321 lines) — `HeadlessLayoutPlugin` (`:192`, `impl Plugin` `:194`), which registers the attribute cascades explicitly because `RenderPlugin` is absent.
+  - `src/panel/builder.rs` (1277 lines) — `PanelBuildError` (`:45`), `BuilderData` (`:189`). `src/panel/diegetic_panel.rs` (2432 lines) — `replace_from_precompose_helper` (`:451`), `seed_panel_overrides` (`:1566`). `src/panel/lifecycle.rs` (2089 lines) — `PanelCascadeOwnership` (`:122`), `teardown_owned_shared_state` (`:775`). `src/panel/mod.rs` (321 lines) — `HeadlessLayoutPlugin` (`:192`, `impl Plugin` `:194`), which registers the attribute cascades explicitly because `RenderPlugin` is absent.
   - `src/render/fill_batch.rs` (5616 lines) — `apply_sdf_visual_override` (`:1359`), which reads `fill_color.or(color)` and `border_color.or(color)`. `src/render/panel_text/batching.rs` (2888 lines) — cascade-resolution block (`:288`), `apply_routed_text_run_update` (`:435`). `src/render/batch_store.rs` — `BatchStore::upsert` (`:201`). `src/render/analytic_paths/batching.rs` — `TextRunBatch::rebuild` (`:314`).
   - `src/lib.rs` — crate-root `pub use widgets::*` block (`:346-410` after Phase 4's eight new `layout::` exports). Phase 1 added `Appearance` and the four `Widget{Hovered,Pressed,Focused,Disabled}Appearance` wrappers; a later phase adding a public **widget** symbol extends this block. A public **error** type goes with `PanelBuildError` in the `panel::` block at `:238` instead.
   - `examples/widgets.rs` (1691 lines) — `.disabled_color` use (`:1162`), `add_slider` (`:1200`), `apply_state_appearance` (`:1450`).
@@ -57,16 +57,20 @@
 - **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --scope edit --project-root /Users/natemccoy/rust/hana_diegetic_widgets`
 
 - **Invariants:**
-  - **An accepted option must reach the runtime.** No phase may ship a builder whose value is validated and then discarded; if a combination cannot present, it is gated out of the type surface or it is not offered. *How it is carried, after Phase 5:* for `background`, `border_color`, `border_width`, and `material`, by **record synthesis** — `CommonEl::default_state_surfaces` (`layout/builder.rs`) emits the transparent record the state replaces, so there is nothing to reject and no appearance validation runs at panel build. It is **not** carried for an explicitly empty bundle (Phase 8's open question) and is not yet carried for `content_color`, whose recipients — text, image, `PanelDraw` — cannot be synthesized (Phase 7 must decide). *Scope limit:* this binds **part-local** authoring. A global `CascadeDefault` or a runtime entity command cannot promise a present recipient — a higher-level property with no compatible record at some element is **dormant** there, not an error.
-  - **Every level merges into the one above it, property by property.** Global default → panel → widget → part. A level that names a property wins for that property; a level silent on a property takes the value from above; a property nobody names stays at the ordinary look. A global default of `{background: GRAY, content_color: DIM}` plus `.disabled(Appearance::new().border_color(RED))` on one slider resolves to gray, dim, *and* a red border. Silence means "no opinion," not "leave me alone": a level that must hold its ordinary look against an inherited bundle names the ordinary value explicitly, and `.disabled(Appearance::new())` is a no-op rather than a way to clear an inherited look.
+  - **An accepted option must reach the runtime.** No phase may ship a builder whose value is validated and then discarded; if a combination cannot present, it is gated out of the type surface or it is not offered. *How it is carried, after Phase 5:* for `background`, `border_color`, `border_width`, and `material`, by **record synthesis** — `CommonEl::default_state_surfaces` (`layout/builder.rs`) emits the transparent record the state replaces, so there is nothing to reject and no appearance validation runs at panel build. It is **not** carried for an explicitly empty bundle (Phase 8's open question) For `text_color` and `path_color` it is carried by a **build error**: their recipients — text and `PanelDraw` — cannot be synthesized, so a part naming a color it structurally cannot present is rejected at panel build (Phase 7, resolved 2026-07-29). *Scope limit:* this binds **part-local** authoring. A global `CascadeDefault` or a runtime entity command cannot promise a present recipient — a higher-level property with no compatible record at some element is **dormant** there, not an error.
+  - **Every level merges into the one above it, property by property.** Global default → panel → widget → part. A level that names a property wins for that property; a level silent on a property takes the value from above; a property nobody names stays at the ordinary look. A global default of `{background: GRAY, text_color: DIM}` plus `.disabled(Appearance::new().border_color(RED))` on one slider resolves to gray, dim, *and* a red border. Silence means "no opinion," not "leave me alone": a level that must hold its ordinary look against an inherited bundle names the ordinary value explicitly, and `.disabled(Appearance::new())` is a no-op rather than a way to clear an inherited look.
+  - **Four levels, and no element-tree inheritance.** Ruled 2026-07-29; the analysis is recorded in this invariant and the note below it. A property applies only to the element it is written on and to elements reached by the four named levels above. A color written on a container element does **not** flow to its child elements by tree position. This is deliberate: the widget level already reaches every owned element at unbounded depth (`layout/element.rs:857-930`), so tree inheritance would add only the intermediate-container case, at the cost of making applicability depend on position — which no typestate can check, and which this repo has already paid for twice (`Slider::disabled_color`'s hand-written focus-border suppression at `slider.rs:1221`, and the generated-caret exclusion in Phase 10). Do not reopen this in a review pass. Phase 10's ordered-slice reduction is the insurance that keeps the option cheap if it is ever revisited.
+
+    *The prior art, recorded accurately so the wrong lesson is not drawn later:* CSS's reputation for being hard to reason about belongs to **specificity and `!important`**, not to inheritance. The CSSWG's own published list of design regrets does not name inheritance, the cascade, or specificity; State of CSS 2025 and 2026 do not rank them as top pain points; and StyleX, which banned every other form of action-at-a-distance, deliberately kept `color` inheritance. A system with no selectors and no specificity — which this is — could take inheritance without taking what made CSS unpleasant. The decision above therefore does **not** rest on "CSS is a cautionary tale." It rests on three things specific to this codebase: the widget level already reaches every owned element at unbounded depth, so tree inheritance would add only the intermediate-container case; this repo has already paid for subtree propagation twice; and position-dependent applicability cannot be checked by any typestate, which is the property the plan owner asked for.
   - **Cascade precedence and state precedence are separate axes, resolved in that order.** First resolve each of the four states independently down the levels (global → panel → widget → part). Only then layer the *active* states in `WidgetState::LAYER_ORDER` = `[Focused, Hovered, Pressed, Disabled]`. Composing active states per level and then resolving levels would let a part's local hovered bundle defeat an inherited disabled bundle.
   - **State appearance only exists inside a widget.** Hover, press, focus, and disabled are widget states; there is no text widget and no hoverable bare element. An element that authors a state look is a *widget part*, and a part is only placeable inside a widget's children.
-  - **A state layer replaces values on a retained record; it never authors a missing one.** That is a property of `VisualSlotOverride`, not a constraint on authors: since Phase 5, layout supplies the record. A state `background` with no `El::background` gets a `Color::NONE` fill; a state `border_color`/`border_width` with no `El::border` gets `Border::all(Px(0.0), Color::NONE)`; a state `material` gets a fill only when there is no border record to re-key. `.background(X).disabled(Appearance::new().background(Y))` is still not redundant — the ordinary call is what the element shows at rest. **`content_color` (Phase 7) has no synthesizable record** and is the one property this does not cover.
+  - **A state layer replaces values on a retained record; it never authors a missing one.** That is a property of `VisualSlotOverride`, not a constraint on authors: since Phase 5, layout supplies the record. A state `background` with no `El::background` gets a `Color::NONE` fill; a state `border_color`/`border_width` with no `El::border` gets `Border::all(Px(0.0), Color::NONE)`; a state `material` gets a fill only when there is no border record to re-key. `.background(X).disabled(Appearance::new().background(Y))` is still not redundant — the ordinary call is what the element shows at rest. **`text_color` and `path_color` (Phase 7) have no synthesizable record** and are the two properties this does not cover — which is why they are the only ones that can fail at build.
   - **No state property may change solved layout.** Border width changes grow inward and re-key nothing.
   - **Public opaque types, not leaked private ones.** A `pub` trait whose methods mention `pub(crate)` types trips `private_interfaces` even when the methods live on a sealed trait in a private module; E0446 additionally forbids a public trait exposing a private associated type. Every type reachable from a public associated type — `WidgetBuilder`, `WidgetPart`, `EditableField`, the scope token — is a public opaque type with private fields.
   - **Presentation must not dirty `WidgetVisualOverrides` when resolved values are unchanged.** Compare through an immutable query and take `get_mut` only on inequality; comparing inside a method already reached through `Mut<_>` is too late.
   - **Workspace lints, inherited by both packages** (`[lints] workspace = true` in each `Cargo.toml`): `[lints.rust] missing_docs = "deny"` — every new public item needs a doc comment. `[lints.clippy]` denies the `all` / `cargo` / `nursery` / `pedantic` groups (`priority = -1`) plus `allow_attributes_without_reason`, `expect_used`, `panic`, `self_named_module_files`, `unreachable`, `unwrap_used`. No `.unwrap()` / `.expect()` / `panic!` in non-test code, and any `#[allow(...)]` needs a `reason = "…"`.
-  - **Headless only.** No phase needs a GPU, a window, or a screenshot. Assertions are on resolved `VisualSlotOverride` values, `VisualOverrideIndex` membership, batch-key identity, and entity counts — never on rendered color. Harnesses: `HeadlessLayoutPlugin` (`panel/mod.rs:194`) for layout / reification / cascade resolution; a plain `App` with no render device for retained batching (precedent: `fill_batch.rs` 59 tests, `panel_text/batching.rs` 33, `panel_shapes/batching.rs` 31, `material_table.rs` 31); `trybuild` for typestate boundaries. Baseline: `verify.sh test hana_diegetic` reports **1130 passed / 2 skipped** at Phase 5 completion (was 1107 at Phase 2). Measure with that command, not by counting the workspace — a phase's gate covers this package only. **No phase may land with a lower test count than it inherited.**
+  - **Headless only.** No phase needs a GPU, a window, or a screenshot. Assertions are on resolved `VisualSlotOverride` values, `VisualOverrideIndex` membership, batch-key identity, and entity counts — never on rendered color. Harnesses: `HeadlessLayoutPlugin` (`panel/mod.rs:194`) for layout / reification / cascade resolution; a plain `App` with no render device for retained batching (precedent: `fill_batch.rs` 59 tests, `panel_text/batching.rs` 33, `panel_shapes/batching.rs` 31, `material_table.rs` 31); `trybuild` for typestate boundaries. Baseline: `verify.sh test hana_diegetic` reports **1146 passed / 2 skipped** at Phase 6 completion (was 1107 at Phase 2). Measure with that command, not by counting the workspace — a phase's gate covers this package only. **No phase may land with a lower test count than it inherited.**
+  - **Carve-out for rendered appearance (added 2026-07-29).** The automated gate stays headless; that is unchanged. But a phase whose changes alter what the example *looks like* also gets a **live smoke test run by the plan owner** before checkpoint — currently phases 7 and 11, each carrying an explicit gate line. Phase 6 is the precedent: lint, 1130 tests, trybuild, and the example build all passed while the focused field rendered as an opaque black bar, because every assertion was on override state and none on pixels. The headless proxy assertion catches the capability/override half of that class without a GPU and remains required; the smoke covers the half it structurally cannot. Driving is **keyboard only** (`brp_extras_send_keys` / `brp_extras_type_text`) — no BRP mouse control while the plan owner is at the machine.
 
 ## Phases
 
@@ -663,7 +667,7 @@ Defaulting happens at **element construction**, on `CommonEl`, not in `LayoutTre
 - **`as-built/widgets.md`** said "state builders affect only the element carrying the widget declaration; child text, icons, images and shapes stay as authored" — false since Phase 4 and contradicting the same file 30 lines earlier. Corrected.
 - **Not changed:** the `validated_element_appearance` mentions inside the Phase 3 and Phase 4 retrospectives and review blocks. Those record what was true when those phases shipped.
 
-### Phase 6 — Generated editable parts · status: done
+### Phase 6 — Generated editable parts · status: done (`929d442d`)
 
 #### Work Order
 
@@ -799,30 +803,36 @@ not only an override-index check.
 - **Phases 8 and 9** — reviewed, no changes needed. Phase 6 touched none of the files they own.
 - **Delegation Context** — test floor raised 1125 → 1130.
 
-### Phase 7 — Content color · status: todo
+### Phase 7 — Text and path color · status: done (`aefc0f9c`)
 
 #### Work Order
 
-**Goal:** Text, images, and draw primitives change color with widget state, and state materials reach every record type the retained routes already support.
+**Goal:** Text and draw primitives change color with widget state, and state materials reach every record type the retained routes already support.
 
 **Spec:**
 
-Add a fifth property, `content_color`, to `Appearance`.
+Add **two** properties to `Appearance`: `text_color` (glyph color) and `path_color` (line and circle color).
 
-It does **not** map to `VisualSlotOverride::color`. `apply_sdf_visual_override` (`render/fill_batch.rs:1359`) reads `fill_color.or(color)` and `border_color.or(color)` — the generic `color` field (`widgets/visual.rs:170`) is the **fallback for every color role**, so it drives fill and border together. That is the mechanism behind `Slider::disabled_color`. A text element that also authors a background would therefore have its fill recolored by a text-color change.
+**There is no `content_color`.** An earlier draft of this plan proposed one property covering text, images, and draws; it was cancelled on 2026-07-29. Two reasons. First, one name would have covered two different operations — the text route (`panel_text/batching.rs:618`) and the shape route (`panel_shapes/batching.rs:1132`) both **replace** the color via `.unwrap_or(fill_color)`, while the image route (`image_batch.rs:628`) **multiplies** (`image_batch.rs:136`: "Linear RGBA tint multiplied after texture sRGB decode"). Second, one element can carry both text content and a draw, and those must be colorable independently. Do not reintroduce `content_color`, `foreground`, or `ink` — all three were considered and rejected.
 
-Add a **distinct `content_color` override** consumed only by the text, image, and draw-primitive routes, leaving `fill_color` and `border_color` exclusive to SDF roles. `VisualSlotOverride` grows from 144 to 160 bytes for this phase; Phase 11 deletes the superseded generic `color` field and returns it to 144.
+**Images are out of scope for this phase.** They get their own `.tint()` property in Phase 11, which is the phase that deletes the generic `color` field images currently read. Until then `image_batch.rs:628` keeps reading `slot_override.color` unchanged; do not edit it here.
+
+Neither property maps to `VisualSlotOverride::color`. `apply_sdf_visual_override` (`render/fill_batch.rs:1359`) reads `fill_color.or(color)` and `border_color.or(color)` — the generic `color` field (`widgets/visual.rs:170`) is the **fallback for every color role**, so it drives fill and border together. That is the mechanism behind `Slider::disabled_color`. A text element that also authors a background would otherwise have its fill recolored by a text-color change.
+
+Add **two distinct overrides**, `text_color` consumed only by the text route and `path_color` only by the draw-primitive route, leaving `fill_color` and `border_color` exclusive to SDF roles.
+
+**Byte-size budget — measured 184.** The plan's 144→160 figure assumed one new field at 16 bytes; two fields predicted 176 on that basis. The measured value is **184**: `Option<Color>` is 20 bytes here, not 16. The assertion records 184. Phase 11 then removes the generic `color` and adds `tint`, a net-zero change, so Phase 11 asserts **184 as well**; its "back to 144" line was wrong and has been corrected.
 
 There is no material error left to widen — Phase 5 deleted `StateMaterialRequiresSurface` along with the other three. What survives is the **capability derivation**: `SDF_MATERIAL` is derived from a narrower set of records than the retained routes actually apply `VisualSlotOverride::material` to, which is SDF, text, and **every** `PanelDraw` record — lines *and* `PanelCircle` (`layout/draw.rs:11` for `PanelDraw`; `layout/line.rs:42` for the `PanelShape` enum, `:64` for `PanelCircle`; `render/panel_shapes/batching.rs:989`). Widen the derivation to match. Content color's recipients are text, image, or `PanelDraw` content.
 
-**This requires splitting Phase 2's capability mask, not merely extending it.** `VisualElementCapabilities` (`widgets/id.rs:115`) ships one `CONTENT` bit covering text, image, and non-empty `PanelDraw` together, and sets `SDF_MATERIAL` only when a background or border exists (`element.rs:1293`). Material-accepts-text-and-draw-but-rejects-image-only is not expressible from a single bit, so replace `CONTENT` with `TEXT` / `IMAGE` / `DRAW` and widen the `SDF_MATERIAL` derivation in `element_visual_capabilities` (`element.rs:1285`) to any SDF, text, or `PanelDraw` record. Content color's capability is `TEXT | IMAGE | DRAW`; material's is everything except `IMAGE` alone.
+**This requires splitting Phase 2's capability mask, not merely extending it.** `VisualElementCapabilities` (`widgets/id.rs:115`) ships one `CONTENT` bit covering text, image, and non-empty `PanelDraw` together, and sets `SDF_MATERIAL` only when a background or border exists (`element.rs:1293`). Material-accepts-text-and-draw-but-rejects-image-only is not expressible from a single bit, so replace `CONTENT` with `TEXT` / `IMAGE` / `DRAW` and widen the `SDF_MATERIAL` derivation in `element_visual_capabilities` (`element.rs:1319`) to any SDF, text, or `PanelDraw` record. `text_color`'s capability is `TEXT` alone and `path_color`'s is `DRAW` alone; material's is everything except `IMAGE` alone. The `IMAGE` bit is created here even though no property in this phase names it — it exists for the material derivation, and Phase 11's `tint` will use it.
 
 **Files:**
-- `src/widgets/appearance.rs:98` — fifth property on `Appearance` (impl at `:109`) and its fluent setter. Phase 3 deleted both `layer_onto` methods; per-property layering is now inlined in `WidgetStateCascades::resolve` (`:332`), so compose the fifth property by adding a fifth local plus a `VisualChange::To` arm inside that function's `LAYER_ORDER` loop and a fifth field in the `VisualSlotOverride` it constructs. `Appearance` derives `PartialEq` (`:95`), so the new field is compared automatically — there is no hand-written comparison to edit.
-- `src/widgets/visual.rs:169` — `content_color` on `VisualSlotOverride`, **and extend both `apply` (`:195`) and `apply_element` (`:209`)**. Those two functions enumerate every field explicitly and are the only path by which an element override composes over a slot baseline in `dispatch_visual_overrides` (`:506`); omitting either silently drops a `content_color` element override wherever a slot overlay exists on the same element index.
+- `src/widgets/appearance.rs:98` — **two** new properties on `Appearance` (impl at `:109`) and their fluent setters. Phase 3 deleted both `layer_onto` methods; per-property layering is now inlined in `WidgetStateCascades::resolve` (`:332`), so compose each by adding a local plus a `VisualChange::To` arm inside that function's `LAYER_ORDER` loop and a field in the `VisualSlotOverride` it constructs — two of each, not one. `Appearance` derives `PartialEq` (`:95`), so the new fields are compared automatically; there is no hand-written comparison to edit.
+- `src/widgets/visual.rs:169` — `text_color` **and** `path_color` on `VisualSlotOverride`, **and extend both `apply` (`:195`) and `apply_element` (`:209`) with both fields**. Those two functions enumerate every field explicitly and are the only path by which an element override composes over a slot baseline in `dispatch_visual_overrides` (`:506`); omitting either function, or either field in either function, silently drops that element override wherever a slot overlay exists on the same element index.
 - `src/render/panel_text/batching.rs` — the glyph-color override is `apply_text_visual_override` at **`:609`**, reading `slot_override.color` at **`:618`**. (`:288` is the cascade-read block and `:435` is `apply_routed_text_run_update`; neither is the override site.)
 - `src/render/panel_shapes/batching.rs` — `apply_shape_visual_override` at **`:1123`**, color read at **`:1132`**. (`:989` is a blank line.)
-- `src/render/image_batch.rs:628` — `slot_override.color.map_or(tint, linear_tint)`, the crate's only image tint override and the image `content_color` recipient. Named explicitly; the Spec's "images likewise" pointed at no file.
+- **`src/render/image_batch.rs` is NOT an edit site in this phase.** `:628` reads `slot_override.color.map_or(tint, linear_tint)` and keeps doing so until Phase 11 replaces it with `tint`. Images are deliberately out of scope here — see the Spec.
 - **`src/render/analytic_paths/batching.rs` is NOT an edit site** — the file contains zero `VisualSlotOverride` references. It consumes a color already resolved and stamped by `panel_text/batching.rs`. Dropped from this phase (and re-examine before trusting Phase 11's list).
 - `src/widgets/id.rs:115` — split `CONTENT` into `TEXT` / `IMAGE` / `DRAW`.
 - `src/layout/element.rs:1317` — `element_visual_capabilities`; widen the `SDF_MATERIAL` derivation (now at **`:1326`**) to any SDF/text/`PanelDraw` record and emit the three new content bits. (Phase 6 shifted these ~+32 from the `:1285`/`:1293` the Spec above still cites.)
@@ -831,45 +841,51 @@ There is no material error left to widen — Phase 5 deleted `StateMaterialRequi
 **Constraints from prior phases:**
 - **Phase 1:** `Appearance` is public with `background` / `border_color` / `border_width` / `material`, each a `VisualChange<T>`; adding a fifth field takes it from 80 to 96 bytes, which is why the cascade attributes carry `Arc<Appearance>` and each has its own `size_of` assertion against `CASCADE_ATTRIBUTE_BYTES = 32`. Do not add a `VisualChange` variant.
 - **Phase 2:** each recipient index carries a property-capability mask (`VisualElementCapabilities`, `widgets/id.rs:115`) so containers and non-content elements stay excluded. Its one `CONTENT` bit conflates text, image, and draw, and `SDF_MATERIAL` is set only for background-or-border — both must change here, per the Spec.
-- **Phase 5:** there is no appearance validation left anywhere. `validated_element_appearance` and its three call sites are deleted; the four `PanelBuildError::State*` variants are deleted. The guarantee is now carried by **record synthesis** — `CommonEl::default_state_surfaces` (`layout/builder.rs`, called from `text_leaf_element` and `El::into_element`) emits the transparent record a state property replaces. Do not go looking for a validator to add a fifth arm to; there is none. `element_visual_capabilities` (`element.rs:1285`) survives and still derives the mask, but nothing consumes it as a rejection gate.
+- **Phase 5:** there is no appearance validation left anywhere. `validated_element_appearance` and its three call sites are deleted; the four `PanelBuildError::State*` variants are deleted. The guarantee is now carried by **record synthesis** — `CommonEl::default_state_surfaces` (`layout/builder.rs`, called from `text_leaf_element` and `El::into_element`) emits the transparent record a state property replaces. Do not go looking for a validator to add a fifth arm to; there is none. `element_visual_capabilities` (`element.rs:1319`) survives and still derives the mask, but nothing consumes it as a rejection gate.
 - **Phase 5, the interaction this phase must handle:** `default_state_surfaces` emits a `Color::NONE` fill for a state `material` whenever the element has no border record. It does not look at `ElementContent`, so a text-only or `PanelDraw`-only part authoring a state material gets an SDF fill it does not need. Today that fill is *load-bearing* — `SDF_MATERIAL` is the only route a state material has. Once this phase widens the derivation to text and `PanelDraw`, it becomes waste (one material-table row plus quad geometry per element). Both conversion sites already have `content` in scope, so passing it into `default_state_surfaces` and skipping the fill when the element emits its own recipient is a small change — but it is this phase's change to make, and this phase's gate must assert the circle-only part carries **no** defaulted fill.
-- **Phase 6:** the four generated editor parts are recipients; editor text is the canonical `content_color` target. Specifically:
+- **Phase 6:** the four generated editor parts are recipients; editor text is the canonical `text_color` target. Specifically:
   - The four fluent methods live on `El<L, WidgetElement<EditableField>>` (`layout/builder.rs:1033`–`:1072`).
   - `EditorPart` is `pub(crate)` (`layout/builder.rs:448`), with `into_text` (`:515`), `with_children` (`:524`), and `with_background_if_unset` (`:487`) — the last supplies the built-in `EDITOR_SELECTION` / `EDITOR_CARET` colors, which are **private consts**, so an authored declaration that omits a background still gets the default.
   - **`editor_text` and `editor_validation` become text leaves; `editor_selection` and `editor_caret` become rectangles.** Only the latter two can use `background`.
-  - The example currently authors **neither** `editor_text` nor `editor_validation`, because `background` on a text leaf painted an opaque rect over the glyphs. This phase adds both back on `content_color`.
-  - **Fan-out:** one `editor_text` declaration reaches up to **eight** generated text elements — `add_text` is called at `ime/editor.rs:1222`, `:1229`, `:1238`, `:1250`, `:1272`, `:1279`, `:1286`, `:1292` (preedit runs, pre/post-selection runs, and the run inside `add_selected_text`). `into_text` clears `common.id` (`layout/builder.rs:516`), so none can be named individually. One authored `content_color` therefore produces N recipients and N part-map entries.
+  - The example currently authors **neither** `editor_text` nor `editor_validation`, because `background` on a text leaf painted an opaque rect over the glyphs. This phase adds both back on `text_color`.
+  - **Fan-out:** one `editor_text` declaration reaches up to **eight** generated text elements — `add_text` is called at `ime/editor.rs:1222`, `:1229`, `:1238`, `:1250`, `:1272`, `:1279`, `:1286`, `:1292` (preedit runs, pre/post-selection runs, and the run inside `add_selected_text`). `into_text` clears `common.id` (`layout/builder.rs:516`), so none can be named individually. One authored `text_color` therefore produces N recipients and N part-map entries.
 
-**Pending decision:** what happens when `content_color` names a recipient the element cannot emit.
+**RESOLVED 2026-07-29 — build error.** A state `text_color` or `path_color` authored on a part that structurally cannot present it is a **`PanelBuildError`**, not a silent no-op.
 
-Phase 5 made the other four properties unrejectable by synthesizing the record they replace. `content_color` cannot follow: layout can conjure a transparent SDF fill or border out of nothing, but it cannot conjure text, an image, or a `PanelDraw`. So `El::new().disabled(Appearance::new().content_color(RED))` on a structural container compiles, is admitted to `part_appearances` by `any_overridden()` (`element.rs:1318-1324`), and can never present. That is the **accepted option must reach the runtime** breach Phase 4 closed with `validated_element_appearance` — whose machinery Phase 5 deleted.
+The problem it settles: Phase 5 made the other four properties unrejectable by synthesizing the record they replace. These two cannot follow — layout can conjure a transparent SDF fill or border out of nothing, but it cannot conjure text or a `PanelDraw`. So `El::new().disabled(Appearance::new().text_color(RED))` on a structural container compiles, is admitted to `part_appearances` by `any_overridden()` (`element.rs:1318-1324`), and can never present. That is the **accepted option must reach the runtime** breach Phase 4 closed with `validated_element_appearance`, whose machinery Phase 5 deleted.
 
-Three options:
-- **Declare it dormant** and amend the invariant's part-local scope to admit one exception. Consistent with how a higher-level property with no compatible recipient already behaves, but it means the one property an author most expects to see do something silently does nothing.
-- **Reintroduce one targeted build error** for `content_color` only. Reverses Phase 5's direction for a single property, and re-adds the error-text problem the plan owner rejected — though the recovery here is real (`add a text or image child`), not a record layout could have emitted itself.
-- **Gate it out of the type surface** — only a part whose element emits content can name it. Strongest, but `content_color` lives on `Appearance`, which is one type shared by every element; splitting it by capability would need a second appearance type or a typestate parameter, and the plan already rejected typestate for this family.
+The plan previously recommended declaring it dormant, and argued that a build error was impossible because emission is a runtime predicate. **That argument does not hold**, and the reason is worth recording so it is not reopened: `add_text` early-returns on empty text (`ime/editor.rs:1303-1305`) and creates **no element at all**. The argument conflates two distinct cases —
 
-Recommendation: **declare it dormant**, and add the empty-bundle question (Phase 8) and this one to the same invariant amendment rather than amending it twice. Resolve before dispatching Phase 7.
+1. *No element exists* (empty buffer). There is nothing in `part_appearances`, nothing to validate, and no error is possible or needed.
+2. *An element exists that structurally cannot present* (a bare grouping container; `editor_selection`, which is a rectangle holding text as a child). Fully knowable at panel build.
 
-**Phase 6 strengthens this recommendation and eliminates option 3.** `add_text` early-returns on empty text (`ime/editor.rs:1303`), so whether `editor_text` emits a content recipient at all is decided **at runtime** from the buffer contents — no build error (option 2) and no typestate gate (option 3) can evaluate that predicate for a generated part. Further, `editor_selection` is a rectangle that *contains* the text as a child, so an author will reasonably expect `content_color` there to do something it cannot. Dormancy is the only implementable option for the generated parts.
+Only case 2 is being rejected, and case 2 is a build-time fact.
+
+**Mechanism.** `element_visual_capabilities` (`layout/element.rs:1317`) already derives the needed bits at build time — this phase is splitting `CONTENT` into `TEXT` / `IMAGE` / `DRAW` anyway. Reject when a bundle names `text_color` on an element with no `TEXT` bit, or `path_color` with no `DRAW` bit. Follow the error shape of `PanelBuildError::SliderThumbOutsideSlider` (`element.rs:825`); the recovery text is real here (`add a text child`, `add a draw`), not a record layout could have emitted itself.
+
+**Scope limit, unchanged.** This binds **part-local** authoring only. A global `CascadeDefault`, a panel-level default, or a runtime entity command still cannot promise a present recipient, so a higher-level property with no compatible record at some element stays **dormant** there. That is the existing invariant and this decision does not disturb it.
+
+**This does not cover the typestate rule.** Restricting the four state verbs so they cannot be called on a plain layout element at all is a separate, type-level change with its own phase — see Phase 13. That phase does not subsume this one: the parts rejected here are already inside widgets, so they pass any typestate gate.
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
 - **Docs (orchestrator-run — see Delegation Context → Docs):** this phase adds a public `Appearance` property and its doc entry, so both doc commands must pass before checkpoint.
-- Whatever the pending decision resolves to, a `content_color` naming an absent recipient is covered by a test: dormant-and-inert, or rejected at build.
-- A `const _: () = assert!(size_of::<VisualSlotOverride>() <= …)` records the type's new size at the value this phase grows it to, following the per-attribute precedent at `widgets/appearance.rs:219`. Phase 11 shrinks it back and asserts the smaller number; without this line that later assertion is a first measurement rather than a verified delta.
+- **Live smoke (orchestrator-run — see Delegation Context → Headless only carve-out):** this phase changes what `examples/widgets.rs` renders, so the plan owner runs the example and confirms the focused editable field shows correctly colored editor text before checkpoint. Keyboard only. Do not checkpoint on a passing headless gate alone — that is exactly the state Phase 6 shipped its opaque-bar defect in.
+- **Build error, both properties.** A `text_color` on a part with no `TEXT` capability and a `path_color` on a part with no `DRAW` capability each produce a `PanelBuildError` naming the element, with a compile-fail or build-error fixture per property. Two companion assertions prove the rejection is narrow: a `text_color` on a part that *does* emit text builds clean, and a **global or panel-level** default naming `text_color` against a container with no text stays **dormant** and produces no error — the part-local scope limit in the Spec.
+- A `const _: () = assert!(size_of::<VisualSlotOverride>() <= …)` records the type's new size, following the per-attribute precedent at `widgets/appearance.rs:219`. Two fields land here; the measured value is **184**. Phase 11 is net-zero on size (removes `color`, adds `tint`) and asserts the same value.
 - A disabled slider dims its label.
 - A hovered button brightens its caption **without touching its fill**.
 - A text element carrying its own background and border changes **only** its text color under a state.
 - A circle-only part accepts and presents both material and content color, and carries **no** defaulted `Color::NONE` fill (see the Phase 5 interaction constraint).
 - A state material on a text label wins over the `TextMaterial` cascade and restores it when the state clears.
-- An element-level `content_color` survives composition with a slot override on the same element index, proving `apply_element` carries the new field.
-- A disabled editable field dims its editor text — asserted on **every** generated run, not just the first, given the up-to-eight fan-out recorded in the Phase 6 constraints. (Moved here from Phase 6 — editor text color is unreachable until this phase adds `content_color`.)
-- A **headless proxy for the Phase 6 defect class**: a text-leaf recipient authoring only `content_color` acquires no `SDF_FILL` capability and no `fill_color` override. This is what would have caught the opaque-bar bug without a GPU.
+- An element-level `text_color` **and** an element-level `path_color` each survive composition with a slot override on the same element index, proving `apply_element` carries both new fields.
+- A part that carries both text and a draw colors them independently: `text_color` alone moves the glyphs and leaves the path, `path_color` alone does the reverse. This is the case that justifies two properties instead of one.
+- A disabled editable field dims its editor text — asserted on **every** generated run, not just the first, given the up-to-eight fan-out recorded in the Phase 6 constraints. (Moved here from Phase 6 — editor text color is unreachable until this phase adds `text_color`.)
+- A **headless proxy for the Phase 6 defect class**: a text-leaf recipient authoring only `text_color` acquires no `SDF_FILL` capability and no `fill_color` override. This is what would have caught the opaque-bar bug without a GPU.
 - `examples/widgets.rs` **adds** an `editor_text` part and an `editor_validation`
-  part, both authoring `content_color` (not `background`). Phase 6 deleted both
+  part, both authoring `text_color` (not `background`). Phase 6 deleted both
   calls outright, so there is nothing to "migrate" — grepping for `.editor_text(`
   finds nothing. Both parts are text leaves (`ime/editor.rs:1180` routes validation
   through `add_text` too), which is why `background` was wrong for them. Verified by
@@ -900,7 +916,110 @@ Add both: the headless proxy as the automated gate, and a one-line orchestrator 
 as a human check before checkpoint. The smoke costs a launch and a keypress; Phase 6
 shows the alternative costs a shipped-broken feature.
 
-Approve this direction, or modify it?
+**RESOLVED 2026-07-29 — approved by the plan owner.** Phases that change rendered
+appearance get a live smoke test run by the plan owner before checkpoint. Add the
+orchestrator-run smoke line to phases 7 and 11 parallel to the existing **Docs**
+line, keep the headless proxy assertion as the automated gate, and spell out the
+carve-out in the "Headless only" invariant. Driving is **keyboard only** — no BRP
+mouse control while the plan owner is at the machine.
+
+### Retrospective
+
+**What worked:**
+- Splitting `CONTENT` into `TEXT` / `IMAGE` / `DRAW` made the acceptance relation
+  expressible; the single bit could not say "material accepts text and draw but
+  rejects image-only".
+- The two new properties stayed off the generic `color` field, so
+  `apply_sdf_visual_override`'s `fill_color.or(color)` / `border_color.or(color)`
+  fallback (`render/fill_batch.rs:1359`) never recolors glyphs.
+- The live smoke confirmed the channel end to end: focused editor text renders
+  near-white over the blue selection fill, and both disappear on blur.
+
+**What deviated from the plan:**
+- Predicted `size_of::<VisualSlotOverride>()` was 176; measured **184**.
+  `Option<Color>` is 20 bytes here, not 16. Phase 7's assertion and Phase 11's
+  three references were corrected to 184.
+- Fix pass 1 reported all gates green while a test it had just added was failing
+  (`state_path_color_updates_the_draw_row_without_a_text_override`). Its fixture
+  authored a draw on a text leaf, where the leaf's bounds clipped every shape
+  command away, so there was no draw row to recolor. The draw moved to the widget
+  root. Two fix passes were needed, not one.
+
+**Surprises:**
+- Subtree seeding in `dispatch_visual_overrides` (`widgets/visual.rs:566-576`) was
+  the one writer of the generic `color`, so moving the text and shape routes onto
+  the new fields silently broke `Slider::disabled_color` — it stopped dimming text
+  and paths. The existing slider test asserts on `disabled.offset` and
+  `disabled.border_color`, fields the regression does not touch, so it passed
+  vacuously. The seeding now writes all three color fields.
+- The blind reviewer's proposed remedy for that regression — restoring a
+  `slot_override.color` fallback in the text and shape routes — was rejected: it
+  would let a background change recolor an element's glyphs, which is the exact
+  coupling this phase exists to remove.
+- The widget input context activates only for the OS-focused window
+  (`widgets/input.rs:595-615`), so the smoke could not be driven until the plan
+  owner clicked the window. `Window.focused` cannot be forced over BRP —
+  bevy_winit syncs it back from the real OS state.
+
+**Implications for remaining phases:**
+- Phase 11 removes the generic `color` and adds `tint`, a net-zero change, so its
+  size assertion is 184, not the "back to 144" the plan carried.
+- Phase 11 **deletes** the subtree channel rather than re-pointing it. The
+  ordering constraint is that `VisualSlotOverride::color` cannot be removed before
+  the subtree branch that writes it, and the dimming that branch provided has to
+  be reproduced by per-part authoring in `examples/widgets.rs`.
+- Any phase adding a per-role color must add a capability bit alongside it; the
+  build error is what makes a part-local override safe, and it needs a bit to test.
+
+### Phase 7 Review
+
+- **Delegation Context refreshed** for the shipped tree: the single `CONTENT`
+  capability bit is now `TEXT` / `IMAGE` / `DRAW` (`widgets/id.rs:123`/`:125`/`:127`),
+  `VisualSlotOverride` carries its six-field list with the `<= 184` upper-bound caveat,
+  `apply` (`visual.rs:202`) is named as the only color-naming method, the subtree-seeding
+  branch (`:556-568`) as the only writer of the generic `color`, and the test baseline
+  moves to 1146 passed / 2 skipped.
+- **Phase 9** gains a gate line re-asserting the part-local scope limit. Phase 7's
+  `global_text_color_default_stays_dormant_on_textless_widget_part` passes vacuously
+  today because no `CascadePlugin` is registered for the appearance channels
+  (`widgets/mod.rs:234`); Phase 9 registers them, which is the first moment that test
+  can fail. Its `BuilderData` ref corrected to `panel/builder.rs:189`.
+- **Phase 10**: corrected the claim that `WidgetStateCascades::any` has one production
+  caller — Phase 7 added `validate_part_state_colors` (`layout/element.rs:1348`),
+  calling it at `:1367` and `:1372`; deleting the authored view would break the
+  part-local build errors as well as record synthesis. The unsatisfiable
+  `&(element_index, _)` grep is scoped to `resolve_part_overrides`. Two pending
+  decisions added: the dormancy matrix must be rebuilt as explicit rows because
+  `SDF_MATERIAL` is now derived from background/border/text/draw (`element.rs:1341`)
+  and leaves only image-only elements incompatible; and the generated editor subtree
+  escapes `validate_part_state_colors` entirely, so a state color authored on a caret
+  or selection is accepted and permanently dormant.
+- **Phase 11**: **Files** gains `layout/element.rs:1348` and `panel/builder.rs:69-74` —
+  adding `tint` means adding a third arm to the part-local check and copying the two
+  Phase 7 error variants. A constraint records the check's early return
+  (`element.rs:1354`) so the `tint` arm inherits its exemptions rather than widening
+  them. The example-migration gate now enumerates the fields each `disabled` bundle
+  asserts (`background`, `border_color`, `text_color`, `path_color` independently),
+  because `disabled_color` dimmed a whole subtree with one value and a single
+  wholesale assertion would pass while a route was dropped. The size gate tightens
+  `visual.rs:199` from `<= 184` to `== 184`; the unsatisfiable bare `\.with_color\(`
+  grep is replaced by the `slot_override.color` grep plus `cargo check`. Its pending
+  decision on `SliderFocusedThumbBorderColorRequiresThumbBorder` was re-argued: Phase 7
+  reinstated the error class it claimed to be the last of, so the distinguishing test
+  is now synthesizability — a thumb border is synthesizable, text and `PanelDraw` are
+  not. Recommendation to delete stands, on the new grounds.
+- **Phase 12**: **Files** gains `validate_part_state_colors`, which mints
+  `PanelElementId::auto(...)` from the element's tree index (`element.rs:1361-1366`)
+  rather than through `next_auto_id` — a second, independent auto-id producer that the
+  structural-id change must move, or its error messages will name ids the elements do
+  not carry.
+- **Line-reference drift** corrected across every remaining phase and the Delegation
+  Context: `layout/element.rs`, `layout/builder.rs`, `widgets/visual.rs`,
+  `widgets/appearance.rs`, and the three presenters. Phases 11 and 13 cited
+  `LayoutContentBuilder::with<L, Role>`; the generic `with` is a default method on
+  `AcceptsElement` (`builder.rs:1554`, method `:1720`).
+- **Reviewed clean:** no remaining phase is redundant or already satisfied, and the
+  phase ordering is unchanged.
 
 ### Phase 8 — Per-property merge in the cascade · status: todo
 
@@ -912,7 +1031,7 @@ Approve this direction, or modify it?
 
 Stock resolution returns the first `Cascade::Override` and stops — `resolve_from_queries` (`bevy_kana/src/cascade.rs:433`) and `resolve_from_world` (`:446`) both do — and the `CascadeDefault<A>` root is a *fallback*, never combined. The design requires **per-property merge at every hop**, including into the global default.
 
-`Appearance`'s five fields are each `VisualChange<T>`, so a bundle is already a sparse per-property record. Merging is field-by-field: **the lower level's `To(value)` wins, otherwise the higher level's field carries through.** Write one
+`Appearance`'s six fields (`background`, `border_color`, `border_width`, `text_color`, `path_color`, `material` — Phase 7 added the middle two) are each `VisualChange<T>`, so a bundle is already a sparse per-property record. Merging is field-by-field: **the lower level's `To(value)` wins, otherwise the higher level's field carries through.** Write one
 
 ```rust
 Appearance::merge_over(&self, higher: &Self) -> Self
@@ -999,7 +1118,11 @@ This phase touches `bevy_kana`. Nothing in `hana_diegetic` consumes the merge ye
 
 **Constraints from prior phases:**
 - **Phase 1:** the four wrappers are `Arc<Appearance>` newtypes with hand-written `PartialEq` (`Arc::ptr_eq` then content equality) and per-attribute `size_of` assertions. Every merge allocates a fresh `Arc`, so equality must fall through to content comparison — a merge producing an equal value must still compare equal, or propagation dirties `Resolved<A>` every frame.
-- **Phase 7:** `Appearance` now has five `VisualChange` fields — `background`, `border_color`, `border_width`, `material`, `content_color`. `merge_over` covers all five.
+- **Phase 7:** `Appearance` now has six `VisualChange` fields — `background`, `border_color`, `border_width`, `material`, `text_color`, `path_color`. `merge_over` covers all six.
+- **One merge direction, never varied.** `merge_over` must have a single documented orientation and every call site must go through it. Flutter ships `TextStyle.merge` (the argument wins) and `ButtonStyle.merge` (the receiver wins) in the same framework, and that inconsistency is a documented source of confusion. Pick lower-wins-over-higher, state it in the doc comment, and do not add a second merge with the opposite sense.
+- **`CascadeRoot::root_default()` must return a stable cached value, not a freshly computed one.** It stays total — never `Option` — but totality is not enough. SwiftUI's `@Entry` generates a *computed* default, so a reference-type default mints a new instance on every unresolved read, which defeats identity comparison and causes spurious invalidation. `material: VisualChange<Handle<StandardMaterial>>` is exactly where that would bite here: a fresh `Handle` per read would make Bevy change detection fire every frame on an unchanged cascade. Return a cached handle.
+- **Keep the sparse per-property record; do not switch to whole-object replacement.** `VisualChange<T>`-per-field is the shape CSS declarations, Flutter's nullable `TextStyle` fields, and SwiftUI's independent environment keys all converge on. Flutter's `ButtonStyle` replaces whole objects instead ("one replaces the other entirely") and that is a documented annoyance.
+- **Inherit-or-not is declared per property, never inferred.** Today the answer is "no property inherits by element tree position" (see the Delegation Context invariant), so this costs nothing now — but if a property is ever added that does, it says so at its declaration. CSS `@property` makes `inherits` mandatory and invalidates the rule if it is missing; WPF requires `FrameworkPropertyMetadata.Inherits` and defaults it off. Two independent systems converged on stating it explicitly.
 - The existing cascade attributes that must keep replace semantics, all declared through `cascade_attribute!` in `src/cascade/resolved.rs`: `TextAlpha` (`:52`), `FontUnit` (`:58`), `HdrTextCoverageBias` (`:63`), `SdfMaterial` (`:112`), `TextMaterial` (`:125`), `ShapeMaterial` (`:138`), `Lighting` (`:149`), `ShadowCasting` (`:152`), `GlyphShadowMode` (`:155`), `Sidedness` (`:159`), `AntiAlias` (`:163`), `HairlineFade` (`:167`), `WidgetInteractivity` (`:170`). **None of them is edited by this phase** — the macro emits no `combine`, so they inherit the replace default.
 
 **Pending decision:** whether an explicitly authored empty bundle suppresses an inherited one, or is indistinguishable from never authoring.
@@ -1019,7 +1142,7 @@ What should change — pick one and make the whole document say it:
 - **No-op (matches the invariant and both gates).** An empty bundle contributes nothing at any level. The stored `Override`/`Inherit` distinction stays inert — harmless, but it is not load-bearing and Phase 1's rationale for it should be corrected rather than left to mislead a later delegate.
 - **Suppression (matches Phase 1's archived Spec).** An explicit empty bundle clears whatever a higher level authored, giving authors a way to opt a widget out of an inherited look. This needs the fold to distinguish the two cases, a revised invariant, and revised gate lines here and in Phase 10. **Phase 3 raised its cost:** it additionally requires deleting the default-drop filter at `widgets/visual.rs:392` and inventing an explicit "clear" token in `VisualSlotOverride`, which has none — every field is an `Option<T>` whose `None` already means "no opinion", so there is no spare value to spend on "clear". Choosing suppression pulls `src/widgets/visual.rs` into this phase's **Files**.
 
-Whichever is chosen, this phase must also settle **part-map admission**: it stays override-keyed (required if suppression wins, since an empty bundle must reach resolution to suppress), or it reverts to property-authorship (cheaper under no-op, since an empty entry can never change a pixel). If admission changes, `layout/element.rs:1309` `record_owned_widget_element` joins this phase's **Files** and Phase 2's admission test is updated with it.
+Whichever is chosen, this phase must also settle **part-map admission**: it stays override-keyed (required if suppression wins, since an empty bundle must reach resolution to suppress), or it reverts to property-authorship (cheaper under no-op, since an empty entry can never change a pixel). If admission changes, `layout/element.rs:1380` `record_owned_widget_element` joins this phase's **Files** and Phase 2's admission test is updated with it.
 
 Recommendation:
 Take the no-op reading — it is what the invariant, this phase's gate, and Phase 10's gate already specify, **and Phase 3 has already shipped it** (`widgets/visual.rs:392` drops any resolution equal to `VisualSlotOverride::default()`), so only Phase 1's archived rationale is out of step. Record the correction as a note beneath Phase 1's Retrospective rather than editing the archived Work Order. If suppression is wanted later, it is a clean additive feature (an explicit "clear" value distinct from an empty bundle) rather than a reinterpretation of empty. Keep admission override-keyed regardless: the entry is rare, the capability mask already prevents the expensive part of the waste, and reverting admission would destroy the distinction a later suppression feature needs.
@@ -1033,9 +1156,9 @@ Approve this direction, or modify it?
 - **`CascadeAttribute` and its blanket impl are byte-identical to `HEAD`**, and no attribute type gains a hand-written `impl CascadeAttribute`.
 - A test asserts **every existing cascade attribute still resolves first-override-wins** across a global → panel → widget chain after the fold lands, including the no-override case that returns the `CascadeDefault` root.
 - A cycle, a missing `CascadeFrom`, and depth-limit exhaustion each still yield the same value as today for a replace attribute.
-- `merge_over` unit tests cover all five properties for the four combinations of (higher names it / does not) × (lower names it / does not).
+- `merge_over` unit tests cover all six properties (`background`, `border_color`, `border_width`, `text_color`, `path_color`, `material`) for the four combinations of (higher names it / does not) × (lower names it / does not).
 - `Appearance::new().merge_over(&x)` equals `x` — an empty bundle is a no-op, not a clear.
-- A three-level merge test: global naming `background`, panel naming `content_color`, widget naming `background` resolves to the widget's background, the panel's content color, and `Unchanged` elsewhere.
+- A three-level merge test: global naming `background`, panel naming `text_color`, widget naming `background` resolves to the widget's background, the panel's text color, and `Unchanged` elsewhere.
 
 ### Phase 9 — Register the four cascades and the panel authoring surface · status: todo
 
@@ -1078,7 +1201,7 @@ Presentation does not read `Resolved<…>` yet — that is Phase 10.
 **Files:**
 - `src/widgets/mod.rs:233-237` — four `CascadePlugin` registrations in the `add_plugins` tuple.
 - `src/panel/mod.rs:194` — four registrations in `HeadlessLayoutPlugin`.
-- `src/panel/builder.rs:183` — four `BuilderData` fields + builder methods + seeds + `build_panel` assignments.
+- `src/panel/builder.rs:189` — four `BuilderData` fields + builder methods + seeds + `build_panel` assignments.
 - `src/panel/diegetic_panel.rs` — four `seed_panel_value` calls (`:1566`), four `replace_from_precompose_helper` assignments (`:451`).
 - `src/panel/lifecycle.rs` — four ownership-observer entries (`:122`), four teardown entries (`:775`).
 - `src/cascade/attributes.rs:30` — four typed command pairs, with durability documentation.
@@ -1098,9 +1221,10 @@ Presentation does not read `Resolved<…>` yet — that is Phase 10.
 - **Docs (orchestrator-run — see Delegation Context → Docs):** this phase adds the public panel authoring surface and the runtime override/inherit commands, so both doc commands must pass before checkpoint.
 - A global `CascadeDefault` reaches every widget entity's `Resolved<…>` with no per-widget authoring.
 - **Panel beats global** for each of the four states, asserted on `Resolved<…>`.
-- Level-to-level merge holds: a panel bundle naming only `border_color` against a global default of `background` + `content_color` resolves to all three.
+- Level-to-level merge holds: a panel bundle naming only `border_color` against a global default of `background` + `text_color` resolves to all three.
 - Lifecycle tests cover a pre-existing application-owned `Cascade`/`Resolved` pair, precompose replacement, role removal, and role re-addition.
 - Runtime `override_widget_*_appearance` / `inherit_widget_*_appearance` commands change the resolved value and restore inheritance.
+- **Re-assert the part-local scope limit for `text_color`, now that a global default can actually reach a part.** Phase 7 added `global_text_color_default_stays_dormant_on_textless_widget_part` (`layout/element.rs`), but it passes vacuously today: no `CascadePlugin` is registered for `WidgetHoveredAppearance` (`widgets/mod.rs:234` registers only `WidgetInteractivity`), so nothing propagates and the "dormant" assertion is trivially true. This phase registers all four channels, which is the first moment the test can fail. Re-assert it here: a global `hovered` default naming `text_color` resolves onto a widget part that has no text, and produces **no** `text_color` in that part's resolved override and **no** `PanelBuildError` — the `StateTextColorRequiresText` error is authored-scope only, never triggered by an inherited default.
 - **Propagating an unchanged bundle does not dirty `Resolved<…>`.** Re-running propagation with no authoring change must leave `Resolved<Widget*Appearance>` unmarked, and Phase 3's presenter-isolation tests must pass unchanged. All three presenters already carry the four `Changed<Cascade<Widget*Appearance>>` dirty terms (`button.rs:145-148`), so a propagation that rewrites the `Arc` with a content-equal value wakes every presenter every frame — the Phase 1 constraint above is the cause, this gate is the effect that proves it.
 
 ### Phase 10 — Two-stage resolution and reification · status: todo
@@ -1114,11 +1238,34 @@ Presentation does not read `Resolved<…>` yet — that is Phase 10.
 Resolution is **two-stage**, because `Cascade<T>` and `Resolved<T>` are per-entity components while parts are layout indices on one widget entity — a single `Resolved<T>` cannot carry a distinct value per part, and spawning an entity per part would add roughly eight entities, their relationships, and eight cascade components each per slider.
 
 1. `CascadePlugin` resolves **global → panel → widget** on the widget entity, over the four attribute types (already wired in Phase 9).
-2. Presentation resolves **part against widget** by reference: each sparse map entry is a part-local `Cascade<…>` resolved against the widget's `Resolved<…>`, through **one typed helper** rather than precedence spelled out in each presenter. **That helper already exists.** Phase 3 shipped `widgets::visual::resolve_part_overrides` (`widgets/visual.rs:369`), called identically by all three presenters (`button.rs:235`, `editable.rs:121`, `slider.rs:1202`) — it is already the single part-resolution seam. Extend it to take the four `&Resolved<Widget*Appearance>` as parameters. **Do not write a second helper in `src/cascade/`**: that duplicates the seam Phase 3 established and leaves the three presenters resolving through two different paths.
+2. Presentation resolves **part against widget** by reference: each sparse map entry is a part-local `Cascade<…>` resolved against the widget's `Resolved<…>`, through **one typed helper** rather than precedence spelled out in each presenter. **That helper already exists.** Phase 3 shipped `widgets::visual::resolve_part_overrides` (`widgets/visual.rs:369`), called identically by all three presenters (`button.rs:232`, `editable.rs:121`, `slider.rs:1202`) — it is already the single part-resolution seam. Extend it to take the four `&Resolved<Widget*Appearance>` as parameters. **Do not write a second helper in `src/cascade/`**: that duplicates the seam Phase 3 established and leaves the three presenters resolving through two different paths.
+
+**Stage 2 is a reduction over an ordered bundle slice, not a two-argument merge.** For one state channel at one recipient, resolution takes the authored levels **lowest precedence first** as `&[&Appearance]` and reduces them with `Appearance::merge_over` (Phase 8). It does **not** take a widget bundle and a part bundle as two named parameters, and no presenter inlines the precedence.
+
+```rust
+/// Reduces one state channel's authored levels into a single bundle.
+///
+/// `levels` is ordered lowest precedence first, so the last entry wins per
+/// property. The arity is the caller's business: today a recipient supplies
+/// the widget's resolved bundle and, when it has one, its own part bundle.
+fn merge_levels(levels: &[&Appearance]) -> Appearance {
+    levels
+        .iter()
+        .rev()
+        .copied()
+        .fold(Appearance::new(), |lower, higher| lower.merge_over(higher))
+}
+```
+
+`merge_over` is *lower wins over higher*, so the reduction runs from the most specific end and accumulates the winner. Either traversal direction is acceptable as long as **one** function owns the orientation and every call site goes through it.
+
+The slice has exactly two entries today. **Do not encode that arity anywhere**: no `(widget, part)` parameter pair on the resolved-side state view, no two-branch `if let` precedence in `button.rs` / `slider.rs` / `editable.rs`. The three presenters pass their four `&Resolved<Widget*Appearance>` into `resolve_part_overrides` (`widgets/visual.rs:369`) and the slice is built inside `visual.rs`. Reason: a further level is then a longer slice and nothing more. A two-parameter signature turns that into a rewrite of the seam plus all three call sites plus the reduction. This is insurance, and it is required whether or not a further level is ever added — see the Delegation Context invariant on element-tree inheritance.
+
+**Read the capability mask; do not destructure it away.** `resolve_part_overrides` currently binds `&(element_index, _)` at `widgets/visual.rs:377`, discarding the `VisualElementCapabilities` that `WidgetVisualSlots::elements` (`:120`) carries. Bind it and use it: a recipient whose mask can present **no** property the reduced bundle names produces no `VisualOverrideIndex` entry. This is the only bound on the index growth this phase's skip inversion creates, and it is the gate the dormancy acceptance lines depend on.
 
 **Then, and only then,** layer the active states in `LAYER_ORDER` (`widgets/appearance.rs:388`, `[Focused, Hovered, Pressed, Disabled]`) and build the record override. The two axes must not be interleaved.
 
-**This phase needs two state views, not one.** `WidgetStateCascades<'a>` (`widgets/appearance.rs:264`) holds `&'a Cascade<Widget*Appearance>` and its `layer` (`:295`) reads through `Cascade::as_override()`. Presentation here reads `Resolved<Widget*Appearance>`, which derefs to the attribute itself and is never a `Cascade` — so the resolved path needs its own view over four `&Appearance` (or four `&Widget*Appearance`). The authored view must stay, for two reasons: `resolve_part_overrides` calls `cascades().resolve(...)` on the part's **authored** `StateAppearance` (`visual.rs:391`), and `CommonEl::default_state_surfaces` (`layout/builder.rs`) calls `any` (`:317`) to decide which records to synthesize. (Phase 5 deleted the build-time validation this paragraph used to cite; `any` now has exactly that one production caller.) Factor the shared `LAYER_ORDER` fold so both views call one implementation rather than duplicating `layer`/`resolve`.
+**This phase needs two state views, not one.** `WidgetStateCascades<'a>` (`widgets/appearance.rs:264`) holds `&'a Cascade<Widget*Appearance>` and its `layer` (`:295`) reads through `Cascade::as_override()`. Presentation here reads `Resolved<Widget*Appearance>`, which derefs to the attribute itself and is never a `Cascade` — so the resolved path needs its own view over four `&Appearance` (or four `&Widget*Appearance`). The authored view must stay, for two reasons: `resolve_part_overrides` calls `cascades().resolve(...)` on the part's **authored** `StateAppearance` (`visual.rs:391`), and `CommonEl::default_state_surfaces` (`layout/builder.rs`) calls `any` (`:317`) to decide which records to synthesize. (Phase 5 deleted the build-time validation this paragraph used to cite, but Phase 7 added a second production caller: `validate_part_state_colors` (`layout/element.rs:1348`) calls `cascades.any(…)` at `:1367` and `:1372` to decide whether a part authored `text_color` / `path_color` in any state. So the authored view has two live callers, not one, and deleting it breaks the part-local build errors as well as the synthesis path.) Factor the shared `LAYER_ORDER` fold so both views call one implementation rather than duplicating `layer`/`resolve`.
 
 Both hops use `Appearance::merge_over` from Phase 8. For one element in one state:
 
@@ -1130,7 +1277,7 @@ Both hops use `Appearance::merge_over` from Phase 8. For one element in one stat
 
 **That inversion makes `VisualElementCapabilities` load-bearing for the first time.** The mask is stored in `WidgetVisualSlots::elements` (`widgets/visual.rs:84`, read at `:120`) but the merge-walk destructures it away — `&(element_index, _)` at `:355` — and **no production code reads it today**; Phase 2 built it and nothing has consumed it since. Wire it here: a recipient whose capabilities cannot present any property the resolved bundle names must produce no `VisualOverrideIndex` entry. Without this the dormancy gate below cannot pass, because every recipient would now get an entry.
 
-**Named risk — index growth.** Once every recipient receives the widget bundle, one global `CascadeDefault` naming a single property produces index entries proportional to widgets × recipients, where today it produces none. The capability mask is the only bound on that, which is the second reason it must be wired in this phase rather than deferred. **Since Phase 5 the recipient set is no longer fixed by ordinary declarations:** `element_visual_capabilities` derives `SDF_FILL` / `SDF_BORDER` from `background.is_some()` / `border.is_some()` (`element.rs:1285`), and a structural container authoring `.hovered(Appearance::new().background(X))` now gets a synthesized fill — so it becomes a full SDF recipient where it was previously a build error. State authorship can create recipients, so the multiplier is larger than the pre-Phase-5 estimate.
+**Named risk — index growth.** Once every recipient receives the widget bundle, one global `CascadeDefault` naming a single property produces index entries proportional to widgets × recipients, where today it produces none. The capability mask is the only bound on that, which is the second reason it must be wired in this phase rather than deferred. **Since Phase 5 the recipient set is no longer fixed by ordinary declarations:** `element_visual_capabilities` derives `SDF_FILL` / `SDF_BORDER` from `background.is_some()` / `border.is_some()` (`element.rs:1319`), and a structural container authoring `.hovered(Appearance::new().background(X))` now gets a synthesized fill — so it becomes a full SDF recipient where it was previously a build error. State authorship can create recipients, so the multiplier is larger than the pre-Phase-5 estimate.
 
 **Reification.** Widgets already receive `CascadeFrom::new(panel)` on spawn (`bevy_kana/src/cascade.rs:197`) and `update_widget` (`reify.rs:352`) repairs a wrong relationship. The existing order is cycle-free: `CascadeSet::Propagate → PanelSystems::ComputeLayout → WidgetSystems::Reify → ReifyCommandsApplied → presentation`, with `ReifyCommandsApplied` flushing both the widget insertions and the `resolve_inserted_cascade` observer (`bevy_kana/src/cascade.rs:339`) that seeds `Resolved<A>` — the existing `disabled_widget_is_marked_in_its_reification_frame` test already proves same-frame behavior for `WidgetInteractivity`.
 
@@ -1145,7 +1292,7 @@ This phase must additionally:
 **Files:**
 - `src/widgets/visual.rs:369` — extend Phase 3's existing `resolve_part_overrides` (the part-against-widget seam) to take the four `&Resolved<Widget*Appearance>`; invert the no-part-entry skip (`:379-390`); read `VisualElementCapabilities` at `:377` instead of discarding it. **No new helper in `src/cascade/`.**
 - `src/widgets/mod.rs:238-268` and `:299-307` — presentation ordering after `Propagate` and `ReifyCommandsApplied`.
-- `src/widgets/button.rs:235`, `src/widgets/slider.rs:1202`, `src/widgets/editable.rs:121` — the three `resolve_part_overrides` call sites; each passes the four `&Resolved<…>` and gains four `Changed<Resolved<…>>` dirty inputs. **Query-signature changes only** — the resolution logic stays in `visual.rs`.
+- `src/widgets/button.rs:232`, `src/widgets/slider.rs:1202`, `src/widgets/editable.rs:121` — the three `resolve_part_overrides` call sites; each passes the four `&Resolved<…>` and gains four `Changed<Resolved<…>>` dirty inputs. **Query-signature changes only** — the resolution logic stays in `visual.rs`.
 - `src/widgets/appearance.rs:249-365` — add the resolved-side state view alongside the authored `WidgetStateCascades<'a>` (`:264`) and share one `LAYER_ORDER` (`:388`) fold between them. `resolve` (`:332`) composes the merged bundles in `LAYER_ORDER` after level resolution, not during it. **This is a smaller change than it sounds**, though not for the reason previously recorded here: Phase 3 rewrote `resolve`, and it does **not** layer against an `Appearance::default()` accumulator. It accumulates four `Option<&T>` per-property winners across the `LAYER_ORDER` loop (`:335`) and builds a `VisualSlotOverride` directly (`:331-362`), taking `panel: Option<&DiegeticPanel>` for border-width conversion. It does already keep the two axes separate. What changes is only where each layer comes from — the resolved bundles passed in, instead of `layer(state)` (`:295`) reading this record's own `Cascade`s. Do not rewrite the layering algorithm.
 - `docs/hana_diegetic/widgets-deferred.md` — the four documentation edits above.
 
@@ -1155,7 +1302,7 @@ This phase must additionally:
 - **Phase 2:** the sparse part map is sorted by element index, capability-masked, revision-scoped, and stored **separately** from the four root `Cascade` values — the root's bundle is the widget's own override and must not be applied a second time as a part override. Phase 2 also landed the entity shape this phase resolves through: `StateAppearance` is not a `Component`, `spawn_widget` inserts all four `Cascade<Widget*Appearance>` channels including `Cascade::Inherit`, `update_widget` synchronizes them per channel, and `WidgetStateCascades<'_>` is the borrowed view the presenters already use.
 - **Phase 3:** presenters already merge-walk recipients and already own their `Changed`/`RemovedComponents` drains; this phase adds four more `Changed` filters to the drains they own, not to a run condition.
 - **Phase 5:** part-local authoring is never rejected — a state property with no ordinary declaration gets a transparent record to replace, emitted by `CommonEl::default_state_surfaces` (`layout/builder.rs`) at element construction. Higher-level properties with no compatible recipient are likewise **dormant**, not errors. There is no appearance validation left to route them through.
-- **Phase 7:** `content_color` is the fifth property and the merge covers it.
+- **Phase 7:** `text_color` and `path_color` are the fifth and sixth properties, and the merge covers both.
 
 **Pending decision:** which override channel carries the widget level.
 
@@ -1163,7 +1310,7 @@ Actual problem:
 Phase 3 gave `WidgetVisualOverrides` two channels — per-element overrides (`set_element` `widgets/visual.rs:320`, read back via `element_overrides` `:338`) and the older whole-slot overrides. `dispatch_visual_overrides` composes them in that order: the slot override is the baseline, the element override lays over it per property via `apply_element` (`:209`, applied at `:524-538`). This phase writes the resolved widget-level bundle to every recipient but never says **which of those two channels it uses**, and the slider still writes its root as a *slot* today (`slider.rs:1196-1199`). Phase 11's focus-border rework silently depends on the answer.
 
 What exists now:
-- `apply` (`:195`) and `apply_element` (`:209`) are both per-property `overlay.or(self)` — an overlay that names `border_color` replaces it, one that leaves it `Unchanged` preserves what was underneath.
+- `apply` (`:202`) is per-property `overlay.or(self)`; `apply_element` (`:218`) saves `offset`, delegates to `apply`, and restores `offset`, so it inherits that behavior without naming any color field — an overlay that names `border_color` replaces it, one that leaves it `Unchanged` preserves what was underneath.
 - The slider writes `SLIDER_ROOT` through the slot channel (`slider.rs:1196-1199`); nothing yet writes a widget-level bundle through the element channel.
 - Phase 11's three focus-border bullets ("a disabled `border_color: To(…)` replaces it, `Unchanged` preserves it, an element overlay without `offset` leaves the thumb translation alone") describe exactly what `apply_element` already does.
 
@@ -1181,7 +1328,9 @@ Approve this direction, or modify it?
 - `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic headless_widgets`
-- **Merge matrix, table-driven.** For each of the five properties, all four widget × part combinations, asserting the resolved value at the part:
+- **Stage 2 is arity-agnostic.** The part-against-widget merge is a single reduction over an ordered `&[&Appearance]` (lowest precedence first) living in `widgets/visual.rs`; no signature and no presenter names a widget bundle and a part bundle as separate parameters. A unit test drives it with slices of length **0, 1, 2, and 3** and asserts the most specific entry wins per property — the length-3 case exists specifically to prove the reduction is not arity-limited to today's two levels, so it must not be deleted as redundant. `rg -n 'merge_over' crates/hana_diegetic/src/widgets` shows call sites only inside that reduction and Phase 8's unit tests.
+- **The capability mask is read, not discarded.** `resolve_part_overrides` no longer binds `&(element_index, _)` (check that function specifically — the identical binding in the `dispatch_visual_overrides` subtree-seeding loop at `visual.rs:557` is **not** this phase's to remove; Phase 11 deletes it), and a recipient whose `VisualElementCapabilities` can present no property the reduced bundle names produces **no** `VisualOverrideIndex` entry — asserted once per property × incompatible-recipient pair, sharing the fixtures of the dormancy gate below.
+- **Merge matrix, table-driven.** For each of the six properties, all four widget × part combinations, asserting the resolved value at the part:
 
   | widget names it | part names it | resolved at part |
   |---|---|---|
@@ -1191,16 +1340,54 @@ Approve this direction, or modify it?
   | yes | yes | part's value |
 
   Run the matrix for all four states and at every hop: global→panel, panel→widget, widget→part.
+- **Generated-part exclusion.** A widget-level `focused` bundle naming `background` on an editable field, with **no** `editor_caret` / `editor_selection` declaration, reaches the field's own recipients and produces **no** `VisualOverrideIndex` entry for the generated caret or selection elements — those keep `EDITOR_CARET` / `EDITOR_SELECTION`. Its companion asserts the exclusion is scoped to the widget hop: the same fixture plus an `editor_caret` declaration **does** resolve at the caret, proving Phase 6's part surface still reaches generated elements.
 - A part hovered bundle carrying **only** a border color keeps the widget's inherited hovered background and replaces only the border.
 - A part naming the **ordinary value** for a property holds that property against a widget bundle.
 - An **explicit empty part bundle resolves to the widget's inherited bundle at that element, identically to a recipient with no part entry** — its own named test. State it against the post-inversion path: Phase 3's default-drop filter (`visual.rs:392`) already makes an empty bundle produce nothing today, so the previous wording ("resolves identically to no part bundle") passes on the current tree without proving anything this phase builds.
-- **Dormancy:** a widget bundle naming `border_color` against a text-only label leaves the label unchanged, produces no error, and creates no `VisualOverrideIndex` entry for it. One test per property × incompatible-recipient pair. **The fixture's label must author no state border of its own** — if it does, `CommonEl::default_state_surfaces` synthesizes a transparent border and it becomes a legitimate `SDF_BORDER` recipient, so the test would be asserting the opposite of what it claims.
-- Every test in this phase authors its bundles through the public part-authoring surface Phase 4 shipped, never through `set_element_state_appearance` (`element.rs:462`, `#[cfg(test)]`). That helper assigns `element.appearance` after construction and is the one path that skips Phase 5's defaulting — a bundle placed through it gets no synthesized record, no capability bit, and no recipient, making the test structurally incapable of proving presentation.
+- **Dormancy:** a widget bundle naming `border_color` against a text-only label leaves the label unchanged, produces no error, and creates no `VisualOverrideIndex` entry for it. One test per property × incompatible-recipient pair **that still exists** — see the pending decision below; after Phase 7 this row is the only one of the original set that is still true. **The fixture's label must author no state border of its own** — if it does, `CommonEl::default_state_surfaces` synthesizes a transparent border and it becomes a legitimate `SDF_BORDER` recipient, so the test would be asserting the opposite of what it claims.
+- Every test in this phase authors its bundles through the public part-authoring surface Phase 4 shipped, never through `set_element_state_appearance` (`element.rs:475`, `#[cfg(test)]`). That helper assigns `element.appearance` after construction and is the one path that skips Phase 5's defaulting — a bundle placed through it gets no synthesized record, no capability bit, and no recipient, making the test structurally incapable of proving presentation.
 - A test sources focused, hovered, pressed, and disabled from **four different levels**, including an explicit empty part bundle, and asserts `LAYER_ORDER` still governs.
 - Runtime global-default and panel-override mutations repaint live buttons, sliders, and editable fields while widget state is unchanged; editable tests confirm pressed appearance never applies.
 - A **first-update test** covers global, panel, widget-root, and part inheritance in the reification frame.
 - **Phase 3's presenter-isolation tests pass unchanged** once the four `Changed<Resolved<…>>` terms are added: `button_press_edges_do_not_rebuild_slider_overrides`, plus the detector that removes `WidgetVisualOverrides` from the peer widget, drives the other, and asserts the peer's component is not re-inserted. Propagating an unchanged bundle must not dirty `Resolved<…>` and must not wake a presenter.
 - `docs/hana_diegetic/widgets-deferred.md` carries none of the four stale statements.
+
+**Pending decision:** what the dormancy matrix covers now that Phase 7 changed the capability derivation.
+
+Actual problem:
+The gate above asks for "one test per property × incompatible-recipient pair". That
+table was written against the pre-Phase-7 capability derivation and most of its rows
+no longer describe anything. `element_visual_capabilities` (`layout/element.rs:1319`)
+now sets `SDF_MATERIAL` whenever `background.is_some() || border.is_some() || has_text
+|| has_draw` (`:1341`), so `material` has no incompatible recipient left except an
+element that is image-only. Writing the matrix as stated would produce tests that
+assert dormancy on recipients that are in fact compatible — passing for the wrong
+reason.
+
+What exists now:
+- `border_color` vs a text-only label: still a genuine incompatible pair, still the
+  gate row that should be written.
+- `material` vs anything with a background, a border, text, or a draw: **compatible**.
+  The only incompatible recipient is an image-only element.
+- `text_color` and `path_color`: Phase 7 made these a **build error**
+  (`StateTextColorRequiresText` / `StatePathColorRequiresDraw`,
+  `panel/builder.rs:71`/`:74`) when authored on a part that cannot take them, so at
+  the part level they are not dormancy cases at all. They stay dormancy cases only on
+  the inherited path, where no error is raised — which is the Phase 9 gate line added
+  by this review, not a Phase 10 row.
+
+What should change:
+- Rebuild the matrix as an explicit list rather than a formula: `border_color` vs a
+  text-only label; `material` vs an image-only element; `background` vs an element
+  with no fill surface, if one can still be constructed after Phase 5's defaulting.
+- State the `text_color` / `path_color` split in the gate — authored-on-part is an
+  error (Phase 7 owns it), inherited-from-above is dormant (Phase 9 owns it), and
+  neither belongs in Phase 10's matrix.
+
+Recommendation:
+Replace the "one test per property × incompatible-recipient pair" sentence with the
+three enumerated rows above. A formula that expands to a table nobody rechecked is
+what produced this drift; the rows are few enough to write out.
 
 **Pending decision:** whether a widget-level appearance bundle should repaint the generated carets and selection boxes.
 
@@ -1225,7 +1412,78 @@ Accept and gate it — a widget-level bundle reaching everything the widget owns
 whole premise of the plan, and the generated parts are owned. But it must be a named,
 tested behavior rather than an emergent one.
 
-Approve this direction, or modify it?
+**RESOLVED 2026-07-29 — the plan owner chose exclusion, against the recommendation
+above.** The recommendation was withdrawn during the discussion: the caret and the
+selection highlight signal cursor position and selection extent by contrasting with
+the field's own background, so inheriting that background makes the caret vanish into
+the box and renders selected text indistinguishable from unselected text. Both failure
+modes fire on the most ordinary authoring line — a widget-level `focused` background.
+That is a correctness defect, not a style preference, so it outweighs the
+everything-the-widget-owns premise for these two elements specifically.
+
+**The rule Phase 10 implements.** The widget-level bundle reaches every authored
+recipient in the widget's subtree. It does **not** reach an element the editor
+generates. Those elements keep their built-in look
+(`EDITOR_CARET` / `EDITOR_SELECTION`, `ime/editor.rs:74`/`:76`) unless the author
+writes a part declaration for them, which is exactly the Phase 6 surface
+(`editor_text` / `editor_selection` / `editor_caret` / `editor_validation`).
+Part-level authoring is unaffected by this exclusion — it still reaches them, and it
+remains the only way to restyle them.
+
+**Mechanism.** The four editor generation sites are already known and cited above:
+`add_text` (`ime/editor.rs:1264`, called for committed/preedit runs and for the
+validation message), `add_selected_text` (`:1271`, body at `:1326-1345`), and
+`add_caret` (`:1285`, body at `:1348-1377`). Mark the elements those sites construct
+and skip marked elements in the widget-level pass of `resolve_part_overrides`
+(`widgets/visual.rs:369`) only — the part-level merge that follows must still apply to
+them. Do not key the exclusion off "has no part entry": that is the condition the skip
+inversion removes, and reusing it would defeat the inversion for every authored child.
+
+Phase 6's four `editor_*` methods and their tests are unaffected — this decision
+constrains only the new widget-level hop.
+
+**Pending decision:** whether the generated editor subtree gets a `text_color` /
+`path_color` check at all.
+
+Actual problem:
+Phase 7's part-local check `validate_part_state_colors` (`layout/element.rs:1348`)
+never sees a generated editor element, so a state color authored on one is accepted
+and then silently does nothing. Today
+`.editor_selection(El::new().disabled(Appearance::new().text_color(RED)))` builds
+clean, produces no error, and never applies — the accepted-but-ignored shape Phase 7
+was written to eliminate.
+
+What exists now:
+- `validate_part_state_colors` runs from exactly one place: `LayoutTree::validate_widgets`
+  (`layout/element.rs:782`), at panel build.
+- The generated editor elements do not exist at panel build. They are minted at runtime
+  by `set_field_editing_content` (`layout/element.rs:1033`) whenever the field's content
+  changes, so no build-time walk can reach them.
+- The editable field itself is exempted anyway by the early return at `:1354`
+  (`owning_widget.is_none() || element.widget.is_some() || element.editable.is_some()`).
+- Phase 10 owns the generated-part exclusion rule (the block above), which is the only
+  place in the plan that reasons about these elements as override recipients.
+
+What should change — three viable answers:
+- **Check at authoring time.** Validate the `El` passed to `editor_text` /
+  `editor_selection` / `editor_caret` / `editor_validation` against a fixed capability
+  mask per role (caret and selection are fill-only; text and validation carry text).
+  The roles are known statically, so this needs no generated element and stays a build
+  error. Costs a fifth arm in the builder rather than in `validate_part_state_colors`.
+- **Check at generation time.** Have `set_field_editing_content` validate as it mints,
+  turning the breach into a runtime warning rather than a build error — visible, but no
+  longer a compile-adjacent failure, and it fires per content change.
+- **Document the exemption.** State in the `editor_*` docs that the generated subtree
+  accepts only the surface properties and ignores the rest. Cheapest, and the one that
+  leaves the accepted-but-ignored API in place.
+
+Recommendation:
+**Check at authoring time.** The four roles have fixed, known capabilities, so the check
+costs one static mask per role and keeps every state-color mistake a build error, which
+is the guarantee the rest of the plan already gives. Runtime validation trades a
+compile-time error for a log line nobody reads; documenting the hole leaves an API that
+accepts input it discards. Resolve before dispatching Phase 10, since Phase 10 is where
+the generated subtree's override behavior is decided.
 
 **Ref corrections and added constraints (Phase 6 review):**
 - The merge-walk destructure is at `widgets/visual.rs:377`, not the `:355` this
@@ -1244,15 +1502,19 @@ Approve this direction, or modify it?
 
 #### Work Order
 
-**Goal:** The blunt subtree-recolor path is gone, `VisualSlotOverride` is back to 144 bytes, and the slider's focus border composes correctly against a cascaded disabled bundle.
+**Goal:** The blunt subtree-recolor path is gone, images get their own `tint` property, and the slider's focus border composes correctly against a cascaded disabled bundle.
 
 **Spec:**
 
-Delete `Slider::disabled_color` — the field (`widgets/slider.rs:173`), its constructor default (`:192`), its builder method (`:234`), its `El` forward — `El<L, WidgetElement<Slider>>::disabled_color` at `layout/builder.rs:1049`, **not** `:883-886`, which after Phase 4 is inside the `El<L, WidgetElement<W>>::disabled` block — and its test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` (`:5274`). **There is no crate-internal setter** — an earlier revision of this Work Order claimed one at `slider.rs:255`; that line is inside `fn validated()` and no `set_disabled_color` exists anywhere in the crate. Delete `WidgetVisualOverrides::subtree_color` (`widgets/visual.rs:265`), `set_subtree_color` (`:272`), the getter (`:277`), the `set_subtree_color` seeding call in `slider.rs:1178`, and its consumption in `dispatch_visual_overrides` (`visual.rs:535-545`).
+Delete `Slider::disabled_color` — the field (`widgets/slider.rs:173`), its constructor default (`:192`), its builder method (`:234`), its `El` forward — `El<L, WidgetElement<Slider>>::disabled_color` at `layout/builder.rs:1258`, **not** `:883-886`, which after Phase 4 is inside the `El<L, WidgetElement<W>>::disabled` block — and its test `disabled_color_recolors_every_slider_element_and_suppresses_focus_border` (`:5274`). **There is no crate-internal setter** — an earlier revision of this Work Order claimed one at `slider.rs:255`; that line is inside `fn validated()` and no `set_disabled_color` exists anywhere in the crate. Delete `WidgetVisualOverrides::subtree_color` (`widgets/visual.rs:265`), `set_subtree_color` (`:272`), the getter (`:277`), the `set_subtree_color` seeding call in `slider.rs:1178`, and its consumption in `dispatch_visual_overrides` (`visual.rs:535-545`).
 
-With its only production producer gone, delete `VisualSlotOverride::color` (`visual.rs:171`), its overlay logic, and the `with_color` test helper (`:220`); move the text, image, and draw-primitive consumers to `content_color`. **The overlay logic is now two methods, not one** — `apply` (`:195`, the only one that names `color`) and `apply_element` (`:209`), both added or reworked by Phase 3; edit both.
+With its only production producer gone, delete `VisualSlotOverride::color` (`visual.rs:171`), its overlay logic, and the `with_color` test helper (`:220`); move the text consumer to `text_color` and the draw-primitive consumer to `path_color`, both added in Phase 7; the image consumer moves to this phase's new `tint`. **The overlay logic lives in `apply` alone** (`:202`) — `apply_element` (`:218`) saves `offset`, delegates to `apply`, and restores `offset`, so it names no color field and needs no edit.
 
-**Keep the `HashMap<usize, VisualSlotOverride>`.** The former instruction to delete it "only if Phase 3's element channel did not take it over" is now answered: it did. The map is built once at `visual.rs:534` and serves three producers — subtree seeding (`:535-545`), slot overlays (`:546-554`), and Phase 3's element channel (`:555-560`). Delete **only** the subtree branch at `:535-545`; the map and the other two producers stay. `VisualSlotOverride` returns from 160 to 144 bytes.
+**Keep the `HashMap<usize, VisualSlotOverride>`.** The former instruction to delete it "only if Phase 3's element channel did not take it over" is now answered: it did. The map is built once at `visual.rs:534` and serves three producers — subtree seeding (`:535-545`), slot overlays (`:546-554`), and Phase 3's element channel (`:555-560`). Delete **only** the subtree branch at `:535-545`; the map and the other two producers stay.
+
+**Add `tint` for images, in this phase.** Phase 7 deliberately left images alone because the generic `color` field they read is what this phase deletes, so the replacement lands with the removal. `tint` is a sixth-and-final `Appearance` property with capability `IMAGE` (the bit Phase 7 created). It is a **separate property from `text_color` and `path_color` because it does something different**: `image_batch.rs:136` documents "Linear RGBA tint multiplied after texture sRGB decode" — the image route *multiplies*, where the text and shape routes *replace*. Naming one property for both operations was the reason `content_color` was cancelled; do not undo that here by routing images through `text_color`.
+
+**Size is net-zero.** Phase 7 asserted `VisualSlotOverride` at **184** bytes. This phase removes the generic `color` and adds `tint`, one field out and one in, so the assertion stays at 184. Any earlier text in this plan claiming a return to 144 is stale.
 
 **Focus-border composition.** The thumb focus border cannot be suppressed by "a resolved disabled bundle exists" — under a cascade every state always resolves to something, so presence is always true, and a disabled bundle changing only a background would delete the focus border. Compose `Slider::focused_thumb_border_color` as a **focused-thumb layer before normal state composition**:
 - a disabled `border_color: To(…)` **replaces** it,
@@ -1271,29 +1533,36 @@ Convert `examples/widgets.rs`'s slider (`add_slider` `:1200`, `.disabled_color` 
 
 **Files:**
 - `src/widgets/slider.rs` — delete `disabled_color` (field `:173`, default `:192`, builder `:234`; there is no crate-internal setter) and the `set_subtree_color` seeding call (`:1178`); rework focus-border composition in `present_slider_state` (`:1121`), which under the element-channel outcome means deleting the guard at `:1221-1222`; delete the `:5274` test.
-- `src/widgets/visual.rs` — delete `subtree_color` (`:265`, `set_subtree_color` `:272`, getter `:277`), `VisualSlotOverride::color` (`:171`) and its overlay logic in **both** `apply` (`:195`) and `apply_element` (`:209`), the subtree branch of `dispatch_visual_overrides` (keeping its map — see the Spec above for the verified line ranges in that function), and `with_color` (`:220`). Phase 3 added seven `with_color` sites in this file, including tests at `:860`, `:900`, `:940` with assertions at `:1060-1138` that read `VisualSlotOverride::color` — they migrate to `content_color` with the rest.
-- `src/render/panel_text/batching.rs`, `src/render/panel_text/reify.rs`, `src/render/panel_shapes/batching.rs`, `src/render/analytic_paths/batching.rs`, `src/render/fill_batch.rs:1359`, `src/widgets/tooltip.rs`, `src/widgets/reify.rs` — move remaining `color` consumers to `content_color`. `with_color` has roughly 29 call sites across these seven files; the last three were absent from this list before Phase 3's review.
-- `src/layout/builder.rs:1049` — remove the `El<L, WidgetElement<Slider>>::disabled_color` forward.
+- `src/widgets/visual.rs` — delete `subtree_color` (`:265`, `set_subtree_color` `:272`, getter `:277`), `VisualSlotOverride::color` (`:174`) and its overlay logic in `apply` (`:202`) only — `apply_element` (`:218`) delegates to `apply` and names no color field, the subtree branch of `dispatch_visual_overrides` (keeping its map — see the Spec above for the verified line ranges in that function), and `with_color` (`:220`). Phase 3 added seven `with_color` sites in this file, including tests at `:860`, `:900`, `:940` with assertions at `:1060-1138` that read `VisualSlotOverride::color` — they migrate to `text_color` / `path_color` / `tint` with the rest, each to the property matching its route.
+- `src/render/panel_text/batching.rs`, `src/render/panel_text/reify.rs`, `src/render/panel_shapes/batching.rs`, `src/render/analytic_paths/batching.rs`, `src/render/fill_batch.rs:1359`, `src/widgets/tooltip.rs`, `src/widgets/reify.rs` — move remaining `color` consumers to `text_color` / `path_color` / `tint`, each to the property matching its route. `VisualSlotOverride::with_color` has roughly 20 call sites across these seven files; the last three were absent from this list before Phase 3's review.
+- `src/layout/builder.rs:1258` — remove the `El<L, WidgetElement<Slider>>::disabled_color` forward.
+- `src/layout/element.rs:1348` — `validate_part_state_colors`, the Phase 7 part-local check. Adding `tint` means adding a third arm here (`IMAGE` capability, `PanelBuildError::StateTintRequiresImage`) alongside the `text_color` arm (`:1370`) and the `path_color` arm (`:1375`), and adding `tint` to `Appearance`'s per-property walk.
+- `src/panel/builder.rs:69-74` — `PanelBuildError::StateTextColorRequiresText` (`:71`) and `StatePathColorRequiresDraw` (`:74`) are the two variants to copy for `tint`, together with their `Display` rows.
 - `examples/widgets.rs:1162`, `:1200` — author slider parts explicitly.
 
 **Constraints from prior phases:**
-- **Phase 7:** `content_color` exists on `Appearance` and `VisualSlotOverride` and is consumed by the text, image, and `PanelDraw` routes. Both `color` and `content_color` have been alive simultaneously since Phase 7; this phase removes `color`.
+- **Phase 7:** `text_color` and `path_color` exist on `Appearance` and `VisualSlotOverride`, consumed by the text route and the `PanelDraw` route respectively. Images were deliberately left reading the generic `color` in Phase 7, because this is the phase that deletes it — so this phase both removes `color` and adds `tint` for them. Phase 7 asserted `VisualSlotOverride` at **184** bytes; this phase is net-zero on size (one field out, one in) and asserts the same number.
 - **Phase 10:** every state always resolves to something under the cascade, which is exactly why "a disabled bundle exists" cannot gate the focus border. The resolved override reaching the thumb is an element override composed on top of the authored slot baseline (Phase 3), so the presentation-owned `offset` is already preserved unconditionally. **This phase's focus-border scope depends on Phase 10's pending decision** — under the element channel the composition is inherited from `apply_element` and the work is a deletion; under the root slot it must be written by hand. Read Phase 10's resolved decision first.
 - **Phase 4:** the slider's track, thumb, and label can carry their own bundles as `El<L, WidgetPart>`, which is what the example migration uses. The role is monomorphic; the `Slider` owner comes from the enclosing `WidgetBuilder<'_, Slider>`.
 - **Phase 1:** a state verb **replaces** the whole bundle for its state — a second `hovered(…)` on the same element discards what the first authored. The example migration below authors several properties per state per part; each state must be built as one `Appearance` and passed in a single call, never as chained calls that each name one property. That chained form worked before Phase 1 and silently drops all but the last bundle now.
 - **Phase 2:** structural containers are excluded from the recipient list, so the example's resolved overrides cover exactly root, track, thumb, and label.
 - **Phase 4 — declaration order is forced.** `button`, `slider`, `widget`, and `editable_field` live in `impl<L> El<L, LayoutOnly>` (`layout/builder.rs:738-839`), so `El::new().disabled(...).slider(...)` does **not** compile. A widget root must declare its widget before any state verb; the example migration has to be written that way round.
-- **Phase 4 — a part-authoring helper cannot be generic over the builder.** `LayoutContentBuilder::with` takes `El<L, LayoutOnly>` (`layout/builder.rs:1327`), so a helper that authors parts must take `&mut WidgetBuilder<'_, W>` for a concrete owner. `tests/trybuild/pass/typestate_helpers.rs::add_widget_content` is the worked example.
+- **Phase 7 — the part-local color check and its exemptions.** `validate_part_state_colors` (`layout/element.rs:1348`) runs from `LayoutTree::validate_widgets` (`:782`) at panel build. It returns early for anything that is not an owned widget part: `owning_widget.is_none() || element.widget.is_some() || element.editable.is_some()` (`:1354`) — so widget roots and editable-field elements are exempt, and the editor-generated subtree never reaches it at all (those elements are minted at runtime by `set_field_editing_content`, `:1033`, long after build validation). The `tint` arm this phase adds inherits every one of those exemptions; do not widen the early return to compensate.
+- **Phase 4 — a part-authoring helper cannot be generic over the builder.** `AcceptsElement::with` takes `El<L, LayoutOnly>` (`layout/builder.rs:1327`), so a helper that authors parts must take `&mut WidgetBuilder<'_, W>` for a concrete owner. `tests/trybuild/pass/typestate_helpers.rs::add_widget_content` is the worked example.
 
 **Pending decision:** whether `SliderFocusedThumbBorderColorRequiresThumbBorder` survives.
 
-Phase 5 abolished the "a state property needs its ordinary declaration" error class — except here. `PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder` is still live: declared at `panel/builder.rs:68`, its `Display` row at `:1001`, raised at `layout/element.rs:796` and `:825`, produced at `widgets/slider.rs:5453`. It rejects `Slider::focused_thumb_border_color` when the thumb declares no `El::border` — the same condition, on the same record, that `CommonEl::default_state_surfaces` now handles by synthesizing `Border::all(Px(0.0), Color::NONE)`.
+**The premise changed in Phase 7 — re-argue before deciding.** Phase 5 abolished the "a state property needs its ordinary declaration" error class, and this decision was originally written as "except here". Phase 7 reinstated the class: `StateTextColorRequiresText` (`panel/builder.rs:71`) and `StatePathColorRequiresDraw` (`:74`) are exactly that shape, raised from `validate_part_state_colors` (`layout/element.rs:1370` / `:1375`). "It is the only one left" is therefore no longer the argument.
+
+The distinguishing test is **synthesizability**. Phase 5 could delete its four errors because `CommonEl::default_state_surfaces` can mint the missing record: a transparent `Border::all(Px(0.0), Color::NONE)` or a transparent background is a real, inert record the state layer can then override. Text and `PanelDraw` cannot be synthesized — there is no such thing as an empty text run or a zero-path draw to hang a color on — so Phase 7 had to reject instead. The slider case falls on the **synthesizable** side: a thumb border is exactly the record Phase 5 already synthesizes. That is what makes deleting it consistent rather than an exception, and it is a stronger argument than the one this block originally carried.
+
+`PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder` is still live: declared at `panel/builder.rs:68`, its `Display` row at `:1001`, raised at `layout/element.rs:796` and `:825`, produced at `widgets/slider.rs:5453`. It rejects `Slider::focused_thumb_border_color` when the thumb declares no `El::border` — the same condition, on the same record, that `CommonEl::default_state_surfaces` now handles by synthesizing `Border::all(Px(0.0), Color::NONE)`.
 
 Two options:
 - **Delete it** — remove the variant, its `Display` row, both raise sites, and the producer, and let the defaulting cover the thumb like every other element. One authoring rule instead of two.
 - **Keep it as a deliberate exception** — a focused thumb border color with no thumb border is arguably a typo rather than a state-only role, and a transparent widened border on a slider thumb is invisible in a way an author would not expect.
 
-Recommendation: **delete it.** A surviving special case in one widget is the kind of inconsistency the codebase-consistency rule exists to prevent, and the recovery — declare the thumb border with its resting color — is exactly what `Appearance::border_width`'s doc already tells authors. Resolve before dispatching Phase 11.
+Recommendation: **delete it.** Under the synthesizability test above it is the one rejection in the codebase whose missing record the builder can already mint, so it is a special case rather than a category. The recovery — declare the thumb border with its resting color — is exactly what `Appearance::border_width`'s doc already tells authors. Resolve before dispatching Phase 11.
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
@@ -1301,24 +1570,23 @@ Recommendation: **delete it.** A surviving special case in one widget is the kin
 - `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
 - `bash ~/.claude/scripts/delegate/verify.sh example hana_diegetic widgets`
 - **Docs (orchestrator-run — see Delegation Context → Docs):** this phase removes public API and rewrites doc examples that referenced it, so both doc commands must pass before checkpoint.
+- **Live smoke (orchestrator-run — see Delegation Context → Headless only carve-out):** this phase converts the example's slider off `disabled_color` to explicit per-part authoring, so the plan owner runs the example and confirms the slider's disabled and hovered looks are unchanged before checkpoint. Keyboard only. The exact-override assertion below proves the resolved values; it cannot prove they render as intended.
 - `rg -n 'SliderFocusedThumbBorderColorRequiresThumbBorder' crates/hana_diegetic` matches whatever the pending decision resolved to — nothing if deleted, or the variant plus a test asserting the exception is deliberate. The `subtree_color|disabled_color` grep below does not reach it.
-- `rg -n 'subtree_color|disabled_color' crates/hana_diegetic` returns nothing, and `rg -n 'VisualSlotOverride::color|\.with_color\(' crates/hana_diegetic` returns nothing. Both patterns are needed: `with_color` reaches roughly 29 sites across seven files (listed in **Files**), several of them Phase 3's own tests, so an unscoped grep for the bare word does not distinguish "migrated" from "missed".
-- `VisualSlotOverride` is back to 144 bytes, asserted by the `size_of` assertion Phase 7 introduced — this phase lowers its number rather than adding the first one.
+- `rg -n 'subtree_color|disabled_color' crates/hana_diegetic` returns nothing, and `rg -n 'VisualSlotOverride::color|slot_override\.color' crates/hana_diegetic` returns nothing. **Do not grep bare `\.with_color\(`** — `TextStyle::with_color` (`layout/text_props.rs:474`) is an unrelated public builder with matches in 39 files including every example and `benches/fixtures/panels.rs`, so that pattern can never return nothing. `VisualSlotOverride::with_color` (`visual.rs:231`) is `#[cfg(test)]` with roughly 20 sites; `cargo check` plus the `slot_override.color` grep is what actually proves the migration.
+- `VisualSlotOverride` is **still 184 bytes**, and this phase **tightens the assertion at `visual.rs:199` from `<= 184` to `== 184`**. Phase 7 shipped an upper bound, which cannot detect a shrink — exactly the failure this gate exists to catch, since this phase removes one field and adds one. If the measured number moves, a field was dropped or added that this Work Order does not describe.
+- **`tint` works on images and only on images.** A state `tint` on an image recipient multiplies its texture color and restores on state exit; a `tint` on a part with no `IMAGE` capability is a `PanelBuildError`, matching the treatment `text_color` and `path_color` got in Phase 7. `rg -n 'slot_override\.color' crates/hana_diegetic/src/render` returns nothing.
 - A **focused × disabled × dragging matrix** is tested for both a background-only disabled bundle (focus border survives) and a border-authoring one (focus border replaced), asserting the thumb `offset` is unchanged in every case and that disabled remains the last normal layer. The matrix includes the pressed/dragging state and the frame that queues `SliderDrag` removal.
-- The example's final resolved overrides for root, track, thumb, and label are asserted **exactly** — the headless harness produces no pixels, so visual equality is not a gate.
+- The example's final resolved overrides for root, track, thumb, and label are asserted **exactly** — the headless harness produces no pixels, so visual equality is not a gate. **Enumerate the fields, do not assert the bundle wholesale.** Each migrated `disabled` bundle is checked field by field — `background`, `border_color`, `text_color` on the label, `path_color` on any part carrying a `PanelDraw` — with a separate `assert_eq!` per field reading `Some(expected)`. `disabled_color` used to dim a whole subtree with one value, so a single per-part assertion will pass while a property route is silently dropped: that is the vacuous-pass class Phase 7's review caught in the slider tests (`widgets/slider.rs:5305`, `:5336`), and the migration is where it recurs.
 - Material churn: a compatible label/track/thumb transition causes no batch-key move and no batch entity creation; an incompatible one migrates only the affected retained members.
 
 **Ref corrections (Phase 6 review) — `layout/builder.rs` drifted ~+200:**
 - `El<L, WidgetElement<Slider>>::disabled_color` → **`:1251`** (plan says `:1049`)
 - `impl<L> El<L, LayoutOnly>` → **`:917`** (plan says `:738-839`)
-- `LayoutContentBuilder::with` → **`:1569`** (plan says `:1327`)
+- `AcceptsElement::with` → **`:1569`** (plan says `:1327`)
 - `Text::layout` → **`:297`**
 - `widgets/visual.rs`: `VisualSlotOverride::color` **`:173`**, `with_color` **`:222`**,
   `subtree_color` **`:267`**, `set_subtree_color` **`:274`**, getter **`:279`**
-- **Add `src/render/image_batch.rs:628`** to the `color`-removal file list. It reads
-  `slot_override.color.map_or(tint, linear_tint)` and this phase's
-  `rg -n 'VisualSlotOverride::color|\.with_color\('` gate cannot see it — only
-  `cargo check` would catch the miss.
+- **`src/render/image_batch.rs:628`** is both a `color`-removal site and this phase's `tint` site. It reads `slot_override.color.map_or(tint, linear_tint)`; the `rg -n 'VisualSlotOverride::color|\.with_color\('` gate cannot see it, so only `cargo check` or the explicit `slot_override\.color` grep in the gate catches a miss.
 
 ### Phase 12 — Stable material keys: no dropped material rows · status: todo
 
@@ -1365,10 +1633,11 @@ Frame 6 is the evidence that capacity ≥ 2× live makes re-keys free. Frame 3 i
 - `src/ime/ids.rs:85-103` — `PanelElementId`; add the interned render-side handle if that is the chosen answer to the named risk.
 - `src/layout/element.rs:108`, `:679` — element id storage and accessor.
 - `src/render/draw_order.rs:30-33` — `CommandIndex` loses this consumer; delete it only if no other consumer remains.
+- `src/layout/element.rs:1348` — `validate_part_state_colors` (Phase 7) mints the id it reports with `PanelElementId::auto(...)` from the element's **tree index** (`:1361-1366`), not through `next_auto_id`. It is therefore a second, independent producer of auto ids and must move to whatever structural id this phase adopts; leaving it alone makes the `StateTextColorRequiresText` / `StatePathColorRequiresDraw` messages name an id the element does not carry.
 
 **Constraints from prior phases:**
-- **Independent of phases 1-11.** This is a render-layer defect in material-row identity; no widget appearance behavior depends on it and it gates none of the earlier phases. It is sequenced last because Phase 11 edits `render/fill_batch.rs:1359` and the seven-file `content_color` migration, and this phase should start from that settled tree.
-- **Phase 11:** `VisualSlotOverride::color` is gone and all consumers read `content_color`. Do not reintroduce a `color` read while touching the batching files.
+- **Independent of phases 1-11.** This is a render-layer defect in material-row identity; no widget appearance behavior depends on it and it gates none of the earlier phases. It is sequenced last because Phase 11 edits `render/fill_batch.rs:1359` and the seven-file color-property migration, and this phase should start from that settled tree.
+- **Phase 11:** `VisualSlotOverride::color` is gone and all consumers read `text_color` / `path_color` / `tint`. Do not reintroduce a `color` read while touching the batching files.
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
@@ -1397,6 +1666,51 @@ Frame 6 is the evidence that capacity ≥ 2× live makes re-keys free. Frame 3 i
   with a `Named` id. This phase's Files names only the three `LayoutBuilder`
   constructors and `tooltip_add_text`; add this path as the case that proves
   structural ids actually work.
+
+### Phase 13 — The state verbs require a widget in the type · status: todo
+
+#### Work Order
+
+**Goal:** `.hovered()` / `.focused()` / `.pressed()` / `.disabled()` cannot be called on a plain layout element at all — the element's type must already carry the enclosing widget — and every widget-child authoring site produces such an element.
+
+**Spec:**
+
+Today all four state verbs live on `impl<L> El<L, LayoutOnly>` (`layout/builder.rs:924`, `disabled` at `:937`), and calling one **promotes** the element to `WidgetPart`. That promotion is Phase 4's shipped builder-acceptance relation, and it means this compiles:
+
+```rust
+// A container that belongs to no widget. Nothing rejects it today.
+El::new().disabled(Appearance::new().background(GRAY))
+```
+
+The plan owner's rule: **the element's type must carry the widget it belongs to.** A state verb on an element with no enclosing widget is not a runtime mistake to diagnose, it is a call that must not exist.
+
+**This is type-level, not a build error.** Do not implement it by adding a `PanelBuildError` — that was considered and rejected. Move the four verbs off `El<L, LayoutOnly>` onto a role that only a widget-owned element can hold, so the call above fails to resolve rather than failing to build a panel.
+
+**The hard part is the child-building closure, not the verbs.** `AcceptsElement::with<L, Role>` (default method, `builder.rs:1720`) (`layout/builder.rs:1713` — the `:1327`/`:1569` refs elsewhere in this plan are stale) accepts any role, and every child inside it starts life as `El::new()`, which is `LayoutOnly`. Moving the verbs without changing that closure makes widget parts unauthorable. The closure must hand out elements that already carry their owner, which is what makes this phase touch every widget-child call site and revisit Phase 4's acceptance relation.
+
+**Scope boundary — this does not subsume Phase 7's build error.** The parts Phase 7 rejects (a grouping row inside a button; `editor_selection`, a rectangle holding text as a child) are already inside widgets and already carry the owner in their type. They pass this gate and still cannot present a `text_color`. Both mechanisms are needed; neither replaces the other.
+
+**Files:**
+- `src/layout/builder.rs:924` — the `impl<L> El<L, LayoutOnly>` block holding all four verbs (`disabled` at `:937`); `AcceptsElement::with<L, Role>` (default method, `builder.rs:1720`) at `:1713`; the role markers `WidgetPart` (`:106`) / `PressedPart` (`:110`) behind sealed `ElementRole` (`:113`); `AcceptsElement<Role>` (`:1547`) and its five impls (`:1838`, `:1851`, `:1865`, `:1882`, `:1899`).
+- `crates/hana_diegetic/tests/trybuild/` — the compile-fail fixture for this phase, plus any existing `pass/` fixture that authors a state verb on a bare `El::new()` and would now correctly stop compiling.
+- Every widget-child authoring site — enumerate with `rg -n '\.with\(' crates/hana_diegetic/src` and the example.
+
+**Constraints from prior phases:**
+- **Phase 4:** the acceptance relation and the five `AcceptsElement` impls are what this phase revises. `tests/trybuild/pass/typestate_helpers.rs::add_widget_content` is the worked example of a part-authoring helper; it takes `&mut WidgetBuilder<'_, W>` for a concrete owner because `AcceptsElement::with` could not be made generic over the builder. That constraint is what this phase has to solve properly.
+- **Phase 4:** `button`, `slider`, `widget`, and `editable_field` live in `impl<L> El<L, LayoutOnly>`, so a widget root declares its widget **before** any state verb. That ordering is already forced and must survive.
+- **Phase 7:** the build error for a state color on a contentless part is a separate mechanism and stays.
+- **Sequencing:** last. It revisits the builder surface every earlier phase authors against, so running it before the cascade phases would mean rewriting their call sites twice.
+
+**Acceptance gate:**
+- `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`
+- `bash ~/.claude/scripts/delegate/verify.sh test hana_diegetic`
+- `bash ~/.claude/scripts/delegate/verify.sh lint hana_diegetic`
+- `bash ~/.claude/scripts/delegate/verify.sh example hana_diegetic widgets`
+- **A trybuild compile-fail fixture per verb** — `El::new().hovered(…)`, `.focused(…)`, `.pressed(…)`, `.disabled(…)` on an element with no enclosing widget each fail to compile, with the error naming the missing widget rather than a generic trait mismatch.
+- **A trybuild pass fixture** proving every legitimate authoring shape still compiles: a widget root, a direct part, a part nested inside a child-building closure, and a part authored through a helper function.
+- `rg -n 'impl<L> El<L, LayoutOnly>' crates/hana_diegetic/src/layout/builder.rs` shows that block no longer defines any of the four state verbs.
+- No `PanelBuildError` variant was added — this phase's rejection is entirely in the type system.
+- **Docs (orchestrator-run — see Delegation Context → Docs):** this phase changes the public builder surface, so both doc commands must pass before checkpoint.
 
 ## Outstanding items
 

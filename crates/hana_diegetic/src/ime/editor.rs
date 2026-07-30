@@ -1471,6 +1471,7 @@ mod tests {
     use crate::widgets::SemanticWidgetIntent;
     use crate::widgets::VisualElementCapabilities;
     use crate::widgets::VisualOverrideIndex;
+    use crate::widgets::WidgetDisabled;
     use crate::widgets::WidgetState;
     use crate::widgets::WidgetVisualSlots;
     use crate::widgets::WidgetsPlugin;
@@ -1479,6 +1480,7 @@ mod tests {
     struct PropagatedPanelClicks(Vec<bool>);
 
     const EDITOR_CARET_FOCUSED_FILL: Color = Color::srgb(0.20, 0.80, 0.40);
+    const EDITOR_TEXT_DISABLED_COLOR: Color = Color::srgb(0.35, 0.45, 0.55);
     const EDITOR_SELECTION_FOCUSED_FILL: Color = Color::srgb(0.90, 0.30, 0.20);
     const EDITOR_TEXT_FOCUSED_FILL: Color = Color::srgb(0.20, 0.50, 0.90);
     const EDITOR_VALIDATION_FOCUSED_FILL: Color = Color::srgb(0.80, 0.30, 0.80);
@@ -1538,6 +1540,29 @@ mod tests {
                 )
                 .editor_validation(
                     El::new().focused(Appearance::new().background(EDITOR_VALIDATION_FOCUSED_FILL)),
+                ),
+            |builder| {
+                builder.text(("display", TextStyle::new(10.0)));
+            },
+        );
+        builder.build()
+    }
+
+    fn disabled_text_editable_tree() -> LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Float {
+                min: None,
+                max: None,
+            }));
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(
+            El::new()
+                .editable_field("field", field)
+                .editor_text(
+                    El::new().disabled(Appearance::new().text_color(EDITOR_TEXT_DISABLED_COLOR)),
+                )
+                .editor_validation(
+                    El::new().disabled(Appearance::new().text_color(EDITOR_TEXT_DISABLED_COLOR)),
                 ),
             |builder| {
                 builder.text(("display", TextStyle::new(10.0)));
@@ -1664,6 +1689,40 @@ mod tests {
             .collect()
     }
 
+    fn assert_disabled_editor_text_parts(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        expected_count: usize,
+    ) {
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("editable field should carry visual slots");
+        let parts = slots.part_appearances();
+        assert_eq!(parts.len(), expected_count);
+        for (element_index, appearance) in parts {
+            assert!(slots.elements().iter().any(|(visual_index, capabilities)| {
+                *visual_index == *element_index
+                    && capabilities.contains(VisualElementCapabilities::TEXT)
+            }));
+            assert_eq!(
+                appearance
+                    .cascades()
+                    .resolve(&[Some(WidgetState::Disabled)], None)
+                    .text_color,
+                Some(EDITOR_TEXT_DISABLED_COLOR),
+            );
+            let override_value = app
+                .world()
+                .resource::<VisualOverrideIndex>()
+                .get(panel, *element_index)
+                .expect("disabled editor text recipient should receive an override");
+            assert_eq!(override_value.text_color, Some(EDITOR_TEXT_DISABLED_COLOR));
+            assert_eq!(override_value.fill_color, None);
+        }
+    }
+
     fn open_inline_editor(app: &mut App, window: Entity, panel: Entity, text: &str) {
         app.world_mut().trigger(ImeOpenSession {
             target: ImeTarget::WorldPanelField {
@@ -1710,6 +1769,22 @@ mod tests {
             .resource_mut::<ActiveImeSession>()
             .apply_edit_command(ImeEditCommand::PlaceCursor(position), &input_blocker)
             .expect("active editor should accept a cursor placement");
+        app.world_mut().trigger(changed);
+        app.world_mut().flush();
+    }
+
+    fn apply_inline_editor_preedit(
+        app: &mut App,
+        window: Entity,
+        text: &str,
+        cursor: Option<(usize, usize)>,
+    ) {
+        let input_blocker = app.world().resource::<crate::ImeInputBlocker>().clone();
+        let changed = app
+            .world_mut()
+            .resource_mut::<ActiveImeSession>()
+            .apply_preedit(window, text, cursor, &input_blocker)
+            .expect("active editor should accept a preedit update");
         app.world_mut().trigger(changed);
         app.world_mut().flush();
     }
@@ -1892,6 +1967,37 @@ mod tests {
                 "closing the editor must remove its generated part override",
             );
         }
+    }
+
+    #[test]
+    fn disabled_editor_text_recolors_every_generated_text_recipient() {
+        let (mut app, window, panel) = inline_editor_visual_app(disabled_text_editable_tree());
+        let field = resolve_field_widget(&mut app, panel);
+        activate_styled_inline_editor(&mut app, window, field);
+        app.world_mut()
+            .entity_mut(field)
+            .insert(WidgetDisabled::test_marker());
+        app.update();
+        assert_disabled_editor_text_parts(&app, panel, field, 1);
+
+        move_inline_editor_cursor(&mut app, "display".len() / 2);
+        app.update();
+        assert_disabled_editor_text_parts(&app, panel, field, 2);
+
+        apply_inline_editor_preedit(&mut app, window, "xy", Some((1, 1)));
+        app.update();
+        assert_disabled_editor_text_parts(&app, panel, field, 4);
+
+        apply_inline_editor_preedit(&mut app, window, "", None);
+        app.update();
+        let session_id = active_session_id(&app);
+        app.world_mut().trigger(ImeRequestCommit {
+            session_id,
+            cause: ImeCommitCause::Request,
+        });
+        app.world_mut().flush();
+        app.update();
+        assert_disabled_editor_text_parts(&app, panel, field, 3);
     }
 
     #[test]

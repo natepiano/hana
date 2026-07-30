@@ -581,9 +581,10 @@ impl CommonEl {
     /// record, so a declaration naming one without the matching ordinary
     /// declaration gets a transparent stand-in to replace. A state material
     /// carries its own color — the SDF fill reads
-    /// `StandardMaterial::base_color` — so it needs a fill record only when
-    /// there is no border record to re-key.
-    fn default_state_surfaces(&mut self) {
+    /// `StandardMaterial::base_color`. The `content` parameter identifies
+    /// text and draw recipients that can re-key that material, so this method
+    /// adds a fill record only when no border or content recipient exists.
+    fn default_state_surfaces(&mut self, content: &ElementContent) {
         let Some(appearance) = self.appearance.as_deref() else {
             return;
         };
@@ -592,9 +593,15 @@ impl CommonEl {
         let state_border = cascades
             .any(|layer| layer.border_color.is_authored() || layer.border_width.is_authored());
         let state_material = cascades.any(|layer| layer.material.is_authored());
+        let has_material_recipient = matches!(content, ElementContent::Text { .. })
+            || self
+                .draw
+                .as_ref()
+                .is_some_and(|draw| !draw.shapes_ref().is_empty());
 
         if self.background.is_none()
-            && (state_background || (state_material && self.border.is_none()))
+            && (state_background
+                || (state_material && self.border.is_none() && !has_material_recipient))
         {
             self.background = Some(Color::NONE);
         }
@@ -642,7 +649,7 @@ impl Default for CommonEl {
 }
 
 fn text_leaf_element(mut common: CommonEl, content: ElementContent) -> Element {
-    common.default_state_surfaces();
+    common.default_state_surfaces(&content);
     Element {
         id: common.id,
         width: common.width,
@@ -1339,7 +1346,7 @@ impl<L, Role> El<L, Role> {
             child_layout,
             role: _,
         } = self;
-        common.default_state_surfaces();
+        common.default_state_surfaces(&content);
         let child_layout = if matches!(
             content,
             ElementContent::Text { .. } | ElementContent::Image { .. }

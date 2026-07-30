@@ -4,7 +4,7 @@
 //! [`El::background`](crate::El::background), [`El::border`](crate::El::border),
 //! and [`El::material`](crate::El::material). A widget element adds a
 //! [`StateAppearance`]: one [`Appearance`] per [`WidgetState`], naming only the
-//! properties that state replaces on the widget's root visual slot.
+//! properties that state replaces on the widget's retained recipients.
 //! [`WidgetStateCascades::resolve`] layers the active states in
 //! [`WidgetState::LAYER_ORDER`] and returns the [`VisualSlotOverride`] the
 //! retained routes apply, so state presentation patches records layout already
@@ -46,7 +46,9 @@ impl<T> VisualChange<T> {
 /// | [`Appearance::background`] | Root SDF fill |
 /// | [`Appearance::border_color`] | Root SDF border color |
 /// | [`Appearance::border_width`] | Root SDF border widths |
-/// | [`Appearance::material`] | Root SDF fill or border material |
+/// | [`Appearance::text_color`] | Text glyphs |
+/// | [`Appearance::path_color`] | Panel draw primitives |
+/// | [`Appearance::material`] | SDF, text, or panel-draw material |
 ///
 /// A button and slider can author hovered, focused, pressed, and disabled
 /// bundles. An editable field can author hovered, focused, and disabled
@@ -61,6 +63,9 @@ impl<T> VisualChange<T> {
 /// naming a property the element does not declare emits a transparent
 /// stand-in to replace: a state background gets a [`Color::NONE`] fill, and a
 /// state border color or width gets `Border::all(Px(0.0), Color::NONE)`.
+/// A part's [`Appearance::text_color`] and [`Appearance::path_color`] instead
+/// require an emitted text or draw recipient respectively, because layout
+/// cannot synthesize either record type.
 /// Declare [`crate::El::border`] with the resting color when a state widens a
 /// border that is normally invisible — a width replacement alone leaves the
 /// defaulted border transparent.
@@ -102,6 +107,10 @@ pub struct Appearance {
     pub(crate) border_color: VisualChange<Color>,
     /// Replaces the element's authored border width on all four sides.
     pub(crate) border_width: VisualChange<Dimension>,
+    /// Replaces the element's authored text glyph color.
+    pub(crate) text_color:   VisualChange<Color>,
+    /// Replaces the element's authored panel-draw primitive color.
+    pub(crate) path_color:   VisualChange<Color>,
     /// Replaces the element's authored root material.
     pub(crate) material:     VisualChange<Handle<StandardMaterial>>,
 }
@@ -113,6 +122,8 @@ impl Appearance {
             background:   VisualChange::Unchanged,
             border_color: VisualChange::Unchanged,
             border_width: VisualChange::Unchanged,
+            text_color:   VisualChange::Unchanged,
+            path_color:   VisualChange::Unchanged,
             material:     VisualChange::Unchanged,
         }
     }
@@ -146,12 +157,31 @@ impl Appearance {
         self
     }
 
-    /// Replaces the material for the root SDF fill and border records.
+    /// Replaces the glyph color of text emitted by this element.
+    ///
+    /// A part that names this property must emit text itself; panel building
+    /// reports an error for a structural part with no text recipient.
+    pub const fn text_color(mut self, color: Color) -> Self {
+        self.text_color = VisualChange::To(color);
+        self
+    }
+
+    /// Replaces the color of panel draw primitives emitted by this element.
+    ///
+    /// A part that names this property must emit a draw itself; panel building
+    /// reports an error for a structural part with no draw recipient.
+    pub const fn path_color(mut self, color: Color) -> Self {
+        self.path_color = VisualChange::To(color);
+        self
+    }
+
+    /// Replaces the material for SDF, text, and panel-draw records.
     ///
     /// The material carries its own color — the fill reads
     /// `StandardMaterial::base_color` — so without [`crate::El::background`]
     /// or [`crate::El::border`], layout emits a [`Color::NONE`] fill record
-    /// for this material to re-key.
+    /// for this material to re-key. Text and panel-draw recipients need no
+    /// additional fill record.
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
         self.material = VisualChange::To(material);
         self
@@ -337,6 +367,8 @@ impl<'a> WidgetStateCascades<'a> {
         let mut background = None;
         let mut border_color = None;
         let mut border_width = None;
+        let mut text_color = None;
+        let mut path_color = None;
         let mut material = None;
         for state in WidgetState::LAYER_ORDER {
             if active.contains(&Some(state))
@@ -351,6 +383,12 @@ impl<'a> WidgetStateCascades<'a> {
                 if let VisualChange::To(value) = &layer.border_width {
                     border_width = Some(value);
                 }
+                if let VisualChange::To(value) = &layer.text_color {
+                    text_color = Some(value);
+                }
+                if let VisualChange::To(value) = &layer.path_color {
+                    path_color = Some(value);
+                }
                 if let VisualChange::To(value) = &layer.material {
                     material = Some(value);
                 }
@@ -363,6 +401,8 @@ impl<'a> WidgetStateCascades<'a> {
             fill_color: background.copied(),
             border_color: border_color.copied(),
             border_widths,
+            text_color: text_color.copied(),
+            path_color: path_color.copied(),
             material: material.cloned(),
             ..VisualSlotOverride::default()
         }
@@ -429,6 +469,8 @@ mod tests {
     const HOVER_FILL: Color = Color::srgb(0.1, 0.2, 0.3);
     const FOCUS_BORDER: Color = Color::srgb(0.9, 0.8, 0.2);
     const PRESS_FILL: Color = Color::srgb(0.4, 0.5, 0.6);
+    const HOVER_TEXT: Color = Color::srgb(0.7, 0.5, 0.3);
+    const FOCUS_PATH: Color = Color::srgb(0.3, 0.5, 0.7);
 
     fn panel() -> DiegeticPanel {
         DiegeticPanel::world()
@@ -477,6 +519,29 @@ mod tests {
             None,
         );
         assert_eq!(resolved.fill_color, Some(PRESS_FILL));
+    }
+
+    #[test]
+    fn text_and_path_colors_layer_independently() {
+        let state_appearance = StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                Appearance::new().text_color(HOVER_TEXT),
+            )),
+            focused: Cascade::Override(WidgetFocusedAppearance::new(
+                Appearance::new().path_color(FOCUS_PATH),
+            )),
+            ..StateAppearance::default()
+        };
+
+        let resolved = state_appearance.cascades().resolve(
+            &[Some(WidgetState::Focused), Some(WidgetState::Hovered)],
+            None,
+        );
+
+        assert_eq!(resolved.text_color, Some(HOVER_TEXT));
+        assert_eq!(resolved.path_color, Some(FOCUS_PATH));
+        assert_eq!(resolved.fill_color, None);
+        assert_eq!(resolved.border_color, None);
     }
 
     #[test]

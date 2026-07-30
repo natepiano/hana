@@ -17,6 +17,7 @@
 //! Overrides patch records that layout already emitted; they never create a
 //! record for an unauthored fill, border, image, text, or panel-line role.
 
+use core::mem::size_of;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -153,13 +154,13 @@ impl WidgetVisualSlots {
 
 /// State-only presentation override for one visual slot.
 ///
-/// `color` recolors the slot's authored fill, border, image tint, text, or
-/// panel-line records without changing batch routing. `fill_color` and
-/// `border_color` recolor only the slot's SDF fill or border role and take
-/// precedence over `color` for that role; image, text, and panel-line records
-/// never read them. `border_widths` replaces the slot's authored SDF border
-/// widths, which grow inward from the authored outer bounds and so change no
-/// geometry layout solved. `offset` translates
+/// `color` recolors the slot's authored fill, border, or image tint without
+/// changing batch routing. `text_color` and `path_color` replace text glyphs
+/// and panel-draw primitives respectively. `fill_color` and `border_color`
+/// recolor only the slot's SDF fill or border role and take precedence over
+/// `color` for that role. `border_widths` replaces the slot's authored SDF
+/// border widths, which grow inward from the authored outer bounds and so
+/// change no geometry layout solved. `offset` translates
 /// the slot's SDF, image, text, and panel-line records in the panel-local
 /// render frame — panel world units with Y increasing upward — while
 /// preserving authored draw depth. `material`
@@ -169,8 +170,12 @@ impl WidgetVisualSlots {
 /// the destination `ImageBatchKey`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct VisualSlotOverride {
-    /// Replacement color for authored fill/tint/text/line color.
+    /// Fallback replacement color for authored SDF fill, SDF border, and image tint.
     pub color:         Option<Color>,
+    /// Replacement color for text glyphs only.
+    pub text_color:    Option<Color>,
+    /// Replacement color for panel draw primitives only.
+    pub path_color:    Option<Color>,
     /// Replacement color for the SDF fill role only.
     pub fill_color:    Option<Color>,
     /// Replacement color for the SDF border role only.
@@ -191,9 +196,13 @@ pub(crate) struct VisualSlotOverride {
     pub texture:       Option<Handle<Image>>,
 }
 
+const _: () = assert!(size_of::<VisualSlotOverride>() <= 184);
+
 impl VisualSlotOverride {
     fn apply(&mut self, overlay: &Self) {
         self.color = overlay.color.or(self.color);
+        self.text_color = overlay.text_color.or(self.text_color);
+        self.path_color = overlay.path_color.or(self.path_color);
         self.fill_color = overlay.fill_color.or(self.fill_color);
         self.border_color = overlay.border_color.or(self.border_color);
         self.border_widths = overlay.border_widths.or(self.border_widths);
@@ -221,6 +230,18 @@ impl VisualSlotOverride {
     #[must_use]
     pub(crate) const fn with_color(mut self, color: Color) -> Self {
         self.color = Some(color);
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_text_color(mut self, color: Color) -> Self {
+        self.text_color = Some(color);
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_path_color(mut self, color: Color) -> Self {
+        self.path_color = Some(color);
         self
     }
 
@@ -538,6 +559,8 @@ pub(crate) fn dispatch_visual_overrides(
                         element_index,
                         VisualSlotOverride {
                             color: Some(color),
+                            text_color: Some(color),
+                            path_color: Some(color),
                             ..VisualSlotOverride::default()
                         },
                     );
@@ -598,7 +621,12 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::WidgetHoveredAppearance;
     use crate::cascade::Cascade;
+    use crate::cascade::CascadeDefault;
     use crate::layout::BoundingBox;
+    use crate::layout::PanelCircle;
+    use crate::layout::PanelDraw;
+    use crate::layout::Text;
+    use crate::layout::TextStyle;
     use crate::text::DiegeticTextMeasurer;
     use crate::widgets::PanelWidget;
     use crate::widgets::Slider;
@@ -611,6 +639,8 @@ mod tests {
     const PEER_ELEMENT_INDEX: usize = 5;
     const PEER_OVERRIDE_COLOR: Color = Color::srgb(0.2, 0.8, 0.9);
     const PART_HOVER_FILL: Color = Color::srgb(0.3, 0.7, 0.2);
+    const TEXT_OVERRIDE_COLOR: Color = Color::srgb(0.3, 0.2, 0.7);
+    const PATH_OVERRIDE_COLOR: Color = Color::srgb(0.7, 0.2, 0.3);
 
     fn computed_slot(slot: VisualSlotId, element_index: usize) -> ComputedVisualSlot {
         ComputedVisualSlot {
@@ -751,6 +781,32 @@ mod tests {
         }
     }
 
+    fn text_part_tree(appearance: Appearance) -> (crate::LayoutTree, usize) {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.text(
+                Text::new("label", TextStyle::new(10.0)).layout(El::new().hovered(appearance)),
+            );
+        });
+        let tree = builder.build();
+        (tree.clone(), tree.len() - 1)
+    }
+
+    fn text_and_draw_part_tree(appearance: Appearance) -> (crate::LayoutTree, usize) {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.text(
+                Text::new("label", TextStyle::new(10.0)).layout(
+                    El::new()
+                        .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                        .hovered(appearance),
+                ),
+            );
+        });
+        let tree = builder.build();
+        (tree.clone(), tree.len() - 1)
+    }
+
     fn button_part_tree(stateful_part: bool, prepended_part: bool) -> (crate::LayoutTree, usize) {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
@@ -860,6 +916,158 @@ mod tests {
                 ..VisualSlotOverride::default()
             }),
         );
+    }
+
+    #[test]
+    fn element_text_and_path_colors_compose_over_a_slot_override() {
+        let mut app = dispatch_app();
+        let panel = app.world_mut().spawn_empty().id();
+        let slots = WidgetVisualSlots::new(vec![computed_slot(SLOT, SLOT_ELEMENT_INDEX)])
+            .with_elements(vec![(SLOT_ELEMENT_INDEX, VisualElementCapabilities::TEXT)]);
+        let mut overrides = WidgetVisualOverrides::default();
+        overrides.set(
+            SLOT,
+            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+        );
+        overrides.set_element(
+            SLOT_ELEMENT_INDEX,
+            VisualSlotOverride::default()
+                .with_text_color(TEXT_OVERRIDE_COLOR)
+                .with_path_color(PATH_OVERRIDE_COLOR),
+        );
+        app.world_mut().spawn((
+            PanelWidget::new(PanelElementId::named("styled")),
+            WidgetOf::new(panel),
+            slots,
+            overrides,
+        ));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<VisualOverrideIndex>()
+                .get(panel, SLOT_ELEMENT_INDEX),
+            Some(&VisualSlotOverride {
+                color: Some(OVERRIDE_COLOR),
+                text_color: Some(TEXT_OVERRIDE_COLOR),
+                path_color: Some(PATH_OVERRIDE_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn text_only_part_state_color_never_creates_a_fill_capability_or_override() {
+        let mut app = widgets_test_app();
+        let (tree, text_index) = text_part_tree(Appearance::new().text_color(TEXT_OVERRIDE_COLOR));
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        let capabilities = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("button should carry visual slots")
+            .elements()
+            .iter()
+            .find(|(element_index, _)| *element_index == text_index)
+            .map(|(_, capabilities)| *capabilities)
+            .expect("text recipient should remain in visual slots");
+        assert!(capabilities.contains(VisualElementCapabilities::TEXT));
+        assert!(!capabilities.contains(VisualElementCapabilities::SDF_FILL));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        let override_value = app
+            .world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, text_index)
+            .expect("hovered text recipient should receive an override");
+        assert_eq!(override_value.text_color, Some(TEXT_OVERRIDE_COLOR));
+        assert_eq!(override_value.fill_color, None);
+    }
+
+    #[test]
+    fn global_text_color_default_stays_dormant_on_textless_widget_part() {
+        let mut app = widgets_test_app();
+        app.insert_resource(CascadeDefault(WidgetHoveredAppearance::new(
+            Appearance::new().text_color(TEXT_OVERRIDE_COLOR),
+        )));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(El::new().id("container"), |_| {});
+        });
+        let tree = builder.build();
+        let container_index = tree.len() - 1;
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(tree)
+            .build()
+            .expect("global text-color default should not reject a textless widget part");
+        let panel = app.world_mut().spawn(panel).id();
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<VisualOverrideIndex>()
+                .get(panel, container_index)
+                .and_then(|override_value| override_value.text_color),
+            None,
+        );
+    }
+
+    #[test]
+    fn text_and_draw_part_state_colors_stay_role_isolated() {
+        let mut app = widgets_test_app();
+        let (tree, text_index) =
+            text_and_draw_part_tree(Appearance::new().text_color(TEXT_OVERRIDE_COLOR));
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+        let capabilities = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("button should carry visual slots")
+            .elements()
+            .iter()
+            .find(|(element_index, _)| *element_index == text_index)
+            .map(|(_, capabilities)| *capabilities)
+            .expect("text and draw recipient should remain in visual slots");
+        assert!(capabilities.contains(VisualElementCapabilities::TEXT));
+        assert!(capabilities.contains(VisualElementCapabilities::DRAW));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        let text_override = app
+            .world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, text_index)
+            .expect("hovered text and draw recipient should receive an override");
+        assert_eq!(text_override.text_color, Some(TEXT_OVERRIDE_COLOR));
+        assert_eq!(text_override.path_color, None);
+
+        let (tree, path_index) =
+            text_and_draw_part_tree(Appearance::new().path_color(PATH_OVERRIDE_COLOR));
+        assert_eq!(path_index, text_index);
+        reauthor_tree(&mut app, panel, tree);
+        let path_override = app
+            .world()
+            .resource::<VisualOverrideIndex>()
+            .get(panel, path_index)
+            .expect("re-authored text and draw recipient should receive an override");
+        assert_eq!(path_override.text_color, None);
+        assert_eq!(path_override.path_color, Some(PATH_OVERRIDE_COLOR));
     }
 
     #[test]

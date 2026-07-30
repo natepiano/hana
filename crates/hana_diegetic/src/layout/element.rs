@@ -826,6 +826,8 @@ impl LayoutTree {
                 }
             }
 
+            validate_part_state_colors(element, index, owning_widget.as_ref())?;
+
             let next_owning_widget = validated_element_widget_owner(
                 element,
                 index,
@@ -1322,20 +1324,57 @@ fn element_visual_capabilities(element: &Element) -> VisualElementCapabilities {
     if element.border.is_some() {
         capabilities |= VisualElementCapabilities::SDF_BORDER;
     }
-    if element.background.is_some() || element.border.is_some() {
-        capabilities |= VisualElementCapabilities::SDF_MATERIAL;
-    }
-    if matches!(
-        element.content,
-        ElementContent::Text { .. } | ElementContent::Image { .. }
-    ) || element
+    let has_text = matches!(element.content, ElementContent::Text { .. });
+    let has_image = matches!(element.content, ElementContent::Image { .. });
+    let has_draw = element
         .draw
         .as_ref()
-        .is_some_and(|draw| !draw.shapes_ref().is_empty())
-    {
-        capabilities |= VisualElementCapabilities::CONTENT;
+        .is_some_and(|draw| !draw.shapes_ref().is_empty());
+    if has_text {
+        capabilities |= VisualElementCapabilities::TEXT;
+    }
+    if has_image {
+        capabilities |= VisualElementCapabilities::IMAGE;
+    }
+    if has_draw {
+        capabilities |= VisualElementCapabilities::DRAW;
+    }
+    if element.background.is_some() || element.border.is_some() || has_text || has_draw {
+        capabilities |= VisualElementCapabilities::SDF_MATERIAL;
     }
     capabilities
+}
+
+fn validate_part_state_colors(
+    element: &Element,
+    index: usize,
+    owning_widget: Option<&(PanelElementId, WidgetKind)>,
+) -> Result<(), PanelBuildError> {
+    if owning_widget.is_none() || element.widget.is_some() || element.editable.is_some() {
+        return Ok(());
+    }
+    let Some(appearance) = element.appearance.as_deref() else {
+        return Ok(());
+    };
+    let capabilities = element_visual_capabilities(element);
+    let element_id = || {
+        element
+            .id
+            .clone()
+            .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)))
+    };
+    let cascades = appearance.cascades();
+    if cascades.any(|layer| layer.text_color.is_authored())
+        && !capabilities.contains(VisualElementCapabilities::TEXT)
+    {
+        return Err(PanelBuildError::StateTextColorRequiresText(element_id()));
+    }
+    if cascades.any(|layer| layer.path_color.is_authored())
+        && !capabilities.contains(VisualElementCapabilities::DRAW)
+    {
+        return Err(PanelBuildError::StatePathColorRequiresDraw(element_id()));
+    }
+    Ok(())
 }
 
 fn record_owned_widget_element(
@@ -1676,12 +1715,15 @@ mod tests {
     use super::LayoutTree;
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
+    use super::element_visual_capabilities;
     use crate::Appearance;
     use crate::CalloutCap;
+    use crate::DiegeticPanel;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
+    use crate::PanelBuildError;
     use crate::PanelElementId;
     use crate::Slider;
     use crate::WidgetHoveredAppearance;
@@ -1698,6 +1740,7 @@ mod tests {
     use crate::layout::LayoutEngine;
     use crate::layout::LayoutOnly;
     use crate::layout::Padding;
+    use crate::layout::PanelCircle;
     use crate::layout::PanelCoord;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
@@ -1721,6 +1764,13 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text((text, style));
         builder.build()
+    }
+
+    fn build_world_panel(tree: LayoutTree) -> Result<DiegeticPanel, PanelBuildError> {
+        DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(tree)
+            .build()
     }
 
     #[test]
@@ -2358,12 +2408,98 @@ mod tests {
                 .map(|(_, capabilities)| *capabilities)
                 .collect::<Vec<_>>(),
             vec![
-                VisualElementCapabilities::CONTENT,
+                VisualElementCapabilities::TEXT | VisualElementCapabilities::SDF_MATERIAL,
                 VisualElementCapabilities::SDF_FILL | VisualElementCapabilities::SDF_MATERIAL,
                 VisualElementCapabilities::SDF_FILL
                     | VisualElementCapabilities::SDF_BORDER
                     | VisualElementCapabilities::SDF_MATERIAL,
             ],
+        );
+    }
+
+    #[test]
+    fn part_state_text_color_requires_a_text_recipient() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                El::new()
+                    .id("container")
+                    .disabled(Appearance::new().text_color(Color::BLACK)),
+                |_| {},
+            );
+        });
+
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::StateTextColorRequiresText(id))
+                if id == PanelElementId::named("container")
+        ));
+    }
+
+    #[test]
+    fn part_state_path_color_requires_a_draw_recipient() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                El::new()
+                    .id("container")
+                    .disabled(Appearance::new().path_color(Color::BLACK)),
+                |_| {},
+            );
+        });
+
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::StatePathColorRequiresDraw(id))
+                if id == PanelElementId::named("container")
+        ));
+    }
+
+    #[test]
+    fn panel_text_material_default_stays_dormant_on_textless_widget_part() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(El::new().id("container"), |_| {});
+        });
+
+        assert!(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .text_material(Handle::default())
+                .with_tree(builder.build())
+                .build()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn circle_part_state_material_and_path_color_need_no_default_fill() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                El::new()
+                    .id("circle")
+                    .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                    .disabled(
+                        Appearance::new()
+                            .material(Handle::default())
+                            .path_color(Color::BLACK),
+                    ),
+                |_| {},
+            );
+        });
+        let tree = builder.build();
+
+        assert!(build_world_panel(tree.clone()).is_ok());
+        let circle = tree
+            .elements
+            .iter()
+            .find(|element| element.id.as_ref() == Some(&PanelElementId::named("circle")))
+            .expect("circle recipient should remain in the layout tree");
+        assert_eq!(circle.background, None);
+        assert_eq!(
+            element_visual_capabilities(circle),
+            VisualElementCapabilities::DRAW | VisualElementCapabilities::SDF_MATERIAL,
         );
     }
 

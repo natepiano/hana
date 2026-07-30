@@ -119,8 +119,12 @@ bitflags! {
         const SDF_BORDER = 1 << 1;
         /// A retained SDF material override.
         const SDF_MATERIAL = 1 << 2;
-        /// Retained text, image, or panel-draw content.
-        const CONTENT = 1 << 3;
+        /// Retained text content.
+        const TEXT = 1 << 3;
+        /// Retained image content.
+        const IMAGE = 1 << 4;
+        /// Retained panel-draw primitives.
+        const DRAW = 1 << 5;
     }
 }
 
