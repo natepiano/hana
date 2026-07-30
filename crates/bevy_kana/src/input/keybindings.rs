@@ -3,6 +3,8 @@ use std::marker::PhantomData;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 
+use super::platform_shortcut_mode::PlatformShortcutMode;
+
 struct ModifierBlockers {
     all_entities:       Vec<Entity>,
     non_shift_entities: Vec<Entity>,
@@ -205,19 +207,3 @@ struct AltModifier;
 #[derive(InputAction)]
 #[action_output(bool)]
 struct ControlModifier;
-
-#[derive(Clone, Copy)]
-enum PlatformShortcutMode {
-    Command,
-    Control,
-}
-
-impl PlatformShortcutMode {
-    const fn current() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Command
-        } else {
-            Self::Control
-        }
-    }
-}

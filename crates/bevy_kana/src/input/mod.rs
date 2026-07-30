@@ -9,5 +9,6 @@ mod action;
 mod bind_action_system;
 mod event;
 mod keybindings;
+mod platform_shortcut_mode;
 
 pub use keybindings::Keybindings;
