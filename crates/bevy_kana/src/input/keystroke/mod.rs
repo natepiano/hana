@@ -1,15 +1,19 @@
 //! Canonical keyboard keystrokes and their parser.
 
 mod sequence;
+mod sequence_matcher;
 
 use std::fmt;
 use std::str::FromStr;
 
+use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bitflags::bitflags;
 pub use sequence::EmptyKeystrokeSequenceError;
 pub use sequence::KeystrokeSequence;
 pub use sequence::KeystrokeSequenceParseError;
+pub use sequence_matcher::MatchOutcome;
+pub use sequence_matcher::SequenceMatcher;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -90,6 +94,36 @@ impl Modifiers {
     #[must_use]
     pub const fn has_platform(self) -> bool { self.0.contains(ModifierFlags::PLATFORM) }
 
+    /// Creates canonical modifiers from the modifier keys currently held down.
+    ///
+    /// On macOS, physical Super keys are the platform shortcut modifier and Control keys remain
+    /// control. On every other platform, physical Control keys are the platform shortcut modifier
+    /// and physical Super keys do not contribute a modifier.
+    #[must_use]
+    pub fn from_pressed(pressed: &ButtonInput<KeyCode>) -> Self {
+        let mut modifiers = Self::none();
+
+        if modifier_pair_pressed(pressed, KeyCode::AltLeft, KeyCode::AltRight) {
+            modifiers = modifiers.with_alt();
+        }
+        if modifier_pair_pressed(pressed, KeyCode::ShiftLeft, KeyCode::ShiftRight) {
+            modifiers = modifiers.with_shift();
+        }
+
+        if cfg!(target_os = "macos") {
+            if modifier_pair_pressed(pressed, KeyCode::SuperLeft, KeyCode::SuperRight) {
+                modifiers = modifiers.with_platform();
+            }
+            if modifier_pair_pressed(pressed, KeyCode::ControlLeft, KeyCode::ControlRight) {
+                modifiers = modifiers.with_control();
+            }
+        } else if modifier_pair_pressed(pressed, KeyCode::ControlLeft, KeyCode::ControlRight) {
+            modifiers = modifiers.with_platform();
+        }
+
+        modifiers
+    }
+
     fn insert(&mut self, modifier: Modifier) {
         match modifier {
             Modifier::Control => self.0.insert(ModifierFlags::CONTROL),
@@ -98,6 +132,10 @@ impl Modifiers {
             Modifier::Platform => *self = self.with_platform(),
         }
     }
+}
+
+fn modifier_pair_pressed(pressed: &ButtonInput<KeyCode>, left: KeyCode, right: KeyCode) -> bool {
+    pressed.pressed(left) || pressed.pressed(right)
 }
 
 /// A keyboard key and its canonical modifier set.
@@ -410,6 +448,7 @@ fn key_name(key: KeyCode) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    use bevy::input::ButtonInput;
     use bevy::input::keyboard::KeyCode;
 
     use super::CANONICAL_KEY_MAPPINGS;
@@ -424,6 +463,14 @@ mod tests {
             Ok(_) => Err(KeystrokeParseError::new(input, 0)),
             Err(error) => Ok(error),
         }
+    }
+
+    fn pressed(keys: &[KeyCode]) -> ButtonInput<KeyCode> {
+        let mut pressed = ButtonInput::default();
+        for key in keys {
+            pressed.press(*key);
+        }
+        pressed
     }
 
     #[test]
@@ -494,6 +541,58 @@ mod tests {
         assert_eq!(parsed("cmd-left-p")?, parsed("superright-p")?);
 
         Ok(())
+    }
+
+    #[test]
+    fn pressed_control_matches_parsed_control() -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::ControlLeft]);
+
+        assert_eq!(
+            Modifiers::from_pressed(&keys),
+            parsed("ctrl-p")?.modifiers()
+        );
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn pressed_control_matches_parsed_command_off_macos() -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::ControlLeft]);
+
+        assert_eq!(Modifiers::from_pressed(&keys), parsed("cmd-p")?.modifiers());
+
+        Ok(())
+    }
+
+    #[test]
+    fn pressed_alt_and_shift_match_parsed_modifiers() -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::AltLeft, KeyCode::ShiftRight]);
+
+        assert_eq!(
+            Modifiers::from_pressed(&keys),
+            parsed("alt-shift-p")?.modifiers()
+        );
+
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pressed_super_matches_parsed_command_on_macos() -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::SuperLeft]);
+
+        assert_eq!(Modifiers::from_pressed(&keys), parsed("cmd-p")?.modifiers());
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn pressed_super_is_empty_off_macos() {
+        let keys = pressed(&[KeyCode::SuperLeft]);
+
+        assert_eq!(Modifiers::from_pressed(&keys), Modifiers::none());
     }
 
     #[test]

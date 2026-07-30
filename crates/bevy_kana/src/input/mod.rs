@@ -22,4 +22,6 @@ pub use keystroke::Keystroke;
 pub use keystroke::KeystrokeParseError;
 pub use keystroke::KeystrokeSequence;
 pub use keystroke::KeystrokeSequenceParseError;
+pub use keystroke::MatchOutcome;
 pub use keystroke::Modifiers;
+pub use keystroke::SequenceMatcher;

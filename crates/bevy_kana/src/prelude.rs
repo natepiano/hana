@@ -15,6 +15,7 @@ pub use super::Keystroke;
 pub use super::KeystrokeParseError;
 pub use super::KeystrokeSequence;
 pub use super::KeystrokeSequenceParseError;
+pub use super::MatchOutcome;
 pub use super::Modifiers;
 #[cfg(feature = "math")]
 pub use super::Orientation;
@@ -23,6 +24,7 @@ pub use super::Position;
 pub use super::Resolved;
 #[cfg(feature = "math")]
 pub use super::ScreenPosition;
+pub use super::SequenceMatcher;
 #[cfg(feature = "math")]
 pub use super::ToF32;
 #[cfg(feature = "math")]

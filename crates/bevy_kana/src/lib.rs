@@ -20,6 +20,8 @@
 //! bevy_kana = { version = "0.0.1", default-features = false, features = ["math"] }
 //! ```
 
+#[cfg(test)]
+mod allocation_test_support;
 mod cascade;
 mod input;
 #[cfg(feature = "math")]
@@ -27,6 +29,8 @@ mod math;
 /// Convenience re-exports for glob imports.
 pub mod prelude;
 
+#[cfg(test)]
+pub(crate) use allocation_test_support::TEST_ALLOCATOR;
 pub use cascade::CASCADE_DEPTH_LIMIT;
 pub use cascade::Cascade;
 pub use cascade::CascadeAttribute;
@@ -48,7 +52,9 @@ pub use input::Keystroke;
 pub use input::KeystrokeParseError;
 pub use input::KeystrokeSequence;
 pub use input::KeystrokeSequenceParseError;
+pub use input::MatchOutcome;
 pub use input::Modifiers;
+pub use input::SequenceMatcher;
 #[cfg(feature = "math")]
 pub use math::Displacement;
 #[cfg(feature = "math")]

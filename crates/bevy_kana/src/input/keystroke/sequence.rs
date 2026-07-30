@@ -1,6 +1,7 @@
 //! Ordered non-empty keystroke sequences.
 
 use std::fmt;
+use std::slice::Iter;
 use std::str::FromStr;
 
 use super::Keystroke;
@@ -29,6 +30,30 @@ impl KeystrokeSequence {
     /// Returns the keystrokes in source order.
     #[must_use]
     pub fn as_slice(&self) -> &[Keystroke] { &self.keystrokes }
+
+    /// Returns the first keystroke in source order.
+    ///
+    /// `KeystrokeSequence` construction rejects empty input.
+    #[must_use]
+    pub fn first(&self) -> Keystroke { self.keystrokes[0] }
+
+    /// Returns the number of keystrokes.
+    #[must_use]
+    #[expect(
+        clippy::len_without_is_empty,
+        reason = "KeystrokeSequence is non-empty by construction"
+    )]
+    pub const fn len(&self) -> usize { self.keystrokes.len() }
+
+    /// Iterates over the keystrokes in source order.
+    pub fn iter(&self) -> Iter<'_, Keystroke> { self.keystrokes.iter() }
+}
+
+impl<'a> IntoIterator for &'a KeystrokeSequence {
+    type IntoIter = Iter<'a, Keystroke>;
+    type Item = &'a Keystroke;
+
+    fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
 
 impl TryFrom<Vec<Keystroke>> for KeystrokeSequence {
@@ -116,9 +141,13 @@ impl std::error::Error for KeystrokeSequenceParseError {
 
 #[cfg(test)]
 mod tests {
+    use bevy::input::keyboard::KeyCode;
+
     use super::EmptyKeystrokeSequenceError;
+    use super::Keystroke;
     use super::KeystrokeSequence;
     use super::KeystrokeSequenceParseError;
+    use crate::Modifiers;
 
     #[test]
     fn sequence_display_round_trips() -> Result<(), KeystrokeSequenceParseError> {
@@ -135,6 +164,22 @@ mod tests {
             KeystrokeSequence::new(Vec::new()),
             Err(EmptyKeystrokeSequenceError)
         );
+    }
+
+    #[test]
+    fn accessors_follow_the_nonempty_sequence_invariant() -> Result<(), KeystrokeSequenceParseError>
+    {
+        let sequence: KeystrokeSequence = "g h".parse()?;
+        let first = Keystroke::new(Modifiers::none(), KeyCode::KeyG);
+
+        assert_eq!(sequence.first(), first);
+        assert_eq!(sequence.len(), 2);
+        assert_eq!(
+            sequence.iter().copied().collect::<Vec<_>>(),
+            sequence.as_slice()
+        );
+
+        Ok(())
     }
 
     #[test]
