@@ -164,7 +164,7 @@ jobs:
           df -h
 
       - name: Run test targets
-        run: cargo nextest run --all-features --workspace --tests
+        run: cargo nextest run --all-features --workspace --tests --run-ignored all
         env:
           WGPU_BACKEND: gl
           WINIT_UNIX_BACKEND: x11
