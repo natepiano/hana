@@ -1968,6 +1968,7 @@ mod tests {
     use crate::Appearance;
     use crate::CascadeEntityCommandsExt as _;
     use crate::DiegeticTextMeasurer;
+    use crate::EditorStateColors;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeBuiltInFieldKind;
@@ -2014,7 +2015,7 @@ mod tests {
         builder.with(
             El::new()
                 .editable_field("field", field)
-                .editor_text(El::new().focused(Appearance::new()).background(fill)),
+                .editor_text(EditorStateColors::new().focused(fill)),
             |builder| {
                 builder.text(("display", TextStyle::new(10.0)));
             },

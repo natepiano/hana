@@ -57,6 +57,7 @@ use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticText;
+use hana_diegetic::EditorStateColors;
 use hana_diegetic::El;
 use hana_diegetic::FacePicking;
 use hana_diegetic::Fit;
@@ -1283,12 +1284,10 @@ fn add_editable_text(builder: &mut LayoutBuilder) {
             .padding(Padding::all(CONTROL_PADDING))
             .alignment(AlignX::Center, AlignY::Center)
             .editable_field(TEXT_FIELD_ID, field)
-            .editor_text(El::new().focused(Appearance::new().text_color(CONTROL_TEXT)))
-            .editor_selection(El::new().focused(Appearance::new().background(BUTTON_FILL_HOVERED)))
-            .editor_caret(El::new().focused(Appearance::new().background(BUTTON_BORDER_FOCUSED)))
-            .editor_validation(
-                El::new().focused(Appearance::new().text_color(BUTTON_BORDER_FOCUSED)),
-            )
+            .editor_text(EditorStateColors::new().focused(CONTROL_TEXT))
+            .editor_selection(EditorStateColors::new().focused(BUTTON_FILL_HOVERED))
+            .editor_caret(EditorStateColors::new().focused(BUTTON_BORDER_FOCUSED))
+            .editor_validation(EditorStateColors::new().focused(BUTTON_BORDER_FOCUSED))
             .tooltip(authored_tooltip(
                 "Editable text",
                 "Tab selects all; Enter or double-click edits",
@@ -1458,8 +1457,8 @@ type ButtonElement = El<Row, WidgetElement<Button>>;
 /// distance the cube panel sits from the camera.
 fn apply_state_appearance(element: ButtonElement) -> ButtonElement {
     element
-        .hovered(Appearance::new().background(BUTTON_FILL_HOVERED))
-        .pressed(Appearance::new().background(BUTTON_FILL_PRESSED))
+        .hovered(BUTTON_FILL_HOVERED)
+        .pressed(BUTTON_FILL_PRESSED)
         .focused(
             Appearance::new()
                 .border_color(BUTTON_BORDER_FOCUSED)

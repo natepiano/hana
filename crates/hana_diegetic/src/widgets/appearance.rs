@@ -41,8 +41,9 @@ impl<T> VisualChange<T> {
 
 /// The visual properties a widget state replaces.
 ///
-/// State methods on [`crate::El`] accept one `Appearance` bundle. Each builder
-/// below replaces values on a retained record layout emits:
+/// State methods on [`crate::El`] accept an `Appearance` bundle or a bare
+/// [`Color`] that declares the state's background. Each builder below replaces
+/// values on a retained record layout emits:
 ///
 /// | Builder | Retained record |
 /// | --- | --- |
@@ -87,7 +88,7 @@ impl<T> VisualChange<T> {
 ///     .background(Color::NONE)
 ///     .border(Border::all(Px(0.0), Color::WHITE))
 ///     .button("apply")
-///     .hovered(Appearance::new().background(Color::BLACK))
+///     .hovered(Color::BLACK)
 ///     .focused(Appearance::new().border_width(Px(2.0)))
 ///     .pressed(Appearance::new().border_color(Color::WHITE))
 ///     .disabled(Appearance::new().material(Default::default()));
@@ -225,6 +226,13 @@ impl Appearance {
     }
 }
 
+/// A bare [`Color`] declares an [`Appearance`] background.
+///
+/// For `.hovered(Default::default())`, write `.hovered(Appearance::default())`.
+impl From<Color> for Appearance {
+    fn from(color: Color) -> Self { Self::new().background(color) }
+}
+
 static EMPTY_APPEARANCE: LazyLock<Arc<Appearance>> = LazyLock::new(|| Arc::new(Appearance::new()));
 
 /// Hovered-state cascade attribute for one [`Appearance`] bundle.
@@ -240,7 +248,7 @@ pub struct WidgetHoveredAppearance(Arc<Appearance>);
 impl WidgetHoveredAppearance {
     /// Wraps one appearance bundle as the hovered-state attribute value.
     #[must_use]
-    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
 
     /// Borrows this hovered-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -283,7 +291,7 @@ pub struct WidgetPressedAppearance(Arc<Appearance>);
 impl WidgetPressedAppearance {
     /// Wraps one appearance bundle as the pressed-state attribute value.
     #[must_use]
-    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
 
     /// Borrows this pressed-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -326,7 +334,7 @@ pub struct WidgetFocusedAppearance(Arc<Appearance>);
 impl WidgetFocusedAppearance {
     /// Wraps one appearance bundle as the focused-state attribute value.
     #[must_use]
-    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
 
     /// Borrows this focused-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -369,7 +377,7 @@ pub struct WidgetDisabledAppearance(Arc<Appearance>);
 impl WidgetDisabledAppearance {
     /// Wraps one appearance bundle as the disabled-state attribute value.
     #[must_use]
-    pub fn new(appearance: Appearance) -> Self { Self(Arc::new(appearance)) }
+    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
 
     /// Borrows this disabled-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -635,6 +643,7 @@ mod tests {
 
     use super::Appearance;
     use super::StateAppearance;
+    use super::VisualChange;
     use super::WidgetDisabledAppearance;
     use super::WidgetFocusedAppearance;
     use super::WidgetHoveredAppearance;
@@ -736,6 +745,56 @@ mod tests {
             )),
             ..StateAppearance::default()
         }
+    }
+
+    #[test]
+    fn bare_and_explicit_hovered_backgrounds_resolve_to_the_same_appearance() {
+        let mut app = cascade_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("bare").hovered(HOVER_FILL), |_| {});
+        builder.with(
+            El::new()
+                .button("explicit")
+                .hovered(Appearance::new().background(HOVER_FILL)),
+            |_| {},
+        );
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(builder.build())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let bare = resolve_widget(&mut app, panel, "bare");
+        assert_resolved_appearance!(
+            &app,
+            bare,
+            WidgetHoveredAppearance,
+            Appearance {
+                background:   VisualChange::To(HOVER_FILL),
+                border_color: VisualChange::Unchanged,
+                border_width: VisualChange::Unchanged,
+                text_color:   VisualChange::Unchanged,
+                path_color:   VisualChange::Unchanged,
+                material:     VisualChange::Unchanged,
+            },
+        );
+        let explicit = resolve_widget(&mut app, panel, "explicit");
+        assert_resolved_appearance!(
+            &app,
+            explicit,
+            WidgetHoveredAppearance,
+            Appearance {
+                background:   VisualChange::To(HOVER_FILL),
+                border_color: VisualChange::Unchanged,
+                border_width: VisualChange::Unchanged,
+                text_color:   VisualChange::Unchanged,
+                path_color:   VisualChange::Unchanged,
+                material:     VisualChange::Unchanged,
+            },
+        );
     }
 
     #[test]

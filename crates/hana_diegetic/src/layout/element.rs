@@ -1738,6 +1738,7 @@ mod tests {
     use crate::Appearance;
     use crate::CalloutCap;
     use crate::DiegeticPanel;
+    use crate::EditorStateColors;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
@@ -1774,6 +1775,8 @@ mod tests {
     use crate::widgets::StateAppearance;
     use crate::widgets::VisualElementCapabilities;
     use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetState;
 
     const LARGE_CHILD_GAP: f32 = 2.0;
     const SMALL_CHILD_GAP: f32 = 1.0;
@@ -1979,17 +1982,12 @@ mod tests {
     }
 
     #[test]
-    fn screen_source_scaled_scales_editor_caret_declaration_dimensions() {
+    fn screen_source_scaled_preserves_editor_caret_state_colors() {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(
             El::new()
                 .editable_field("field", field_spec())
-                .editor_caret(
-                    El::new()
-                        .hovered(Appearance::new())
-                        .width(Sizing::fixed(Mm(4.0)))
-                        .padding(Padding::all(Mm(2.0))),
-                ),
+                .editor_caret(EditorStateColors::new().hovered(Color::srgb(0.2, 0.4, 0.6))),
             |_| {},
         );
         let tree = builder.build();
@@ -2009,17 +2007,19 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.text(declaration.into_text("caret", &TextStyle::new(3.0)));
         let generated = builder.build();
-        let expected_scale = millimeters_to_points * points_to_pixels;
-        assert!(matches!(generated.elements[1].width, Sizing::Fixed(_)));
-        let Sizing::Fixed(width) = generated.elements[1].width else {
-            return;
-        };
-        assert!((-4.0_f32).mul_add(expected_scale, width.value).abs() < FLOAT_TOLERANCE);
-        assert_eq!(width.unit, None);
-
-        let padding = generated.elements[1].padding;
-        assert!((-2.0_f32).mul_add(expected_scale, padding.left.value).abs() < FLOAT_TOLERANCE);
-        assert_eq!(padding.left.unit, None);
+        let appearance = generated.elements[1]
+            .appearance
+            .as_deref()
+            .expect("editor caret state colors should be retained");
+        assert_eq!(
+            appearance
+                .cascades()
+                .resolve(&[Some(WidgetState::Hovered)], None),
+            VisualSlotOverride {
+                fill_color: Some(Color::srgb(0.2, 0.4, 0.6)),
+                ..VisualSlotOverride::default()
+            },
+        );
     }
 
     fn assert_default_leaf_child_layout(child_layout: ChildLayout) {

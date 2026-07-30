@@ -1430,10 +1430,10 @@ mod tests {
     use super::screen_field_record_rect;
     use super::text_hit_at_x;
     use crate::AlignX;
-    use crate::Appearance;
     use crate::BoundingBox;
     use crate::DiegeticPanel;
     use crate::DiegeticTextMeasurer;
+    use crate::EditorStateColors;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeBufferBoundary;
@@ -1474,6 +1474,7 @@ mod tests {
     use crate::widgets::SemanticWidgetIntent;
     use crate::widgets::VisualElementCapabilities;
     use crate::widgets::VisualOverrideIndex;
+    use crate::widgets::VisualSlotOverride;
     use crate::widgets::WidgetDisabled;
     use crate::widgets::WidgetState;
     use crate::widgets::WidgetVisualSlots;
@@ -1485,8 +1486,8 @@ mod tests {
     const EDITOR_CARET_FOCUSED_FILL: Color = Color::srgb(0.20, 0.80, 0.40);
     const EDITOR_TEXT_DISABLED_COLOR: Color = Color::srgb(0.35, 0.45, 0.55);
     const EDITOR_SELECTION_FOCUSED_FILL: Color = Color::srgb(0.90, 0.30, 0.20);
-    const EDITOR_TEXT_FOCUSED_FILL: Color = Color::srgb(0.20, 0.50, 0.90);
-    const EDITOR_VALIDATION_FOCUSED_FILL: Color = Color::srgb(0.80, 0.30, 0.80);
+    const EDITOR_TEXT_FOCUSED_COLOR: Color = Color::srgb(0.20, 0.50, 0.90);
+    const EDITOR_VALIDATION_FOCUSED_COLOR: Color = Color::srgb(0.80, 0.30, 0.80);
 
     fn record_propagated_panel_click(
         click: On<Pointer<Click>>,
@@ -1530,19 +1531,11 @@ mod tests {
         builder.with(
             El::new()
                 .editable_field("field", field)
-                .editor_text(
-                    El::new()
-                        .id("editor-text")
-                        .focused(Appearance::new().background(EDITOR_TEXT_FOCUSED_FILL)),
-                )
-                .editor_selection(
-                    El::new().focused(Appearance::new().background(EDITOR_SELECTION_FOCUSED_FILL)),
-                )
-                .editor_caret(
-                    El::new().focused(Appearance::new().background(EDITOR_CARET_FOCUSED_FILL)),
-                )
+                .editor_text(EditorStateColors::new().focused(EDITOR_TEXT_FOCUSED_COLOR))
+                .editor_selection(EditorStateColors::new().focused(EDITOR_SELECTION_FOCUSED_FILL))
+                .editor_caret(EditorStateColors::new().focused(EDITOR_CARET_FOCUSED_FILL))
                 .editor_validation(
-                    El::new().focused(Appearance::new().background(EDITOR_VALIDATION_FOCUSED_FILL)),
+                    EditorStateColors::new().focused(EDITOR_VALIDATION_FOCUSED_COLOR),
                 ),
             |builder| {
                 builder.text(("display", TextStyle::new(10.0)));
@@ -1561,12 +1554,8 @@ mod tests {
         builder.with(
             El::new()
                 .editable_field("field", field)
-                .editor_text(
-                    El::new().disabled(Appearance::new().text_color(EDITOR_TEXT_DISABLED_COLOR)),
-                )
-                .editor_validation(
-                    El::new().disabled(Appearance::new().text_color(EDITOR_TEXT_DISABLED_COLOR)),
-                ),
+                .editor_text(EditorStateColors::new().disabled(EDITOR_TEXT_DISABLED_COLOR))
+                .editor_validation(EditorStateColors::new().disabled(EDITOR_TEXT_DISABLED_COLOR)),
             |builder| {
                 builder.text(("display", TextStyle::new(10.0)));
             },
@@ -1579,9 +1568,9 @@ mod tests {
             ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(
-            El::new().editable_field("field", field).editor_selection(
-                El::new().hovered(Appearance::new().background(Color::srgb(0.9, 0.2, 0.1))),
-            ),
+            El::new()
+                .editable_field("field", field)
+                .editor_selection(EditorStateColors::new().hovered(Color::srgb(0.9, 0.2, 0.1))),
             |builder| {
                 builder.text(("display", TextStyle::new(10.0)));
             },
@@ -1654,36 +1643,31 @@ mod tests {
         app: &App,
         panel: Entity,
         widget: Entity,
-        expected_fills: &[Color],
+        expected_overrides: &[VisualSlotOverride],
     ) -> Vec<usize> {
         let slots = app
             .world()
             .get::<WidgetVisualSlots>(widget)
             .expect("editable field should carry visual slots");
         let parts = slots.part_appearances();
-        assert_eq!(parts.len(), expected_fills.len());
+        assert_eq!(parts.len(), expected_overrides.len());
         assert!(
             parts.windows(2).all(|pair| pair[0].0 < pair[1].0),
             "generated editor part appearances must remain element-index ordered",
         );
-        for ((element_index, appearance), expected_fill) in parts.iter().zip(expected_fills) {
-            assert!(slots.elements().iter().any(|(visual_index, capabilities)| {
-                *visual_index == *element_index
-                    && capabilities.contains(VisualElementCapabilities::SDF_FILL)
-            }));
+        for ((element_index, appearance), expected_override) in parts.iter().zip(expected_overrides)
+        {
             assert_eq!(
                 appearance
                     .cascades()
-                    .resolve(&[Some(WidgetState::Focused)], None)
-                    .fill_color,
-                Some(*expected_fill),
+                    .resolve(&[Some(WidgetState::Focused)], None),
+                expected_override.clone(),
             );
             assert_eq!(
                 app.world()
                     .resource::<VisualOverrideIndex>()
-                    .get(panel, *element_index)
-                    .and_then(|override_value| override_value.fill_color),
-                Some(*expected_fill),
+                    .get(panel, *element_index),
+                Some(expected_override),
             );
         }
         parts
@@ -1909,7 +1893,16 @@ mod tests {
             &app,
             panel,
             field,
-            &[EDITOR_SELECTION_FOCUSED_FILL, EDITOR_TEXT_FOCUSED_FILL],
+            &[
+                VisualSlotOverride {
+                    fill_color: Some(EDITOR_SELECTION_FOCUSED_FILL),
+                    ..VisualSlotOverride::default()
+                },
+                VisualSlotOverride {
+                    text_color: Some(EDITOR_TEXT_FOCUSED_COLOR),
+                    ..VisualSlotOverride::default()
+                },
+            ],
         );
 
         move_inline_editor_cursor(&mut app, "display".len() / 2);
@@ -1919,9 +1912,18 @@ mod tests {
             panel,
             field,
             &[
-                EDITOR_TEXT_FOCUSED_FILL,
-                EDITOR_CARET_FOCUSED_FILL,
-                EDITOR_TEXT_FOCUSED_FILL,
+                VisualSlotOverride {
+                    text_color: Some(EDITOR_TEXT_FOCUSED_COLOR),
+                    ..VisualSlotOverride::default()
+                },
+                VisualSlotOverride {
+                    fill_color: Some(EDITOR_CARET_FOCUSED_FILL),
+                    ..VisualSlotOverride::default()
+                },
+                VisualSlotOverride {
+                    text_color: Some(EDITOR_TEXT_FOCUSED_COLOR),
+                    ..VisualSlotOverride::default()
+                },
             ],
         );
 
@@ -1937,10 +1939,22 @@ mod tests {
             panel,
             field,
             &[
-                EDITOR_TEXT_FOCUSED_FILL,
-                EDITOR_CARET_FOCUSED_FILL,
-                EDITOR_TEXT_FOCUSED_FILL,
-                EDITOR_VALIDATION_FOCUSED_FILL,
+                VisualSlotOverride {
+                    text_color: Some(EDITOR_TEXT_FOCUSED_COLOR),
+                    ..VisualSlotOverride::default()
+                },
+                VisualSlotOverride {
+                    fill_color: Some(EDITOR_CARET_FOCUSED_FILL),
+                    ..VisualSlotOverride::default()
+                },
+                VisualSlotOverride {
+                    text_color: Some(EDITOR_TEXT_FOCUSED_COLOR),
+                    ..VisualSlotOverride::default()
+                },
+                VisualSlotOverride {
+                    text_color: Some(EDITOR_VALIDATION_FOCUSED_COLOR),
+                    ..VisualSlotOverride::default()
+                },
             ],
         );
 

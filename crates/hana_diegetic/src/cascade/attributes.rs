@@ -55,7 +55,10 @@ pub trait CascadeEntityCommandsExt {
     /// on a reified widget entity may be replaced by reification; author a
     /// durable widget or part appearance in the panel's
     /// [`LayoutTree`](crate::LayoutTree).
-    fn override_widget_hovered_appearance(&mut self, appearance: Appearance) -> &mut Self;
+    fn override_widget_hovered_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self;
 
     /// Makes this entity durably inherit the hovered widget appearance.
     ///
@@ -71,7 +74,10 @@ pub trait CascadeEntityCommandsExt {
     /// on a reified widget entity may be replaced by reification; author a
     /// durable widget or part appearance in the panel's
     /// [`LayoutTree`](crate::LayoutTree).
-    fn override_widget_pressed_appearance(&mut self, appearance: Appearance) -> &mut Self;
+    fn override_widget_pressed_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self;
 
     /// Makes this entity durably inherit the pressed widget appearance.
     ///
@@ -87,7 +93,10 @@ pub trait CascadeEntityCommandsExt {
     /// on a reified widget entity may be replaced by reification; author a
     /// durable widget or part appearance in the panel's
     /// [`LayoutTree`](crate::LayoutTree).
-    fn override_widget_focused_appearance(&mut self, appearance: Appearance) -> &mut Self;
+    fn override_widget_focused_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self;
 
     /// Makes this entity durably inherit the focused widget appearance.
     ///
@@ -103,7 +112,10 @@ pub trait CascadeEntityCommandsExt {
     /// on a reified widget entity may be replaced by reification; author a
     /// durable widget or part appearance in the panel's
     /// [`LayoutTree`](crate::LayoutTree).
-    fn override_widget_disabled_appearance(&mut self, appearance: Appearance) -> &mut Self;
+    fn override_widget_disabled_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self;
 
     /// Makes this entity durably inherit the disabled widget appearance.
     ///
@@ -199,32 +211,44 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
         remove_cascade_override::<WidgetInteractivity>(self)
     }
 
-    fn override_widget_hovered_appearance(&mut self, appearance: Appearance) -> &mut Self {
-        apply_cascade_override(self, WidgetHoveredAppearance::new(appearance))
+    fn override_widget_hovered_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self {
+        apply_cascade_override(self, WidgetHoveredAppearance::new(appearance.into()))
     }
 
     fn inherit_widget_hovered_appearance(&mut self) -> &mut Self {
         remove_cascade_override::<WidgetHoveredAppearance>(self)
     }
 
-    fn override_widget_pressed_appearance(&mut self, appearance: Appearance) -> &mut Self {
-        apply_cascade_override(self, WidgetPressedAppearance::new(appearance))
+    fn override_widget_pressed_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self {
+        apply_cascade_override(self, WidgetPressedAppearance::new(appearance.into()))
     }
 
     fn inherit_widget_pressed_appearance(&mut self) -> &mut Self {
         remove_cascade_override::<WidgetPressedAppearance>(self)
     }
 
-    fn override_widget_focused_appearance(&mut self, appearance: Appearance) -> &mut Self {
-        apply_cascade_override(self, WidgetFocusedAppearance::new(appearance))
+    fn override_widget_focused_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self {
+        apply_cascade_override(self, WidgetFocusedAppearance::new(appearance.into()))
     }
 
     fn inherit_widget_focused_appearance(&mut self) -> &mut Self {
         remove_cascade_override::<WidgetFocusedAppearance>(self)
     }
 
-    fn override_widget_disabled_appearance(&mut self, appearance: Appearance) -> &mut Self {
-        apply_cascade_override(self, WidgetDisabledAppearance::new(appearance))
+    fn override_widget_disabled_appearance(
+        &mut self,
+        appearance: impl Into<Appearance>,
+    ) -> &mut Self {
+        apply_cascade_override(self, WidgetDisabledAppearance::new(appearance.into()))
     }
 
     fn inherit_widget_disabled_appearance(&mut self) -> &mut Self {

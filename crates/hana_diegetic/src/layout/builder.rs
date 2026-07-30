@@ -110,6 +110,127 @@ pub struct WidgetPart(());
 #[derive(Clone, Copy, Debug)]
 pub struct PressedPart(());
 
+/// State colors for generated editable-field parts.
+///
+/// Each setter replaces the complete appearance bundle for its state. Start
+/// with [`Self::new`], then set [`Self::focused`], [`Self::hovered`],
+/// [`Self::disabled`], or [`Self::pressed`] in any order.
+#[must_use]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct EditorStateColors {
+    hovered:  Option<Color>,
+    focused:  Option<Color>,
+    disabled: Option<Color>,
+}
+
+/// State colors that include an unsupported pressed state for an editable part.
+///
+/// [`EditorStateColors::pressed`] returns this distinct role so
+/// [`El::editor_text`], [`El::editor_selection`], [`El::editor_caret`], and
+/// [`El::editor_validation`] reject it at compile time.
+#[must_use]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PressedEditorStateColors {
+    colors:  EditorStateColors,
+    pressed: Color,
+}
+
+impl EditorStateColors {
+    /// Creates a colors declaration with no authored state colors.
+    pub const fn new() -> Self {
+        Self {
+            hovered:  None,
+            focused:  None,
+            disabled: None,
+        }
+    }
+
+    /// Sets the focused-state color.
+    pub const fn focused(mut self, color: Color) -> Self {
+        self.focused = Some(color);
+        self
+    }
+
+    /// Sets a pressed-state color that editable parts reject.
+    pub const fn pressed(self, color: Color) -> PressedEditorStateColors {
+        PressedEditorStateColors {
+            colors:  self,
+            pressed: color,
+        }
+    }
+
+    /// Sets the hovered-state color.
+    pub const fn hovered(mut self, color: Color) -> Self {
+        self.hovered = Some(color);
+        self
+    }
+
+    /// Sets the disabled-state color.
+    pub const fn disabled(mut self, color: Color) -> Self {
+        self.disabled = Some(color);
+        self
+    }
+
+    fn into_editor_part(self, role: EditorPartColorRole) -> EditorPart {
+        let appearance = StateAppearance {
+            hovered:  self.hovered.map_or(Cascade::Inherit, |color| {
+                Cascade::Override(WidgetHoveredAppearance::new(role.appearance(color)))
+            }),
+            pressed:  Cascade::Inherit,
+            focused:  self.focused.map_or(Cascade::Inherit, |color| {
+                Cascade::Override(WidgetFocusedAppearance::new(role.appearance(color)))
+            }),
+            disabled: self.disabled.map_or(Cascade::Inherit, |color| {
+                Cascade::Override(WidgetDisabledAppearance::new(role.appearance(color)))
+            }),
+        };
+        let mut part = El::new();
+        part.common.appearance = Some(Box::new(appearance));
+        EditorPart::from_el(part.into_role())
+    }
+}
+
+impl PressedEditorStateColors {
+    /// Sets the hovered-state color.
+    pub const fn hovered(mut self, color: Color) -> Self {
+        self.colors.hovered = Some(color);
+        self
+    }
+
+    /// Sets the focused-state color.
+    pub const fn focused(mut self, color: Color) -> Self {
+        self.colors.focused = Some(color);
+        self
+    }
+
+    /// Sets the disabled-state color.
+    pub const fn disabled(mut self, color: Color) -> Self {
+        self.colors.disabled = Some(color);
+        self
+    }
+
+    /// Replaces the pressed-state color.
+    pub const fn pressed(mut self, color: Color) -> Self {
+        self.pressed = color;
+        self
+    }
+}
+
+#[derive(Clone, Copy)]
+enum EditorPartColorRole {
+    Fill,
+    Text,
+}
+
+impl EditorPartColorRole {
+    const fn appearance(self, color: Color) -> Appearance {
+        match self {
+            Self::Fill => Appearance::new().background(color),
+            Self::Text => Appearance::new().text_color(color),
+        }
+    }
+}
+
 /// Public marker trait for element roles accepted by ordinary panel layout.
 pub trait ElementRole: private::RoleSealed {}
 
@@ -945,33 +1066,36 @@ impl<L> El<L, LayoutOnly> {
     /// Sets the appearance while the enclosing widget is hovered.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: Appearance) -> El<L, WidgetPart> {
-        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
+    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> El<L, WidgetPart> {
+        self.appearance_mut().hovered =
+            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
         self.into_role()
     }
 
     /// Sets the appearance while the enclosing widget's focus indicator is visible.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: Appearance) -> El<L, WidgetPart> {
-        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
+    pub fn focused(mut self, appearance: impl Into<Appearance>) -> El<L, WidgetPart> {
+        self.appearance_mut().focused =
+            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
         self.into_role()
     }
 
     /// Sets the appearance while the enclosing widget is disabled.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: Appearance) -> El<L, WidgetPart> {
+    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> El<L, WidgetPart> {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
         self.into_role()
     }
 
     /// Sets the appearance while the enclosing widget is held by a press or drag.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: Appearance) -> El<L, PressedPart> {
-        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
+    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> El<L, PressedPart> {
+        self.appearance_mut().pressed =
+            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
         self.into_role()
     }
 
@@ -1058,8 +1182,9 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
+    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().hovered =
+            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
         self
     }
 
@@ -1068,8 +1193,9 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
+    pub fn focused(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().focused =
+            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
         self
     }
 
@@ -1078,9 +1204,9 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: Appearance) -> Self {
+    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> Self {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
         self
     }
 
@@ -1090,57 +1216,45 @@ impl<L, W> El<L, WidgetElement<W>> {
 impl<L> El<L, WidgetElement<EditableField>> {
     /// Authors the state appearance for generated committed and preedit text runs.
     ///
-    /// A later call replaces an earlier text declaration. The generated text
-    /// content and [`TextStyle`] remain editor-controlled; this declaration's
-    /// layout and visual properties become the generated text element.
-    pub fn editor_text<L2>(mut self, part: El<L2, WidgetPart>) -> Self
-    where
-        L2: ChildLayoutState,
-    {
-        self.common.editor_text = Some(Box::new(EditorPart::from_el(part)));
+    /// A later call replaces an earlier text colors declaration. The generated
+    /// text content and [`TextStyle`] remain editor-controlled; the colors
+    /// apply to the generated text glyphs.
+    pub fn editor_text(mut self, colors: EditorStateColors) -> Self {
+        self.common.editor_text =
+            Some(Box::new(colors.into_editor_part(EditorPartColorRole::Text)));
         self
     }
 
     /// Authors the state appearance for the generated selection highlight box.
     ///
-    /// A later call replaces an earlier selection declaration. The generated
-    /// selection assigns [`Sizing::FIT`] width and height after this declaration;
-    /// its other layout and visual properties become the highlight element. When
-    /// `background` is unset, the generated selection keeps its built-in color;
-    /// an authored `background` replaces that color.
-    pub fn editor_selection<L2>(mut self, part: El<L2, WidgetPart>) -> Self
-    where
-        L2: ChildLayoutState,
-    {
-        self.common.editor_selection = Some(Box::new(EditorPart::from_el(part)));
+    /// A later call replaces an earlier selection colors declaration. The
+    /// generated selection keeps its editor-controlled dimensions, and the
+    /// colors apply to its fill.
+    pub fn editor_selection(mut self, colors: EditorStateColors) -> Self {
+        self.common.editor_selection =
+            Some(Box::new(colors.into_editor_part(EditorPartColorRole::Fill)));
         self
     }
 
     /// Authors the state appearance for the generated caret box.
     ///
-    /// A later call replaces an earlier caret declaration. The generated caret
-    /// assigns its width and visible-text height after this declaration; its
-    /// other layout and visual properties become the caret element. When
-    /// `background` is unset, the generated caret keeps its built-in color; an
-    /// authored `background` replaces that color.
-    pub fn editor_caret<L2>(mut self, part: El<L2, WidgetPart>) -> Self
-    where
-        L2: ChildLayoutState,
-    {
-        self.common.editor_caret = Some(Box::new(EditorPart::from_el(part)));
+    /// A later call replaces an earlier caret colors declaration. The generated
+    /// caret keeps its editor-controlled dimensions, and the colors apply to
+    /// its fill.
+    pub fn editor_caret(mut self, colors: EditorStateColors) -> Self {
+        self.common.editor_caret =
+            Some(Box::new(colors.into_editor_part(EditorPartColorRole::Fill)));
         self
     }
 
     /// Authors the state appearance for the generated validation message run.
     ///
-    /// A later call replaces an earlier validation declaration. The generated
-    /// validation message and [`TextStyle`] remain editor-controlled; this
-    /// declaration's layout and visual properties become the validation element.
-    pub fn editor_validation<L2>(mut self, part: El<L2, WidgetPart>) -> Self
-    where
-        L2: ChildLayoutState,
-    {
-        self.common.editor_validation = Some(Box::new(EditorPart::from_el(part)));
+    /// A later call replaces an earlier validation colors declaration. The
+    /// generated validation message and [`TextStyle`] remain editor-controlled;
+    /// the colors apply to the validation glyphs.
+    pub fn editor_validation(mut self, colors: EditorStateColors) -> Self {
+        self.common.editor_validation =
+            Some(Box::new(colors.into_editor_part(EditorPartColorRole::Text)));
         self
     }
 }
@@ -1151,8 +1265,9 @@ impl<L, W: Pressable> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
+    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().pressed =
+            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
         self
     }
 }
@@ -1161,33 +1276,36 @@ impl<L> El<L, WidgetPart> {
     /// Sets the appearance while the enclosing widget is hovered.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
+    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().hovered =
+            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
         self
     }
 
     /// Sets the appearance while the enclosing widget's focus indicator is visible.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
+    pub fn focused(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().focused =
+            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
         self
     }
 
     /// Sets the appearance while the enclosing widget is disabled.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: Appearance) -> Self {
+    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> Self {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
         self
     }
 
     /// Sets the appearance while the enclosing widget is held by a press or drag.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: Appearance) -> El<L, PressedPart> {
-        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
+    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> El<L, PressedPart> {
+        self.appearance_mut().pressed =
+            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
         self.into_role()
     }
 }
@@ -1196,33 +1314,36 @@ impl<L> El<L, PressedPart> {
     /// Sets the appearance while the enclosing widget is hovered.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
+    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().hovered =
+            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
         self
     }
 
     /// Sets the appearance while the enclosing widget's focus indicator is visible.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
+    pub fn focused(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().focused =
+            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
         self
     }
 
     /// Sets the appearance while the enclosing widget is disabled.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: Appearance) -> Self {
+    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> Self {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
         self
     }
 
     /// Sets the appearance while the enclosing widget is held by a press or drag.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: Appearance) -> Self {
-        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
+    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> Self {
+        self.appearance_mut().pressed =
+            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
         self
     }
 }

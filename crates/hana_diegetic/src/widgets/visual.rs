@@ -707,6 +707,7 @@ mod tests {
     use crate::Border;
     use crate::DiegeticPanel;
     use crate::DiegeticPanelCommands;
+    use crate::EditorStateColors;
     use crate::El;
     use crate::HeadlessLayoutPlugin;
     use crate::ImeAppOwnedFieldSpec;
@@ -1253,7 +1254,7 @@ mod tests {
 
     fn editable_tree_with_widget_focus_and_optional_caret(
         text: &str,
-        caret_appearance: Option<Appearance>,
+        caret_colors: Option<EditorStateColors>,
     ) -> crate::LayoutTree {
         let field =
             ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
@@ -1261,10 +1262,25 @@ mod tests {
             .background(PART_NORMAL_FILL)
             .editable_field("field", field)
             .focused(Appearance::new().background(WIDGET_PROPERTY_COLOR));
-        let field = match caret_appearance {
-            Some(appearance) => field.editor_caret(El::new().focused(appearance)),
+        let field = match caret_colors {
+            Some(colors) => field.editor_caret(colors),
             None => field,
         };
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(field, |children| {
+            children.text((text, TextStyle::new(10.0)));
+        });
+        builder.build()
+    }
+
+    fn editable_tree_with_text_colors(text: &str, colors: EditorStateColors) -> crate::LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
+        let field = El::new()
+            .background(PART_NORMAL_FILL)
+            .editable_field("field", field)
+            .focused(Appearance::new().background(WIDGET_PROPERTY_COLOR))
+            .editor_text(colors);
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(field, |children| {
             children.text((text, TextStyle::new(10.0)));
@@ -1457,8 +1473,105 @@ mod tests {
         let (mut app, window, panel) =
             inline_editor_visual_app(editable_tree_with_widget_focus_and_optional_caret(
                 "",
-                Some(Appearance::new().background(PART_PROPERTY_COLOR)),
+                Some(EditorStateColors::new().focused(PART_PROPERTY_COLOR)),
             ));
+        let field = resolve_widget(&mut app, panel, "field");
+        activate_inline_editor(&mut app, window, field);
+
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(field)
+            .expect("editable field visual slots");
+        let caret_index = slots
+            .part_appearances()
+            .iter()
+            .find_map(|(element_index, _)| {
+                slots
+                    .generated_editor_elements
+                    .binary_search(element_index)
+                    .is_ok()
+                    .then_some(*element_index)
+            })
+            .expect("the declared editor caret should generate a styled part");
+        assert_eq!(
+            part_override(&app, panel, caret_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(PART_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn editor_state_colors_apply_to_text_glyphs_and_caret_fill() {
+        let colors = EditorStateColors::new().focused(PART_PROPERTY_COLOR);
+        let (mut text_app, text_window, text_panel) =
+            inline_editor_visual_app(editable_tree_with_text_colors("display", colors.clone()));
+        let text_field = resolve_widget(&mut text_app, text_panel, "field");
+        activate_inline_editor(&mut text_app, text_window, text_field);
+        let text_slots = text_app
+            .world()
+            .get::<WidgetVisualSlots>(text_field)
+            .expect("editable field visual slots");
+        let text_index = text_slots
+            .part_appearances()
+            .iter()
+            .find_map(|(element_index, _)| {
+                text_slots
+                    .elements()
+                    .iter()
+                    .find(|(visual_index, capabilities)| {
+                        *visual_index == *element_index
+                            && capabilities.contains(VisualElementCapabilities::TEXT)
+                    })
+                    .map(|_| *element_index)
+            })
+            .expect("the declared editor text should generate a text recipient");
+        assert_eq!(
+            part_override(&text_app, text_panel, text_index),
+            Some(VisualSlotOverride {
+                text_color: Some(PART_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+
+        let (mut caret_app, caret_window, caret_panel) = inline_editor_visual_app(
+            editable_tree_with_widget_focus_and_optional_caret("", Some(colors)),
+        );
+        let caret_field = resolve_widget(&mut caret_app, caret_panel, "field");
+        activate_inline_editor(&mut caret_app, caret_window, caret_field);
+        let caret_slots = caret_app
+            .world()
+            .get::<WidgetVisualSlots>(caret_field)
+            .expect("editable field visual slots");
+        let caret_index = caret_slots
+            .part_appearances()
+            .iter()
+            .find_map(|(element_index, _)| {
+                caret_slots
+                    .generated_editor_elements
+                    .binary_search(element_index)
+                    .is_ok()
+                    .then_some(*element_index)
+            })
+            .expect("the declared editor caret should generate a styled part");
+        assert_eq!(
+            part_override(&caret_app, caret_panel, caret_index),
+            Some(VisualSlotOverride {
+                fill_color: Some(PART_PROPERTY_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn later_editor_focused_color_replaces_the_earlier_color() {
+        let colors = EditorStateColors::new()
+            .focused(WIDGET_PROPERTY_COLOR)
+            .focused(PART_PROPERTY_COLOR);
+        let (mut app, window, panel) = inline_editor_visual_app(
+            editable_tree_with_widget_focus_and_optional_caret("", Some(colors)),
+        );
         let field = resolve_widget(&mut app, panel, "field");
         activate_inline_editor(&mut app, window, field);
 
