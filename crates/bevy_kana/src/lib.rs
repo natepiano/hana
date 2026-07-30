@@ -9,8 +9,8 @@
 //!
 //! - **`math`** (default) — zero-cost newtype wrappers around Bevy math primitives that prevent
 //!   accidental mixing at compile time.
-//! - **`input`** (default) — macros and utilities for wiring keyboard actions to commands through
-//!   `bevy_enhanced_input`.
+//! - **`input`** — macros and utilities for wiring keyboard actions to commands through
+//!   `bevy_enhanced_input`. Canonical keystroke parsing is always available.
 //! - [`Cascade`] — explicit inherited/overridden authoring values plus optional relationship-backed
 //!   ECS propagation through [`CascadePlugin`].
 //!
@@ -21,7 +21,6 @@
 //! ```
 
 mod cascade;
-#[cfg(feature = "input")]
 mod input;
 #[cfg(feature = "math")]
 mod math;
@@ -42,8 +41,14 @@ pub use cascade::resolve_cascade;
 pub use cascade::resolve_cascade_ref;
 pub use cascade::resolve_entity_cascade;
 pub use cascade::resolved_cascade;
+pub use input::EmptyKeystrokeSequenceError;
 #[cfg(feature = "input")]
 pub use input::Keybindings;
+pub use input::Keystroke;
+pub use input::KeystrokeParseError;
+pub use input::KeystrokeSequence;
+pub use input::KeystrokeSequenceParseError;
+pub use input::Modifiers;
 #[cfg(feature = "math")]
 pub use math::Displacement;
 #[cfg(feature = "math")]

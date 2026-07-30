@@ -20,8 +20,9 @@ input   = ["dep:bevy_enhanced_input"]
 math    = []
 
 [dependencies]
-bevy                = { workspace = true, features = ["bevy_log"] }
+bevy                = { workspace = true, features = ["bevy_log", "keyboard"] }
 bevy_enhanced_input = { workspace = true, optional = true }
+bitflags            = { workspace = true }
 
 [dev-dependencies]
 bevy          = { workspace = true, features = ["3d"] }

@@ -8,8 +8,14 @@ pub use super::CascadePlugin;
 pub use super::CascadeSet;
 #[cfg(feature = "math")]
 pub use super::Displacement;
+pub use super::EmptyKeystrokeSequenceError;
 #[cfg(feature = "input")]
 pub use super::Keybindings;
+pub use super::Keystroke;
+pub use super::KeystrokeParseError;
+pub use super::KeystrokeSequence;
+pub use super::KeystrokeSequenceParseError;
+pub use super::Modifiers;
 #[cfg(feature = "math")]
 pub use super::Orientation;
 #[cfg(feature = "math")]
