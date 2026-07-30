@@ -33,6 +33,10 @@ use crate::KeymapSystems;
 pub struct ConditionName(String);
 
 impl ConditionName {
+    /// Creates a condition name from application-authored keymap text.
+    #[must_use]
+    pub(crate) fn new(name: impl Into<String>) -> Self { Self(name.into()) }
+
     /// Borrows the condition text declared by the application context enum.
     #[must_use]
     pub fn as_str(&self) -> &str { &self.0 }
@@ -114,7 +118,7 @@ impl ConditionRegistry {
         let mut names = HashSet::new();
 
         for condition in C::iter() {
-            let condition_name = ConditionName(condition.as_ref().to_owned());
+            let condition_name = ConditionName::new(condition.as_ref());
             let description = condition
                 .get_message()
                 .filter(|message| !message.is_empty());
