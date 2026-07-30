@@ -5,20 +5,14 @@ use bevy::window::WindowMode;
 use bevy::window::WindowPosition;
 use bevy::winit::WINIT_WINDOWS;
 
-use super::target_position;
-use super::target_position::MonitorResolutionSource;
-use super::target_position::RestoreDiagnostics;
+use super::NativeWindowReady;
+use super::RestorePreparation;
 use super::target_position::TargetPosition;
 use crate::Platform;
 use crate::WindowKey;
-use crate::constants::DEFAULT_SCALE_FACTOR;
-use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
-use crate::persistence;
-#[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
-use crate::persistence::SavedWindowMode;
-use crate::restore_window_config::RestoreWindowConfig;
+use crate::persistence::CapturedWindowStates;
 
 /// Window decoration dimensions (title bar, borders).
 struct WindowDecoration {
@@ -29,8 +23,7 @@ struct WindowDecoration {
 /// Information from winit captured at startup.
 #[derive(Resource)]
 pub(crate) struct WinitInfo {
-    starting_monitor_index: usize,
-    window_decoration:      WindowDecoration,
+    window_decoration: WindowDecoration,
 }
 
 impl WinitInfo {
@@ -44,13 +37,25 @@ impl WinitInfo {
     }
 }
 
+#[cfg(test)]
+impl Default for WinitInfo {
+    fn default() -> Self {
+        Self {
+            window_decoration: WindowDecoration {
+                physical_width:  0,
+                physical_height: 0,
+            },
+        }
+    }
+}
+
 /// Token indicating X11 frame extent compensation is complete (W6 workaround).
 ///
 /// This component gates `restore_windows` - the restore system cannot process
 /// a window until this token exists on the entity. On Linux X11 with W6 workaround
 /// enabled, this ensures frame extents are queried and position is compensated
 /// before restore proceeds. On other platforms/configurations, the token is
-/// inserted immediately during `load_target_position` since no compensation is needed.
+/// inserted immediately during `prepare_restore_targets` since no compensation is needed.
 #[derive(Component)]
 pub(crate) struct X11FrameCompensated;
 
@@ -127,38 +132,29 @@ pub(crate) fn init_winit_info(
                 physical_position.y,
             );
 
-            commands.entity(*window_entity).insert(CurrentMonitor {
-                monitor_info:   starting_monitor,
-                effective_window_mode: WindowMode::Windowed,
-            });
+            commands.entity(*window_entity).insert((
+                CurrentMonitor {
+                    monitor_info:          starting_monitor,
+                    effective_window_mode: WindowMode::Windowed,
+                },
+                NativeWindowReady,
+            ));
 
             commands.insert_resource(WinitInfo {
-                starting_monitor_index,
                 window_decoration: physical_decoration,
             });
         }
     });
 }
 
-/// Load saved window state and insert `TargetPosition` on the primary window entity.
-pub(crate) fn load_target_position(
+/// Queue primary startup restoration from the one-read captured-state authority.
+pub(crate) fn queue_primary_restore(
     mut commands: Commands,
     window_entity: Single<Entity, With<PrimaryWindow>>,
-    monitors: Res<Monitors>,
-    winit_info: Res<WinitInfo>,
-    mut restore_window_config: ResMut<RestoreWindowConfig>,
-    platform: Res<Platform>,
+    mut captured_window_states: ResMut<CapturedWindowStates>,
 ) {
-    if let Some(all_states) = persistence::load_all_states(&restore_window_config.path) {
-        restore_window_config.loaded_states = all_states;
-    }
-
-    let Some(window_state) = restore_window_config
-        .loaded_states
-        .get(&WindowKey::Primary)
-        .cloned()
-    else {
-        debug!("[load_target_position] No saved bevy_clerestory state, showing window");
+    if !captured_window_states.bind_and_freeze(&WindowKey::Primary, *window_entity) {
+        debug!("[queue_primary_restore] No saved bevy_clerestory state, showing window");
         commands.queue(|world: &mut World| {
             let mut query = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
             if let Some(mut window) = query.iter_mut(world).next() {
@@ -166,86 +162,11 @@ pub(crate) fn load_target_position(
             }
         });
         return;
-    };
-
-    debug!(
-        "[load_target_position] Loaded state: position={:?} logical_size={}x{} monitor_scale={} monitor_index={} mode={:?}",
-        window_state.logical_position,
-        window_state.logical_width,
-        window_state.logical_height,
-        window_state.scale,
-        window_state.monitor,
-        window_state.saved_window_mode
-    );
-
-    let starting_monitor_index = winit_info.starting_monitor_index;
-    let starting_scale = monitors
-        .by_index(starting_monitor_index)
-        .map_or(DEFAULT_SCALE_FACTOR, |monitor| monitor.scale);
-
-    let resolved_monitor = target_position::resolve_target_monitor_and_position(
-        window_state.monitor,
-        window_state.logical_position,
-        &monitors,
-    );
-    if matches!(
-        resolved_monitor.monitor_resolution_source,
-        MonitorResolutionSource::FallbackToPrimary
-    ) {
-        warn!(
-            "[load_target_position] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
-            window_state.monitor,
-        );
     }
 
-    let target_position = target_position::compute_target_position(
-        &window_state,
-        resolved_monitor.monitor_info,
-        resolved_monitor.logical_position,
-        winit_info.physical_decoration(),
-        starting_scale,
-        *platform,
-    );
-
-    debug!(
-        "[load_target_position] Starting monitor={starting_monitor_index} scale={starting_scale}, Target monitor={} scale={}, monitor_scale_strategy={:?}, position={:?}",
-        target_position.monitor_index,
-        target_position.target_scale,
-        target_position.monitor_scale_strategy,
-        target_position.physical_position
-    );
-
-    #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
-    if matches!(
-        window_state.saved_window_mode,
-        SavedWindowMode::Fullscreen { .. }
-    ) {
-        debug!(
-            "[load_target_position] Windows exclusive fullscreen: showing window for surface creation"
-        );
-        commands.queue(|world: &mut World| {
-            let mut query = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
-            if let Some(mut window) = query.iter_mut(world).next() {
-                window.visible = true;
-            }
-        });
-    }
-
-    let entity = *window_entity;
-    let is_fullscreen = window_state.saved_window_mode.is_fullscreen();
-    let restore_diagnostics = RestoreDiagnostics {
-        starting_monitor_index,
-        starting_scale,
-        target_scale: target_position.target_scale,
-        monitor_scale_strategy: target_position.monitor_scale_strategy,
-    };
     commands
-        .entity(entity)
-        .insert((target_position, restore_diagnostics));
-
-    if is_fullscreen || !platform.needs_frame_compensation() {
-        commands.entity(entity).insert(X11FrameCompensated);
-    }
+        .entity(*window_entity)
+        .insert(RestorePreparation::startup(WindowKey::Primary));
 }
 
 /// Move the primary window to the target monitor for fullscreen restore on X11.
@@ -273,5 +194,72 @@ pub(crate) fn move_to_target_monitor(
     if let Some(position) = target_position.physical_position {
         debug!("[move_to_target_monitor] X11 fullscreen: setting position={position:?}");
         window.position = WindowPosition::At(position);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monitors::MonitorIdentity;
+    use crate::monitors::MonitorInfo;
+    use crate::monitors::PanelIdentity;
+    use crate::persistence::CapturedWindowPlacement;
+    use crate::persistence::CapturedWindowPosition;
+    use crate::persistence::SavedWindowMode;
+
+    #[test]
+    fn primary_startup_protects_saved_placement_when_restore_is_queued() {
+        let original_placement = CapturedWindowPlacement {
+            panel_identity:    PanelIdentity::Anonymous,
+            monitor_snapshot:  MonitorInfo {
+                identity:          MonitorIdentity::Unverified,
+                index:             0,
+                scale:             1.0,
+                physical_position: IVec2::ZERO,
+                physical_size:     UVec2::new(1_920, 1_080),
+            },
+            position:          CapturedWindowPosition::Restorable {
+                logical_offset: IVec2::new(10, 20),
+            },
+            logical_size:      UVec2::new(800, 600),
+            saved_window_mode: SavedWindowMode::Windowed,
+        };
+        let mut app = App::new();
+        app.init_resource::<CapturedWindowStates>()
+            .add_systems(PreStartup, queue_primary_restore);
+        let entity = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut()
+            .resource_mut::<CapturedWindowStates>()
+            .promote(WindowKey::Primary, entity, original_placement.clone());
+
+        app.world_mut().run_schedule(PreStartup);
+
+        assert!(app.world().get::<RestorePreparation>(entity).is_some());
+        let mut captured_window_states = app.world_mut().resource_mut::<CapturedWindowStates>();
+        assert!(captured_window_states.is_bound_to(&WindowKey::Primary, entity));
+        captured_window_states.capture(
+            WindowKey::Primary,
+            entity,
+            CapturedWindowPlacement {
+                panel_identity:    PanelIdentity::Anonymous,
+                monitor_snapshot:  MonitorInfo {
+                    identity:          MonitorIdentity::Unverified,
+                    index:             0,
+                    scale:             1.0,
+                    physical_position: IVec2::ZERO,
+                    physical_size:     UVec2::new(1_920, 1_080),
+                },
+                position:          CapturedWindowPosition::CompositorControlled,
+                logical_size:      UVec2::new(1_024, 768),
+                saved_window_mode: SavedWindowMode::Windowed,
+            },
+        );
+        assert_eq!(
+            captured_window_states.captured_placement(&WindowKey::Primary),
+            Some(&original_placement)
+        );
     }
 }

@@ -1,6 +1,9 @@
 //! Ordered non-empty keystroke sequences.
 
+use std::error::Error;
 use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::slice::Iter;
 use std::str::FromStr;
 
@@ -62,8 +65,8 @@ impl TryFrom<Vec<Keystroke>> for KeystrokeSequence {
     fn try_from(keystrokes: Vec<Keystroke>) -> Result<Self, Self::Error> { Self::new(keystrokes) }
 }
 
-impl fmt::Display for KeystrokeSequence {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for KeystrokeSequence {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         for (index, keystroke) in self.keystrokes.iter().enumerate() {
             if index != 0 {
                 formatter.write_str(" ")?;
@@ -104,13 +107,13 @@ impl FromStr for KeystrokeSequence {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EmptyKeystrokeSequenceError;
 
-impl fmt::Display for EmptyKeystrokeSequenceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for EmptyKeystrokeSequenceError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str("a keystroke sequence must contain at least one keystroke")
     }
 }
 
-impl std::error::Error for EmptyKeystrokeSequenceError {}
+impl Error for EmptyKeystrokeSequenceError {}
 
 /// A sequence parse failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,8 +124,8 @@ pub enum KeystrokeSequenceParseError {
     Keystroke(KeystrokeParseError),
 }
 
-impl fmt::Display for KeystrokeSequenceParseError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for KeystrokeSequenceParseError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty(error) => error.fmt(formatter),
             Self::Keystroke(error) => error.fmt(formatter),
@@ -130,8 +133,8 @@ impl fmt::Display for KeystrokeSequenceParseError {
     }
 }
 
-impl std::error::Error for KeystrokeSequenceParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl Error for KeystrokeSequenceParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Empty(error) => Some(error),
             Self::Keystroke(error) => Some(error),

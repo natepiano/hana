@@ -16,18 +16,136 @@
 //! MANUAL tabbing (dragging a window onto another's tab bar, "Merge All
 //! Windows").
 
+use std::collections::HashMap;
+use std::ptr::NonNull;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
+
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::winit::WINIT_WINDOWS;
+use block2::RcBlock;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::runtime::NSObjectProtocol;
+use objc2::runtime::ProtocolObject;
 use objc2_app_kit::NSView;
 use objc2_app_kit::NSWindow;
+use objc2_app_kit::NSWindowDidEnterFullScreenNotification;
+use objc2_app_kit::NSWindowDidExitFullScreenNotification;
+use objc2_app_kit::NSWindowStyleMask;
 use objc2_app_kit::NSWindowTabbingMode;
+use objc2_foundation::NSNotification;
+use objc2_foundation::NSNotificationCenter;
 use raw_window_handle::HasWindowHandle;
 use raw_window_handle::RawWindowHandle;
 
 use super::ManagedWindow;
+use crate::restore::NativeFullscreenState;
+use crate::restore::TargetPosition;
+
+const NATIVE_WINDOWED: u8 = 0;
+const NATIVE_FULLSCREEN: u8 = 1;
+
+struct NativeFullscreenObservation {
+    center:         Retained<NSNotificationCenter>,
+    enter_observer: Retained<ProtocolObject<dyn NSObjectProtocol>>,
+    exit_observer:  Retained<ProtocolObject<dyn NSObjectProtocol>>,
+    state:          Arc<AtomicU8>,
+}
+
+impl NativeFullscreenObservation {
+    fn new(window: &NSWindow) -> Self {
+        let initial_state = if window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+            NATIVE_FULLSCREEN
+        } else {
+            NATIVE_WINDOWED
+        };
+        let state = Arc::new(AtomicU8::new(initial_state));
+        let center = NSNotificationCenter::defaultCenter();
+
+        let enter_state = Arc::clone(&state);
+        let enter_block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            enter_state.store(NATIVE_FULLSCREEN, Ordering::Release);
+        });
+        // SAFETY: The notification is filtered to this live `NSWindow`. The
+        // block captures only an `Arc<AtomicU8>`, so it is safe if AppKit
+        // invokes it from any thread.
+        let enter_observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidEnterFullScreenNotification),
+                Some(window),
+                None,
+                &enter_block,
+            )
+        };
+
+        let exit_state = Arc::clone(&state);
+        let exit_block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            exit_state.store(NATIVE_WINDOWED, Ordering::Release);
+        });
+        // SAFETY: Same as the enter observer above.
+        let exit_observer = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(NSWindowDidExitFullScreenNotification),
+                Some(window),
+                None,
+                &exit_block,
+            )
+        };
+
+        Self {
+            center,
+            enter_observer,
+            exit_observer,
+            state,
+        }
+    }
+
+    fn state(&self) -> NativeFullscreenState {
+        match self.state.load(Ordering::Acquire) {
+            NATIVE_FULLSCREEN => NativeFullscreenState::Fullscreen,
+            _ => NativeFullscreenState::Windowed,
+        }
+    }
+}
+
+impl Drop for NativeFullscreenObservation {
+    fn drop(&mut self) {
+        // SAFETY: Both values are observer tokens returned by this notification
+        // center and remain alive for the duration of these calls.
+        unsafe {
+            self.center.removeObserver(self.enter_observer.as_ref());
+            self.center.removeObserver(self.exit_observer.as_ref());
+        }
+    }
+}
+
+/// Tracks completed native fullscreen transitions while a restore is active.
+#[derive(Default)]
+pub(crate) struct NativeFullscreenObservations {
+    entries: HashMap<Entity, NativeFullscreenObservation>,
+}
+
+impl NativeFullscreenObservations {
+    /// Start observing before Clerestory asks `AppKit` to change fullscreen state,
+    /// then return the last transition that `AppKit` confirmed as complete.
+    pub(crate) fn observe(&mut self, entity: Entity) -> NativeFullscreenState {
+        if let Some(observation) = self.entries.get(&entity) {
+            return observation.state();
+        }
+        let Some(window) = get_ns_window(entity) else {
+            return NativeFullscreenState::Unavailable;
+        };
+        let observation = NativeFullscreenObservation::new(&window);
+        let state = observation.state();
+        self.entries.insert(entity, observation);
+        state
+    }
+
+    pub(crate) fn stop(&mut self, entity: Entity) { self.entries.remove(&entity); }
+}
 
 /// Opt out of macOS automatic window tabbing for the whole app.
 ///
@@ -59,6 +177,21 @@ fn get_ns_window(entity: Entity) -> Option<Retained<NSWindow>> {
     })
 }
 
+/// Match winit's startup fullscreen sequence by making the window key after
+/// its runtime fullscreen request has reached `AppKit`.
+pub(crate) fn activate_fullscreen_window(entity: Entity) {
+    let Some(window) = get_ns_window(entity) else {
+        debug!("[macos_tabbing_fix] Could not activate fullscreen window {entity:?}");
+        return;
+    };
+    let was_key = window.isKeyWindow();
+    window.makeKeyAndOrderFront(None);
+    debug!(
+        "[macos_tabbing_fix] Made fullscreen window {entity:?} key (was_key={was_key}, is_key={})",
+        window.isKeyWindow()
+    );
+}
+
 /// Disable manual tabbing on newly added `ManagedWindow` entities.
 pub(crate) fn disable_tabbing_on_managed(
     new_windows: Query<Entity, Added<ManagedWindow>>,
@@ -73,4 +206,12 @@ pub(crate) fn disable_tabbing_on_managed(
         ns_window.setTabbingMode(NSWindowTabbingMode::Disallowed);
         debug!("[macos_tabbing_fix] Disabled tabbing on managed window {entity:?}");
     }
+}
+
+/// Stop observing if a restore is cancelled before normal completion.
+pub(crate) fn clear_fullscreen_observation(
+    removed: On<Remove, TargetPosition>,
+    mut observations: NonSendMut<NativeFullscreenObservations>,
+) {
+    observations.stop(removed.entity);
 }

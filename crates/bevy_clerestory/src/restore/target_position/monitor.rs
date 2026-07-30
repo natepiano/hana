@@ -1,33 +1,34 @@
 use crate::monitors::MonitorInfo;
 use crate::monitors::Monitors;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MonitorResolutionSource {
     Requested,
     FallbackToPrimary,
 }
 
-pub struct ResolvedMonitor<'a> {
+pub(crate) struct ResolvedMonitor<'a> {
     pub monitor_info:              &'a MonitorInfo,
-    pub logical_position:          Option<(i32, i32)>,
     pub monitor_resolution_source: MonitorResolutionSource,
 }
 
-/// Resolve the target monitor from saved state and return an adjusted saved position.
+/// Resolve the target monitor from a saved monitor index.
+///
+/// A saved position is only meaningful relative to the monitor it was measured from, so a
+/// `FallbackToPrimary` resolution discards it — the caller must not carry a position past a
+/// monitor it could not resolve.
 #[must_use]
-pub(crate) fn resolve_target_monitor_and_position(
+pub(crate) fn resolve_target_monitor(
     saved_monitor_index: usize,
-    logical_saved_position: Option<(i32, i32)>,
     monitors: &Monitors,
 ) -> ResolvedMonitor<'_> {
     monitors.by_index(saved_monitor_index).map_or_else(
         || ResolvedMonitor {
             monitor_info:              monitors.first(),
-            logical_position:          None,
             monitor_resolution_source: MonitorResolutionSource::FallbackToPrimary,
         },
         |monitor_info| ResolvedMonitor {
             monitor_info,
-            logical_position: logical_saved_position,
             monitor_resolution_source: MonitorResolutionSource::Requested,
         },
     )

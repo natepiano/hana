@@ -2,12 +2,12 @@
 
 [![Crates.io](https://img.shields.io/crates/v/bevy_liminal.svg)](https://crates.io/crates/bevy_liminal)
 [![Downloads](https://img.shields.io/crates/d/bevy_liminal.svg)](https://crates.io/crates/bevy_liminal)
-[![CI](https://github.com/natepiano/bevy_liminal/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/bevy_liminal/actions/workflows/ci.yml)
-[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/bevy_liminal#license)
+[![CI](https://github.com/natepiano/hana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/hana/actions/workflows/ci.yml)
+[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/hana/tree/main/crates/bevy_liminal#license)
 
 A Bevy plugin for rendering 3D mesh outlines using jump-flood and hull-extrusion methods.
 
-> **Work in progress.** This crate is in active development (v0.0.3) and not
+> **Work in progress.** This crate is in active development (v0.0.5) and not
 > subject to semver stability guarantees. APIs will change without notice
 > between commits. Do not depend on this in production code yet.
 
@@ -97,7 +97,7 @@ Adding `Outline` to a parent entity automatically propagates it through the `Chi
 
 | bevy_liminal | Bevy |
 |--------------|------|
-| 0.0.2–0.0.4  | 0.19 |
+| 0.0.2–0.0.5  | 0.19 |
 | 0.0.0–0.0.1  | 0.18 |
 
 ## License

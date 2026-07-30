@@ -74,6 +74,7 @@
       "description": "Borderless fullscreen restore - starts in borderless mode via RON",
       "automation": "full",
       "launch_monitor": 0,
+      "wait_for_restore_event": false,
 
       "ron_file": "fullscreen_borderless_mon0.ron",
 
@@ -86,13 +87,16 @@
 
     {
       "id": "borderless_green_button",
-      "description": "Tests macOS native fullscreen via green button (automated via AppleScript)",
-      "automation": "full",
+      "description": "Tests macOS native fullscreen after one operator green-button click",
+      "automation": "operator_action",
       "launch_monitor": 0,
 
       "ron_file": "fullscreen_borderless_green_button.ron",
 
-      "click_fullscreen_button": true,
+      "instructions": [
+        "Click the primary window's green fullscreen button once, then wait for the runner to observe the transition."
+      ],
+      "success_criteria": "The runner observes native fullscreen, shuts down the owned app, relaunches it, and verifies borderless fullscreen restoration.",
       "windows": {
         "primary": {
           "validate": ["mode"],
@@ -163,7 +167,7 @@
 
     {
       "id": "no_position_cross_dpi_restore",
-      "description": "Window with no saved position on different-scale monitor restores visible with correct size on launch monitor",
+      "description": "Window with no saved position on a different-scale target restores with its saved logical size",
       "automation": "full",
       "launch_monitor": 0,
       "requires": {"min_monitors": 2, "different_scales": true},
@@ -276,6 +280,115 @@
           "validate": ["position", "size", "monitor_index", "mode"]
         }
       }
+    }
+  ],
+
+  "probe_cases": [
+    {
+      "id": "zero_owned_windows",
+      "description": "The process and HTTP probe remain alive after every owned window closes",
+      "interaction": "automated",
+      "evidence": "application"
+    }
+  ],
+
+  "reconnect_cases": [
+    {
+      "id": "same_dell_same_connection",
+      "description": "Windows return once to the same verified Dell after one power cycle",
+      "interaction": "automated",
+      "startup_mode": "windowed",
+      "cycles": 1
+    },
+    {
+      "id": "same_dell_another_port",
+      "description": "The same Dell returns through another USB-C port or dock",
+      "interaction": "operator-action",
+      "missing_capability": "physical-cable-move"
+    },
+    {
+      "id": "different_same_model_panel",
+      "description": "A second DELL S3425DW does not inherit the original identity",
+      "interaction": "operator-action",
+      "missing_capability": "second-same-model-panel"
+    },
+    {
+      "id": "duplicate_identity_evidence",
+      "description": "Indistinguishable panel evidence remains unverified",
+      "interaction": "operator-action",
+      "missing_capability": "duplicate-panel-evidence"
+    },
+    {
+      "id": "different_panel_original_connector",
+      "description": "The Samsung on the Dell connector does not satisfy Dell recovery",
+      "interaction": "operator-action",
+      "missing_capability": "physical-cable-move"
+    },
+    {
+      "id": "macbook_lid_close_open",
+      "description": "Built-in-display recovery survives a lid close and reopen",
+      "interaction": "operator-action",
+      "missing_capability": "physical-lid-action"
+    },
+    {
+      "id": "repeated_cable_churn",
+      "description": "Repeated physical dock or cable disconnects retain one generation",
+      "interaction": "operator-action",
+      "missing_capability": "physical-cable-move"
+    },
+    {
+      "id": "arrangement_only_change",
+      "description": "Arrangement changes do not begin monitor recovery",
+      "interaction": "operator-action",
+      "missing_capability": "display-settings-action"
+    },
+    {
+      "id": "zero_displays",
+      "description": "Recovery state survives while no displays are present",
+      "interaction": "operator-action",
+      "missing_capability": "out-of-band-process-observation"
+    },
+    {
+      "id": "non_target_first_return",
+      "description": "Returning the Samsung first does not satisfy Dell recovery",
+      "interaction": "operator-action",
+      "missing_capability": "independent-samsung-control"
+    },
+    {
+      "id": "rapid_dell_power_cycle",
+      "description": "A rapid off/on request produces no duplicate replacement or result",
+      "interaction": "automated",
+      "startup_mode": "windowed",
+      "cycles": 1,
+      "rapid": true
+    },
+    {
+      "id": "borderless_return",
+      "description": "Borderless fullscreen completes again on the returned Dell",
+      "interaction": "automated",
+      "startup_mode": "borderless",
+      "cycles": 1
+    },
+    {
+      "id": "exclusive_automatic_unarmed",
+      "description": "The exclusive managed window remains intentionally unarmed",
+      "interaction": "automated",
+      "startup_mode": "exclusive",
+      "cycles": 1
+    },
+    {
+      "id": "dell_builtin_cross_dpi_return",
+      "description": "Automatic windows use the built-in display as fallback and return to the Dell",
+      "interaction": "automated",
+      "startup_mode": "windowed",
+      "cycles": 1
+    },
+    {
+      "id": "repeated_dell_power_cycles",
+      "description": "Three power cycles retain one accepted generation and no duplicates",
+      "interaction": "automated",
+      "startup_mode": "windowed",
+      "cycles": 3
     }
   ]
 }

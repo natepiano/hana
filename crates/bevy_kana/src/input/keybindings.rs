@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 
-use super::keystroke::PlatformShortcutMode;
+use super::platform_shortcut_mode::PlatformShortcutMode;
 
 struct ModifierBlockers {
     all_entities:       Vec<Entity>,

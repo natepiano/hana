@@ -3,7 +3,10 @@
 mod sequence;
 mod sequence_matcher;
 
+use std::error::Error;
 use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::str::FromStr;
 
 use bevy::input::ButtonInput;
@@ -14,6 +17,8 @@ pub use sequence::KeystrokeSequence;
 pub use sequence::KeystrokeSequenceParseError;
 pub use sequence_matcher::MatchOutcome;
 pub use sequence_matcher::SequenceMatcher;
+
+use super::platform_shortcut_mode::PlatformShortcutMode;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -162,8 +167,8 @@ impl Keystroke {
     pub const fn key(self) -> KeyCode { self.key }
 }
 
-impl fmt::Display for Keystroke {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Keystroke {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         if self.modifiers.has_platform() {
             formatter.write_str("platform-")?;
         }
@@ -244,8 +249,8 @@ impl KeystrokeParseError {
     }
 }
 
-impl fmt::Display for KeystrokeParseError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for KeystrokeParseError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
             "invalid keystroke token {:?} at byte offset {}",
@@ -254,23 +259,7 @@ impl fmt::Display for KeystrokeParseError {
     }
 }
 
-impl std::error::Error for KeystrokeParseError {}
-
-#[derive(Clone, Copy)]
-pub(super) enum PlatformShortcutMode {
-    Command,
-    Control,
-}
-
-impl PlatformShortcutMode {
-    pub(super) const fn current() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Command
-        } else {
-            Self::Control
-        }
-    }
-}
+impl Error for KeystrokeParseError {}
 
 #[derive(Clone, Copy)]
 enum Modifier {

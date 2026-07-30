@@ -1,9 +1,60 @@
 //! Cross-module constants.
 
+// fullscreen restore
+/// Maximum duration (in seconds) a macOS fullscreen restore spends in
+/// `FullscreenRestoreState::MoveWindowedToTarget` waiting for the windowed window to arrive on
+/// the target monitor.
+///
+/// The move is a request, not a guarantee: winit drops a `WindowPosition::Centered` whose
+/// `MonitorSelection::Index` it cannot resolve, and the compositor is free to leave the window
+/// where it is. Without a deadline the state re-requests the move every frame while the window
+/// stays hidden. On expiry the restore applies the fullscreen mode anyway — winit resolves the
+/// monitor index itself at that point — so the window becomes visible instead of waiting forever.
+pub(crate) const FULLSCREEN_MONITOR_MOVE_TIMEOUT_SECS: f32 = SETTLE_TIMEOUT_SECS;
+
 // managed window names
 /// First numeric suffix appended to deduplicate a managed window name (e.g. `name-2`).
 pub(crate) const FIRST_DUPLICATE_SUFFIX: u32 = 2;
 pub(crate) const MANAGED_WINDOW_NAME_SEPARATOR: &str = "-";
+
+// monitor identity
+/// Directory the kernel populates with one `card<N>-<connector>` entry per DRM connector.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_CLASS_DIRECTORY: &str = "/sys/class/drm";
+/// File inside a DRM connector directory holding that panel's raw EDID block.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_CONNECTOR_EDID_FILE: &str = "edid";
+/// Separates the card name from the connector name in a DRM connector directory name, as in
+/// `card2-HDMI-A-1`.
+///
+/// Connector names contain further separators of their own, so only the first occurrence splits
+/// the directory name.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_CONNECTOR_NAME_SEPARATOR: char = '-';
+/// Hashed ahead of a connector name by `QualifiedEvidence::stable_bytes`, so a `PanelFingerprint`
+/// built from a connector can never equal one built from an EDID block.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_INTERNAL_CONNECTOR_EVIDENCE_TAG: &[u8] = b"drm-internal-connector:";
+/// DRM connector-name prefixes whose panel is built into the machine rather than plugged into it.
+///
+/// `eDP` and `LVDS` carry laptop panels; `DSI` and `DPI` carry panels wired straight to the board.
+/// Nothing else can ever appear on these connectors, so the connector name identifies the panel
+/// and not merely the port it occupies. Every other connector type is a socket that accepts any
+/// display, where the same name would name a different panel after a replug.
+///
+/// Each prefix includes [`DRM_CONNECTOR_NAME_SEPARATOR`] so that `DP-1` cannot match `DPI-`.
+#[cfg(target_os = "linux")]
+pub(crate) const DRM_INTERNAL_CONNECTOR_PREFIXES: [&str; 4] = ["DPI-", "DSI-", "LVDS-", "eDP-"];
+/// FNV-1a 64-bit offset basis, fixed by the algorithm's specification.
+pub(crate) const FNV_1A_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+/// FNV-1a 64-bit prime, fixed by the algorithm's specification.
+pub(crate) const FNV_1A_PRIME: u64 = 0x0000_0100_0000_01b3;
+/// Length of a `ColorSync` display UUID, fixed by `CFUUIDBytes`.
+#[cfg(target_os = "macos")]
+pub(crate) const MACOS_DISPLAY_UUID_BYTES: usize = 16;
+/// `RandR` output property carrying a panel's EDID block.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) const X11_EDID_PROPERTY_NAME: &[u8] = b"EDID";
 
 // monitor lookup
 pub(crate) const MONITOR_SOURCE_EXISTING: &str = "existing";
@@ -12,13 +63,22 @@ pub(crate) const MONITOR_SOURCE_POSITION: &str = "position";
 pub(crate) const MONITOR_SOURCE_WINIT: &str = "winit";
 pub(crate) const PRIMARY_MONITOR_INDEX: usize = 0;
 
+// monitor probe
+#[cfg(feature = "monitor-probe")]
+pub(crate) const MONITOR_PROBE_TARGET: &str = "bevy_clerestory::monitor_probe";
+#[cfg(feature = "monitor-probe")]
+pub(crate) const RECOVERY_ACCEPTANCE_PRODUCER: &str = "Update::accept_eligible_registrations";
+#[cfg(feature = "monitor-probe")]
+pub(crate) const RECOVERY_PROBE_TARGET: &str = "bevy_clerestory::recovery_probe";
+
 // persisted state
-pub(crate) const CURRENT_STATE_VERSION: u8 = 2;
+pub(crate) const CURRENT_STATE_VERSION: u8 = 3;
 pub(crate) const PRIMARY_WINDOW_KEY: &str = "primary";
 /// Header comment prepended to the RON file to document the coordinate contract.
 pub(crate) const RON_HEADER: &str = "\
-// All spatial values (position, size) are in logical pixels.
-// monitor_scale: scale factor at save time (informational, not used during restore).
+// Sizes are in logical pixels.
+// position: MonitorOffset is logical pixels from monitor_index's top-left corner.
+// position: Unrebased is a pre-v3 absolute desktop coordinate awaiting a live monitor layout.
 ";
 pub(crate) const STATE_FILE: &str = "windows.ron";
 
@@ -40,13 +100,28 @@ pub(crate) const DEFAULT_SCALE_FACTOR: f64 = 1.0;
 pub(crate) const SCALE_FACTOR_EPSILON: f64 = 0.01;
 
 // settling
+/// Maximum duration (in seconds) a cross-DPI restore waits for the scale change that moves it
+/// out of `WindowRestoreState::WaitingForScaleChange`.
+///
+/// Neither signal that ends the wait is guaranteed. `WM_DPICHANGED` reaches a hidden window only
+/// because `windows_dpi_fix` forwards it, and a target monitor that no longer matches any live
+/// display is never arrived at. Without a deadline such a restore waits forever with the window
+/// still hidden; on expiry it applies the final size and reveals the window instead, so settling
+/// can report the mismatch.
+pub(crate) const SCALE_CHANGE_WAIT_TIMEOUT_SECS: f32 = SETTLE_TIMEOUT_SECS;
 /// Duration (in seconds) that all values must remain stable before declaring success.
 pub(crate) const SETTLE_STABILITY_SECS: f32 = 0.2;
 /// Maximum total duration (in seconds) to wait for values to stabilize.
 pub(crate) const SETTLE_TIMEOUT_SECS: f32 = 2.0;
+/// Maximum duration of a runtime restore, including shell creation and preparation.
+pub(crate) const RUNTIME_RESTORE_TIMEOUT_SECS: f32 = SETTLE_TIMEOUT_SECS;
 
 // time conversion
 pub(crate) const MILLIS_PER_SECOND: f32 = 1000.0;
+
+// windows display-config acquisition
+#[cfg(target_os = "windows")]
+pub(crate) const DISPLAY_CONFIG_ACQUISITION_ATTEMPTS: usize = 3;
 
 // windows dpi interception
 #[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]

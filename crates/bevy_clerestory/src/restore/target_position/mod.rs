@@ -6,14 +6,22 @@ mod run_conditions;
 mod strategy;
 mod target;
 
+#[cfg(test)]
+pub(crate) use application::InjectedWinitWindows;
+pub(crate) use application::ObservedScaleInputs;
+pub(crate) use application::capture_scale_inputs;
 pub(crate) use application::restore_windows;
 pub(crate) use monitor::MonitorResolutionSource;
-pub(crate) use monitor::resolve_target_monitor_and_position;
+pub(crate) use monitor::ResolvedMonitor;
+pub(crate) use monitor::resolve_target_monitor;
 pub(crate) use run_conditions::has_restoring_windows;
-pub(crate) use run_conditions::no_restoring_windows;
 pub(crate) use strategy::FullscreenRestoreState;
 pub(crate) use strategy::MonitorScaleStrategy;
+#[cfg(target_os = "macos")]
+pub(crate) use strategy::NativeFullscreenState;
 pub(crate) use strategy::WindowRestoreState;
+pub(crate) use target::PreparedWindowPosition;
 pub(crate) use target::RestoreDiagnostics;
 pub(crate) use target::TargetPosition;
 pub(crate) use target::compute_target_position;
+pub(crate) use target::prepare_persisted_position;

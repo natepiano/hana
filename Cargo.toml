@@ -50,8 +50,9 @@ hana_conduit = { path = "crates/hana_conduit" }
 image = { version = "0.25", default-features = false }
 nonmax = "0.5"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
-rand = "0.10.1"
+rand = "0.10.2"
 smallvec = "1"
+thiserror = "2.0.19"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 trybuild = "1"
 ttf-parser = "0.25"
@@ -72,6 +73,7 @@ fairy_dust      = { path = "crates/fairy_dust" }
 float-cmp       = "0.10.0"
 hana_diegetic   = { path = "crates/hana_diegetic" }
 hana_valence    = { path = "crates/hana_valence", default-features = false }
+serde_json      = "1.0"
 
 [workspace.lints.clippy]
 # Our strict lints

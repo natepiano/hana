@@ -74,7 +74,22 @@ pub(crate) const PRIMARY_WINDOW_TITLE: &str = "Window Restore - Primary Window";
 pub(crate) const MILLIHERTZ_PER_HERTZ: u32 = 1000;
 
 // test mode
-pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "BWM_TEST_MODE";
+pub(crate) const TEST_HTTP_PORT_ENVIRONMENT_VARIABLE: &str = "BRP_EXTRAS_PORT";
+pub(crate) const TEST_LAUNCH_MONITOR_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_LAUNCH_MONITOR";
+pub(crate) const TEST_LAUNCH_POSITION_ENVIRONMENT_VARIABLE: &str =
+    "CLERESTORY_TEST_LAUNCH_POSITION";
+/// Physical `width,height` for the initial window, used by the cross-DPI cases so the launch
+/// window fits the (possibly small, software-rendered) monitor it is born on before the restore
+/// relocates it. Absent for every other case, which keeps Bevy's default window size.
+pub(crate) const TEST_LAUNCH_SIZE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_LAUNCH_SIZE";
+pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "CLERESTORY_TEST_MODE";
+pub(crate) const TEST_PERSISTENCE_PATH_ENVIRONMENT_VARIABLE: &str =
+    "CLERESTORY_TEST_PERSISTENCE_PATH";
+
+// remote methods
+pub(crate) const TEST_SHUTDOWN_METHOD: &str = "clerestory/shutdown";
+pub(crate) const TEST_MONITOR_SNAPSHOT_METHOD: &str = "clerestory/monitor_snapshot";
+pub(crate) const TEST_WINDOW_SNAPSHOT_METHOD: &str = "clerestory/window_snapshot";
 
 // video mode scrolling
 /// When the selected video mode falls below the visible window, scroll down so

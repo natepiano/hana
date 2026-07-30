@@ -14,6 +14,7 @@ mod event;
 #[cfg(feature = "input")]
 mod keybindings;
 mod keystroke;
+mod platform_shortcut_mode;
 
 #[cfg(feature = "input")]
 pub use keybindings::Keybindings;
