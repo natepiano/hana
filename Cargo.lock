@@ -3306,7 +3306,7 @@ dependencies = [
 
 [[package]]
 name = "hana_liminal"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
