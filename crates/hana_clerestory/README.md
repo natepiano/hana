@@ -401,9 +401,10 @@ discarded if it no longer lands on a display.
 
 ## Version Compatibility
 
-| hana_clerestory | Bevy |
-|---------------------|------|
-| 0.1 – 0.2           | 0.19 |
+| Version                    | Bevy |
+|----------------------------|------|
+| hana_clerestory 0.3        | 0.19 |
+| bevy_clerestory 0.1 – 0.2  | 0.19 |
 
 ## Platform Support
 
@@ -454,7 +455,7 @@ In your `Cargo.toml`, you can selectively enable features:
 
 ```toml
 [dependencies]
-hana_clerestory = { version = "0.2", default-features = false, features = ["workaround-winit-4341"] }
+hana_clerestory = { version = "0.3", default-features = false, features = ["workaround-winit-4341"] }
 ```
 
 ## License
