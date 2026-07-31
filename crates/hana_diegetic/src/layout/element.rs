@@ -1388,6 +1388,11 @@ fn validate_part_state_colors(
     {
         return Err(PanelBuildError::StatePathColorRequiresDraw(element_id()));
     }
+    if cascades.any(|layer| layer.tint.is_authored())
+        && !capabilities.contains(VisualElementCapabilities::IMAGE)
+    {
+        return Err(PanelBuildError::StateTintRequiresImage(element_id()));
+    }
     Ok(())
 }
 
@@ -2470,6 +2475,25 @@ mod tests {
         assert!(matches!(
             build_world_panel(builder.build()),
             Err(PanelBuildError::StatePathColorRequiresDraw(id))
+                if id == PanelElementId::named("container")
+        ));
+    }
+
+    #[test]
+    fn part_state_tint_requires_an_image_recipient() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                El::new()
+                    .id("container")
+                    .disabled(Appearance::new().tint(Color::BLACK)),
+                |_| {},
+            );
+        });
+
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::StateTintRequiresImage(id))
                 if id == PanelElementId::named("container")
         ));
     }

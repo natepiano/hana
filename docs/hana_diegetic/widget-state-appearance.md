@@ -1841,7 +1841,7 @@ Nothing in this phase's code or tests may `use bevy::prelude::*` and a wrapper n
 - **Mechanical corrections applied in place across Phases 13–16 and the Delegation Context** so every remaining Work Order stays dispatch-ready: the `Tint` wrapper expanded from two pieces to the full seven (including the two-hop `lib.rs`/`mod.rs` re-export and the rustdoc property table), Phase 16's trait-vs-inherent `with` claim corrected for the third time, its five-fixture inventory and sixteen-verb list re-verified against the post-Phase-12 tree, its vacuous `rg` gate row replaced, and every line reference in the remaining phases restamped to post-Phase-12 values.
 - **Deferred, unchanged:** Phase 14 still carries the `**Pending decision:**` on whether `SliderFocusedThumbBorderColorRequiresThumbBorder` survives (deletion recommended, on the synthesizability test). It stops the run at Phase 14's pre-dispatch check.
 
-### Phase 13 — Add the `tint` property and the `Tint` wrapper · status: todo
+### Phase 13 — Add the `tint` property and the `Tint` wrapper · status: done
 
 #### Work Order
 
@@ -1915,6 +1915,29 @@ Its equivalence test follows the same shape as the other four: a literal seven-f
 - `layout/builder.rs` — `EditorPartColorRole` **`:221`** (the type this phase must **not** extend)
 - `src/lib.rs` — the crate-root re-export block is **`:346-419`**, not `:346-410`
 
+### Retrospective (Phase 13)
+
+**What worked:** The Work Order's three-part warning about `resolve_active_layers` was followed exactly — accumulator, `VisualChange::To` arm, and struct-literal field all landed, which is the failure mode that would have passed every gate. The seven-piece wrapper recipe transferred from Phase 12 without deviation, including the `on_unimplemented` label and the snapshot re-record.
+
+**What deviated from the plan:** Nothing. The delegate reported no deviations and both reviews confirmed the diff against the spec.
+
+**Surprises:**
+- **`VisualSlotOverride` measured 200 bytes, not 184 + 16.** The assertion now reads `<= 200`. Phase 14 must tighten to the value it measures after removing `color`, not to a computed one — the layout does not shrink by a predictable amount.
+- **Build-directory contention stretched the phase to ~30 minutes**, most of it the compile-fail target waiting behind other cargo processes and the editors' language servers. Not a code problem; it is the cost of that gate on a shared tree.
+- **No other property-enumeration site existed.** `any_overridden` enumerates states rather than properties, and `default_state_surfaces` (`layout/builder.rs:724-727`) synthesizes stand-in records only for `background` / `border_*` / `material` — an image cannot be synthesized, which is precisely why `tint` gets a build error instead.
+
+**Implications for remaining phases:**
+- Phase 14 inherits a live `tint` and the temporary `slot_override.tint.or(slot_override.color)` at `render/image_batch.rs:628`; deleting the `.or(…)` is part of removing the field.
+- Phase 14's size assertion must be re-measured after the removal. Expected 184, but measure it.
+
+### Phase 13 Review
+
+- Blind review and orchestrator analysis of the diff both returned no findings; the docs gate (rustdoc under `-D warnings`, doctests) passed.
+- **Phase 14** gained a post-Phase-13 `widgets/visual.rs` line block replacing the generic "these will have drifted, re-locate by name" disclaimer, and two stale citations in its pending-decision paragraph were corrected (`panel/builder.rs:1055` → `:1061`, `widgets/slider.rs:5482` → `:5481`).
+- **Phase 14** carries forward the measured-not-computed size rule and the `.or(…)` fallback deletion.
+- **Phase 15** gained an explicit out-of-scope constraint for the image batch key. The architect flagged `ImageRecordKey`'s positional `command_index` as the same defect shape; checking the source showed the consequence differs — material rows are rejected at a hard limit, image batches grow capacity instead — so images drop nothing. Recorded in the Work Order with the reason so the next review does not re-raise it. **User decision, approved.**
+- Phases 14, 15, and 16 need no re-scoping, splitting, or reordering after Phase 13.
+
 ### Phase 14 — Remove `Slider::disabled_color` and the subtree channel · status: todo
 
 #### Work Order
@@ -1931,7 +1954,7 @@ With its only production producer gone, delete `VisualSlotOverride::color` (`vis
 
 **`tint` already exists when this phase starts.** Phase 13 added it as the seventh `Appearance` property with its `Tint` wrapper, its `IMAGE` capability arm in `for_capabilities`, its `resolve_active_layers` entry, and its `StateTintRequiresImage` build error. This phase does not re-add any of that; it removes the generic `color` the image route still falls back to. Concretely, `image_batch.rs:628` reads `slot_override.tint.or(slot_override.color).map_or(tint, linear_tint)` going in, and this phase drops the `.or(slot_override.color)`.
 
-**Size returns to 184.** Phase 13 raised the assertion at `widgets/visual.rs:226` to the size the added `tint` field measured. Removing `color` brings it back down; this phase **prints the real `size_of::<VisualSlotOverride>()` and tightens the assertion to `== <measured>`**, which is expected to be 184 — the value Phase 7 recorded, since one field went in and one comes out. A measured number other than 184 means a field was added or dropped that this Work Order does not describe. Do not write `== 184` from this Work Order's expectation rather than from a measurement; that is the same vacuous shape the assertion exists to close.
+**Size returns to 184.** Phase 13 measured `size_of::<VisualSlotOverride>()` at **200** and the assertion now reads `<= 200`. Removing `color` brings it back down; this phase **prints the real `size_of::<VisualSlotOverride>()` and tightens the assertion to `== <measured>`**, which is expected to be 184 — the value Phase 7 recorded, since one field went in and one comes out. A measured number other than 184 means a field was added or dropped that this Work Order does not describe. Do not write `== 184` from this Work Order's expectation rather than from a measurement; that is the same vacuous shape the assertion exists to close.
 
 **Focus-border composition.** The thumb focus border cannot be suppressed by "a resolved disabled bundle exists" — under a cascade every state always resolves to something, so presence is always true, and a disabled bundle changing only a background would delete the focus border. Compose `Slider::focused_thumb_border_color` as a **focused-thumb layer before normal state composition**:
 - a disabled `border_color: To(…)` **replaces** it,
@@ -1981,7 +2004,7 @@ Convert `examples/widgets.rs`'s slider (`add_slider` `:1204`, `.disabled_color` 
 
 The distinguishing test is **synthesizability**. Phase 5 could delete its four errors because `CommonEl::default_state_surfaces` can mint the missing record: a transparent `Border::all(Px(0.0), Color::NONE)` or a transparent background is a real, inert record the state layer can then override. Text and `PanelDraw` cannot be synthesized — there is no such thing as an empty text run or a zero-path draw to hang a color on — so Phase 7 had to reject instead. The slider case falls on the **synthesizable** side: a thumb border is exactly the record Phase 5 already synthesizes. That is what makes deleting it consistent rather than an exception, and it is a stronger argument than the one this block originally carried.
 
-`PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder` is still live: declared at `panel/builder.rs:73`, its `Display` row at `:1055`, raised at `layout/element.rs:827` and `:858`, produced at `widgets/slider.rs:5482`. It rejects `Slider::focused_thumb_border_color` when the thumb declares no `El::border` — the same condition, on the same record, that `CommonEl::default_state_surfaces` now handles by synthesizing `Border::all(Px(0.0), Color::NONE)`.
+`PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder` is still live: declared at `panel/builder.rs:73`, its `Display` row at `:1061` (Phase 13's new variant shifted the test table), raised at `layout/element.rs:827` and `:858`, produced at `widgets/slider.rs:5481`. It rejects `Slider::focused_thumb_border_color` when the thumb declares no `El::border` — the same condition, on the same record, that `CommonEl::default_state_surfaces` now handles by synthesizing `Border::all(Px(0.0), Color::NONE)`.
 
 Two options:
 - **Delete it** — remove the variant, its `Display` row, both raise sites, and the producer, and let the defaulting cover the thumb like every other element. One authoring rule instead of two.
@@ -2014,7 +2037,7 @@ Recommendation: **delete it.** Under the synthesizability test above it is the o
 - `widgets/slider.rs` (unmoved by Phase 12): the `disabled_color` test → **`:5279`**; the `SliderFocusedThumbBorderColorRequiresThumbBorder` producer → **`:5481`**
 - `examples/widgets.rs` — 1703 lines going into Phase 13; `.disabled_color` **`:1165`**, `add_slider` **`:1205`**, `apply_state_appearance` **`:1459`**. Phase 13 does not touch this file, so these hold unless its delegate deviates.
 - **`src/render/image_batch.rs:628`** is a `color`-removal site the greps cannot see. After Phase 13 it reads `slot_override.tint.or(slot_override.color).map_or(tint, linear_tint)`; only `cargo check` or the explicit `slot_override\.color` grep in the gate catches a missed `.or(…)`.
-- **Phase 13 edits `widgets/visual.rs` and `widgets/appearance.rs` before this phase runs**, so the `visual.rs` numbers above will have drifted by however much a new struct field, an `apply` line, a `for_capabilities` arm, and a raised assertion add. Re-locate each item by name rather than trusting these numbers; they are the pre-Phase-13 positions.
+- **Post-Phase-13 `widgets/visual.rs` positions — these supersede every `visual.rs` number above.** Verified against the tree at the Phase 13 review, 2026-07-30: `VisualSlotOverride::color` **`:202`**, the size assertion **`:229`** (now reading `<= 200`), `apply` **`:232`**, `apply_element` **`:249`**, `for_capabilities` **`:257-277`** (called at **`:499`**), `with_color` **`:285`**, `subtree_color` field **`:342`**, `set_subtree_color` **`:349`**, its getter **`:354`**, the `by_element` map **`:655`**, the subtree branch to delete **`:656-668`**, the slot-overlay producer **`:669-677`**, the element-channel producer **`:678-683`**. The last two stay.
 
 ### Phase 15 — Stable material keys: no dropped material rows · status: todo
 
@@ -2070,6 +2093,7 @@ Frame 6 is the evidence that capacity ≥ 2× live makes re-keys free. Frame 3 i
 - **Independent of phases 1-14.** This is a render-layer defect in material-row identity; no widget appearance behavior depends on it and it gates none of the earlier phases. It is sequenced last because Phase 14 edits `render/fill_batch.rs:1358` and the color-property migration, and this phase should start from that settled tree.
 - **Phase 10 — every zero-drop assertion needs a positive control.** `assert_eq!(dropped_record_count(), 0)` passes identically when the frame did no work at all. Delegation Context → *A test must be able to fail* is the rule; here it means each zero-drop frame also asserts the expected live row count, so a test that silently stopped exercising the re-key cannot read as a pass. The insertion-stability row has the mirror-image trap: assert on the key itself, never on a row count that is stable for the wrong reason.
 - **Phase 14:** `VisualSlotOverride::color` is gone and all consumers read `text_color` / `path_color` / `tint`. Do not reintroduce a `color` read while touching the batching files.
+- **The image batch key is deliberately out of scope — examined at the Phase 13 review, 2026-07-30, and left alone.** `ImageRecordKey` embeds `command_index` (`render/image_batch.rs:76`), the same positional shape this phase removes from `SdfMaterialSourceKey`, so a future review will find it again. It does not share the failure: material rows live in a table with a hard `row_limit` that **rejects** new identities and counts the drops (`render/material_table.rs:548-558`), while image batches grow capacity and rebuild a larger mesh instead (`image_batch.rs:778-811`) — nothing is rejected and no image disappears. Re-keying images would be a rebatching-cost change with no correctness defect behind it. Do not widen this phase to `image_batch.rs`.
 
 **Acceptance gate:**
 - `bash ~/.claude/scripts/delegate/verify.sh check hana_diegetic`

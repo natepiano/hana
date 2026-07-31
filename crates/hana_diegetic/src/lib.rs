@@ -385,6 +385,7 @@ pub use widgets::SliderResetBehavior;
 pub use widgets::SliderState;
 pub use widgets::SliderStep;
 pub use widgets::TextColor;
+pub use widgets::Tint;
 pub use widgets::Tooltip;
 pub use widgets::TooltipCommandsExt;
 pub use widgets::TooltipDisabledPolicy;

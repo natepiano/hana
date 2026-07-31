@@ -57,6 +57,7 @@ impl<T> VisualChange<T> {
 /// | [`Appearance::border_width`] | Root SDF border widths |
 /// | [`Appearance::text_color`] | Text glyphs |
 /// | [`Appearance::path_color`] | Panel draw primitives |
+/// | [`Appearance::tint`] | Image tint |
 /// | [`Appearance::material`] | SDF, text, or panel-draw material |
 ///
 /// A button and slider can author hovered, focused, pressed, and disabled
@@ -72,9 +73,10 @@ impl<T> VisualChange<T> {
 /// naming a property the element does not declare emits a transparent
 /// stand-in to replace: a state background gets a [`Color::NONE`] fill, and a
 /// state border color or width gets `Border::all(Px(0.0), Color::NONE)`.
-/// A part's [`Appearance::text_color`] and [`Appearance::path_color`] instead
-/// require an emitted text or draw recipient respectively, because layout
-/// cannot synthesize either record type.
+/// A part's [`Appearance::text_color`], [`Appearance::path_color`], and
+/// [`Appearance::tint`] instead require an emitted text, draw, or image
+/// recipient respectively, because layout cannot synthesize any of those
+/// record types.
 /// Declare [`crate::El::border`] with the resting color when a state widens a
 /// border that is normally invisible — a width replacement alone leaves the
 /// defaulted border transparent.
@@ -121,6 +123,8 @@ pub struct Appearance {
     pub(crate) text_color:   VisualChange<Color>,
     /// Replaces the element's authored panel-draw primitive color.
     pub(crate) path_color:   VisualChange<Color>,
+    /// Replaces the element's authored image tint.
+    pub(crate) tint:         VisualChange<Color>,
     /// Replaces the element's authored root material.
     pub(crate) material:     VisualChange<Handle<StandardMaterial>>,
 }
@@ -134,6 +138,7 @@ impl Appearance {
             border_width: VisualChange::Unchanged,
             text_color:   VisualChange::Unchanged,
             path_color:   VisualChange::Unchanged,
+            tint:         VisualChange::Unchanged,
             material:     VisualChange::Unchanged,
         }
     }
@@ -164,6 +169,10 @@ impl Appearance {
             path_color:   match &self.path_color {
                 VisualChange::To(value) => VisualChange::To(*value),
                 VisualChange::Unchanged => higher.path_color.clone(),
+            },
+            tint:         match &self.tint {
+                VisualChange::To(value) => VisualChange::To(*value),
+                VisualChange::Unchanged => higher.tint.clone(),
             },
             material:     match &self.material {
                 VisualChange::To(value) => VisualChange::To(value.clone()),
@@ -216,6 +225,15 @@ impl Appearance {
     /// reports an error for a structural part with no draw recipient.
     pub const fn path_color(mut self, color: Color) -> Self {
         self.path_color = VisualChange::To(color);
+        self
+    }
+
+    /// Replaces the tint multiplied against an image's decoded texture sample.
+    ///
+    /// A part that names this property must emit an image itself; panel
+    /// building reports an error for a structural part with no image recipient.
+    pub const fn tint(mut self, color: Color) -> Self {
+        self.tint = VisualChange::To(color);
         self
     }
 
@@ -276,10 +294,21 @@ impl From<Color> for PathColor {
     fn from(color: Color) -> Self { Self(color) }
 }
 
+/// A color that replaces a state appearance's image tint property.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tint(
+    /// The replacement color.
+    pub Color,
+);
+
+impl From<Color> for Tint {
+    fn from(color: Color) -> Self { Self(color) }
+}
+
 /// Converts a state appearance bundle or property-specific color into an [`Appearance`].
 #[diagnostic::on_unimplemented(
     message = "a bare `Color` does not say which property it sets",
-    label = "wrap it: `BackgroundColor({Self})`, `TextColor({Self})`, `BorderColor({Self})`, or `PathColor({Self})`"
+    label = "wrap it: `BackgroundColor({Self})`, `TextColor({Self})`, `BorderColor({Self})`, `PathColor({Self})`, or `Tint({Self})`"
 )]
 pub trait IntoAppearance {
     /// Returns the corresponding state appearance bundle.
@@ -304,6 +333,10 @@ impl IntoAppearance for TextColor {
 
 impl IntoAppearance for PathColor {
     fn into_appearance(self) -> Appearance { Appearance::new().path_color(self.0) }
+}
+
+impl IntoAppearance for Tint {
+    fn into_appearance(self) -> Appearance { Appearance::new().tint(self.0) }
 }
 
 static EMPTY_APPEARANCE: LazyLock<Arc<Appearance>> = LazyLock::new(|| Arc::new(Appearance::new()));
@@ -636,6 +669,7 @@ fn resolve_active_layers<'a>(
     let mut border_width = None;
     let mut text_color = None;
     let mut path_color = None;
+    let mut tint = None;
     let mut material = None;
     for state in WidgetState::LAYER_ORDER {
         if active.contains(&Some(state))
@@ -656,6 +690,9 @@ fn resolve_active_layers<'a>(
             if let VisualChange::To(value) = &layer.path_color {
                 path_color = Some(value);
             }
+            if let VisualChange::To(value) = &layer.tint {
+                tint = Some(value);
+            }
             if let VisualChange::To(value) = &layer.material {
                 material = Some(value);
             }
@@ -670,6 +707,7 @@ fn resolve_active_layers<'a>(
         border_widths,
         text_color: text_color.copied(),
         path_color: path_color.copied(),
+        tint: tint.copied(),
         material: material.cloned(),
         ..VisualSlotOverride::default()
     }
@@ -734,6 +772,7 @@ mod tests {
     use super::PathColor;
     use super::StateAppearance;
     use super::TextColor;
+    use super::Tint;
     use super::VisualChange;
     use super::WidgetDisabledAppearance;
     use super::WidgetFocusedAppearance;
@@ -760,6 +799,7 @@ mod tests {
     const PRESS_FILL: Color = Color::srgb(0.4, 0.5, 0.6);
     const HOVER_TEXT: Color = Color::srgb(0.7, 0.5, 0.3);
     const FOCUS_PATH: Color = Color::srgb(0.3, 0.5, 0.7);
+    const HOVER_TINT: Color = Color::srgb(0.6, 0.4, 0.8);
     const HIGHER_BACKGROUND: Color = Color::srgb(0.1, 0.2, 0.3);
     const LOWER_BACKGROUND: Color = Color::srgb(0.3, 0.2, 0.1);
     const HIGHER_BORDER: Color = Color::srgb(0.2, 0.3, 0.4);
@@ -868,6 +908,7 @@ mod tests {
                 border_width: VisualChange::Unchanged,
                 text_color:   VisualChange::Unchanged,
                 path_color:   VisualChange::Unchanged,
+                tint:         VisualChange::Unchanged,
                 material:     VisualChange::Unchanged,
             },
         );
@@ -903,6 +944,7 @@ mod tests {
                 border_width: VisualChange::Unchanged,
                 text_color:   VisualChange::Unchanged,
                 path_color:   VisualChange::Unchanged,
+                tint:         VisualChange::Unchanged,
                 material:     VisualChange::Unchanged,
             },
         );
@@ -936,6 +978,7 @@ mod tests {
                 border_width: VisualChange::Unchanged,
                 text_color:   VisualChange::To(HOVER_TEXT),
                 path_color:   VisualChange::Unchanged,
+                tint:         VisualChange::Unchanged,
                 material:     VisualChange::Unchanged,
             },
         );
@@ -969,6 +1012,38 @@ mod tests {
                 border_width: VisualChange::Unchanged,
                 text_color:   VisualChange::Unchanged,
                 path_color:   VisualChange::To(FOCUS_PATH),
+                tint:         VisualChange::Unchanged,
+                material:     VisualChange::Unchanged,
+            },
+        );
+    }
+
+    #[test]
+    fn tint_sets_only_the_image_appearance() {
+        let mut app = cascade_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("tint").hovered(Tint(HOVER_TINT)), |_| {});
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(builder.build())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "tint");
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetHoveredAppearance,
+            Appearance {
+                background:   VisualChange::Unchanged,
+                border_color: VisualChange::Unchanged,
+                border_width: VisualChange::Unchanged,
+                text_color:   VisualChange::Unchanged,
+                path_color:   VisualChange::Unchanged,
+                tint:         VisualChange::To(HOVER_TINT),
                 material:     VisualChange::Unchanged,
             },
         );
@@ -985,6 +1060,7 @@ mod tests {
             .border_width(Px(1.0))
             .text_color(HIGHER_TEXT)
             .path_color(HIGHER_PATH)
+            .tint(HOVER_TINT)
             .material(higher_material);
         let lower = Appearance::new()
             .background(LOWER_BACKGROUND)
@@ -992,6 +1068,7 @@ mod tests {
             .border_width(Px(2.0))
             .text_color(LOWER_TEXT)
             .path_color(LOWER_PATH)
+            .tint(FOCUS_PATH)
             .material(lower_material);
         let empty = Appearance::new();
 

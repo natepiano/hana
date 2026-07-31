@@ -182,12 +182,13 @@ impl WidgetVisualSlots {
 /// State-only presentation override for one visual slot.
 ///
 /// `color` recolors the slot's authored fill, border, or image tint without
-/// changing batch routing. `text_color` and `path_color` replace text glyphs
-/// and panel-draw primitives respectively. `fill_color` and `border_color`
-/// recolor only the slot's SDF fill or border role and take precedence over
-/// `color` for that role. `border_widths` replaces the slot's authored SDF
-/// border widths, which grow inward from the authored outer bounds and so
-/// change no geometry layout solved. `offset` translates
+/// changing batch routing. `tint` replaces only an image tint. `text_color`
+/// and `path_color` replace text glyphs and panel-draw primitives respectively.
+/// `fill_color` and `border_color` recolor only the slot's SDF fill or border
+/// role and take precedence over `color` for that role. `border_widths`
+/// replaces the slot's authored SDF border widths, which grow inward from the
+/// authored outer bounds and so change no geometry layout solved. `offset`
+/// translates
 /// the slot's SDF, image, text, and panel-line records in the panel-local
 /// render frame — panel world units with Y increasing upward — while
 /// preserving authored draw depth. `material`
@@ -199,6 +200,8 @@ impl WidgetVisualSlots {
 pub(crate) struct VisualSlotOverride {
     /// Fallback replacement color for authored SDF fill, SDF border, and image tint.
     pub color:         Option<Color>,
+    /// Replacement tint multiplied against an image's decoded texture sample.
+    pub tint:          Option<Color>,
     /// Replacement color for text glyphs only.
     pub text_color:    Option<Color>,
     /// Replacement color for panel draw primitives only.
@@ -223,11 +226,12 @@ pub(crate) struct VisualSlotOverride {
     pub texture:       Option<Handle<Image>>,
 }
 
-const _: () = assert!(size_of::<VisualSlotOverride>() <= 184);
+const _: () = assert!(size_of::<VisualSlotOverride>() <= 200);
 
 impl VisualSlotOverride {
     fn apply(&mut self, overlay: &Self) {
         self.color = overlay.color.or(self.color);
+        self.tint = overlay.tint.or(self.tint);
         self.text_color = overlay.text_color.or(self.text_color);
         self.path_color = overlay.path_color.or(self.path_color);
         self.fill_color = overlay.fill_color.or(self.fill_color);
@@ -260,6 +264,9 @@ impl VisualSlotOverride {
         }
         if !capabilities.contains(VisualElementCapabilities::TEXT) {
             self.text_color = None;
+        }
+        if !capabilities.contains(VisualElementCapabilities::IMAGE) {
+            self.tint = None;
         }
         if !capabilities.contains(VisualElementCapabilities::DRAW) {
             self.path_color = None;
@@ -746,6 +753,7 @@ mod tests {
     const PART_HOVER_FILL: Color = Color::srgb(0.3, 0.7, 0.2);
     const TEXT_OVERRIDE_COLOR: Color = Color::srgb(0.3, 0.2, 0.7);
     const PATH_OVERRIDE_COLOR: Color = Color::srgb(0.7, 0.2, 0.3);
+    const TINT_OVERRIDE_COLOR: Color = Color::srgb(0.5, 0.7, 0.1);
     const PART_NORMAL_FILL: Color = Color::srgb(0.08, 0.12, 0.16);
     const PART_NORMAL_BORDER: Color = Color::srgb(0.18, 0.24, 0.30);
     const WIDGET_PROPERTY_COLOR: Color = Color::srgb(0.82, 0.16, 0.28);
@@ -760,16 +768,18 @@ mod tests {
         BorderWidth,
         TextColor,
         PathColor,
+        Tint,
         Material,
     }
 
     impl MergeProperty {
-        const ALL: [Self; 6] = [
+        const ALL: [Self; 7] = [
             Self::Background,
             Self::BorderColor,
             Self::BorderWidth,
             Self::TextColor,
             Self::PathColor,
+            Self::Tint,
             Self::Material,
         ];
 
@@ -780,6 +790,7 @@ mod tests {
                 Self::BorderWidth => Appearance::new().border_width(Px(2.0)),
                 Self::TextColor => Appearance::new().text_color(WIDGET_PROPERTY_COLOR),
                 Self::PathColor => Appearance::new().path_color(WIDGET_PROPERTY_COLOR),
+                Self::Tint => Appearance::new().tint(WIDGET_PROPERTY_COLOR),
                 Self::Material => Appearance::new().material(material),
             }
         }
@@ -791,6 +802,7 @@ mod tests {
                 Self::BorderWidth => Appearance::new().border_width(Px(4.0)),
                 Self::TextColor => Appearance::new().text_color(PART_PROPERTY_COLOR),
                 Self::PathColor => Appearance::new().path_color(PART_PROPERTY_COLOR),
+                Self::Tint => Appearance::new().tint(PART_PROPERTY_COLOR),
                 Self::Material => Appearance::new().material(material),
             }
         }
@@ -848,6 +860,14 @@ mod tests {
                     }),
                     ..VisualSlotOverride::default()
                 },
+                Self::Tint => VisualSlotOverride {
+                    tint: Some(if part_wins {
+                        PART_PROPERTY_COLOR
+                    } else {
+                        WIDGET_PROPERTY_COLOR
+                    }),
+                    ..VisualSlotOverride::default()
+                },
                 Self::Material => VisualSlotOverride {
                     material: Some(if part_wins {
                         part_material
@@ -872,6 +892,7 @@ mod tests {
             .border_width(Px(1.0))
             .text_color(Color::BLACK)
             .path_color(Color::WHITE)
+            .tint(Color::srgb(0.2, 0.3, 0.4))
             .material(lowest_material.clone());
         let middle = Appearance::new()
             .background(Color::WHITE)
@@ -879,6 +900,7 @@ mod tests {
             .border_width(Px(2.0))
             .text_color(Color::WHITE)
             .path_color(Color::BLACK)
+            .tint(Color::srgb(0.4, 0.3, 0.2))
             .material(middle_material.clone());
         let highest = Appearance::new()
             .background(Color::srgb(0.2, 0.4, 0.6))
@@ -886,6 +908,7 @@ mod tests {
             .border_width(Px(3.0))
             .text_color(Color::srgb(0.3, 0.5, 0.7))
             .path_color(Color::srgb(0.7, 0.5, 0.3))
+            .tint(Color::srgb(0.5, 0.7, 0.3))
             .material(highest_material.clone());
 
         assert_eq!(merge_levels(&[]), Appearance::new());
@@ -897,6 +920,7 @@ mod tests {
                 .border_width(Px(1.0))
                 .text_color(Color::BLACK)
                 .path_color(Color::WHITE)
+                .tint(Color::srgb(0.2, 0.3, 0.4))
                 .material(lowest_material),
         );
         assert_eq!(
@@ -907,6 +931,7 @@ mod tests {
                 .border_width(Px(2.0))
                 .text_color(Color::WHITE)
                 .path_color(Color::BLACK)
+                .tint(Color::srgb(0.4, 0.3, 0.2))
                 .material(middle_material),
         );
         assert_eq!(
@@ -917,6 +942,7 @@ mod tests {
                 .border_width(Px(3.0))
                 .text_color(Color::srgb(0.3, 0.5, 0.7))
                 .path_color(Color::srgb(0.7, 0.5, 0.3))
+                .tint(Color::srgb(0.5, 0.7, 0.3))
                 .material(highest_material),
         );
     }
@@ -1204,6 +1230,33 @@ mod tests {
             ))
     }
 
+    fn image_part(
+        active_state: WidgetState,
+        appearance: Appearance,
+    ) -> crate::El<crate::Row, crate::PressedPart> {
+        El::new()
+            .focused(state_channel_appearance(
+                active_state,
+                WidgetState::Focused,
+                &appearance,
+            ))
+            .hovered(state_channel_appearance(
+                active_state,
+                WidgetState::Hovered,
+                &appearance,
+            ))
+            .pressed(state_channel_appearance(
+                active_state,
+                WidgetState::Pressed,
+                &appearance,
+            ))
+            .disabled(state_channel_appearance(
+                active_state,
+                WidgetState::Disabled,
+                &appearance,
+            ))
+    }
+
     fn activate_widget_state(app: &mut App, widget: Entity, state: WidgetState) {
         match state {
             WidgetState::Hovered => {
@@ -1356,10 +1409,18 @@ mod tests {
                                 &widget_appearance,
                             )),
                         |children| {
-                            children.text(
-                                Text::new("part", TextStyle::new(10.0))
-                                    .layout(rich_part(state, part_appearance)),
-                            );
+                            if matches!(property, MergeProperty::Tint) {
+                                children.image(
+                                    image_part(state, part_appearance),
+                                    Handle::default(),
+                                    Color::WHITE,
+                                );
+                            } else {
+                                children.text(
+                                    Text::new("part", TextStyle::new(10.0))
+                                        .layout(rich_part(state, part_appearance)),
+                                );
+                            }
                         },
                     );
                     let tree = builder.build();
@@ -1864,6 +1925,62 @@ mod tests {
         app.update();
 
         assert_eq!(part_override(&app, panel, image_index), None);
+    }
+
+    #[test]
+    fn widget_tint_reaches_image_parts_and_skips_text_parts() {
+        let mut app = widgets_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .button("button")
+                .hovered(Appearance::new().tint(TINT_OVERRIDE_COLOR)),
+            |children| {
+                children.text(Text::new("label", TextStyle::new(10.0)).layout(El::new()));
+                children.image(El::new(), Handle::default(), Color::WHITE);
+            },
+        );
+        let tree = builder.build();
+        let text_index = tree.len() - 2;
+        let image_index = tree.len() - 1;
+        let panel = spawn_widget_panel(&mut app, tree);
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "button");
+
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .expect("widget visual slots");
+        let text_capabilities = slots
+            .elements()
+            .iter()
+            .find_map(|(element_index, capabilities)| {
+                (*element_index == text_index).then_some(*capabilities)
+            })
+            .expect("text visual recipient");
+        let image_capabilities = slots
+            .elements()
+            .iter()
+            .find_map(|(element_index, capabilities)| {
+                (*element_index == image_index).then_some(*capabilities)
+            })
+            .expect("image visual recipient");
+        assert!(!text_capabilities.contains(VisualElementCapabilities::IMAGE));
+        assert!(image_capabilities.contains(VisualElementCapabilities::IMAGE));
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+
+        assert_eq!(part_override(&app, panel, text_index), None);
+        assert_eq!(
+            part_override(&app, panel, image_index),
+            Some(VisualSlotOverride {
+                tint: Some(TINT_OVERRIDE_COLOR),
+                ..VisualSlotOverride::default()
+            }),
+        );
     }
 
     #[test]

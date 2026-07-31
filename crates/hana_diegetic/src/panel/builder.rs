@@ -77,6 +77,9 @@ pub enum PanelBuildError {
     /// A widget part named a state path color without emitting a panel draw itself.
     #[error("widget part `{0}` state path color requires a draw; add a draw")]
     StatePathColorRequiresDraw(PanelElementId),
+    /// A widget part named a state tint without emitting an image itself.
+    #[error("widget part `{0}` state tint requires an image; add an image")]
+    StateTintRequiresImage(PanelElementId),
     /// A slider's authored range, value, or step failed validation.
     #[error("slider `{0}`: {1}")]
     SliderConfig(PanelElementId, #[source] SliderConfigError),
@@ -1056,6 +1059,10 @@ mod tests {
                     PanelElementId::named("volume"),
                 ),
                 "slider `volume` focused thumb border color requires an authored thumb border",
+            ),
+            (
+                PanelBuildError::StateTintRequiresImage(PanelElementId::named("image")),
+                "widget part `image` state tint requires an image; add an image",
             ),
             (
                 PanelBuildError::SliderConfig(

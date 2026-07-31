@@ -22,6 +22,7 @@ pub use appearance::PathColor;
 pub(crate) use appearance::ResolvedWidgetStateAppearances;
 pub(crate) use appearance::StateAppearance;
 pub use appearance::TextColor;
+pub use appearance::Tint;
 pub use appearance::WidgetDisabledAppearance;
 pub use appearance::WidgetFocusedAppearance;
 pub use appearance::WidgetHoveredAppearance;
