@@ -13,15 +13,9 @@ fn device_kind_requires_a_wildcard_arm() {
 }
 
 #[test]
-fn device_identity_cannot_be_compared() {
+fn identity_verdict_requires_a_wildcard_arm() {
     let cases = trybuild::TestCases::new();
-    cases.compile_fail("tests/compile_fail/device_identity_cannot_be_compared.rs");
-}
-
-#[test]
-fn device_identity_requires_a_wildcard_arm() {
-    let cases = trybuild::TestCases::new();
-    cases.compile_fail("tests/compile_fail/device_identity_requires_a_wildcard_arm.rs");
+    cases.compile_fail("tests/compile_fail/identity_verdict_requires_a_wildcard_arm.rs");
 }
 
 #[test]

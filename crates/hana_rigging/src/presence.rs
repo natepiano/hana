@@ -51,7 +51,7 @@ pub enum ReportedAs {
 
 /// One unit in a provider's completed whole-set report.
 ///
-/// `DeviceRecord` carries observed evidence but no `crate::DeviceIdentity` or `crate::DeviceId`.
+/// `DeviceRecord` carries observed evidence but no `crate::IdentityVerdict` or `crate::DeviceId`.
 /// Reconciliation creates those conclusions after comparing this report with saved keys; allowing
 /// a provider to supply either would let it assert identity for a unit that supplied no evidence.
 pub struct DeviceRecord {

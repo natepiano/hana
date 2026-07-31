@@ -1,6 +1,5 @@
-//! Device identity and registration policy for providers that report device sets to Bevy.
+//! Device identity and recovery policy for providers that report device sets to Bevy.
 
-mod availability;
 mod capabilities;
 mod claim;
 mod endpoint;
@@ -8,11 +7,10 @@ mod evidence;
 mod identity;
 mod policy;
 mod presence;
+mod recovery;
 mod scheme;
 mod verdict;
 
-pub use availability::Act;
-pub use availability::Availability;
 pub use capabilities::Capabilities;
 pub use capabilities::CapabilityAttachError;
 pub use claim::Claim;
@@ -38,6 +36,7 @@ pub use presence::Presence;
 pub use presence::ProviderId;
 pub use presence::ProviderRevision;
 pub use presence::ReportedAs;
+pub use recovery::RecoveryPolicy;
 pub use scheme::Digest;
 pub use scheme::RegisteredSchemes;
 pub use scheme::ReportedId;
@@ -45,16 +44,14 @@ pub use scheme::ReportedIdError;
 pub use scheme::SchemeName;
 pub use scheme::SchemeNameError;
 pub use scheme::UnregisteredSchemeError;
-pub use verdict::DeviceIdentity;
+pub use verdict::IdentityVerdict;
 pub use verdict::ReportedSerial;
 pub use verdict::UnverifiedReason;
 
 /// Common types for reporting devices to the kernel and for reading the identity verdicts it
 /// returns.
 pub mod prelude {
-    pub use crate::Act;
     pub use crate::AttachmentPath;
-    pub use crate::Availability;
     pub use crate::Capabilities;
     pub use crate::CapabilityAttachError;
     pub use crate::Claim;
@@ -62,7 +59,6 @@ pub mod prelude {
     pub use crate::DeviceDescriptor;
     pub use crate::DeviceId;
     pub use crate::DeviceIdSource;
-    pub use crate::DeviceIdentity;
     pub use crate::DeviceKey;
     pub use crate::DeviceKind;
     pub use crate::DeviceRecord;
@@ -70,6 +66,7 @@ pub mod prelude {
     pub use crate::DeviceSet;
     pub use crate::Digest;
     pub use crate::EndpointRef;
+    pub use crate::IdentityVerdict;
     pub use crate::OnAbort;
     pub use crate::OnSessionLoss;
     pub use crate::OsDeviceId;
@@ -77,6 +74,7 @@ pub mod prelude {
     pub use crate::Presence;
     pub use crate::ProviderId;
     pub use crate::ProviderRevision;
+    pub use crate::RecoveryPolicy;
     pub use crate::RegisteredSchemes;
     pub use crate::ReportedAs;
     pub use crate::ReportedId;

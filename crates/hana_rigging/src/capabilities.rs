@@ -68,8 +68,8 @@ impl Capabilities {
     ///
     /// A type present from only one provider contributes to the later union. When both providers
     /// report the same component type, `PartialReflect::reflect_partial_eq` must return
-    /// `Some(true)` for every pair; unavailable equality evidence or unequal values disarms the
-    /// device during reconciliation.
+    /// `Some(true)` for every pair; unavailable equality evidence or unequal values keep the
+    /// device out of service during reconciliation.
     #[must_use]
     pub fn agrees_with(&self, other: &Self) -> bool {
         self.0.iter().all(|capability| {

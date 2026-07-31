@@ -25,7 +25,7 @@ pub enum RetryOn {
 /// reachable.
 ///
 /// The kernel consults `OnAbort` only for a revision change. A lost `Claim` makes reversion
-/// impossible, and a future arming veto makes it unsafe, so both outcomes bypass this policy.
+/// impossible, and a deferred `ServiceVeto` makes it unsafe, so both outcomes bypass this policy.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Reflect)]
 pub enum OnAbort {
     /// Keep the partial device configuration until the next reconciliation selects a new target.
@@ -44,7 +44,7 @@ pub enum OnAbort {
 
 /// Response when a still-present device loses its local session without becoming absent.
 ///
-/// `OnSessionLoss` differs from `Availability`, which handles a departing device, and `OnAbort`,
+/// `OnSessionLoss` differs from `RecoveryPolicy`, which handles a departing device, and `OnAbort`,
 /// which handles an in-flight apply attempt. Nothing unplugged and no attempt was abandoned.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Reflect)]
 pub enum OnSessionLoss {

@@ -38,22 +38,22 @@ pub enum ReportedSerial {
     PlatformCannotReport,
 }
 
-/// Reconciliation result that states whether a live unit and its durable `DeviceKey` identify the
-/// same physical device.
+/// Reconciliation conclusion that states whether a live unit corresponds to its durable
+/// `DeviceKey`.
 ///
-/// The kernel computes `DeviceIdentity` from a reconciliation instead of retaining a raw claim so
-/// the verdict cannot contradict the key that produced it. This enum is non-exhaustive because
-/// future reconciliation evidence can require another verdict; applications must retain a wildcard
-/// arm when matching it.
+/// `DeviceKey` is the durable identity, while `IdentityVerdict` records the kernel's conclusion
+/// about one live unit. Computing the verdict during reconciliation prevents a raw provider claim
+/// from contradicting the key. This enum is non-exhaustive because future reconciliation evidence
+/// can require another conclusion; applications must retain a wildcard arm when matching it.
 #[non_exhaustive]
-#[derive(Clone, Debug, Component, Reflect)]
-#[reflect(Component)]
-pub enum DeviceIdentity {
+#[derive(Clone, PartialEq, Eq, Debug, Component, Reflect)]
+#[reflect(Component, PartialEq)]
+pub enum IdentityVerdict {
     /// A `crate::DeviceIdSource::Reported` key matched one live unit uniquely, as when a display
     /// panel reports the EDID serial a saved layout was written against.
     ///
-    /// `Proven` is the only `DeviceIdentity` that can mint an authorization to arm output because
-    /// a value reported by the unit establishes which physical device receives that output.
+    /// `Proven` is the only `IdentityVerdict` that can mint an authorization for in-service use
+    /// because a value reported by the unit establishes which physical device receives output.
     Proven,
     /// A `crate::DeviceIdSource::Synthesized` key matched one live unit uniquely.
     ///
@@ -95,12 +95,13 @@ pub enum DeviceIdentity {
     Unverified(UnverifiedReason),
 }
 
-impl DeviceIdentity {
+impl IdentityVerdict {
     /// Report whether this verdict identifies the physical unit and nothing more.
     ///
-    /// This is not the output-policy predicate: `Devices::armable` also requires presence and a
-    /// claim before it can authorize output. `DeviceIdentity::RestoreOnly` is identified so saved
-    /// configuration can return to the matching unit, while it remains ineligible to drive output.
+    /// This is not the in-service predicate: `Devices::authorize_service` also requires presence,
+    /// a claim, and reported identity before it can authorize output.
+    /// `IdentityVerdict::RestoreOnly` is identified so saved configuration can return to the
+    /// matching unit while it remains ineligible to drive output.
     #[must_use]
     pub const fn identified(&self) -> bool {
         matches!(self, Self::Proven | Self::RestoreOnly | Self::Authored)
@@ -121,8 +122,8 @@ pub enum UnverifiedReason {
     NotExposedByUnit,
     /// More than one live unit reported the same key in one complete provider scan.
     ///
-    /// Reconciliation disarms the duplicate key because exact identity requires one unit, not a
-    /// plausible choice among two USB devices with indistinguishable reports.
+    /// Reconciliation keeps the duplicate key out of service because exact identity requires one
+    /// unit, not a plausible choice among two USB devices with indistinguishable reports.
     NotUniqueInScan,
     /// The provider's platform API cannot ask this unit for a serial, even though another platform
     /// may be able to obtain one from the same physical device, as when a macOS camera API reports
@@ -134,7 +135,9 @@ pub enum UnverifiedReason {
 mod tests {
     use std::error::Error;
 
-    use super::DeviceIdentity;
+    use bevy::reflect::PartialReflect;
+
+    use super::IdentityVerdict;
     use super::UnverifiedReason;
     use crate::DeviceIdSource;
     use crate::DeviceKey;
@@ -144,12 +147,12 @@ mod tests {
 
     #[test]
     fn identified_is_true_for_confirmed_identity_verdicts() {
-        for device_identity in [
-            DeviceIdentity::Proven,
-            DeviceIdentity::RestoreOnly,
-            DeviceIdentity::Authored,
+        for identity_verdict in [
+            IdentityVerdict::Proven,
+            IdentityVerdict::RestoreOnly,
+            IdentityVerdict::Authored,
         ] {
-            assert!(device_identity.identified());
+            assert!(identity_verdict.identified());
         }
     }
 
@@ -157,11 +160,11 @@ mod tests {
     fn identified_is_false_for_verdicts_without_a_confirmed_identity() -> Result<(), Box<dyn Error>>
     {
         let saved = reported_display_key()?;
-        let displaced = DeviceIdentity::Displaced {
+        let displaced = IdentityVerdict::Displaced {
             saved: saved.clone(),
         };
-        let wrong_unit = DeviceIdentity::WrongUnit { authored: saved };
-        let unverified = DeviceIdentity::Unverified(UnverifiedReason::NotUniqueInScan);
+        let wrong_unit = IdentityVerdict::WrongUnit { authored: saved };
+        let unverified = IdentityVerdict::Unverified(UnverifiedReason::NotUniqueInScan);
 
         assert!(!displaced.identified());
         assert!(!wrong_unit.identified());
@@ -172,9 +175,45 @@ mod tests {
 
     #[test]
     fn not_unique_in_scan_prevents_identification() {
-        let unverified = DeviceIdentity::Unverified(UnverifiedReason::NotUniqueInScan);
+        let unverified = IdentityVerdict::Unverified(UnverifiedReason::NotUniqueInScan);
 
         assert!(!unverified.identified());
+    }
+
+    #[test]
+    fn identity_verdicts_compare_by_their_conclusions() {
+        assert_eq!(IdentityVerdict::Proven, IdentityVerdict::Proven);
+        assert_ne!(IdentityVerdict::Proven, IdentityVerdict::RestoreOnly);
+    }
+
+    #[test]
+    fn identity_verdicts_compare_the_keys_they_carry() -> Result<(), Box<dyn Error>> {
+        let saved = reported_display_key()?;
+        let displaced = IdentityVerdict::Displaced {
+            saved: saved.clone(),
+        };
+
+        assert_eq!(
+            displaced,
+            IdentityVerdict::Displaced {
+                saved: saved.clone(),
+            }
+        );
+        assert_ne!(displaced, IdentityVerdict::WrongUnit { authored: saved });
+
+        Ok(())
+    }
+
+    #[test]
+    fn reflected_comparison_answers_for_equal_and_unequal_verdicts() {
+        assert_eq!(
+            IdentityVerdict::Proven.reflect_partial_eq(&IdentityVerdict::Proven),
+            Some(true)
+        );
+        assert_eq!(
+            IdentityVerdict::Proven.reflect_partial_eq(&IdentityVerdict::RestoreOnly),
+            Some(false)
+        );
     }
 
     fn reported_display_key() -> Result<DeviceKey, Box<dyn Error>> {
