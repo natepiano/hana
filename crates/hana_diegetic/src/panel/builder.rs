@@ -839,7 +839,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
             }
         }
 
-        if let Some(tree) = self.data.tree.as_mut() {
+        if let Some(tree) = self.data.tree.as_ref() {
             widgets::validate_tree(tree)?;
         }
 
@@ -958,7 +958,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         }
         let _ = (has_dynamic_width, has_dynamic_height);
 
-        if let Some(tree) = self.data.tree.as_mut() {
+        if let Some(tree) = self.data.tree.as_ref() {
             widgets::validate_tree(tree)?;
         }
 

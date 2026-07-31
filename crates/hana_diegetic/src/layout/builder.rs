@@ -1383,13 +1383,6 @@ impl<L> El<L, WidgetElement<Slider>> {
         self.configure_slider(|slider| slider.reset_behavior(reset_behavior))
     }
 
-    /// Sets the marked thumb's border color while keyboard focus is visible.
-    ///
-    /// See [`Slider::focused_thumb_border_color`].
-    pub fn focused_thumb_border_color(self, color: Color) -> Self {
-        self.configure_slider(|slider| slider.focused_thumb_border_color(color))
-    }
-
     fn configure_slider(mut self, configure: impl FnOnce(Slider) -> Slider) -> Self {
         if let Some(WidgetSpec::Slider(slider)) = self.widget_mut() {
             *slider = configure(slider.clone());

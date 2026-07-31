@@ -41,7 +41,6 @@ use super::engine;
 use crate::ImePanelField;
 use crate::PanelBuildError;
 use crate::PanelElementId;
-use crate::Px;
 use crate::cascade::Cascade;
 use crate::panel::PanelFieldPresentation;
 use crate::render::AntiAlias;
@@ -794,13 +793,11 @@ impl LayoutTree {
         None
     }
 
-    pub(crate) fn validate_widgets(&mut self) -> Result<(), PanelBuildError> {
+    pub(crate) fn validate_widgets(&self) -> Result<(), PanelBuildError> {
         let Some(root) = self.root else {
             return Ok(());
         };
         let mut sliders_with_thumb = HashSet::new();
-        let mut sliders_with_focused_thumb_border = HashSet::new();
-        let mut thumbs_needing_synthesized_border = Vec::new();
         let mut stack = vec![(
             root,
             Option::<(PanelElementId, WidgetKind)>::None,
@@ -820,11 +817,6 @@ impl LayoutTree {
                     if !sliders_with_thumb.insert(slider_id.clone()) {
                         return Err(PanelBuildError::SliderHasMultipleThumbs(slider_id.clone()));
                     }
-                    if sliders_with_focused_thumb_border.contains(slider_id)
-                        && element.border.is_none()
-                    {
-                        thumbs_needing_synthesized_border.push(index);
-                    }
                 } else {
                     let thumb_id = element
                         .id
@@ -838,20 +830,9 @@ impl LayoutTree {
 
             let next_owning_widget =
                 validated_element_widget_owner(element, index, owning_widget, precompose)?;
-            if let Some(WidgetSpec::Slider(slider)) = &element.widget
-                && slider.has_focused_thumb_border_color()
-                && let Some((slider_id, WidgetKind::Slider)) = next_owning_widget.as_ref()
-            {
-                sliders_with_focused_thumb_border.insert(slider_id.clone());
-            }
 
             for &child in self.children_of(index).iter().rev() {
                 stack.push((child, next_owning_widget.clone(), precompose));
-            }
-        }
-        for index in thumbs_needing_synthesized_border {
-            if let Some(thumb) = self.elements.get_mut(index) {
-                thumb.border = Some(Border::all(Px(0.0), Color::NONE));
             }
         }
         Ok(())
@@ -2363,7 +2344,7 @@ mod tests {
                 ),
             );
         });
-        let mut tree = builder.build();
+        let tree = builder.build();
 
         assert!(tree.validate_widgets().is_ok());
 
