@@ -23,3 +23,4 @@ pub use super::MatchOutcome;
 pub use super::Modifiers;
 pub use super::ReflectKeymapCommand;
 pub use super::SequenceMatcher;
+pub use super::cancel_pending_sequences;

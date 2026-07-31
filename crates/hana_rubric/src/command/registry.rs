@@ -51,6 +51,8 @@ impl CommandRegistry {
     ///
     /// Returns registry-validation diagnostics when a command ID is malformed or duplicated, a
     /// command title or description is empty, or a command event lacks `ReflectEvent` type data.
+    /// Reflection consumers such as BRP need that registration even though [`Self::invoke`] does
+    /// not use reflection to dispatch an event.
     pub fn initialize(world: &mut World) -> Result<Self, Vec<Diagnostic>> {
         world.init_resource::<CustomInputs>();
         let app_type_registry = world.resource::<AppTypeRegistry>().clone();
@@ -62,6 +64,13 @@ impl CommandRegistry {
 
         command_registry.register_held_observers(world);
         Ok(command_registry)
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self {
+            entries:            HashMap::new(),
+            held_registrations: Vec::new(),
+        }
     }
 
     /// Builds a command registry from one reflected type registry.
@@ -144,7 +153,9 @@ impl CommandRegistry {
     /// Dispatches the event registered for `command_id`.
     ///
     /// This resolves the command ID and calls its monomorphized dispatch function without
-    /// reflection type-data lookup or reflected event reconstruction.
+    /// reflection type-data lookup or reflected event reconstruction. Reflection registration is
+    /// still validated during initialization so BRP and other reflection consumers can find the
+    /// command event.
     pub fn invoke(&self, command_id: &CommandId, world: &mut World) -> Option<()> {
         self.entries
             .get(command_id)

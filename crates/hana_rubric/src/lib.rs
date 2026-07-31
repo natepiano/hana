@@ -16,6 +16,14 @@ mod platform_shortcut_mode;
 /// Convenience re-exports for common keymap callers.
 pub mod prelude;
 
+/// Cancels every partially matched multi-keystroke sequence in the active keymap.
+///
+/// Applications call this after a recovery action or focus change should discard the next
+/// keystroke instead of completing an earlier sequence.
+pub fn cancel_pending_sequences(world: &mut bevy::prelude::World) {
+    keymap::runtime::cancel_pending_sequences(world);
+}
+
 #[cfg(test)]
 pub(crate) use allocation_test_support::TEST_ALLOCATOR;
 pub use command::Capability;

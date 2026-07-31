@@ -103,19 +103,19 @@ fn configuration_root(
 }
 
 #[cfg(test)]
-pub(super) static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
 static NEXT_TEST_DIRECTORY_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
-pub(super) struct TestDirectory {
+pub(crate) struct TestDirectory {
     path: PathBuf,
 }
 
 #[cfg(test)]
 impl TestDirectory {
-    pub(super) fn new(label: &str) -> io::Result<Self> {
+    pub(crate) fn new(label: &str) -> io::Result<Self> {
         let directory_id = NEXT_TEST_DIRECTORY_ID.fetch_add(1, Ordering::Relaxed);
         let path = env::temp_dir().join(format!(
             "hana-rubric-{label}-{}-{directory_id}",
@@ -127,7 +127,7 @@ impl TestDirectory {
         Ok(Self { path })
     }
 
-    pub(super) fn path(&self) -> &Path { &self.path }
+    pub(crate) fn path(&self) -> &Path { &self.path }
 }
 
 #[cfg(test)]
@@ -136,13 +136,13 @@ impl Drop for TestDirectory {
 }
 
 #[cfg(test)]
-pub(super) struct XdgConfigHome {
+pub(crate) struct XdgConfigHome {
     previous: Option<OsString>,
 }
 
 #[cfg(test)]
 impl XdgConfigHome {
-    pub(super) fn set(path: &Path) -> Self {
+    pub(crate) fn set(path: &Path) -> Self {
         let previous = env::var_os(XDG_CONFIG_HOME);
 
         // SAFETY: ENVIRONMENT_LOCK serializes all test mutations of this process-wide variable.

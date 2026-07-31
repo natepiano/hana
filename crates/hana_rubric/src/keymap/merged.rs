@@ -1,10 +1,5 @@
 //! Semantic keymap layering before matcher construction.
 
-#![expect(
-    dead_code,
-    reason = "keymap reload constructs merged keymaps after the loading transaction is added"
-)]
-
 use std::collections::HashMap;
 
 use super::CompiledKeymap;
@@ -264,7 +259,26 @@ impl MergedKeymap {
     ) -> ContextResolution {
         match (context, context_source) {
             (None, None) => ContextResolution::Global,
-            (None, Some(_)) => ContextResolution::Invalid,
+            (None, Some(context_source)) => {
+                diagnostics.push(Diagnostic {
+                    source_path:        document.source_path.clone(),
+                    byte_range:         context_source.byte_range.clone(),
+                    line:               context_source.line,
+                    column:             context_source.column,
+                    block_index:        context_source.block_index,
+                    context:            String::new(),
+                    original_keystroke: String::new(),
+                    command_id:         String::new(),
+                    kind:               DiagnosticKind::Context,
+                    severity:           DiagnosticSeverity::Advisory,
+                    message: String::from(
+                        "A keymap block `context` value must be a string naming a registered condition.",
+                    ),
+                    suggestions:        Vec::new(),
+                });
+
+                ContextResolution::Invalid
+            },
             (Some(ContextExpr::Name(condition_name)), Some(context_source)) => {
                 if let Some(condition_handle) = condition_registry.resolve(condition_name.as_str())
                 {
@@ -629,6 +643,7 @@ impl MergedKeymap {
 
     pub(super) fn global(&self) -> &[(KeystrokeSequence, CommandId)] { &self.global }
 
+    #[cfg(test)]
     pub(super) fn for_condition(
         &self,
         condition_handle: ConditionHandle,
@@ -1219,6 +1234,11 @@ mod tests {
             diagnostic.kind == DiagnosticKind::Syntax
                 && diagnostic.severity == DiagnosticSeverity::Failure
                 && diagnostic.message.contains("must be a string")
+        }));
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.kind == DiagnosticKind::Context
+                && diagnostic.severity == DiagnosticSeverity::Advisory
+                && diagnostic.message.contains("registered condition")
         }));
         assert_eq!(
             command_for_sequence(merged_keymap.global(), "space")?,

@@ -19,13 +19,6 @@ use crate::DiagnosticSeverity;
 use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
 
 /// A complete user-keymap state produced by the disk worker.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "plugin reload wiring will consume the user-keymap source path and contents"
-    )
-)]
 pub(crate) struct DiskSnapshot {
     /// User-keymap path associated with this state.
     pub(crate) source_path: PathBuf,
@@ -61,13 +54,6 @@ pub(crate) struct DiskWorkerChannels {
 
 impl DiskWorkerChannels {
     /// Takes the newest worker message, dropping no newer state.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "plugin reload wiring will drain the coalesced disk-worker mailbox"
-        )
-    )]
     pub(crate) fn take_message(&self) -> Option<DiskWorkerMessage> { self.slot.take() }
 
     #[cfg(test)]
@@ -129,13 +115,6 @@ impl DiskWorkerChannels {
     #[cfg(test)]
     pub(super) fn shutdown(&mut self) { self.shutdown_inner(); }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "plugin assembly will send disk worker shutdown during application teardown"
-        )
-    )]
     fn shutdown_inner(&mut self) {
         let _ = self.control_sender.send(WorkerControl::Stop);
 
@@ -217,13 +196,6 @@ pub(super) struct WorkerStatus {
 }
 
 pub(super) enum WorkerControl {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "plugin assembly will request disk worker shutdown during application teardown"
-        )
-    )]
     Stop,
 }
 

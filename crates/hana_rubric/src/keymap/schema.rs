@@ -1,19 +1,12 @@
 //! Runtime-generated JSON Schema for the keymap document.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the plugin's finish step is the only non-test caller of this module"
-    )
-)]
-
 use serde_json_lenient::Error;
 use serde_json_lenient::Map;
 use serde_json_lenient::Value;
 
 use crate::Capability;
 use crate::CommandRegistry;
+use crate::Keystroke;
 use crate::condition::ConditionRegistry;
 
 /// Serializes the schema generated from the application's current keymap registries.
@@ -22,6 +15,47 @@ pub(crate) fn schema_bytes(
     condition_registry: &ConditionRegistry,
 ) -> Result<Vec<u8>, Error> {
     serde_json_lenient::to_vec_pretty(&schema_document(command_registry, condition_registry))
+}
+
+/// Prepends keymap-reference comments to the embedded default JSONC source.
+pub(crate) fn reference_default_bytes(
+    defaults: &str,
+    condition_registry: &ConditionRegistry,
+    protected_keystrokes: &[Keystroke],
+) -> Vec<u8> {
+    let mut header = String::from("// Keymap reference\n");
+    if protected_keystrokes.is_empty() {
+        header.push_str("// Protected recovery keystrokes: none.\n");
+    } else {
+        for protected_keystroke in protected_keystrokes {
+            header.push_str("// Protected recovery keystroke: ");
+            push_comment_text(&mut header, &protected_keystroke.to_string());
+            header.push_str(".\n");
+        }
+    }
+    for condition in condition_registry.iter() {
+        header.push_str("// Context `");
+        header.push_str(condition.name.as_str());
+        header.push_str("`: ");
+        push_comment_text(&mut header, condition.description);
+        header.push('\n');
+    }
+    header.push('\n');
+
+    let mut bytes = header.into_bytes();
+    bytes.extend_from_slice(defaults.as_bytes());
+    bytes
+}
+
+fn push_comment_text(header: &mut String, text: &str) {
+    let mut lines = text.split('\n');
+    if let Some(first_line) = lines.next() {
+        header.push_str(first_line);
+    }
+    for line in lines {
+        header.push_str("\n// ");
+        header.push_str(line);
+    }
 }
 
 fn schema_document(
@@ -159,15 +193,20 @@ mod tests {
     use crate::CommandRegistry;
     use crate::HoldPhase;
     use crate::KeymapCommand;
+    use crate::Keystroke;
     use crate::ReflectKeymapCommand;
     use crate::condition::ConditionRegistry;
     use crate::keymap;
+    use crate::keymap::KeymapDocument;
+    use crate::keymap::document::RECOGNIZED_ROOT_MEMBERS;
     use crate::keymap::merged::RECOGNIZED_BLOCK_MEMBERS;
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
     #[strum(serialize_all = "snake_case")]
     enum TestContext {
-        #[strum(message = "While the dimension lock is active")]
+        #[strum(
+            message = "While the dimension lock is active\nThe locked dimension determines the available commands."
+        )]
         DimensionLock,
         #[strum(message = "While the selected tool is active")]
         SelectedTool,
@@ -526,6 +565,54 @@ mod tests {
                 .all(serde_json_lenient::Value::is_object)
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn root_schema_members_match_the_loader_authority() -> Result<(), String> {
+        let (command_registry, condition_registry) = registries()?;
+        let schema = generated_schema(&command_registry, &condition_registry)?;
+        let mut schema_members = value_field(&schema, "properties")?
+            .as_object()
+            .ok_or_else(|| String::from("root schema properties are not an object"))?
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let mut recognized_members = RECOGNIZED_ROOT_MEMBERS.to_vec();
+
+        schema_members.sort_unstable();
+        recognized_members.sort_unstable();
+
+        assert_eq!(schema_members, recognized_members);
+        Ok(())
+    }
+
+    #[test]
+    fn reference_header_precedes_byte_identical_embedded_defaults() -> Result<(), String> {
+        let (_, condition_registry) = registries()?;
+        let defaults = "{\n  \"bindings\": []\n}\n";
+        let protected_keystroke = "ctrl-g"
+            .parse::<Keystroke>()
+            .map_err(|error| format!("invalid protected test keystroke: {error}"))?;
+        let bytes =
+            keymap::reference_default_bytes(defaults, &condition_registry, &[protected_keystroke]);
+        let published_defaults = std::str::from_utf8(&bytes)
+            .map_err(|error| format!("reference defaults are not UTF-8: {error}"))?;
+        let defaults_offset = published_defaults
+            .find(defaults)
+            .ok_or_else(|| String::from("reference defaults omit the embedded source"))?;
+        let header = &published_defaults[..defaults_offset];
+
+        assert!(header.contains("ctrl-g"));
+        for condition in condition_registry.iter() {
+            let commented_description = condition.description.replace('\n', "\n// ");
+
+            assert!(header.contains(condition.name.as_str()));
+            assert!(header.contains(&commented_description));
+        }
+        assert!(header.contains("// Context `selected_tool`: While the selected tool is active\n"));
+        assert_eq!(&published_defaults[defaults_offset..], defaults);
+        assert!(KeymapDocument::parse("published-defaults.jsonc", published_defaults).is_ok());
         Ok(())
     }
 }

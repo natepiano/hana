@@ -10,24 +10,19 @@ mod constants;
 mod paths;
 mod worker;
 
+pub(crate) use constants::MAX_RETAINED_DIAGNOSTICS;
+#[cfg(test)]
+pub(crate) use paths::ENVIRONMENT_LOCK;
 pub use paths::KeymapPaths;
+#[cfg(test)]
+pub(crate) use paths::TestDirectory;
+#[cfg(test)]
+pub(crate) use paths::XdgConfigHome;
 #[expect(
     unused_imports,
     reason = "plugin assembly receives disk snapshots after the reload transaction is added"
 )]
 pub(crate) use worker::DiskSnapshot;
-#[expect(
-    unused_imports,
-    reason = "plugin assembly stores disk worker channels after the reload transaction is added"
-)]
 pub(crate) use worker::DiskWorkerChannels;
-#[expect(
-    unused_imports,
-    reason = "plugin assembly consumes disk worker messages after the reload transaction is added"
-)]
 pub(crate) use worker::DiskWorkerMessage;
-#[expect(
-    unused_imports,
-    reason = "plugin assembly starts the disk worker after companion generation is added"
-)]
 pub(crate) use worker::start_disk_worker;

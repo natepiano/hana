@@ -16,13 +16,6 @@ use crate::keymap::CommandHandle;
 use crate::keymap::CompiledKeymap;
 use crate::keymap::constants::SEQUENCE_TIMEOUT;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Phase 19's recovery handler calls this runtime cancellation entry point"
-    )
-)]
 pub(crate) fn cancel_pending_sequences(world: &mut World) {
     let Some(mut compiled_keymap) = world.get_resource_mut::<CompiledKeymap>() else {
         return;
@@ -838,7 +831,7 @@ mod tests {
         release(&mut app, KeyCode::KeyG);
         assert!(app.world().resource::<CompiledKeymap>().global.is_pending());
 
-        crate::keymap::runtime::cancel_pending_sequences(app.world_mut());
+        crate::cancel_pending_sequences(app.world_mut());
 
         assert!(!app.world().resource::<CompiledKeymap>().global.is_pending());
         press(&mut app, KeyCode::KeyH);
@@ -849,7 +842,7 @@ mod tests {
     #[test]
     fn keymap_plugin_routes_global_bindings_without_a_context_plugin() -> Result<(), String> {
         let mut app = runtime_app();
-        app.add_plugins(KeymapPlugin);
+        app.add_plugins(KeymapPlugin::new());
         insert_compiled(
             &mut app,
             bindings(&[("g", RuntimeOneShot::ID)]),
@@ -871,7 +864,7 @@ mod tests {
         app.insert_resource(RuntimeContext::Flying)
             .add_plugins(KeymapPlugin::new().for_context::<RuntimeContext>())
             .add_plugins(KeymapPlugin::new().for_context::<SecondaryRuntimeContext>())
-            .add_plugins(KeymapPlugin);
+            .add_plugins(KeymapPlugin::new());
         let command_registry = command_registry(&mut app)?;
         let condition_registry = app.world().resource::<ConditionRegistry>();
         let compiled_keymap = compile_with_conditions(

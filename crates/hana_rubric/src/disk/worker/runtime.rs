@@ -4,7 +4,6 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::ErrorKind;
 use std::io::Write;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
@@ -42,17 +41,13 @@ const USER_KEYMAP_STUB: &[u8] = br#"{
 }"#;
 
 /// Starts the dedicated disk worker for one configured application.
-#[expect(
-    dead_code,
-    reason = "plugin assembly will start the disk worker after companion generation is added"
-)]
 pub(crate) fn start_disk_worker(
-    app_name: &str,
+    paths: &KeymapPaths,
     default_keymap: Vec<u8>,
-    schema: Vec<u8>,
+    schema: Option<Vec<u8>>,
 ) -> DiskWorkerChannels {
     start_disk_worker_with(
-        app_name,
+        paths,
         default_keymap,
         schema,
         WorkerTimings::production(),
@@ -61,9 +56,9 @@ pub(crate) fn start_disk_worker(
 }
 
 pub(super) fn start_disk_worker_with(
-    app_name: &str,
+    paths: &KeymapPaths,
     default_keymap: Vec<u8>,
-    schema: Vec<u8>,
+    schema: Option<Vec<u8>>,
     worker_timings: WorkerTimings,
     watch_mode: WatchMode,
 ) -> DiskWorkerChannels {
@@ -91,7 +86,7 @@ pub(super) fn start_disk_worker_with(
     #[cfg(not(test))]
     let (watcher_notifications, watcher_receiver) = (None, None);
     let disk_worker = DiskWorker {
-        app_name: app_name.to_owned(),
+        paths: paths.clone(),
         default_keymap,
         schema,
         slot: slot.clone(),
@@ -123,9 +118,9 @@ pub(super) fn start_disk_worker_with(
 }
 
 pub(super) struct DiskWorker {
-    app_name:                         String,
+    paths:                            KeymapPaths,
     default_keymap:                   Vec<u8>,
-    schema:                           Vec<u8>,
+    schema:                           Option<Vec<u8>>,
     slot:                             CoalescingSlot,
     control_receiver:                 Receiver<WorkerControl>,
     pub(super) status:                Arc<WorkerStatus>,
@@ -145,18 +140,11 @@ pub(super) struct DiskWorker {
 
 impl DiskWorker {
     fn run(mut self) {
-        let Some(paths) = KeymapPaths::new(&self.app_name) else {
-            self.report_diagnostics(vec![channels::disk_diagnostic(
-                Path::new(&self.app_name),
-                "Could not resolve a configuration directory for the keymap application.",
-            )]);
-            return;
-        };
-
+        let paths = self.paths.clone();
         self.report_diagnostics(companion_files::publish_companion_files(
             &paths,
             &self.default_keymap,
-            &self.schema,
+            self.schema.as_deref(),
         ));
         self.create_user_stub(&paths);
         self.read_user_keymap(&paths, Instant::now());
@@ -462,20 +450,22 @@ mod tests {
     }
 
     fn start_worker(watch_mode: WatchMode) -> DiskWorkerChannels {
+        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
         start_disk_worker_with(
-            TEST_APP_NAME,
+            &paths,
             DEFAULT_KEYMAP.to_vec(),
-            b"{}".to_vec(),
+            Some(b"{}".to_vec()),
             worker_timings(),
             watch_mode,
         )
     }
 
     fn start_injected_worker(worker_timings: WorkerTimings) -> DiskWorkerChannels {
+        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
         start_disk_worker_with(
-            TEST_APP_NAME,
+            &paths,
             DEFAULT_KEYMAP.to_vec(),
-            b"{}".to_vec(),
+            Some(b"{}".to_vec()),
             worker_timings,
             WatchMode::Injected,
         )

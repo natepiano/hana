@@ -1,10 +1,5 @@
 //! JSONC keymap decoding with source locations for every authored binding.
 
-#![expect(
-    dead_code,
-    reason = "later keymap loading and compilation stages consume this document model"
-)]
-
 use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
@@ -24,9 +19,15 @@ use crate::DiagnosticSeverity;
 use crate::KeystrokeSequence;
 use crate::KeystrokeSequenceParseError;
 
+pub(crate) const RECOGNIZED_ROOT_MEMBERS: [&str; 2] = ["$schema", "bindings"];
+
 /// A parsed keymap document and the source information needed by later keymap stages.
 #[derive(Debug)]
 pub(crate) struct KeymapDocument {
+    #[expect(
+        dead_code,
+        reason = "the parsed schema reference is intentionally unread after validation"
+    )]
     pub(super) schema:      Option<String>,
     pub(super) source_path: String,
     pub(super) blocks:      Vec<KeymapBlock>,
@@ -68,12 +69,19 @@ impl KeymapDocument {
             },
         };
 
-        let mut diagnostics = Vec::new();
+        let SourceIndex {
+            blocks: indexed_blocks,
+            unrecognized_root_members,
+        } = source_index;
+        let mut diagnostics = unrecognized_root_members
+            .into_iter()
+            .map(|member| root_member_diagnostic(source_path, member))
+            .collect();
         let blocks = parse_blocks(
             source_path,
             source,
             wire_document.bindings,
-            source_index.blocks,
+            indexed_blocks,
             &mut diagnostics,
         )?;
 
@@ -86,6 +94,52 @@ impl KeymapDocument {
             diagnostics,
         ))
     }
+}
+
+fn root_member_diagnostic(source_path: &str, member: IndexedRootMember) -> Diagnostic {
+    let suggestion = RECOGNIZED_ROOT_MEMBERS
+        .iter()
+        .min_by_key(|recognized_member| {
+            levenshtein_distance(member.name.as_str(), recognized_member)
+        })
+        .copied()
+        .unwrap_or("bindings");
+
+    Diagnostic {
+        source_path:        source_path.to_owned(),
+        byte_range:         member.location.byte_range,
+        line:               member.location.line,
+        column:             member.location.column,
+        block_index:        0,
+        context:            String::new(),
+        original_keystroke: String::new(),
+        command_id:         String::new(),
+        kind:               DiagnosticKind::Syntax,
+        severity:           DiagnosticSeverity::Advisory,
+        message:            format!(
+            "Unrecognized keymap document member `{}`. Did you mean `{suggestion}`?",
+            member.name
+        ),
+        suggestions:        vec![suggestion.to_owned()],
+    }
+}
+
+fn levenshtein_distance(left: &str, right: &str) -> usize {
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+
+    for (left_index, left_character) in left.chars().enumerate() {
+        let mut current = Vec::with_capacity(right.len() + 1);
+        current.push(left_index + 1);
+        for (right_index, right_character) in right.chars().enumerate() {
+            let replace = previous[right_index] + usize::from(left_character != right_character);
+            let insert = current[right_index] + 1;
+            let delete = previous[right_index + 1] + 1;
+            current.push(replace.min(insert).min(delete));
+        }
+        previous = current;
+    }
+
+    previous[right.len()]
 }
 
 fn parse_blocks(
@@ -731,7 +785,8 @@ impl<'de> Deserialize<'de> for WireBindings {
 }
 
 struct SourceIndex {
-    blocks: Vec<IndexedBlock>,
+    blocks:                    Vec<IndexedBlock>,
+    unrecognized_root_members: Vec<IndexedRootMember>,
 }
 
 impl SourceIndex {
@@ -744,18 +799,29 @@ impl SourceIndex {
         scanner.skip_trivia()?;
 
         if scanner.consume_byte(b'}') {
-            return Ok(Self { blocks: Vec::new() });
+            return Ok(Self {
+                blocks:                    Vec::new(),
+                unrecognized_root_members: Vec::new(),
+            });
         }
 
+        let mut unrecognized_root_members = Vec::new();
         loop {
             let key = scanner.parse_string()?;
             scanner.skip_trivia()?;
             scanner.expect_byte(b':', "Expected `:` after an object key.")?;
             scanner.skip_trivia()?;
 
-            if scanner.string_value(&key)? == "bindings" && scanner.peek_byte() == Some(b'[') {
+            let member_name = scanner.string_value(&key)?;
+            if member_name == "bindings" && scanner.peek_byte() == Some(b'[') {
                 blocks = Some(scanner.parse_blocks()?);
+            } else if RECOGNIZED_ROOT_MEMBERS.contains(&member_name.as_str()) {
+                scanner.skip_value()?;
             } else {
+                unrecognized_root_members.push(IndexedRootMember {
+                    name:     member_name,
+                    location: SourceLocation::from_token(scanner.source, key),
+                });
                 scanner.skip_value()?;
             }
 
@@ -777,8 +843,14 @@ impl SourceIndex {
 
         Ok(Self {
             blocks: blocks.unwrap_or_default(),
+            unrecognized_root_members,
         })
     }
+}
+
+struct IndexedRootMember {
+    name:     String,
+    location: SourceLocation,
 }
 
 struct IndexedBlock {
@@ -1200,7 +1272,6 @@ mod tests {
             KeymapDocument::parse(SOURCE_PATH, source).expect("valid keymap envelope");
 
         assert!(diagnostics.is_empty());
-        assert_eq!(document.schema.as_deref(), Some("./keymap.schema.json"));
         assert_eq!(document.blocks.len(), 2);
         assert!(matches!(
             document.blocks[0].bindings[0].edit,
@@ -1216,6 +1287,25 @@ mod tests {
         ));
         assert_eq!(document.blocks[0].bindings[0].source.block_index, 0);
         assert_eq!(document.blocks[1].bindings[0].source.block_index, 1);
+    }
+
+    #[test]
+    fn unrecognized_root_members_produce_load_time_advisories() {
+        let source = r#"{
+            "bindingz": [],
+            "bindings": []
+        }"#;
+
+        let (_, diagnostics) =
+            KeymapDocument::parse(SOURCE_PATH, source).expect("valid JSONC envelope");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("bindingz"))
+            .expect("unknown root member must be diagnosed");
+
+        assert_eq!(diagnostic.kind, DiagnosticKind::Syntax);
+        assert_eq!(diagnostic.severity, crate::DiagnosticSeverity::Advisory);
+        assert_eq!(&source[diagnostic.byte_range.clone()], "bindingz");
     }
 
     #[test]

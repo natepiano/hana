@@ -263,10 +263,11 @@ mod tests {
     }
 
     fn start_worker(worker_timings: WorkerTimings, watch_mode: WatchMode) -> DiskWorkerChannels {
+        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
         runtime::start_disk_worker_with(
-            TEST_APP_NAME,
+            &paths,
             DEFAULT_KEYMAP.to_vec(),
-            b"{}".to_vec(),
+            Some(b"{}".to_vec()),
             worker_timings,
             watch_mode,
         )

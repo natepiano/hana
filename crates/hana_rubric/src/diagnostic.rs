@@ -79,15 +79,24 @@ pub struct Diagnostic {
     pub suggestions:        Vec<String>,
 }
 
-/// Problems reported by the most recent keymap load.
+/// Problems reported by keymap loads and diagnostics retained from startup.
 ///
-/// A later reload transaction retains advisory diagnostics after a successful
-/// load so keymap editors can continue to present source corrections.
+/// A later reload transaction retains advisories after a successful load, while startup
+/// diagnostics remain available because a reload cannot reproduce them.
 #[derive(Clone, Debug, Default, Reflect, Resource)]
 #[reflect(Resource)]
 pub struct KeymapLoadFailures {
-    /// All diagnostics retained from the most recent keymap load.
-    pub diagnostics: Vec<Diagnostic>,
+    /// Diagnostics from the current or most recent keymap load.
+    pub diagnostics:          Vec<Diagnostic>,
+    /// Diagnostics produced during startup that no keymap reload can reproduce.
+    pub retained_diagnostics: Vec<Diagnostic>,
+}
+
+impl KeymapLoadFailures {
+    /// Iterates over both reload-produced and startup diagnostics.
+    pub fn all_diagnostics(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.diagnostics.iter().chain(&self.retained_diagnostics)
+    }
 }
 
 #[cfg(test)]
@@ -116,7 +125,8 @@ mod tests {
             suggestions:        vec![String::from("camera::home")],
         };
         let keymap_load_failures = KeymapLoadFailures {
-            diagnostics: vec![diagnostic],
+            diagnostics:          vec![diagnostic],
+            retained_diagnostics: Vec::new(),
         };
 
         let diagnostic = &keymap_load_failures.diagnostics[0];
@@ -130,6 +140,7 @@ mod tests {
         assert_eq!(diagnostic.message, "The command is unavailable.");
         let _: &Vec<String> = &diagnostic.suggestions;
         let _: &Vec<Diagnostic> = &keymap_load_failures.diagnostics;
+        assert_eq!(keymap_load_failures.all_diagnostics().count(), 1);
     }
 
     #[test]

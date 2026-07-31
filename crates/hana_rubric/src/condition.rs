@@ -245,12 +245,14 @@ fn condition_diagnostic(condition_name: &str, message: String) -> Diagnostic {
 }
 
 pub(crate) struct ResourceContextPlugin<C> {
-    marker: PhantomData<fn() -> C>,
+    keymap_plugin: crate::KeymapPlugin,
+    marker:        PhantomData<fn() -> C>,
 }
 
 impl<C> ResourceContextPlugin<C> {
-    pub(crate) const fn new() -> Self {
+    pub(crate) fn new(keymap_plugin: crate::KeymapPlugin) -> Self {
         Self {
+            keymap_plugin,
             marker: PhantomData,
         }
     }
@@ -261,22 +263,27 @@ where
     C: KeymapContext + Resource,
 {
     fn build(&self, app: &mut App) {
-        if register_context::<C>(app).is_ok() {
+        self.keymap_plugin.install(app);
+        if register_context::<C>(app, ContextSource::Resource).is_ok() {
             app.add_systems(
                 PreUpdate,
                 sync_resource_condition::<C>.in_set(KeymapSystems::UpdateActiveCondition),
             );
         }
     }
+
+    fn finish(&self, app: &mut App) { crate::KeymapPlugin::finish_assembly(app); }
 }
 
 pub(crate) struct StateContextPlugin<C> {
-    marker: PhantomData<fn() -> C>,
+    keymap_plugin: crate::KeymapPlugin,
+    marker:        PhantomData<fn() -> C>,
 }
 
 impl<C> StateContextPlugin<C> {
-    pub(crate) const fn new() -> Self {
+    pub(crate) fn new(keymap_plugin: crate::KeymapPlugin) -> Self {
         Self {
+            keymap_plugin,
             marker: PhantomData,
         }
     }
@@ -287,17 +294,54 @@ where
     C: KeymapContext + States,
 {
     fn build(&self, app: &mut App) {
-        if register_context::<C>(app).is_ok() {
+        self.keymap_plugin.install(app);
+        if register_context::<C>(app, ContextSource::State).is_ok() {
             app.add_systems(
                 PreUpdate,
                 sync_state_condition::<C>.in_set(KeymapSystems::UpdateActiveCondition),
             );
         }
     }
+
+    fn finish(&self, app: &mut App) { crate::KeymapPlugin::finish_assembly(app); }
 }
 
-fn register_context<C: KeymapContext>(app: &mut App) -> Result<(), Vec<Diagnostic>> {
+#[derive(Resource)]
+struct ContextSourceInstalled(ContextSource);
+
+#[derive(Clone, Copy)]
+enum ContextSource {
+    Resource,
+    State,
+}
+
+impl ContextSource {
+    const fn description(self) -> &'static str {
+        match self {
+            Self::Resource => "resource-backed",
+            Self::State => "state-backed",
+        }
+    }
+}
+
+fn register_context<C: KeymapContext>(
+    app: &mut App,
+    context_source: ContextSource,
+) -> Result<(), Vec<Diagnostic>> {
     crate::KeymapPlugin::install_runtime(app);
+    if let Some(previous_context_source) = app.world().get_resource::<ContextSourceInstalled>() {
+        let diagnostics = vec![condition_diagnostic(
+            "",
+            format!(
+                "A {} keymap context is already registered; a keymap accepts exactly one context source.",
+                previous_context_source.0.description()
+            ),
+        )];
+        retain_context_diagnostics(app, &diagnostics);
+        return Err(diagnostics);
+    }
+    app.world_mut()
+        .insert_resource(ContextSourceInstalled(context_source));
     app.world_mut()
         .resource_mut::<ActiveCondition>()
         .await_context();
@@ -309,14 +353,23 @@ fn register_context<C: KeymapContext>(app: &mut App) -> Result<(), Vec<Diagnosti
         .register::<C>();
 
     if let Err(diagnostics) = &result {
-        app.init_resource::<KeymapLoadFailures>();
         app.world_mut()
-            .resource_mut::<KeymapLoadFailures>()
-            .diagnostics
-            .extend(diagnostics.iter().cloned());
+            .insert_resource(crate::keymap_plugin::RegistryValidationFailed);
+        retain_context_diagnostics(app, diagnostics);
     }
 
     result
+}
+
+fn retain_context_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
+    for diagnostic in diagnostics {
+        bevy::log::error!("{}", diagnostic.message);
+    }
+    app.init_resource::<KeymapLoadFailures>();
+    app.world_mut()
+        .resource_mut::<KeymapLoadFailures>()
+        .retained_diagnostics
+        .extend(diagnostics.iter().cloned());
 }
 
 #[cfg(test)]
@@ -408,7 +461,7 @@ mod tests {
         let diagnostics = &app
             .world()
             .resource::<crate::KeymapLoadFailures>()
-            .diagnostics;
+            .retained_diagnostics;
 
         assert!(diagnostics.iter().any(|diagnostic| {
             diagnostic.kind == DiagnosticKind::Context

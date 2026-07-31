@@ -2,7 +2,7 @@ use std::time::Duration;
 
 // diagnostics
 /// Bounds memory retained when the application does not drain disk diagnostics.
-pub(super) const MAX_RETAINED_DIAGNOSTICS: usize = 64;
+pub(crate) const MAX_RETAINED_DIAGNOSTICS: usize = 64;
 
 // filenames
 pub(super) const DEFAULT_KEYMAP_FILE_NAME: &str = "keymap.default.jsonc";

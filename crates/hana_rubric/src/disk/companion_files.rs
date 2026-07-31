@@ -24,7 +24,7 @@ static NEXT_TEMPORARY_FILE_ID: AtomicUsize = AtomicUsize::new(0);
 pub(super) fn publish_companion_files(
     paths: &KeymapPaths,
     default_keymap: &[u8],
-    schema: &[u8],
+    schema: Option<&[u8]>,
 ) -> Vec<Diagnostic> {
     if let Err(error) = fs::create_dir_all(paths.config_directory()) {
         return vec![companion_diagnostic(paths.config_directory(), error)];
@@ -32,10 +32,11 @@ pub(super) fn publish_companion_files(
 
     let mut diagnostics = Vec::new();
 
-    for (path, contents) in [
-        (paths.default_keymap(), default_keymap),
-        (paths.schema(), schema),
-    ] {
+    let mut companions = vec![(paths.default_keymap(), default_keymap)];
+    if let Some(schema) = schema {
+        companions.push((paths.schema(), schema));
+    }
+    for (path, contents) in companions {
         if let Err(error) = publish_companion_file(path, contents) {
             diagnostics.push(companion_diagnostic(path, error));
         }
@@ -215,7 +216,7 @@ mod tests {
 
         assert!(direct_write.is_err());
 
-        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, SCHEMA_BYTES);
+        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, Some(SCHEMA_BYTES));
 
         assert!(diagnostics.is_empty());
         assert_eq!(
@@ -270,7 +271,7 @@ mod tests {
             .expect("matching default permissions are set");
         let before = fs::metadata(paths.default_keymap()).expect("default metadata exists");
 
-        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, SCHEMA_BYTES);
+        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, Some(SCHEMA_BYTES));
         let after = fs::metadata(paths.default_keymap()).expect("default metadata exists");
 
         assert!(diagnostics.is_empty());
@@ -302,7 +303,7 @@ mod tests {
         fs::set_permissions(paths.config_directory(), fs::Permissions::from_mode(0o555))
             .expect("configuration directory is read only");
 
-        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, SCHEMA_BYTES);
+        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, Some(SCHEMA_BYTES));
 
         assert!(!diagnostics.is_empty());
         assert!(
@@ -339,7 +340,7 @@ mod tests {
         fs::write(&linked_file, b"linked file contents").expect("linked file exists");
         symlink(&linked_file, paths.schema()).expect("schema path is a symlink");
 
-        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, SCHEMA_BYTES);
+        let diagnostics = publish_companion_files(&paths, DEFAULT_BYTES, Some(SCHEMA_BYTES));
 
         assert!(diagnostics.is_empty());
         assert_eq!(

@@ -37,13 +37,6 @@ pub(crate) struct CompiledKeymap {
 impl CompiledKeymap {
     /// Builds a replacement keymap with one resolved matcher for every registered condition.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the reload transaction constructs replacement keymaps in the next phase"
-        )
-    )]
     pub(crate) fn from_merged(
         generation: Generation,
         merged_keymap: &MergedKeymap,
@@ -105,6 +98,19 @@ impl CompiledKeymap {
         self.commands
             .get(command_handle.0)
             .map(CommandEntry::dispatch)
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn generation(&self) -> Generation { self.generation }
+
+    #[cfg(test)]
+    pub(crate) fn match_global(
+        &mut self,
+        keystroke: crate::Keystroke,
+        now: std::time::Instant,
+        timeout: std::time::Duration,
+    ) -> crate::MatchOutcome<CommandHandle> {
+        self.global.match_keystroke(keystroke, now, timeout)
     }
 }
 

@@ -4,6 +4,7 @@ mod compiled;
 mod constants;
 mod document;
 mod merged;
+mod reload;
 pub(crate) mod runtime;
 mod schema;
 
@@ -12,12 +13,11 @@ pub(crate) use compiled::CompiledKeymap;
 pub(crate) use compiled::Generation;
 pub(crate) use document::KeymapDocument;
 pub(crate) use merged::MergedKeymap;
+pub(crate) use reload::PendingReload;
+pub(crate) use reload::ReloadConfiguration;
+pub(crate) use reload::ReloadRequest;
+pub(crate) use reload::commit_defaults;
+pub(crate) use reload::commit_reload;
 pub(crate) use runtime::route_input;
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "the plugin's finish step is the only non-test caller of this entry point"
-    )
-)]
+pub(crate) use schema::reference_default_bytes;
 pub(crate) use schema::schema_bytes;
