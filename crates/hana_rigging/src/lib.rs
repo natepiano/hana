@@ -1,14 +1,18 @@
 //! Device identity and registration policy for providers that report device sets to Bevy.
 
+mod availability;
 mod capabilities;
 mod claim;
 mod endpoint;
 mod evidence;
 mod identity;
+mod policy;
 mod presence;
 mod scheme;
 mod verdict;
 
+pub use availability::Act;
+pub use availability::Availability;
 pub use capabilities::Capabilities;
 pub use capabilities::CapabilityAttachError;
 pub use claim::Claim;
@@ -24,6 +28,9 @@ pub use identity::DeviceId;
 pub use identity::DeviceIdSource;
 pub use identity::DeviceKey;
 pub use identity::DeviceKind;
+pub use policy::OnAbort;
+pub use policy::OnSessionLoss;
+pub use policy::RetryOn;
 pub use presence::DeviceRecord;
 pub use presence::DeviceScan;
 pub use presence::DeviceSet;
@@ -45,7 +52,9 @@ pub use verdict::UnverifiedReason;
 /// Common types for reporting devices to the kernel and for reading the identity verdicts it
 /// returns.
 pub mod prelude {
+    pub use crate::Act;
     pub use crate::AttachmentPath;
+    pub use crate::Availability;
     pub use crate::Capabilities;
     pub use crate::CapabilityAttachError;
     pub use crate::Claim;
@@ -61,6 +70,8 @@ pub mod prelude {
     pub use crate::DeviceSet;
     pub use crate::Digest;
     pub use crate::EndpointRef;
+    pub use crate::OnAbort;
+    pub use crate::OnSessionLoss;
     pub use crate::OsDeviceId;
     pub use crate::PermissionGate;
     pub use crate::Presence;
@@ -71,6 +82,7 @@ pub mod prelude {
     pub use crate::ReportedId;
     pub use crate::ReportedIdError;
     pub use crate::ReportedSerial;
+    pub use crate::RetryOn;
     pub use crate::SchemeName;
     pub use crate::SchemeNameError;
     pub use crate::Slot;
