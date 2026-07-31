@@ -40,7 +40,7 @@ bitflags = { workspace = true }
 [dev-dependencies]
 bevy            = { workspace = true, features = ["3d"] }
 bevy_brp_extras = { workspace = true }
-bevy_clerestory = { workspace = true }
+hana_clerestory = { workspace = true }
 fairy_dust      = { workspace = true }
 float-cmp       = { workspace = true }
 hana_diegetic   = { workspace = true }

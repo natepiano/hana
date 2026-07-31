@@ -7,9 +7,9 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
 use hana_diegetic::DiegeticPanel;

@@ -115,7 +115,7 @@ impl<S, Baseline> SprinkleBuilder<S, Baseline> {
         builder
     }
 
-    /// Add a `bevy_clerestory` `WindowManagerPlugin` so window position
+    /// Add a `hana_clerestory` `WindowManagerPlugin` so window position
     /// and size are persisted across runs.
     #[must_use]
     pub fn with_save_window_position(self) -> SprinkleBuilder<S> {

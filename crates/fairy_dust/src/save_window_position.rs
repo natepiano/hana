@@ -1,8 +1,8 @@
 //! Capability: persist window position and size across runs via
-//! `bevy_clerestory::WindowManagerPlugin`.
+//! `hana_clerestory::WindowManagerPlugin`.
 
 use bevy::prelude::*;
-use bevy_clerestory::WindowManagerPlugin;
+use hana_clerestory::WindowManagerPlugin;
 
 use crate::ensure_plugin;
 

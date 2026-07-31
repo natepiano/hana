@@ -9,12 +9,12 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
 use bevy_lagrange::Focus;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitAngles;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::Radius;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;

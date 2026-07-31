@@ -2,7 +2,7 @@
 //! `Camera::order` layers a minimap overlay on top of the main view;
 //! `Camera::viewport` clips that overlay to a square in the top-right corner;
 //! `RenderTarget::Window` aims a third camera at a second OS window spawned
-//! via `bevy_clerestory::ManagedWindow`; and
+//! via `hana_clerestory::ManagedWindow`; and
 //! `ResolvedCameraInputRoute::routed_camera()` resolves which camera the
 //! cursor is currently over so input goes to that one.
 //!
@@ -20,7 +20,6 @@ use bevy::prelude::*;
 use bevy::window::ClosingWindow;
 use bevy::window::WindowRef;
 use bevy::window::WindowResized;
-use bevy_clerestory::ManagedWindow;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
@@ -30,6 +29,7 @@ use fairy_dust::CameraHomeEntity;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
+use hana_clerestory::ManagedWindow;
 
 // app / title bar
 const EXAMPLE_TITLE: &str = "Viewports & Windows";

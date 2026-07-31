@@ -65,7 +65,7 @@ winit = { version = "0.30.13", default-features = false, features = [
 
 # dev-dependencies
 bevy_brp_extras = "0.22.2"
-bevy_clerestory = { path = "crates/bevy_clerestory" }
+hana_clerestory = { path = "crates/hana_clerestory" }
 bevy_lagrange   = { path = "crates/bevy_lagrange" }
 clay-layout     = { path = "vendor/clay-layout" }
 criterion       = { version = "0.8.2", features = ["html_reports"] }

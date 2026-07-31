@@ -615,33 +615,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_clerestory"
-version = "0.3.0-dev"
-dependencies = [
- "bevy",
- "bevy_diagnostic",
- "bevy_kana",
- "bevy_remote",
- "block2 0.6.2",
- "dirs",
- "fairy_dust",
- "hana_diegetic",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "raw-window-handle",
- "ron",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tracing",
- "windows",
- "winit",
- "x11rb",
-]
-
-[[package]]
 name = "bevy_clipboard"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1143,12 +1116,12 @@ version = "0.4.0-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_clerestory",
  "bevy_enhanced_input",
  "bevy_kana",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
+ "hana_clerestory",
  "hana_diegetic",
 ]
 
@@ -2838,10 +2811,10 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_clerestory",
  "bevy_enhanced_input",
  "bevy_kana",
  "bevy_lagrange",
+ "hana_clerestory",
  "hana_diegetic",
  "hana_valence",
  "trybuild",
@@ -3258,6 +3231,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "hana_clerestory"
+version = "0.3.0-dev"
+dependencies = [
+ "bevy",
+ "bevy_diagnostic",
+ "bevy_kana",
+ "bevy_remote",
+ "block2 0.6.2",
+ "dirs",
+ "fairy_dust",
+ "hana_diegetic",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "ron",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tracing",
+ "windows",
+ "winit",
+ "x11rb",
+]
+
+[[package]]
 name = "hana_conduit"
 version = "0.1.0"
 dependencies = [
@@ -3274,13 +3274,13 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_clerestory",
  "bevy_kana",
  "bevy_lagrange",
  "bitflags 2.13.0",
  "clay-layout",
  "criterion",
  "fairy_dust",
+ "hana_clerestory",
  "hana_valence",
  "image",
  "parley",
@@ -3310,13 +3310,13 @@ version = "0.2.0-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_clerestory",
  "bevy_kana",
  "bevy_lagrange",
  "bevy_render",
  "bytemuck",
  "fairy_dust",
  "getrandom 0.4.3",
+ "hana_clerestory",
  "nonmax",
  "rand",
 ]
