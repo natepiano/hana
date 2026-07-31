@@ -35,3 +35,11 @@ fn match_evidence_only_cannot_expose_a_device_key() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/match_evidence_only_cannot_expose_device_key.rs");
 }
+
+#[test]
+fn attempt_progress_finished_requires_an_attempt_outcome() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail(
+        "tests/compile_fail/attempt_progress_finished_requires_an_attempt_outcome.rs",
+    );
+}

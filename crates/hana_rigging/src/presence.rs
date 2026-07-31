@@ -93,35 +93,35 @@ pub enum DeviceScan {
 
 /// Whole current device set reported by one provider after it completes a scan.
 pub struct DeviceSet {
-    /// Process-local provider handle that identifies which registered provider produced this set.
-    pub provider: ProviderId,
-    /// Every currently visible device from the provider, with absent devices omitted. Parent links
+    /// Process-local reporter handle that identifies which registered reporter produced this set.
+    pub reporter: ReporterId,
+    /// Every currently visible device from the reporter, with absent devices omitted. Parent links
     /// form a forest that reconciliation ingests from roots toward children.
     pub devices:  Vec<DeviceRecord>,
-    /// Per-provider monotonic count that reconciliation folds into a global rigging revision.
-    pub revision: ProviderRevision,
+    /// Per-reporter monotonic count that reconciliation folds into a global rigging revision.
+    pub revision: ReporterRevision,
 }
 
-/// Opaque process-local handle that the provider registry issues in registration order.
+/// Opaque process-local handle that the reporter registry issues in registration order.
 ///
-/// `ProviderId` has no public constructor because providers receive it from the provider registry;
-/// permitting a provider to mint one would let it overwrite another provider's whole device set.
+/// `ReporterId` has no public constructor because reporters receive it from the reporter registry;
+/// permitting a reporter to mint one would let it overwrite another reporter's whole device set.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
-pub struct ProviderId(pub(crate) u32);
+pub struct ReporterId(pub(crate) u32);
 
-/// Monotonic counter attached to each completed scan from one provider.
+/// Monotonic counter attached to each completed scan from one reporter.
 ///
-/// A `ProviderRevision` is per provider, not a topology counter: camera, HID, and display
-/// providers advance independently before reconciliation combines their latest complete reports.
+/// A `ReporterRevision` is per reporter, not a topology counter: camera, HID, and display
+/// reporters advance independently before reconciliation combines their latest complete reports.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Reflect)]
-pub struct ProviderRevision(u64);
+pub struct ReporterRevision(u64);
 
-impl ProviderRevision {
-    /// Wrap a provider's current completed-scan counter without assigning it global meaning.
+impl ReporterRevision {
+    /// Wrap a reporter's current completed-scan counter without assigning it global meaning.
     #[must_use]
     pub const fn new(value: u64) -> Self { Self(value) }
 
-    /// Return the provider-owned count for diagnostics and provider-side monotonic updates.
+    /// Return the reporter-owned count for diagnostics and reporter-side monotonic updates.
     #[must_use]
     pub const fn get(self) -> u64 { self.0 }
 }

@@ -15,41 +15,58 @@ use crate::DeviceKey;
 
 /// Binding target that identifies one provider-defined endpoint on one durable device.
 ///
-/// `EndpointRef` permits several bindings to address different channels of one audio interface,
-/// lighting controller, or HID panel. A display uses the same type with its single `Slot`.
+/// `DeviceEndpoint` permits several bindings to address different channels of one audio
+/// interface, lighting controller, or HID panel. A display uses the same type with
+/// `EndpointId::Whole`.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Reflect)]
 #[reflect(Serialize, Deserialize)]
-pub struct EndpointRef {
+pub struct DeviceEndpoint {
     /// Durable device designation that keeps the endpoint associated with one physical unit.
     pub device: DeviceKey,
-    /// Provider-defined endpoint name within `device`, such as `ch/7` or `key/3`.
-    pub slot:   Slot,
+    /// Provider-defined address within `device`, distinguishing a whole display from one named
+    /// part such as `ch/7` or `key/3`.
+    pub id:     EndpointId,
 }
 
-/// Provider-defined name for one endpoint within a device.
+/// Address within a device that distinguishes its whole surface from one provider-named part.
 ///
-/// `Slot` retains the provider's vocabulary because the kernel cannot know whether `ch/7` is an
-/// audio channel, `key/3` is a control surface key, or `nfc` is a reader. Its checked constructor
-/// rejects blank and control-character values before endpoint configuration is retained.
+/// A display has one endpoint, so it uses `Whole` rather than inventing a part name. `Part` keeps
+/// the provider's vocabulary because the kernel cannot know whether `ch/7` is an audio channel,
+/// `key/3` is a control surface key, or `nfc` is a reader.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Reflect)]
+#[reflect(Serialize, Deserialize)]
+pub enum EndpointId {
+    /// The device exposes one undivided endpoint, as with a display surface.
+    Whole,
+    /// A provider-defined endpoint within a multi-part device, such as one audio channel.
+    Part(PartName),
+}
+
+/// Provider-defined name for one named part within a device.
+///
+/// `PartName` retains the provider's vocabulary because the kernel cannot know whether `ch/7` is
+/// an audio channel, `key/3` is a control surface key, or `nfc` is a reader. Its checked
+/// constructor rejects blank and control-character values before endpoint configuration is
+/// retained.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Reflect)]
 #[reflect(opaque)]
 #[reflect(Serialize, Deserialize)]
-pub struct Slot(String);
+pub struct PartName(String);
 
-impl Slot {
+impl PartName {
     /// Create an endpoint name that can be retained without blank or control-character text.
     ///
     /// # Errors
     ///
-    /// Returns `SlotError` when `value` cannot identify an endpoint in diagnostics or persisted
-    /// configuration.
-    pub fn new(value: impl Into<String>) -> Result<Self, SlotError> {
+    /// Returns `PartNameError` when `value` cannot identify an endpoint in diagnostics or
+    /// persisted configuration.
+    pub fn new(value: impl Into<String>) -> Result<Self, PartNameError> {
         let value = value.into();
         if value.is_empty() {
-            return Err(SlotError::Empty);
+            return Err(PartNameError::Empty);
         }
         if value.chars().any(char::is_control) {
-            return Err(SlotError::ContainsControlCharacter);
+            return Err(PartNameError::ContainsControlCharacter);
         }
 
         Ok(Self(value))
@@ -60,11 +77,11 @@ impl Slot {
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
-impl Display for Slot {
+impl Display for PartName {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FormatResult { formatter.write_str(&self.0) }
 }
 
-impl<'de> Deserialize<'de> for Slot {
+impl<'de> Deserialize<'de> for PartName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -74,14 +91,14 @@ impl<'de> Deserialize<'de> for Slot {
     }
 }
 
-/// Reason `Slot::new` rejected text before it could name an endpoint.
+/// Reason `PartName::new` rejected text before it could name an endpoint.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum SlotError {
-    /// An empty value cannot select a device endpoint, even for a one-slot display.
-    #[error("endpoint slots must not be empty")]
+pub enum PartNameError {
+    /// An empty value cannot select a named device endpoint.
+    #[error("endpoint part names must not be empty")]
     Empty,
-    /// Control characters make endpoint labels ambiguous in configuration and diagnostics.
-    #[error("endpoint slots must not contain control characters")]
+    /// Control characters make part labels ambiguous in configuration and diagnostics.
+    #[error("endpoint part names must not contain control characters")]
     ContainsControlCharacter,
 }
 
@@ -89,9 +106,13 @@ pub enum SlotError {
 mod tests {
     use std::error::Error;
 
-    use super::EndpointRef;
-    use super::Slot;
-    use super::SlotError;
+    use ron::Options;
+    use ron::extensions::Extensions;
+
+    use super::DeviceEndpoint;
+    use super::EndpointId;
+    use super::PartName;
+    use super::PartNameError;
     use crate::DeviceIdSource;
     use crate::DeviceKey;
     use crate::DeviceKind;
@@ -99,40 +120,56 @@ mod tests {
     use crate::SchemeName;
 
     #[test]
-    fn one_slot_display_endpoint_round_trips_through_slot_constructor() -> Result<(), Box<dyn Error>>
-    {
-        let endpoint_ref = EndpointRef {
+    fn whole_display_endpoint_survives_serde_round_trip() -> Result<(), Box<dyn Error>> {
+        let device_endpoint = DeviceEndpoint {
             device: display_key()?,
-            slot:   Slot::new("0")?,
+            id:     EndpointId::Whole,
         };
-        let reconstructed_slot = Slot::new(endpoint_ref.slot.as_str())?;
+        let options = Options::default().with_default_extension(Extensions::UNWRAP_NEWTYPES);
+        let encoded = options.to_string(&device_endpoint)?;
+        let decoded: DeviceEndpoint = options.from_str(&encoded)?;
 
-        assert_eq!(reconstructed_slot, endpoint_ref.slot);
+        assert_eq!(decoded, device_endpoint);
 
         Ok(())
     }
 
     #[test]
-    fn empty_slot_returns_empty_error() {
-        assert_eq!(Slot::new(""), Err(SlotError::Empty));
+    fn named_part_endpoint_survives_serde_round_trip() -> Result<(), Box<dyn Error>> {
+        let device_endpoint = DeviceEndpoint {
+            device: display_key()?,
+            id:     EndpointId::Part(PartName::new("ch/7")?),
+        };
+        let options = Options::default().with_default_extension(Extensions::UNWRAP_NEWTYPES);
+        let encoded = options.to_string(&device_endpoint)?;
+        let decoded: DeviceEndpoint = options.from_str(&encoded)?;
+
+        assert_eq!(decoded, device_endpoint);
+
+        Ok(())
     }
 
     #[test]
-    fn slot_with_control_character_returns_error() {
+    fn empty_part_name_returns_empty_error() {
+        assert_eq!(PartName::new(""), Err(PartNameError::Empty));
+    }
+
+    #[test]
+    fn part_name_with_control_character_returns_error() {
         assert_eq!(
-            Slot::new("input\nchannel"),
-            Err(SlotError::ContainsControlCharacter)
+            PartName::new("input\nchannel"),
+            Err(PartNameError::ContainsControlCharacter)
         );
     }
 
     #[test]
-    fn empty_slot_fails_ron_deserialization() {
-        assert!(ron::from_str::<Slot>("\"\"").is_err());
+    fn empty_part_name_fails_ron_deserialization() {
+        assert!(ron::from_str::<PartName>("\"\"").is_err());
     }
 
     #[test]
-    fn slot_with_control_character_fails_ron_deserialization() {
-        assert!(ron::from_str::<Slot>(r#""input\nchannel""#).is_err());
+    fn part_name_with_control_character_fails_ron_deserialization() {
+        assert!(ron::from_str::<PartName>(r#""input\nchannel""#).is_err());
     }
 
     fn display_key() -> Result<DeviceKey, Box<dyn Error>> {

@@ -10,7 +10,7 @@ use bevy::prelude::Reflect;
 /// remains available. `Presence` and `Claim` answer current usability; this policy instead
 /// controls whether the binding keeps a configuration and how it may return.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Component, Reflect)]
-#[reflect(Component)]
+#[reflect(Component, PartialEq)]
 pub enum RecoveryPolicy {
     /// Discard the saved configuration when a provider no longer reports the device, as for a
     /// display whose window arrangement must not return after the display is removed.
@@ -49,6 +49,7 @@ mod tests {
     use bevy::app::App;
     use bevy::ecs::reflect::AppTypeRegistry;
     use bevy::ecs::reflect::ReflectComponent;
+    use bevy::reflect::PartialReflect;
 
     use super::RecoveryPolicy;
     use crate::DeviceKey;
@@ -69,6 +70,18 @@ mod tests {
         assert_copy::<RecoveryPolicy>();
         assert_eq!(copy, recovery_policy);
         assert!(matches!(copy, RecoveryPolicy::ReapplyOnReturn));
+    }
+
+    #[test]
+    fn reflected_comparison_answers_for_equal_and_unequal_recovery_policies() {
+        assert_eq!(
+            RecoveryPolicy::Forget.reflect_partial_eq(&RecoveryPolicy::Forget),
+            Some(true)
+        );
+        assert_eq!(
+            RecoveryPolicy::Forget.reflect_partial_eq(&RecoveryPolicy::Retain),
+            Some(false)
+        );
     }
 
     #[test]

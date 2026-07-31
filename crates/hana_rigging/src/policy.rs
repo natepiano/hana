@@ -17,7 +17,7 @@ pub enum RetryOn {
     /// the reported set.
     ///
     /// A camera held open by another application becomes available when that application exits,
-    /// even though no camera appears or disappears and the provider revision does not advance.
+    /// even though no camera appears or disappears and the reporter revision does not advance.
     Interval(Duration),
 }
 
