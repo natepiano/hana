@@ -42,6 +42,8 @@ use super::PathExtendedMaterial;
 use super::SdfExtendedMaterial;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
+#[cfg(test)]
+use super::fill_batch::SdfMaterialRole;
 use super::fill_batch::SdfMaterialSourceKey;
 use super::image_material::ImageExtendedMaterial;
 use super::panel_shapes::PanelShapeRenderKey;
@@ -111,7 +113,8 @@ pub(crate) fn record_sdf_driver_run(
 }
 
 const DEFAULT_TABLE_CAPACITY: u32 = 64;
-const CAPACITY_HEADROOM_DIVISOR: u32 = 8;
+/// Reserves room for a full live-source re-key while prior source rows retire.
+const CAPACITY_HEADROOM_DIVISOR: u32 = 1;
 const MATERIAL_SLOT_RETIREMENT_FRAMES: u64 = 2;
 const MATERIAL_TABLE_STRESS_FRAMES: usize = 16;
 const MATERIAL_TABLE_WARMUP_FRAMES: usize = 4;
@@ -1715,6 +1718,7 @@ mod tests {
     use crate::render::PathMaterialBuffers;
     use crate::render::RenderMode;
     use crate::render::batch_key::BatchAlphaMode;
+    use crate::render::draw_order::CommandIndex;
     use crate::render::fill_batch::FillBatchPlugin;
     use crate::render::image_batch::ImageBatchPlugin;
     use crate::render::panel_shapes::PanelShapePlugin;
@@ -1722,6 +1726,9 @@ mod tests {
 
     const MATERIAL_SLOT_VALUES_SHADER_SIZE_BYTES: u64 = 160;
     const STANDARD_MATERIAL_UNIFORM_SHADER_SIZE_BYTES: u64 = 192;
+    /// Measured at 131 live rows in the `widgets` example on 2026-07-31; used here as a
+    /// realistic probe size.
+    const PROBE_SOURCE_COUNT: u32 = 131;
     const MATERIAL_SLOT_VALUES_WGSL_FIELDS: [&str; 16] = [
         "base_color",
         "emissive",
@@ -1786,6 +1793,33 @@ mod tests {
                 .builder_mut()
                 .upsert_values(MaterialSourceKey::Test(index), values);
         }
+    }
+
+    fn assert_material_table_frame(app: &App, expected_live_rows: u32) {
+        let build = app.world().resource::<FrameMaterialTableBuild>();
+        assert_eq!(
+            build.table().live_row_count(),
+            expected_live_rows.to_usize()
+        );
+        assert_eq!(build.dropped_record_count(), 0);
+    }
+
+    fn assert_material_table_rekey_frame(app: &App, expected_live_rows: u32) {
+        assert_material_table_frame(app, expected_live_rows);
+        let build = app.world().resource::<FrameMaterialTableBuild>();
+        assert_eq!(
+            build.table().row_count(),
+            expected_live_rows.saturating_mul(2).to_usize()
+        );
+    }
+
+    fn material_table_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Assets::<ShaderBuffer>::default())
+            .init_resource::<FrameMaterialTableBuild>()
+            .init_resource::<MaterialTableBuffer>();
+        app
     }
 
     fn material_with_values(index: usize) -> StandardMaterial {
@@ -2214,11 +2248,11 @@ mod tests {
     fn capacity_includes_headroom_and_rounds_to_a_power_of_two() {
         assert_eq!(
             material_table_capacity(343, INVALID_GPU_MATERIAL_SLOT - 1),
-            512
+            1024
         );
         assert_eq!(
             material_table_capacity(600, INVALID_GPU_MATERIAL_SLOT - 1),
-            1024
+            2048
         );
     }
 
@@ -2484,60 +2518,121 @@ mod tests {
         }
     }
 
-    fn probe_report(build: Res<FrameMaterialTableBuild>, table_buffer: Res<MaterialTableBuffer>) {
-        println!(
-            "PROBE device_row_limit={} active_capacity={} builder_row_limit={} entries={} \
-             live={} dropped={} required={}",
-            build.row_limit(),
-            table_buffer.capacity,
-            build.builder.row_limit,
-            build.table().row_count(),
-            build.table().live_row_count(),
-            build.dropped_record_count(),
-            build.required_row_count(),
-        );
+    #[derive(Resource)]
+    struct PanelRespawnKeys {
+        panel: Entity,
+        count: u32,
+    }
+
+    fn write_panel_respawn_rows(
+        keys: Res<PanelRespawnKeys>,
+        mut build: ResMut<FrameMaterialTableBuild>,
+    ) {
+        let values = MaterialSlotValues::from(&StandardMaterial::default());
+        for command_index in 0..keys.count.to_usize() {
+            let source = SdfMaterialSourceKey {
+                panel:         keys.panel,
+                command_index: CommandIndex::from(command_index),
+                role:          SdfMaterialRole::Fill,
+            };
+            let _ = build.builder_mut().upsert_values(source.into(), values);
+        }
     }
 
     #[test]
     fn probe_rekey_drop() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(Assets::<ShaderBuffer>::default())
-            .init_resource::<FrameMaterialTableBuild>()
-            .init_resource::<MaterialTableBuffer>()
-            .insert_resource(ProbeKeys {
-                offset: 0,
-                count:  100,
-            })
-            .add_systems(
-                Update,
-                (
-                    activate_prepared_material_table_buffer,
-                    clear_frame_material_table,
-                    probe_write_rows,
-                    freeze_frame_material_table,
-                    ensure_material_table_buffer_handle,
-                    probe_report,
-                )
-                    .chain(),
-            );
+        let mut app = material_table_test_app();
+        app.insert_resource(ProbeKeys {
+            offset: 0,
+            count:  PROBE_SOURCE_COUNT,
+        })
+        .add_systems(
+            Update,
+            (
+                clear_frame_material_table,
+                probe_write_rows,
+                freeze_frame_material_table,
+                ensure_material_table_buffer_handle,
+            )
+                .chain(),
+        );
 
-        println!("-- frame 1: 100 sources, keys 0..100 (no buffer yet)");
         app.update();
-        println!("-- frame 2: same 100 keys");
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
         app.update();
-        println!("-- frame 3: full re-key, 100 fresh keys 10_000..10_100");
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
+        // Changing `ProbeKeys::offset` replaces every positional source identity.
         app.world_mut().resource_mut::<ProbeKeys>().offset = 10_000;
         app.update();
-        println!("-- frame 4: same fresh keys");
+        assert_material_table_rekey_frame(&app, PROBE_SOURCE_COUNT);
         app.update();
-        println!("-- frame 5");
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
         app.update();
-        println!("-- frame 6: second full re-key 20_000..20_100");
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
         app.world_mut().resource_mut::<ProbeKeys>().offset = 20_000;
         app.update();
-        println!("-- frame 7");
+        assert_material_table_rekey_frame(&app, PROBE_SOURCE_COUNT);
         app.update();
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
+    }
+
+    #[test]
+    fn cold_start_larger_than_default_capacity_never_drops_material_rows() {
+        let mut app = material_table_test_app();
+        app.insert_resource(ProbeKeys {
+            offset: 0,
+            count:  PROBE_SOURCE_COUNT,
+        })
+        .add_systems(
+            Update,
+            (
+                clear_frame_material_table,
+                probe_write_rows,
+                freeze_frame_material_table,
+                ensure_material_table_buffer_handle,
+            )
+                .chain(),
+        );
+
+        let source_count = app.world().resource::<ProbeKeys>().count;
+        assert!(source_count > DEFAULT_TABLE_CAPACITY);
+
+        app.update();
+
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
+    }
+
+    #[test]
+    fn panel_respawn_rekeys_sdf_material_rows_without_drops() {
+        let mut app = material_table_test_app();
+        let first_panel = app.world_mut().spawn_empty().id();
+        app.insert_resource(PanelRespawnKeys {
+            panel: first_panel,
+            count: PROBE_SOURCE_COUNT,
+        })
+        .add_systems(
+            Update,
+            (
+                clear_frame_material_table,
+                write_panel_respawn_rows,
+                freeze_frame_material_table,
+                ensure_material_table_buffer_handle,
+            )
+                .chain(),
+        );
+
+        app.update();
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
+        app.update();
+        assert_material_table_frame(&app, PROBE_SOURCE_COUNT);
+
+        assert!(app.world_mut().despawn(first_panel));
+        let second_panel = app.world_mut().spawn_empty().id();
+        assert_ne!(second_panel, first_panel);
+        app.world_mut().resource_mut::<PanelRespawnKeys>().panel = second_panel;
+
+        app.update();
+        assert_material_table_rekey_frame(&app, PROBE_SOURCE_COUNT);
     }
 
     #[test]

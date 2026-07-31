@@ -3058,6 +3058,51 @@ mod tests {
     }
 
     #[test]
+    fn border_limit_drop_counts_each_rolled_back_surface() {
+        let mut builder = FrameMaterialTableBuilder::default();
+        builder.clear(1);
+        let (materials, default_material, material) =
+            material_context_for_test(StandardMaterial::default());
+        let first_surface = resolved_surface_for_test(
+            0,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
+        let second_surface = resolved_surface_for_test(
+            1,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
+        let asset_server = asset_server_for_test();
+
+        let first = append_sdf_record_materials(
+            &mut builder,
+            &first_surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
+            &materials,
+            &asset_server,
+            &default_material,
+        );
+        let second = append_sdf_record_materials(
+            &mut builder,
+            &second_surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
+            &materials,
+            &asset_server,
+            &default_material,
+        );
+
+        assert!(first.is_none());
+        assert!(second.is_none());
+        assert_eq!(builder.row_count(), 0);
+        assert_eq!(builder.dropped_record_count(), 2);
+    }
+
+    #[test]
     fn two_role_append_keeps_fill_and_border_when_both_rows_fit() {
         let mut builder = FrameMaterialTableBuilder::default();
         let (materials, default_material, material) =
