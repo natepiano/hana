@@ -1036,6 +1036,13 @@ pub(crate) struct BatchResourcesReady;
 pub(crate) struct BatchAssetWrites;
 
 /// `PostUpdate` boundary after which the frame material table is frozen.
+///
+/// A capacity-growth `ShaderBuffer` created in this set must remain in
+/// `MaterialTableBuffer::pending` until the following frame. This set has no
+/// ordering edge to `AssetEventSystems`, so binding a fresh handle here while
+/// batch materials still reference the old buffer uploads nothing and renders
+/// stale table rows. [`activate_prepared_material_table_buffer`] promotes the
+/// pending handle in [`MaterialTableAppendReady`] on the following frame.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct MaterialTableUpdatedToCurrent;
 
@@ -1718,7 +1725,7 @@ mod tests {
     use crate::render::PathMaterialBuffers;
     use crate::render::RenderMode;
     use crate::render::batch_key::BatchAlphaMode;
-    use crate::render::draw_order::CommandIndex;
+    use crate::render::draw_order::ElementIndex;
     use crate::render::fill_batch::FillBatchPlugin;
     use crate::render::image_batch::ImageBatchPlugin;
     use crate::render::panel_shapes::PanelShapePlugin;
@@ -1919,6 +1926,7 @@ mod tests {
     }
 
     struct BatchScheduleSnapshot {
+        append_ready: Vec<String>,
         resources:    Vec<String>,
         asset_writes: Vec<String>,
     }
@@ -1973,6 +1981,9 @@ mod tests {
         let asset_write_systems = graph
             .systems_in_set(BatchAssetWrites.intern())
             .expect("BatchAssetWrites systems should resolve");
+        let append_ready_systems = graph
+            .systems_in_set(MaterialTableAppendReady.intern())
+            .expect("MaterialTableAppendReady systems should resolve");
         let resources = schedule
             .systems()
             .expect("PostUpdate schedule should be initialized")
@@ -1985,7 +1996,14 @@ mod tests {
             .filter(|(system_key, _)| asset_write_systems.contains(system_key))
             .map(|(_, system)| system.name().to_string())
             .collect();
+        let append_ready = schedule
+            .systems()
+            .expect("PostUpdate schedule should be initialized")
+            .filter(|(system_key, _)| append_ready_systems.contains(system_key))
+            .map(|(_, system)| system.name().to_string())
+            .collect();
         BatchScheduleSnapshot {
+            append_ready,
             resources,
             asset_writes,
         }
@@ -2328,6 +2346,40 @@ mod tests {
     }
 
     #[test]
+    fn growth_prepares_a_pending_handle_without_rebinding_the_active_buffer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Assets::<ShaderBuffer>::default())
+            .init_resource::<FrameMaterialTableBuild>()
+            .init_resource::<MaterialTableBuffer>()
+            .insert_resource(TestMaterialRows(1))
+            .add_systems(
+                Update,
+                (
+                    activate_prepared_material_table_buffer,
+                    clear_frame_material_table,
+                    write_test_material_rows,
+                    freeze_frame_material_table,
+                    ensure_material_table_buffer_handle,
+                )
+                    .chain(),
+            );
+
+        app.update();
+        let active_handle = app.world().resource::<MaterialTableBuffer>().handle.clone();
+        assert!(active_handle.is_some());
+        let active_handle = active_handle.unwrap_or_default();
+        let active_capacity = app.world().resource::<MaterialTableBuffer>().capacity;
+        app.world_mut().resource_mut::<TestMaterialRows>().0 = active_capacity.saturating_add(1);
+
+        app.update();
+
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        assert_eq!(table_buffer.handle.as_ref(), Some(&active_handle));
+        assert!(table_buffer.pending.is_some());
+    }
+
+    #[test]
     fn mixed_producers_share_one_row_order() {
         let mut builder = FrameMaterialTableBuilder::default();
         builder.clear(INVALID_GPU_MATERIAL_SLOT - 1);
@@ -2529,11 +2581,12 @@ mod tests {
         mut build: ResMut<FrameMaterialTableBuild>,
     ) {
         let values = MaterialSlotValues::from(&StandardMaterial::default());
-        for command_index in 0..keys.count.to_usize() {
+        for element_index in 0..keys.count.to_usize() {
             let source = SdfMaterialSourceKey {
-                panel:         keys.panel,
-                command_index: CommandIndex::from(command_index),
-                role:          SdfMaterialRole::Fill,
+                panel:           keys.panel,
+                element:         ElementIndex::from(element_index),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             };
             let _ = build.builder_mut().upsert_values(source.into(), values);
         }
@@ -2791,6 +2844,13 @@ mod tests {
                 "{required} should be inside BatchAssetWrites"
             );
         }
+        assert!(
+            snapshot
+                .append_ready
+                .iter()
+                .any(|name| name.contains("activate_prepared_material_table_buffer")),
+            "activate_prepared_material_table_buffer must promote a pending ShaderBuffer before producers append"
+        );
     }
 
     #[test]

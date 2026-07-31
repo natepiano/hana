@@ -43,6 +43,7 @@ use super::BatchAlphaMode;
 use super::BatchRenderLayers;
 use super::CommandIndex;
 use super::Dirty;
+use super::ElementIndex;
 use super::batch_key;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
@@ -66,8 +67,8 @@ use super::material_table::BatchResourcesReady;
 use super::material_table::FrameMaterialTableBuilder;
 use super::material_table::GpuMaterialSlotId;
 use super::material_table::MaterialSlotAppend;
-use super::material_table::MaterialSlotAppended;
 use super::material_table::MaterialSlotCandidate;
+use super::material_table::MaterialSlotId;
 use super::material_table::MaterialSlotInput;
 use super::material_table::MaterialTableAppendReady;
 use super::material_table::RetainedBatchBufferUploads;
@@ -165,12 +166,15 @@ pub(crate) enum SdfMaterialRole {
 /// Material source identity for one SDF fill or border role.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfMaterialSourceKey {
-    /// Panel entity whose command stream produced this role.
-    pub panel:         Entity,
-    /// Command index of the resolved SDF surface.
-    pub command_index: CommandIndex,
+    /// Panel entity that owns this role.
+    pub panel:           Entity,
+    /// Source element in the panel's layout tree.
+    pub element:         ElementIndex,
+    /// Adjacent-child pair ordinal within `element`; `None` means this role belongs to the
+    /// element itself.
+    pub divider_ordinal: Option<usize>,
     /// Role within the resolved SDF surface.
-    pub role:          SdfMaterialRole,
+    pub role:            SdfMaterialRole,
 }
 
 /// Append-time source material for one SDF material-table role.
@@ -386,14 +390,16 @@ impl ResolvedSdfBatchRecord {
     ) -> Self {
         let pipeline_compatibility = sdf_record_pipeline_compatibility(surface, &materials);
         let fill_source = SdfMaterialSourceKey {
-            panel:         surface.panel_entity,
-            command_index: surface.command_index,
-            role:          SdfMaterialRole::Fill,
+            panel:           surface.panel_entity,
+            element:         surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            role:            SdfMaterialRole::Fill,
         };
         let border_source = SdfMaterialSourceKey {
-            panel:         surface.panel_entity,
-            command_index: surface.command_index,
-            role:          SdfMaterialRole::Border,
+            panel:           surface.panel_entity,
+            element:         surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            role:            SdfMaterialRole::Border,
         };
         let batch_key = SdfBatchKey {
             z_index: surface.draw_depth.z_index(),
@@ -1035,13 +1041,23 @@ pub(crate) fn append_sdf_record_materials(
 #[derive(Clone, Debug, PartialEq)]
 enum SdfRoleAppend {
     NotAuthored,
-    Appended(MaterialSlotAppended<SdfMaterialSourceKey>),
+    Appended(SdfMaterialSlotAppended),
     Held,
     DroppedLimit,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct SdfMaterialSlotAppended {
+    /// Stable row assigned by `FrameMaterialTableBuilder`.
+    slot:                   MaterialSlotId,
+    /// Pipeline compatibility used to choose the batch material.
+    pipeline_compatibility: PipelineCompatibility,
+    /// Resource compatibility used to create the batch material.
+    resource_compatibility: ResourceCompatibility,
+}
+
 impl SdfRoleAppend {
-    fn into_appended(self) -> Option<MaterialSlotAppended<SdfMaterialSourceKey>> {
+    fn into_appended(self) -> Option<SdfMaterialSlotAppended> {
         match self {
             Self::Appended(appended) => Some(appended),
             Self::NotAuthored | Self::Held | Self::DroppedLimit => None,
@@ -1051,8 +1067,8 @@ impl SdfRoleAppend {
 
 impl SdfRecordMaterialSlots {
     fn from_appended(
-        fill: Option<MaterialSlotAppended<SdfMaterialSourceKey>>,
-        border: Option<MaterialSlotAppended<SdfMaterialSourceKey>>,
+        fill: Option<SdfMaterialSlotAppended>,
+        border: Option<SdfMaterialSlotAppended>,
     ) -> Option<Self> {
         let fill_material = fill
             .as_ref()
@@ -1113,7 +1129,8 @@ fn append_sdf_role(
     let input = SdfMaterialSlotInput {
         key: SdfMaterialSourceKey {
             panel: surface.panel_entity,
-            command_index: surface.command_index,
+            element: surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
             role,
         },
         base_material,
@@ -1122,7 +1139,13 @@ fn append_sdf_role(
         sidedness: panel_sidedness,
     };
     match material_table::append_material_slot(builder, &input) {
-        MaterialSlotAppend::Appended(appended) => SdfRoleAppend::Appended(appended),
+        MaterialSlotAppend::Appended(appended) => {
+            SdfRoleAppend::Appended(SdfMaterialSlotAppended {
+                slot:                   appended.slot,
+                pipeline_compatibility: appended.pipeline_compatibility,
+                resource_compatibility: appended.resource_compatibility,
+            })
+        },
         MaterialSlotAppend::DroppedLimit => SdfRoleAppend::DroppedLimit,
     }
 }
@@ -1293,10 +1316,13 @@ fn route_sdf_batch_records(
             panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
             panel_shadow_casting,
         );
-        if let Some(slot_override) = visual_overrides.get(
-            stored_surface.panel_entity(),
-            stored_surface.element_index().get(),
-        ) {
+        if let Some(slot_override) =
+            stored_surface
+                .visual_source_element()
+                .and_then(|element_index| {
+                    visual_overrides.get(stored_surface.panel_entity(), element_index.get())
+                })
+        {
             apply_sdf_visual_override(&mut resolved, slot_override);
         }
         resolved_surfaces.push((resolved, panel_lighting, panel_sidedness, panel_visibility));
@@ -1748,6 +1774,7 @@ mod tests {
     use super::*;
     use crate::AlignX;
     use crate::AlignY;
+    use crate::BorderColor;
     use crate::Mm;
     use crate::Padding;
     use crate::PanelElementId;
@@ -1762,6 +1789,7 @@ mod tests {
     use crate::Tooltips;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
+    use crate::layout::ChildDivider;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -1786,6 +1814,7 @@ mod tests {
     use crate::render::material_table::INVALID_GPU_MATERIAL_SLOT;
     use crate::render::material_table::MATERIAL_TABLE_BINDING;
     use crate::render::material_table::MaterialSlotId;
+    use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableBuffer;
     use crate::render::material_table::MaterialTablePlugin;
     use crate::render::material_table::SDF_MESH_BINDING;
@@ -1809,11 +1838,16 @@ mod tests {
     const ANIMATED_BASE_COLOR_SWING: f32 = 0.05;
     const ANIMATED_BASE_GREEN_SPEED: f32 = 0.23;
     const ANIMATED_BASE_RED_SPEED: f32 = 0.19;
+    const CHILD_DIVIDER_COLOR: Color = Color::srgb(0.1, 0.8, 0.4);
+    const DIVIDER_PANEL_METALLIC: f32 = 0.15;
     const IMAGE_BORDER_COLOR: Color = Color::srgb(0.9, 0.8, 0.2);
     const IMAGE_BORDER_WIDTH_MM: f32 = 1.0;
     const OVERRIDE_OFFSET: Vec2 = Vec2::new(0.005, -0.002);
+    const PARENT_ELEMENT_CORNER_RADIUS: f32 = 4.0;
+    const PARENT_ELEMENT_METALLIC: f32 = 0.85;
     const PEER_FILL_COLOR: Color = Color::srgb(0.2, 0.3, 0.8);
     const SDF_SETTLE_FRAMES: usize = 3;
+    const STATE_BORDER_COLOR: Color = Color::srgb(0.9, 0.7, 0.2);
     const SLOT_OVERRIDE_COLOR: Color = Color::srgb(0.1, 0.9, 0.2);
     const TEST_SLOT: VisualSlotId = VisualSlotId::new(1);
     const TOOLTIP_REVEAL_SETTLE_FRAMES: usize = 6;
@@ -2662,7 +2696,7 @@ mod tests {
         authored_row_color(app, record.border_material)
     }
 
-    fn authored_row_color(app: &App, material: SdfPaintMaterial) -> Vec4 {
+    fn authored_row(app: &App, material: SdfPaintMaterial) -> MaterialSlotValues {
         let SdfPaintMaterial::Authored(slot) = material else {
             panic!("material role should be authored");
         };
@@ -2671,7 +2705,18 @@ mod tests {
             .resource::<FrameMaterialTableBuild>()
             .table()
             .rows()[row_index]
-            .base_color
+    }
+
+    fn authored_row_color(app: &App, material: SdfPaintMaterial) -> Vec4 {
+        authored_row(app, material).base_color
+    }
+
+    fn fill_row_metallic(app: &App, record: &ResolvedSdfBatchRecord) -> f32 {
+        authored_row(app, record.fill_material).metallic
+    }
+
+    fn assert_same_f32(actual: f32, expected: f32) {
+        assert_eq!(actual.to_bits(), expected.to_bits());
     }
 
     fn frame_material_row_count(app: &App) -> usize {
@@ -2679,6 +2724,13 @@ mod tests {
             .resource::<FrameMaterialTableBuild>()
             .table()
             .row_count()
+    }
+
+    fn frame_material_live_row_count(app: &App) -> usize {
+        app.world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .live_row_count()
     }
 
     fn frame_material_capacity(app: &App) -> u32 {
@@ -2912,9 +2964,10 @@ mod tests {
     fn fill_input(material: &StandardMaterial, color: Option<Color>) -> SdfMaterialSlotInput<'_> {
         SdfMaterialSlotInput {
             key:            SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Fill,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             },
             base_material:  material,
             color_override: color,
@@ -2956,9 +3009,10 @@ mod tests {
         render::apply_sidedness(&mut base_material, Sidedness::BackOnly);
         let input = SdfMaterialSlotInput {
             key:            SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Fill,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             },
             base_material:  &base_material,
             color_override: None,
@@ -3447,14 +3501,16 @@ mod tests {
                 command_index: CommandIndex::from(0),
             },
             fill_source:      SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Fill,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             },
             border_source:    SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Border,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Border,
             },
             draw_depth:       draw_depth_for_test(0),
             batch_key:        test_batch_key(),
@@ -4229,7 +4285,7 @@ mod tests {
         assert_eq!(initial.len(), 2);
         assert_authored_slots_are_distinct(&initial);
         assert_eq!(
-            frame_material_row_count(&app),
+            frame_material_live_row_count(&app),
             authored_slot_count(&initial)
         );
 
@@ -4245,7 +4301,7 @@ mod tests {
         assert_eq!(reduced.len(), 1);
         assert_authored_slots_are_distinct(&reduced);
         assert_eq!(
-            frame_material_row_count(&app),
+            frame_material_live_row_count(&app),
             authored_slot_count(&reduced)
         );
     }
@@ -4600,6 +4656,7 @@ mod tests {
             panel_entity:    Entity::from_bits(1),
             command_index:   CommandIndex::from(command_index),
             element_index:   draw_order::ElementIndex::from(command_index),
+            divider_ordinal: None,
             draw_depth:      draw_depth_for_test(command_index),
             fill_material:   ResolvedSdfMaterial {
                 authorship:    fill_authorship,
@@ -4706,6 +4763,146 @@ mod tests {
                         .z_index(peer_z_index),
                     |_| {},
                 );
+            },
+        );
+        builder.build()
+    }
+
+    enum FocusedBorderState {
+        Absent,
+        Authored,
+    }
+
+    enum BorderCommandState {
+        Absent,
+        Authored,
+    }
+
+    enum SiblingBorderState {
+        Absent,
+        Authored,
+    }
+
+    fn focused_border_insertion_tree(focused_border_state: FocusedBorderState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                let first = El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(WIDGET_FILL_COLOR)
+                    .button("stateful");
+                let first = match focused_border_state {
+                    FocusedBorderState::Absent => first,
+                    FocusedBorderState::Authored => first.focused(BorderColor(STATE_BORDER_COLOR)),
+                };
+                builder.with(first, |_| {});
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(PEER_FILL_COLOR),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn border_command_insertion_tree(border_command_state: BorderCommandState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                let first = El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(WIDGET_FILL_COLOR);
+                let first = match border_command_state {
+                    BorderCommandState::Absent => first,
+                    BorderCommandState::Authored => {
+                        first.border(Border::all(Mm(1.0), STATE_BORDER_COLOR))
+                    },
+                };
+                builder.with(first, |_| {});
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(PEER_FILL_COLOR),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn divider_key_tree(sibling_border_state: SiblingBorderState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(WIDGET_FILL_COLOR)
+                .child_divider(ChildDivider::new(Mm(1.0), CHILD_DIVIDER_COLOR)),
+            |builder| {
+                let first = El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(PEER_FILL_COLOR);
+                let first = match sibling_border_state {
+                    SiblingBorderState::Absent => first,
+                    SiblingBorderState::Authored => {
+                        first.border(Border::all(Mm(1.0), STATE_BORDER_COLOR))
+                    },
+                };
+                builder.with(first, |_| {});
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_LABEL_FILL_COLOR),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_TRACK_FILL_COLOR),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn styled_divider_tree(parent_material: Handle<StandardMaterial>) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(WIDGET_FILL_COLOR)
+                .material(parent_material)
+                .corner_radius(PARENT_ELEMENT_CORNER_RADIUS)
+                .child_divider(ChildDivider::new(Mm(1.0), CHILD_DIVIDER_COLOR))
+                .button("styled")
+                .visual_slot(TEST_SLOT),
+            |builder| {
+                for color in [
+                    PEER_FILL_COLOR,
+                    WIDGET_LABEL_FILL_COLOR,
+                    WIDGET_TRACK_FILL_COLOR,
+                ] {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .background(color),
+                        |_| {},
+                    );
+                }
             },
         );
         builder.build()
@@ -5037,6 +5234,309 @@ mod tests {
         app.update();
         let records = sdf_records(&app);
         assert_fill_row_colors(&app, &records, &[WIDGET_FILL_COLOR, PEER_FILL_COLOR]);
+    }
+
+    #[test]
+    fn focused_border_authoring_preserves_sibling_material_source_key() {
+        let mut app = widget_sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            focused_border_insertion_tree(FocusedBorderState::Absent),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let expected = SdfMaterialSourceKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfMaterialRole::Fill,
+        };
+        let records = sdf_records(&app);
+        let initial_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key.command_index),
+            Some(CommandIndex::from(1))
+        );
+        assert!(initial_peer_slot.is_some());
+
+        let updated = app.world_mut().commands().set_tree(
+            panel,
+            focused_border_insertion_tree(FocusedBorderState::Authored),
+        );
+        assert!(
+            updated.is_ok(),
+            "focused-border replacement should be accepted"
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        let updated_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key.command_index),
+            Some(CommandIndex::from(2))
+        );
+        assert_eq!(updated_peer_slot, initial_peer_slot);
+    }
+
+    #[test]
+    fn inserted_border_command_preserves_existing_material_source_key() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            border_command_insertion_tree(BorderCommandState::Absent),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let expected = SdfMaterialSourceKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfMaterialRole::Fill,
+        };
+        let records = sdf_records(&app);
+        let initial_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key.command_index),
+            Some(CommandIndex::from(1))
+        );
+        assert!(initial_peer_slot.is_some());
+
+        let updated = app.world_mut().commands().set_tree(
+            panel,
+            border_command_insertion_tree(BorderCommandState::Authored),
+        );
+        assert!(updated.is_ok(), "border replacement should be accepted");
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        let updated_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key.command_index),
+            Some(CommandIndex::from(2))
+        );
+        assert_eq!(updated_peer_slot, initial_peer_slot);
+    }
+
+    #[test]
+    fn divider_material_source_keys_are_distinct_and_stable() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            divider_key_tree(SiblingBorderState::Absent),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let parent_fill = SdfMaterialSourceKey {
+            panel,
+            element: ElementIndex::from(1),
+            divider_ordinal: None,
+            role: SdfMaterialRole::Fill,
+        };
+        let expected = HashSet::from([
+            SdfMaterialSourceKey {
+                panel,
+                element: ElementIndex::from(1),
+                divider_ordinal: Some(0),
+                role: SdfMaterialRole::Fill,
+            },
+            SdfMaterialSourceKey {
+                panel,
+                element: ElementIndex::from(1),
+                divider_ordinal: Some(1),
+                role: SdfMaterialRole::Fill,
+            },
+        ]);
+        let records = sdf_records(&app);
+        let divider_keys: HashSet<_> = records
+            .iter()
+            .map(|record| record.fill_source)
+            .filter(|source| source.divider_ordinal.is_some())
+            .collect();
+        let divider_slots: HashSet<_> = records
+            .iter()
+            .filter(|record| record.fill_source.divider_ordinal.is_some())
+            .filter_map(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            })
+            .collect();
+        let parent_fill_slot = records.iter().find_map(|record| {
+            match (record.fill_source == parent_fill, record.fill_material) {
+                (true, SdfPaintMaterial::Authored(slot)) => Some(slot),
+                _ => None,
+            }
+        });
+        let initial_divider_command_indices: HashMap<_, _> = records
+            .iter()
+            .map(|record| (record.fill_source, record.record_key.command_index))
+            .filter(|(source, _)| source.divider_ordinal.is_some())
+            .collect();
+        assert_eq!(divider_keys, expected);
+        assert!(parent_fill_slot.is_some());
+        assert!(
+            divider_slots
+                .iter()
+                .all(|divider_slot| Some(*divider_slot) != parent_fill_slot)
+        );
+        assert_eq!(divider_slots.len(), 2);
+
+        let updated = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, divider_key_tree(SiblingBorderState::Authored));
+        assert!(updated.is_ok(), "divider replacement should be accepted");
+        settle_sdf_pipeline(&mut app);
+
+        let divider_keys: HashSet<_> = sdf_records(&app)
+            .iter()
+            .map(|record| record.fill_source)
+            .filter(|source| source.divider_ordinal.is_some())
+            .collect();
+        assert_eq!(divider_keys, expected);
+        let updated_divider_command_indices: HashMap<_, _> = sdf_records(&app)
+            .iter()
+            .map(|record| (record.fill_source, record.record_key.command_index))
+            .filter(|(source, _)| source.divider_ordinal.is_some())
+            .collect();
+        assert!(
+            expected.iter().all(|key| {
+                matches!(
+                    (
+                        initial_divider_command_indices.get(key),
+                        updated_divider_command_indices.get(key),
+                    ),
+                    (Some(before), Some(after)) if after > before
+                )
+            }),
+            "the inserted sibling border must shift both divider commands",
+        );
+    }
+
+    #[test]
+    fn dividers_ignore_parent_material_and_visual_slot_overrides() {
+        let mut app = widget_sdf_pipeline_app();
+        let parent_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic: PARENT_ELEMENT_METALLIC,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            styled_divider_tree(parent_material),
+            StandardMaterial {
+                metallic: DIVIDER_PANEL_METALLIC,
+                ..Default::default()
+            },
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_fill_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        let Some(parent_fill) = records.iter().find(|record| {
+            record.fill_source.divider_ordinal.is_none()
+                && fill_row_color(&app, record) == linear_color(SLOT_OVERRIDE_COLOR)
+        }) else {
+            panic!();
+        };
+        let dividers: Vec<_> = records
+            .iter()
+            .filter(|record| record.fill_source.divider_ordinal.is_some())
+            .collect();
+
+        assert_eq!(dividers.len(), 2);
+        assert_eq!(
+            fill_row_color(&app, parent_fill),
+            linear_color(SLOT_OVERRIDE_COLOR)
+        );
+        assert_same_f32(
+            fill_row_metallic(&app, parent_fill),
+            PARENT_ELEMENT_METALLIC,
+        );
+        assert_ne!(parent_fill.corner_radii.value, Vec4::ZERO);
+        for divider in dividers {
+            assert_eq!(
+                fill_row_color(&app, divider),
+                linear_color(CHILD_DIVIDER_COLOR)
+            );
+            assert_same_f32(fill_row_metallic(&app, divider), DIVIDER_PANEL_METALLIC);
+            assert_eq!(divider.corner_radii.value, Vec4::ZERO);
+        }
     }
 
     #[test]

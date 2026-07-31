@@ -828,7 +828,7 @@ fn emit_child_dividers(
     let color = divider.color();
 
     // Draw a line between each pair of adjacent children.
-    for pair in children.windows(2) {
+    for (ordinal, pair) in children.windows(2).enumerate() {
         let a_bounds = computed[pair[0]].bounds;
         let b_bounds = computed[pair[1]].bounds;
 
@@ -846,7 +846,7 @@ fn emit_child_dividers(
                 },
                 RenderCommandKind::Rectangle {
                     color,
-                    source: RectangleSource::ChildDivider,
+                    source: RectangleSource::ChildDivider { ordinal },
                 },
                 parent_idx,
                 parent.z_index,
@@ -865,7 +865,7 @@ fn emit_child_dividers(
                 },
                 RenderCommandKind::Rectangle {
                     color,
-                    source: RectangleSource::ChildDivider,
+                    source: RectangleSource::ChildDivider { ordinal },
                 },
                 parent_idx,
                 parent.z_index,

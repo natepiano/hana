@@ -128,8 +128,10 @@ fn sync_panel_interaction_layers(
 /// Gathered fill + border data for a single element.
 #[derive(Clone, Copy)]
 pub(crate) struct ElementSurface {
-    /// `Element` index in the layout tree.
+    /// Layout-tree identity for this surface, or the parent identity for a child divider.
     index:                  ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
+    divider_ordinal:        Option<usize>,
     /// Bounding box from the render command.
     bounds:                 BoundingBox,
     /// Fill command state, if the element has an authored fill command.
@@ -190,6 +192,17 @@ struct ElementBorder {
 }
 
 impl ElementSurface {
+    /// Returns the element whose visual properties apply to this surface.
+    ///
+    /// Child dividers retain their parent `ElementIndex` for material-table
+    /// identity, but resolve their material and corner radius from the panel.
+    const fn visual_source_element(self) -> Option<ElementIndex> {
+        match self.divider_ordinal {
+            Some(_) => None,
+            None => Some(self.index),
+        }
+    }
+
     const fn fill_only(self) -> Self {
         let Some(fill) = self.fill else {
             return self;
@@ -408,9 +421,11 @@ fn gather_surfaces(
                     continue;
                 };
                 let command_index = CommandIndex::from(cmd_index);
-                if *source == RectangleSource::ChildDivider {
+                let element_index = ElementIndex::from(cmd.element_idx);
+                if let RectangleSource::ChildDivider { ordinal } = source {
                     dividers.push(ElementSurface {
-                        index: ElementIndex::CHILD_DIVIDER,
+                        index: element_index,
+                        divider_ordinal: Some(*ordinal),
                         bounds: cmd.bounds,
                         fill: Some(ElementFill {
                             color: *color,
@@ -425,11 +440,11 @@ fn gather_surfaces(
                         fill_material_override: FillMaterialOverride::Included,
                     });
                 } else {
-                    let element_index = ElementIndex::from(cmd.element_idx);
                     let surface = surfaces
                         .entry(element_index)
                         .or_insert_with(|| ElementSurface {
                             index: element_index,
+                            divider_ordinal: None,
                             bounds: cmd.bounds,
                             fill: None,
                             border: None,
@@ -459,6 +474,7 @@ fn gather_surfaces(
                     .entry(element_index)
                     .or_insert_with(|| ElementSurface {
                         index: element_index,
+                        divider_ordinal: None,
                         bounds: cmd.bounds,
                         fill: None,
                         border: None,
@@ -488,7 +504,7 @@ fn gather_surfaces(
 }
 
 /// Flattens the gathered surfaces and dividers into one list of surfaces to
-/// render, each keyed by its `command_index`.
+/// render, each keyed by its source element and divider ordinal.
 fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
     let mut desired: Vec<ElementSurface> = gathered.surfaces.into_values().collect();
     desired.extend(gathered.dividers);
@@ -514,9 +530,11 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     pub(crate) command_index:   CommandIndex,
-    /// Index of the source element in the panel's `LayoutTree`; widget
-    /// visual-slot overrides key on `(panel_entity, element_index)`.
+    /// Layout-tree identity used by the material-table source key; child
+    /// dividers retain their parent element identity here.
     pub(crate) element_index:   ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
+    pub(crate) divider_ordinal: Option<usize>,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     pub(crate) draw_depth:      DrawCommandDepth,
     /// Fill material input consumed by the SDF material table.
@@ -617,6 +635,8 @@ pub(crate) struct StoredResolvedSdfSurface {
     command_index:   CommandIndex,
     /// Index of the source element in the panel's `LayoutTree`.
     element_index:   ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
+    divider_ordinal: Option<usize>,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     draw_depth:      DrawCommandDepth,
     /// Fill material source for the SDF material table.
@@ -645,6 +665,7 @@ impl StoredResolvedSdfSurface {
             panel_entity:    surface.panel_entity,
             command_index:   surface.command_index,
             element_index:   surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
             draw_depth:      surface.draw_depth,
             fill_material:   StoredResolvedSdfMaterial::from_resolved(&surface.fill_material),
             border_material: StoredResolvedSdfMaterial::from_resolved(&surface.border_material),
@@ -661,8 +682,17 @@ impl StoredResolvedSdfSurface {
     /// Returns the owning `DiegeticPanel` entity.
     pub(crate) const fn panel_entity(&self) -> Entity { self.panel_entity }
 
-    /// Returns the source element index in the panel's `LayoutTree`.
-    pub(crate) const fn element_index(&self) -> ElementIndex { self.element_index }
+    /// Returns the element whose widget visual-slot override applies.
+    ///
+    /// A child divider uses its parent `ElementIndex` for retained-table
+    /// identity only, so it has no visual-slot source element.
+    #[must_use]
+    pub(crate) const fn visual_source_element(&self) -> Option<ElementIndex> {
+        match self.divider_ordinal {
+            Some(_) => None,
+            None => Some(self.element_index),
+        }
+    }
 
     /// Borrows the stored surface with current panel render state.
     pub(crate) const fn as_resolved(
@@ -674,6 +704,7 @@ impl StoredResolvedSdfSurface {
             panel_entity: self.panel_entity,
             command_index: self.command_index,
             element_index: self.element_index,
+            divider_ordinal: self.divider_ordinal,
             draw_depth: self.draw_depth,
             fill_material: self.fill_material.as_resolved(),
             border_material: self.border_material.as_resolved(),
@@ -764,12 +795,10 @@ pub(crate) fn resolve_sdf_surface<'a>(
     surface: &ElementSurface,
     context: &'a PanelReconcileContext<'a>,
 ) -> ResolvedSdfSurface<'a> {
-    let element_mat = context.panel.tree().element_material(surface.index.get());
-    let base_material = element_mat.map_or(&context.sdf_material, core::convert::identity);
+    let (visual_source_element, base_material, material_override_authors_fill) =
+        resolve_surface_material(surface, context);
     let fill_color = surface.fill.map(|fill| fill.color);
     let border_color = surface.border.map(|border| border.color);
-    let material_override_authors_fill =
-        element_mat.is_override() && surface.fill_material_override.is_included();
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = fill_color.or({
@@ -782,8 +811,9 @@ pub(crate) fn resolve_sdf_surface<'a>(
 
     let local_width = surface.bounds.width * context.points_to_world;
     let local_height = surface.bounds.height * context.points_to_world;
-    let corner_radii =
-        panel_local_corner_radii(context.panel, surface.index, context.points_to_world);
+    let corner_radii = visual_source_element.map_or([0.0; 4], |element_index| {
+        panel_local_corner_radii(context.panel, element_index, context.points_to_world)
+    });
     let border_widths = surface
         .border
         .map_or([0.0; 4], |border| border.widths)
@@ -858,6 +888,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
         panel_entity: context.panel_entity,
         command_index: surface.command_index,
         element_index: surface.index,
+        divider_ordinal: surface.divider_ordinal,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
             authorship:    if fill_color.is_some() || material_override_authors_fill {
@@ -887,6 +918,31 @@ pub(crate) fn resolve_sdf_surface<'a>(
         render_layers: context.layer.clone(),
         shadow_casting: context.shadow_casting,
     }
+}
+
+/// Resolves the panel or element material that applies to an `ElementSurface`.
+fn resolve_surface_material<'a>(
+    surface: &ElementSurface,
+    context: &'a PanelReconcileContext<'a>,
+) -> (Option<ElementIndex>, &'a Handle<StandardMaterial>, bool) {
+    let visual_source_element = surface.visual_source_element();
+    let (base_material, element_material_is_override) = match visual_source_element {
+        Some(element_index) => {
+            let element_material = context.panel.tree().element_material(element_index.get());
+            (
+                element_material.map_or(&context.sdf_material, core::convert::identity),
+                element_material.is_override(),
+            )
+        },
+        None => (&context.sdf_material, false),
+    };
+    let material_override_authors_fill =
+        element_material_is_override && surface.fill_material_override.is_included();
+    (
+        visual_source_element,
+        base_material,
+        material_override_authors_fill,
+    )
 }
 
 fn panel_local_corner_radii(

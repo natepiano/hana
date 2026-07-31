@@ -121,9 +121,6 @@ impl CommandIndex {
 }
 
 impl ElementIndex {
-    /// Sentinel used for child-divider rectangles that have no source element.
-    pub(crate) const CHILD_DIVIDER: Self = Self(usize::MAX);
-
     /// Returns the index into the panel's `LayoutTree`.
     #[must_use]
     pub(crate) const fn get(self) -> usize { self.0 }

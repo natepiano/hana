@@ -1243,7 +1243,7 @@ fn overlay_does_not_emit_between_child_dividers() {
             matches!(
                 command.kind,
                 RenderCommandKind::Rectangle {
-                    source: RectangleSource::ChildDivider,
+                    source: RectangleSource::ChildDivider { .. },
                     ..
                 }
             )
@@ -2189,7 +2189,7 @@ fn fit_table_with_grow_rows_aligns_middle_column() {
             matches!(
                 command.kind,
                 RenderCommandKind::Rectangle {
-                    source: RectangleSource::ChildDivider,
+                    source: RectangleSource::ChildDivider { .. },
                     ..
                 }
             )
@@ -2275,7 +2275,7 @@ fn child_dividers_emitted() {
             matches!(
                 cmd.kind,
                 RenderCommandKind::Rectangle {
-                    source: RectangleSource::ChildDivider,
+                    source: RectangleSource::ChildDivider { .. },
                     ..
                 }
             ) && cmd.element_idx == 1
@@ -2334,7 +2334,7 @@ fn cached_geometry_regeneration_preserves_up_traversal_commands() {
             matches!(
                 command.kind,
                 RenderCommandKind::Rectangle {
-                    source: RectangleSource::ChildDivider,
+                    source: RectangleSource::ChildDivider { .. },
                     ..
                 }
             )
