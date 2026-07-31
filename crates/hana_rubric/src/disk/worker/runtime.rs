@@ -1,0 +1,948 @@
+//! Dedicated filesystem worker for user keymap snapshots.
+
+use std::fs;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::Write;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
+
+use notify::RecommendedWatcher;
+
+use super::super::companion_files::publish_companion_files;
+use super::super::constants::DEBOUNCE_INTERVAL;
+use super::super::constants::POLL_INTERVAL;
+use super::super::constants::RETRY_INTERVAL;
+use super::super::paths::KeymapPaths;
+use super::channels::CoalescingSlot;
+use super::channels::DiskSnapshot;
+use super::channels::DiskWorkerChannels;
+use super::channels::DiskWorkerMessage;
+use super::channels::WorkerControl;
+use super::channels::WorkerStatus;
+use super::channels::disk_diagnostic;
+use super::channels::disk_error_diagnostic;
+#[cfg(test)]
+use super::watch::TestWatcher;
+use super::watch::WatchMode;
+use super::watch::WatchNotifications;
+use crate::Diagnostic;
+
+const USER_KEYMAP_STUB: &[u8] = br#"{
+  "$schema": "./keymap.schema.json",
+  "bindings": []
+}"#;
+
+/// Starts the dedicated disk worker for one configured application.
+#[expect(
+    dead_code,
+    reason = "plugin assembly will start the disk worker after companion generation is added"
+)]
+pub(crate) fn start_disk_worker(
+    app_name: &str,
+    default_keymap: Vec<u8>,
+    schema: Vec<u8>,
+) -> DiskWorkerChannels {
+    start_disk_worker_with(
+        app_name,
+        default_keymap,
+        schema,
+        WorkerTimings::production(),
+        WatchMode::Native,
+    )
+}
+
+pub(super) fn start_disk_worker_with(
+    app_name: &str,
+    default_keymap: Vec<u8>,
+    schema: Vec<u8>,
+    worker_timings: WorkerTimings,
+    watch_mode: WatchMode,
+) -> DiskWorkerChannels {
+    let slot = CoalescingSlot::new();
+    let (control_sender, control_receiver) = mpsc::channel();
+    let status = Arc::new(WorkerStatus::default());
+    #[cfg(test)]
+    let (test_watcher, watcher_notifications, watcher_receiver) = match watch_mode {
+        WatchMode::Injected => {
+            let watcher_notifications = Arc::new(Mutex::new(WatchNotifications::default()));
+            let (watcher_sender, watcher_receiver) = mpsc::sync_channel(1);
+            let test_watcher = TestWatcher {
+                watcher_notifications: Arc::clone(&watcher_notifications),
+                watcher_sender,
+            };
+
+            (
+                Some(test_watcher),
+                Some(watcher_notifications),
+                Some(watcher_receiver),
+            )
+        },
+        WatchMode::Native | WatchMode::PollOnly => (None, None, None),
+    };
+    #[cfg(not(test))]
+    let (watcher_notifications, watcher_receiver) = (None, None);
+    let disk_worker = DiskWorker {
+        app_name: app_name.to_owned(),
+        default_keymap,
+        schema,
+        slot: slot.clone(),
+        control_receiver,
+        status: Arc::clone(&status),
+        worker_timings,
+        watch_mode,
+        watcher: None,
+        watcher_notifications,
+        watcher_receiver,
+        observed_keymap: ObservedKeymap::Unknown,
+        dirty_at: None,
+        missing_retry_at: None,
+        next_poll_at: worker_timings.poll.map(|poll| Instant::now() + poll),
+        parent_exists: false,
+        reported_read_error: None,
+        reported_watch_error: None,
+    };
+    let join_handle = thread::spawn(move || disk_worker.run());
+
+    DiskWorkerChannels {
+        slot,
+        control_sender,
+        join_handle: Some(join_handle),
+        status,
+        #[cfg(test)]
+        test_watcher,
+    }
+}
+
+pub(super) struct DiskWorker {
+    app_name:                         String,
+    default_keymap:                   Vec<u8>,
+    schema:                           Vec<u8>,
+    slot:                             CoalescingSlot,
+    control_receiver:                 mpsc::Receiver<WorkerControl>,
+    pub(super) status:                Arc<WorkerStatus>,
+    pub(super) worker_timings:        WorkerTimings,
+    pub(super) watch_mode:            WatchMode,
+    pub(super) watcher:               Option<RecommendedWatcher>,
+    pub(super) watcher_notifications: Option<Arc<Mutex<WatchNotifications>>>,
+    pub(super) watcher_receiver:      Option<mpsc::Receiver<()>>,
+    observed_keymap:                  ObservedKeymap,
+    pub(super) dirty_at:              Option<Instant>,
+    missing_retry_at:                 Option<Instant>,
+    next_poll_at:                     Option<Instant>,
+    pub(super) parent_exists:         bool,
+    reported_read_error:              Option<String>,
+    pub(super) reported_watch_error:  Option<String>,
+}
+
+impl DiskWorker {
+    fn run(mut self) {
+        let Some(paths) = KeymapPaths::new(&self.app_name) else {
+            self.report_diagnostics(vec![disk_diagnostic(
+                Path::new(&self.app_name),
+                "Could not resolve a configuration directory for the keymap application.",
+            )]);
+            return;
+        };
+
+        self.report_diagnostics(publish_companion_files(
+            &paths,
+            &self.default_keymap,
+            &self.schema,
+        ));
+        self.create_user_stub(&paths);
+        self.read_user_keymap(&paths, Instant::now());
+        self.parent_exists = paths.config_directory().is_dir();
+        self.recreate_watcher(&paths);
+
+        while self.process_control() {
+            let now = Instant::now();
+            self.process_due_work(&paths, now);
+
+            let timeout = self.next_deadline(now).min(self.worker_timings.retry);
+
+            match self.watcher_receiver.as_ref() {
+                Some(watcher_receiver) => match watcher_receiver.recv_timeout(timeout) {
+                    Ok(()) => self.handle_watcher_notifications(&paths),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                    Err(mpsc::RecvTimeoutError::Disconnected) => self.handle_watcher_failure(
+                        &paths,
+                        String::from("The keymap watcher notification channel disconnected."),
+                    ),
+                },
+                None => match self.control_receiver.recv_timeout(timeout) {
+                    Ok(WorkerControl::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                },
+            }
+        }
+
+        self.status.watching.store(false, Ordering::Release);
+    }
+
+    fn process_control(&self) -> bool {
+        match self.control_receiver.try_recv() {
+            Ok(WorkerControl::Stop) | Err(mpsc::TryRecvError::Disconnected) => false,
+            Err(mpsc::TryRecvError::Empty) => true,
+        }
+    }
+
+    fn process_due_work(&mut self, paths: &KeymapPaths, now: Instant) {
+        let dirty_due = self.dirty_at.is_some_and(|dirty_at| dirty_at <= now);
+        let retry_due = self
+            .missing_retry_at
+            .is_some_and(|missing_retry_at| missing_retry_at <= now);
+
+        if dirty_due {
+            self.dirty_at = None;
+            self.read_user_keymap(paths, now);
+        } else if retry_due {
+            self.read_user_keymap(paths, now);
+        }
+
+        if self
+            .next_poll_at
+            .is_some_and(|next_poll_at| next_poll_at <= now)
+        {
+            self.next_poll_at = self.worker_timings.poll.map(|poll| now + poll);
+            self.audit(paths, now);
+        }
+    }
+
+    fn next_deadline(&self, now: Instant) -> Duration {
+        [self.dirty_at, self.missing_retry_at, self.next_poll_at]
+            .into_iter()
+            .flatten()
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .min()
+            .unwrap_or(self.worker_timings.retry)
+    }
+
+    fn create_user_stub(&self, paths: &KeymapPaths) {
+        if let Err(error) = fs::create_dir_all(paths.config_directory()) {
+            self.report_diagnostics(vec![disk_error_diagnostic(
+                paths.config_directory(),
+                "Could not create the keymap configuration directory",
+                &error,
+            )]);
+            return;
+        }
+
+        let user_keymap = paths.user_keymap();
+        let stub_file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(user_keymap);
+
+        match stub_file {
+            Ok(mut stub_file) => {
+                if let Err(error) = stub_file.write_all(USER_KEYMAP_STUB) {
+                    self.report_diagnostics(vec![disk_error_diagnostic(
+                        user_keymap,
+                        "Could not write the first-launch keymap stub",
+                        &error,
+                    )]);
+                }
+            },
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {},
+            Err(error) => self.report_diagnostics(vec![disk_error_diagnostic(
+                user_keymap,
+                "Could not create the first-launch keymap stub",
+                &error,
+            )]),
+        }
+    }
+
+    pub(super) fn read_user_keymap(&mut self, paths: &KeymapPaths, now: Instant) {
+        #[cfg(test)]
+        self.status.read_attempts.fetch_add(1, Ordering::Release);
+
+        match fs::read(paths.user_keymap()) {
+            Ok(contents) => self.observe_contents(paths, Arc::from(contents)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                #[cfg(test)]
+                self.status
+                    .not_found_observations
+                    .fetch_add(1, Ordering::Release);
+                self.observe_absence(paths, now);
+            },
+            Err(error) => {
+                let message = error.to_string();
+
+                if self.reported_read_error.as_deref() != Some(message.as_str()) {
+                    self.report_diagnostics(vec![disk_error_diagnostic(
+                        paths.user_keymap(),
+                        "Could not read the user keymap",
+                        &error,
+                    )]);
+                    self.reported_read_error = Some(message);
+                }
+
+                self.missing_retry_at = Some(now + self.worker_timings.retry);
+            },
+        }
+    }
+
+    fn observe_contents(&mut self, paths: &KeymapPaths, contents: Arc<[u8]>) {
+        let changed = !matches!(
+            &self.observed_keymap,
+            ObservedKeymap::Present(previous) if previous.as_ref() == contents.as_ref()
+        );
+
+        self.observed_keymap = ObservedKeymap::Present(Arc::clone(&contents));
+        self.missing_retry_at = None;
+        self.reported_read_error = None;
+
+        if changed {
+            self.publish_snapshot(paths, Some(contents));
+        }
+    }
+
+    fn observe_absence(&mut self, paths: &KeymapPaths, now: Instant) {
+        if matches!(self.observed_keymap, ObservedKeymap::Missing) {
+            return;
+        }
+
+        let Some(missing_retry_at) = self.missing_retry_at else {
+            self.missing_retry_at = Some(now + self.worker_timings.retry);
+            return;
+        };
+
+        if now < missing_retry_at {
+            return;
+        }
+
+        if self.dirty_at.is_some() {
+            self.missing_retry_at = Some(now + self.worker_timings.retry);
+            return;
+        }
+
+        self.observed_keymap = ObservedKeymap::Missing;
+        self.missing_retry_at = None;
+        self.reported_read_error = None;
+        self.publish_snapshot(paths, None);
+    }
+
+    fn publish_snapshot(&self, paths: &KeymapPaths, contents: Option<Arc<[u8]>>) {
+        self.slot.publish(DiskWorkerMessage {
+            snapshot:              Some(DiskSnapshot {
+                source_path: paths.user_keymap().to_path_buf(),
+                contents,
+            }),
+            diagnostics:           Vec::new(),
+            discarded_diagnostics: 0,
+        });
+    }
+
+    pub(super) fn report_diagnostics(&self, diagnostics: Vec<Diagnostic>) {
+        if diagnostics.is_empty() {
+            return;
+        }
+
+        self.slot.publish(DiskWorkerMessage {
+            snapshot: None,
+            diagnostics,
+            discarded_diagnostics: 0,
+        });
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct WorkerTimings {
+    pub(super) debounce: Duration,
+    pub(super) poll:     Option<Duration>,
+    pub(super) retry:    Duration,
+}
+
+impl WorkerTimings {
+    pub(super) const fn production() -> Self {
+        Self {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     Some(POLL_INTERVAL),
+            retry:    RETRY_INTERVAL,
+        }
+    }
+}
+
+enum ObservedKeymap {
+    Unknown,
+    Present(Arc<[u8]>),
+    Missing,
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests stop when their isolated disk-worker setup fails"
+)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use super::DiskWorkerChannels;
+    use super::DiskWorkerMessage;
+    use super::USER_KEYMAP_STUB;
+    use super::WatchMode;
+    use super::WorkerTimings;
+    use super::start_disk_worker_with;
+    use crate::disk::KeymapPaths;
+    use crate::disk::paths::ENVIRONMENT_LOCK;
+    use crate::disk::paths::TestDirectory;
+    use crate::disk::paths::XdgConfigHome;
+
+    const DEFAULT_KEYMAP: &[u8] = b"{\"bindings\": []}";
+    const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
+    const ERROR_RETRY_WINDOWS: u32 = 6;
+    const POLL_AUDIT_INTERVAL: Duration = Duration::from_millis(20);
+    const QUIESCENCE_INTERVAL: Duration = Duration::from_millis(180);
+    const RETRY_ASSERTION_MARGIN: Duration = Duration::from_millis(20);
+    const RETRY_GRACE_INTERVAL: Duration = Duration::from_millis(250);
+    const RETRY_INTERVAL: Duration = Duration::from_millis(30);
+    const TEST_APP_NAME: &str = "hana-rubric-worker-test";
+    const TEST_TIMEOUT: Duration = Duration::from_secs(3);
+    const WAIT_INTERVAL: Duration = Duration::from_millis(5);
+
+    fn worker_timings() -> WorkerTimings {
+        WorkerTimings {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     Some(POLL_AUDIT_INTERVAL),
+            retry:    RETRY_INTERVAL,
+        }
+    }
+
+    fn worker_timings_without_polling() -> WorkerTimings {
+        WorkerTimings {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     None,
+            retry:    RETRY_INTERVAL,
+        }
+    }
+
+    fn worker_timings_for_retry_before_debounce() -> WorkerTimings {
+        WorkerTimings {
+            debounce: RETRY_INTERVAL.saturating_mul(2),
+            poll:     None,
+            retry:    RETRY_INTERVAL,
+        }
+    }
+
+    fn worker_timings_with_retry_grace() -> WorkerTimings {
+        WorkerTimings {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     None,
+            retry:    RETRY_GRACE_INTERVAL,
+        }
+    }
+
+    fn isolated_paths(temporary_directory: &TestDirectory) -> Result<KeymapPaths, String> {
+        let paths = KeymapPaths::new(TEST_APP_NAME)
+            .ok_or_else(|| String::from("test keymap paths should resolve"))?;
+
+        if !paths
+            .config_directory()
+            .starts_with(temporary_directory.path())
+        {
+            return Err(String::from(
+                "test keymap path escaped the temporary directory",
+            ));
+        }
+
+        Ok(paths)
+    }
+
+    fn start_worker(watch_mode: WatchMode) -> DiskWorkerChannels {
+        start_disk_worker_with(
+            TEST_APP_NAME,
+            DEFAULT_KEYMAP.to_vec(),
+            b"{}".to_vec(),
+            worker_timings(),
+            watch_mode,
+        )
+    }
+
+    fn start_injected_worker(worker_timings: WorkerTimings) -> DiskWorkerChannels {
+        start_disk_worker_with(
+            TEST_APP_NAME,
+            DEFAULT_KEYMAP.to_vec(),
+            b"{}".to_vec(),
+            worker_timings,
+            WatchMode::Injected,
+        )
+    }
+
+    fn wait_for_message(worker: &DiskWorkerChannels) -> Result<DiskWorkerMessage, String> {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        while Instant::now() < deadline {
+            if let Some(message) = worker.take_message() {
+                return Ok(message);
+            }
+
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Err(String::from(
+            "disk worker did not publish a message before the test timeout",
+        ))
+    }
+
+    fn wait_for_watcher(worker: &DiskWorkerChannels, expected: bool) -> Result<(), String> {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        while Instant::now() < deadline {
+            if worker.is_watching() == expected {
+                return Ok(());
+            }
+
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Err(format!("disk worker watch state did not become {expected}"))
+    }
+
+    fn assert_snapshot(
+        message: &DiskWorkerMessage,
+        path: &Path,
+        expected_contents: Option<&[u8]>,
+    ) -> Result<(), String> {
+        let snapshot = message
+            .snapshot
+            .as_ref()
+            .ok_or_else(|| String::from("disk worker message has no snapshot"))?;
+
+        if snapshot.source_path != path {
+            return Err(format!(
+                "disk worker used `{}` instead of `{}`",
+                snapshot.source_path.display(),
+                path.display()
+            ));
+        }
+
+        if snapshot.contents.as_deref() != expected_contents {
+            return Err(String::from(
+                "disk worker snapshot contents differed from the file",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn expect_no_message_for(
+        worker: &DiskWorkerChannels,
+        duration: Duration,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + duration;
+
+        while Instant::now() < deadline {
+            if worker.take_message().is_some() {
+                return Err(String::from(
+                    "disk worker published unexpectedly during the quiet interval",
+                ));
+            }
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Ok(())
+    }
+
+    fn expect_no_absence_snapshot(
+        worker: &DiskWorkerChannels,
+        duration: Duration,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + duration;
+
+        while Instant::now() < deadline {
+            if let Some(message) = worker.take_message()
+                && message
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.contents.is_none())
+            {
+                return Err(String::from(
+                    "disk worker published confirmed deletion before the retry grace expired",
+                ));
+            }
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Ok(())
+    }
+
+    fn wait_for_dirty_notifications(
+        worker: &DiskWorkerChannels,
+        expected: usize,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        while Instant::now() < deadline {
+            if worker.dirty_notifications() >= expected {
+                return Ok(());
+            }
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Err(format!(
+            "disk worker observed {} dirty notifications instead of at least {expected}",
+            worker.dirty_notifications()
+        ))
+    }
+
+    fn wait_for_not_found_observations(
+        worker: &DiskWorkerChannels,
+        expected: usize,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        while Instant::now() < deadline {
+            if worker.not_found_observations() >= expected {
+                return Ok(());
+            }
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Err(format!(
+            "disk worker observed {} missing keymaps instead of at least {expected}",
+            worker.not_found_observations()
+        ))
+    }
+
+    fn wait_for_read_attempts(worker: &DiskWorkerChannels, expected: usize) -> Result<(), String> {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        while Instant::now() < deadline {
+            if worker.read_attempts() >= expected {
+                return Ok(());
+            }
+            thread::sleep(WAIT_INTERVAL);
+        }
+
+        Err(format!(
+            "disk worker read {} times instead of at least {expected}",
+            worker.read_attempts()
+        ))
+    }
+
+    #[test]
+    fn watcher_edges_produce_one_debounced_read() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("rename-save").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let worker_timings = worker_timings_for_retry_before_debounce();
+        let mut worker = start_injected_worker(worker_timings);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        wait_for_watcher(&worker, true)?;
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(USER_KEYMAP_STUB),
+        )?;
+        let initial_read_attempts = worker.read_attempts();
+
+        let saved_contents = b"{\"bindings\": [{\"bindings\": {}}]}";
+        fs::write(paths.user_keymap(), saved_contents)
+            .map_err(|error| format!("saved keymap write failed: {error}"))?;
+        worker.inject_watcher_dirty()?;
+        wait_for_dirty_notifications(&worker, 1)?;
+        if worker.read_attempts() != initial_read_attempts {
+            return Err(String::from(
+                "the first watcher edge read before the final debounced edge",
+            ));
+        }
+
+        worker.inject_watcher_dirty()?;
+        wait_for_dirty_notifications(&worker, 2)?;
+        if worker.read_attempts() != initial_read_attempts {
+            return Err(String::from(
+                "the final watcher edge read before its debounce interval expired",
+            ));
+        }
+
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(saved_contents),
+        )?;
+        if worker.read_attempts() != initial_read_attempts + 1 {
+            return Err(String::from(
+                "the debounced watcher edges performed more than one read",
+            ));
+        }
+        expect_no_message_for(&worker, QUIESCENCE_INTERVAL)?;
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn retry_before_debounce_does_not_confirm_absence() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("retry-before-debounce").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let worker_timings = worker_timings_without_polling();
+        let mut worker = start_injected_worker(worker_timings);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(USER_KEYMAP_STUB),
+        )?;
+
+        fs::remove_file(paths.user_keymap())
+            .map_err(|error| format!("user keymap removal failed: {error}"))?;
+        worker.inject_watcher_dirty()?;
+        wait_for_dirty_notifications(&worker, 1)?;
+        worker.inject_watcher_failure()?;
+        wait_for_not_found_observations(&worker, 1)?;
+        expect_no_absence_snapshot(&worker, WAIT_INTERVAL)?;
+
+        thread::sleep(worker_timings.retry + WAIT_INTERVAL);
+        expect_no_absence_snapshot(&worker, WAIT_INTERVAL)?;
+
+        let restored_contents = b"{\"bindings\": [{\"bindings\": {}}]}";
+        fs::write(paths.user_keymap(), restored_contents)
+            .map_err(|error| format!("restored keymap write failed: {error}"))?;
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(restored_contents),
+        )?;
+        expect_no_message_for(&worker, QUIESCENCE_INTERVAL)?;
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn transient_rename_absence_does_not_publish_deletion() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("transient-absence").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let worker_timings = worker_timings_with_retry_grace();
+        let mut worker = start_injected_worker(worker_timings);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(USER_KEYMAP_STUB),
+        )?;
+
+        let temporary_keymap = paths.config_directory().join("keymap.jsonc.tmp");
+        fs::rename(paths.user_keymap(), &temporary_keymap)
+            .map_err(|error| format!("temporary keymap removal failed: {error}"))?;
+        worker.inject_watcher_failure()?;
+        wait_for_not_found_observations(&worker, 1)?;
+        expect_no_absence_snapshot(
+            &worker,
+            worker_timings.retry.saturating_sub(RETRY_ASSERTION_MARGIN),
+        )?;
+        fs::rename(&temporary_keymap, paths.user_keymap())
+            .map_err(|error| format!("temporary keymap restoration failed: {error}"))?;
+
+        expect_no_absence_snapshot(&worker, worker_timings.retry + RETRY_ASSERTION_MARGIN)?;
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn confirmed_absence_publishes_only_after_retry_grace() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("confirmed-absence").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let worker_timings = worker_timings_with_retry_grace();
+        let mut worker = start_injected_worker(worker_timings);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(USER_KEYMAP_STUB),
+        )?;
+
+        fs::remove_file(paths.user_keymap())
+            .map_err(|error| format!("user keymap removal failed: {error}"))?;
+        worker.inject_watcher_failure()?;
+        wait_for_not_found_observations(&worker, 1)?;
+        expect_no_absence_snapshot(
+            &worker,
+            worker_timings.retry.saturating_sub(RETRY_ASSERTION_MARGIN),
+        )?;
+
+        assert_snapshot(&wait_for_message(&worker)?, paths.user_keymap(), None)?;
+        expect_no_message_for(&worker, QUIESCENCE_INTERVAL)?;
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn read_errors_retry_at_a_bounded_rate() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("read-errors").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let worker_timings = worker_timings_without_polling();
+        let mut worker = start_injected_worker(worker_timings);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(USER_KEYMAP_STUB),
+        )?;
+        fs::remove_file(paths.user_keymap())
+            .map_err(|error| format!("user keymap removal failed: {error}"))?;
+        fs::create_dir(paths.user_keymap())
+            .map_err(|error| format!("user keymap directory creation failed: {error}"))?;
+
+        let read_attempts_before_error = worker.read_attempts();
+        worker.inject_watcher_failure()?;
+        wait_for_read_attempts(&worker, read_attempts_before_error + 1)?;
+        thread::sleep(worker_timings.retry.saturating_mul(ERROR_RETRY_WINDOWS));
+
+        let error_window_read_attempts = worker
+            .read_attempts()
+            .saturating_sub(read_attempts_before_error);
+        let maximum_error_window_read_attempts =
+            usize::try_from(ERROR_RETRY_WINDOWS).map_err(|error| error.to_string())? + 1;
+        if error_window_read_attempts > maximum_error_window_read_attempts {
+            return Err(format!(
+                "disk worker read {error_window_read_attempts} times during the error window; expected at most {maximum_error_window_read_attempts}",
+            ));
+        }
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn stub_is_created_once_and_never_overwritten() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory = TestDirectory::new("stub").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let mut first_worker = start_worker(WatchMode::Native);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        let _ = wait_for_message(&first_worker)?;
+        if fs::read(paths.user_keymap())
+            .map_err(|error| format!("first-launch stub read failed: {error}"))?
+            != USER_KEYMAP_STUB
+        {
+            return Err(String::from(
+                "first-launch stub bytes differ from the required document",
+            ));
+        }
+        first_worker.shutdown();
+
+        let custom_contents = b"{\"bindings\": [{\"bindings\": {}}]}";
+        fs::write(paths.user_keymap(), custom_contents)
+            .map_err(|error| format!("custom keymap write failed: {error}"))?;
+        let mut second_worker = start_worker(WatchMode::Native);
+
+        assert_snapshot(
+            &wait_for_message(&second_worker)?,
+            paths.user_keymap(),
+            Some(custom_contents),
+        )?;
+        if fs::read(paths.user_keymap())
+            .map_err(|error| format!("second-launch keymap read failed: {error}"))?
+            != custom_contents
+        {
+            return Err(String::from(
+                "second launch overwrote the existing user keymap",
+            ));
+        }
+
+        second_worker.shutdown();
+
+        fs::write(paths.user_keymap(), [])
+            .map_err(|error| format!("empty keymap write failed: {error}"))?;
+        let mut third_worker = start_worker(WatchMode::Native);
+        assert_snapshot(
+            &wait_for_message(&third_worker)?,
+            paths.user_keymap(),
+            Some(&[]),
+        )?;
+        if !fs::read(paths.user_keymap())
+            .map_err(|error| format!("empty keymap read failed: {error}"))?
+            .is_empty()
+        {
+            return Err(String::from(
+                "third launch overwrote the existing empty user keymap",
+            ));
+        }
+        third_worker.shutdown();
+
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+}

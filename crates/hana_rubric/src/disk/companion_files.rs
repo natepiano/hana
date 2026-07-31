@@ -18,13 +18,6 @@ use crate::DiagnosticSeverity;
 
 static NEXT_TEMPORARY_FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "DiskWorker publishes generated companions with this function"
-    )
-)]
 pub(super) fn publish_companion_files(
     paths: &KeymapPaths,
     default_keymap: &[u8],
