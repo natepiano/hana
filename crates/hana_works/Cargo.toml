@@ -1,0 +1,18 @@
+[package]
+authors.workspace    = true
+categories           = ["game-development", "hardware-support"]
+description          = "Shared Bevy capability components for hardware providers"
+edition.workspace    = true
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/hana_works"
+keywords             = ["bevy", "capability", "device", "hardware"]
+license.workspace    = true
+name                 = "hana_works"
+readme               = "README.md"
+repository.workspace = true
+version              = "0.1.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy.workspace = true

@@ -1,13 +1,36 @@
 //! Device identity and registration policy for providers that report device sets to Bevy.
 
+mod capabilities;
+mod claim;
+mod endpoint;
+mod evidence;
 mod identity;
+mod presence;
 mod scheme;
 mod verdict;
 
+pub use capabilities::Capabilities;
+pub use capabilities::CapabilityAttachError;
+pub use claim::Claim;
+pub use claim::ClaimHolder;
+pub use claim::PermissionGate;
+pub use endpoint::EndpointRef;
+pub use endpoint::Slot;
+pub use endpoint::SlotError;
+pub use evidence::AttachmentPath;
+pub use evidence::DeviceDescriptor;
+pub use evidence::OsDeviceId;
 pub use identity::DeviceId;
 pub use identity::DeviceIdSource;
 pub use identity::DeviceKey;
 pub use identity::DeviceKind;
+pub use presence::DeviceRecord;
+pub use presence::DeviceScan;
+pub use presence::DeviceSet;
+pub use presence::Presence;
+pub use presence::ProviderId;
+pub use presence::ProviderRevision;
+pub use presence::ReportedAs;
 pub use scheme::Digest;
 pub use scheme::RegisteredSchemes;
 pub use scheme::ReportedId;
@@ -22,18 +45,36 @@ pub use verdict::UnverifiedReason;
 /// Common types for reporting devices to the kernel and for reading the identity verdicts it
 /// returns.
 pub mod prelude {
+    pub use crate::AttachmentPath;
+    pub use crate::Capabilities;
+    pub use crate::CapabilityAttachError;
+    pub use crate::Claim;
+    pub use crate::ClaimHolder;
+    pub use crate::DeviceDescriptor;
     pub use crate::DeviceId;
     pub use crate::DeviceIdSource;
     pub use crate::DeviceIdentity;
     pub use crate::DeviceKey;
     pub use crate::DeviceKind;
+    pub use crate::DeviceRecord;
+    pub use crate::DeviceScan;
+    pub use crate::DeviceSet;
     pub use crate::Digest;
+    pub use crate::EndpointRef;
+    pub use crate::OsDeviceId;
+    pub use crate::PermissionGate;
+    pub use crate::Presence;
+    pub use crate::ProviderId;
+    pub use crate::ProviderRevision;
     pub use crate::RegisteredSchemes;
+    pub use crate::ReportedAs;
     pub use crate::ReportedId;
     pub use crate::ReportedIdError;
     pub use crate::ReportedSerial;
     pub use crate::SchemeName;
     pub use crate::SchemeNameError;
+    pub use crate::Slot;
+    pub use crate::SlotError;
     pub use crate::UnregisteredSchemeError;
     pub use crate::UnverifiedReason;
 }

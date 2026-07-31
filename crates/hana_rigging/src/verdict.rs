@@ -3,6 +3,8 @@
 //! These types retain why a provider lacks evidence and record the kernel's resulting identity
 //! decision, keeping raw reports separate from the policy that uses a reconciled device key.
 
+use bevy::ecs::reflect::ReflectComponent;
+use bevy::prelude::Component;
 use bevy::prelude::Reflect;
 
 use super::identity::DeviceKey;
@@ -44,7 +46,8 @@ pub enum ReportedSerial {
 /// future reconciliation evidence can require another verdict; applications must retain a wildcard
 /// arm when matching it.
 #[non_exhaustive]
-#[derive(Clone, Debug, Reflect)]
+#[derive(Clone, Debug, Component, Reflect)]
+#[reflect(Component)]
 pub enum DeviceIdentity {
     /// A `crate::DeviceIdSource::Reported` key matched one live unit uniquely, as when a display
     /// panel reports the EDID serial a saved layout was written against.

@@ -23,8 +23,8 @@ pub struct DeviceId(u64);
 ///
 /// `DeviceKey::id` retains whether its value is proof or a hint. Storing that distinction in the
 /// enum variant prevents callers from copying a string while losing the rule that controls output.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Reflect)]
-#[reflect(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Component, Serialize, Deserialize, Reflect)]
+#[reflect(Component, Serialize, Deserialize)]
 pub struct DeviceKey {
     /// Physical role that keeps a display, audio interface, DMX universe, or HID panel separate
     /// even when two providers use similar identifier values.
