@@ -34,6 +34,7 @@ pub use diagnostic::Diagnostic;
 pub use diagnostic::DiagnosticKind;
 pub use diagnostic::DiagnosticSeverity;
 pub use diagnostic::KeymapLoadFailures;
+pub use disk::KeymapPaths;
 pub use keymap_plugin::KeymapPlugin;
 pub use keymap_plugin::KeymapSystems;
 pub use keystroke::EmptyKeystrokeSequenceError;
