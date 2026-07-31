@@ -401,10 +401,10 @@ discarded if it no longer lands on a display.
 
 ## Version Compatibility
 
-| Version                    | Bevy |
-|----------------------------|------|
-| hana_clerestory 0.3        | 0.19 |
-| bevy_clerestory 0.1 – 0.2  | 0.19 |
+| Version                     | Bevy |
+|-----------------------------|------|
+| `hana_clerestory` 0.3       | 0.19 |
+| `bevy_clerestory` 0.1 – 0.2 | 0.19 |
 
 ## Platform Support
 
