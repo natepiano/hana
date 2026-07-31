@@ -7,7 +7,6 @@ use bevy::prelude::ReflectEvent;
 use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use bevy::prelude::World;
-use bevy::reflect::PartialReflect;
 use bevy::reflect::TypeRegistry;
 use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::CustomInput;
@@ -85,7 +84,7 @@ impl CommandRegistry {
                     title: declaration.command.title,
                     description: declaration.command.description,
                     capability,
-                    reflect_event: declaration.reflect_event,
+                    dispatch: declaration.command.dispatch,
                     invocation,
                 };
 
@@ -141,20 +140,14 @@ impl CommandRegistry {
         self.entries.get(command_id).map(|entry| entry.capability)
     }
 
-    /// Triggers `event` through the `ReflectEvent` handle cached for `command_id`.
+    /// Dispatches the event registered for `command_id`.
     ///
-    /// This resolves the command ID through the registry table and performs no reflection type
-    /// lookup on the input path.
-    pub fn invoke(
-        &self,
-        command_id: &CommandId,
-        event: &dyn PartialReflect,
-        world: &mut World,
-        type_registry: &TypeRegistry,
-    ) -> Option<()> {
+    /// This resolves the command ID and calls its monomorphized dispatch function without
+    /// reflection type-data lookup or reflected event reconstruction.
+    pub fn invoke(&self, command_id: &CommandId, world: &mut World) -> Option<()> {
         self.entries
             .get(command_id)
-            .map(|entry| entry.reflect_event.trigger(world, event, type_registry))
+            .map(|entry| (entry.dispatch)(world))
     }
 
     fn register_held_observers(&self, world: &mut World) {
@@ -192,11 +185,11 @@ pub(crate) fn register_held_observer<T: KeymapCommand>(
 
 #[derive(Clone)]
 pub(crate) struct CommandEntry {
-    title:         &'static str,
-    description:   &'static str,
-    capability:    Capability,
-    reflect_event: ReflectEvent,
-    invocation:    Invocation,
+    title:       &'static str,
+    description: &'static str,
+    capability:  Capability,
+    dispatch:    fn(&mut World),
+    invocation:  Invocation,
 }
 
 impl CommandEntry {
@@ -234,9 +227,8 @@ struct CommandDeclaration {
 }
 
 struct ValidatedDeclaration {
-    command_id:    CommandId,
-    command:       ReflectKeymapCommand,
-    reflect_event: ReflectEvent,
+    command_id: CommandId,
+    command:    ReflectKeymapCommand,
 }
 
 fn command_declarations(type_registry: &TypeRegistry) -> Vec<CommandDeclaration> {
@@ -324,7 +316,7 @@ fn validate_declarations(
             ));
         }
 
-        if let (Some(command_id), Some(reflect_event)) = (command_id, reflected_event)
+        if let (Some(command_id), Some(_)) = (command_id, reflected_event)
             && !duplicate_id
             && !missing_title
             && !missing_description
@@ -332,7 +324,6 @@ fn validate_declarations(
             validated_declarations.push(ValidatedDeclaration {
                 command_id,
                 command: declaration.command,
-                reflect_event,
             });
         }
     }
@@ -411,6 +402,15 @@ mod tests {
         description: "Drives a custom input while the command is held.",
     }
 
+    crate::command! {
+        action:      RegistryUnremappableAction,
+        event:       RegistryUnremappable,
+        id:          "registry::unremappable",
+        title:       "Registry Unremappable",
+        description: "Triggers an unremappable command through the registry.",
+        capability:  Unremappable,
+    }
+
     #[derive(Event, Reflect)]
     #[reflect(Event, KeymapCommand)]
     struct DuplicateFirst;
@@ -420,6 +420,8 @@ mod tests {
         const TITLE: &'static str = "First Duplicate";
         const DESCRIPTION: &'static str = "The first duplicate command declaration.";
         const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+
+        fn build() -> Self { Self }
 
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
@@ -434,6 +436,8 @@ mod tests {
         const DESCRIPTION: &'static str = "The second duplicate command declaration.";
         const CAPABILITY: crate::Capability = crate::Capability::OneShot;
 
+        fn build() -> Self { Self }
+
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
 
@@ -446,6 +450,8 @@ mod tests {
         const TITLE: &'static str = "";
         const DESCRIPTION: &'static str = "A command declaration with an empty title.";
         const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+
+        fn build() -> Self { Self }
 
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
@@ -460,6 +466,8 @@ mod tests {
         const DESCRIPTION: &'static str = "";
         const CAPABILITY: crate::Capability = crate::Capability::OneShot;
 
+        fn build() -> Self { Self }
+
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
 
@@ -473,6 +481,8 @@ mod tests {
         const DESCRIPTION: &'static str = "A command declaration with malformed ID text.";
         const CAPABILITY: crate::Capability = crate::Capability::OneShot;
 
+        fn build() -> Self { Self }
+
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
 
@@ -485,6 +495,8 @@ mod tests {
         const TITLE: &'static str = "Event Not Reflected";
         const DESCRIPTION: &'static str = "A command event without ReflectEvent type data.";
         const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+
+        fn build() -> Self { Self }
 
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
@@ -555,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_invokes_the_cached_reflected_event() {
+    fn registry_invokes_one_shot_from_an_opaque_command_id() {
         let mut app = App::new();
         app.world_mut().init_resource::<InvocationCount>();
         app.world_mut().add_observer(
@@ -570,7 +582,7 @@ mod tests {
         let mut custom_inputs = CustomInputs::default();
         let command_registry = CommandRegistry::build(&type_registry, &mut custom_inputs)
             .expect("a valid command must build a registry");
-        let command_id = CommandId::try_from(RegistryOneShot::ID)
+        let command_id = CommandId::try_from("registry::one_shot")
             .expect("the command macro validates the command ID");
 
         assert_eq!(
@@ -582,12 +594,33 @@ mod tests {
             Some(RegistryOneShot::DESCRIPTION)
         );
         assert_eq!(
-            command_registry.invoke(
-                &command_id,
-                &RegistryOneShot,
-                app.world_mut(),
-                &type_registry,
-            ),
+            command_registry.invoke(&command_id, app.world_mut()),
+            Some(())
+        );
+        assert_eq!(app.world().resource::<InvocationCount>().0, 1);
+    }
+
+    #[test]
+    fn registry_invokes_unremappable_from_an_opaque_command_id() {
+        let mut app = App::new();
+        app.world_mut().init_resource::<InvocationCount>();
+        app.world_mut().add_observer(
+            |_: On<RegistryUnremappable>,
+             mut invocation_count: bevy::prelude::ResMut<InvocationCount>| {
+                invocation_count.0 += 1;
+            },
+        );
+
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<RegistryUnremappable>();
+        let mut custom_inputs = CustomInputs::default();
+        let command_registry = CommandRegistry::build(&type_registry, &mut custom_inputs)
+            .expect("a valid command must build a registry");
+        let command_id = CommandId::try_from("registry::unremappable")
+            .expect("the command macro validates the command ID");
+
+        assert_eq!(
+            command_registry.invoke(&command_id, app.world_mut()),
             Some(())
         );
         assert_eq!(app.world().resource::<InvocationCount>().0, 1);
@@ -633,6 +666,8 @@ mod tests {
         app.world_mut().init_resource::<CustomInputs>();
         let mut type_registry = TypeRegistry::default();
         type_registry.register::<RegistryHeld>();
+        let held_event = RegistryHeld::build();
+        assert_eq!(held_event.phase, HoldPhase::Begin);
         let command_registry = {
             let mut custom_inputs = app.world_mut().resource_mut::<CustomInputs>();
             CommandRegistry::build(&type_registry, &mut custom_inputs)
@@ -666,14 +701,7 @@ mod tests {
         );
 
         assert_eq!(
-            command_registry.invoke(
-                &command_id,
-                &RegistryHeld {
-                    phase: HoldPhase::Begin,
-                },
-                app.world_mut(),
-                &type_registry,
-            ),
+            command_registry.invoke(&command_id, app.world_mut()),
             Some(())
         );
         assert_eq!(
@@ -696,6 +724,39 @@ mod tests {
             app.world().resource::<CustomInputs>().get(&custom_input),
             Some(&ActionValue::Bool(false))
         );
+    }
+
+    #[test]
+    fn registry_dispatch_does_not_allocate_after_warmup() {
+        let mut app = App::new();
+        app.world_mut().init_resource::<InvocationCount>();
+        app.world_mut().add_observer(
+            |_: On<RegistryHeld>, mut invocation_count: bevy::prelude::ResMut<InvocationCount>| {
+                invocation_count.0 += 1;
+            },
+        );
+
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<RegistryHeld>();
+        let mut custom_inputs = CustomInputs::default();
+        let command_registry = CommandRegistry::build(&type_registry, &mut custom_inputs)
+            .expect("a valid command must build a registry");
+        let command_id = CommandId::try_from(RegistryHeld::ID)
+            .expect("the command macro validates the command ID");
+
+        assert_eq!(
+            command_registry.invoke(&command_id, app.world_mut()),
+            Some(())
+        );
+        let allocations_before = crate::TEST_ALLOCATOR.allocation_count();
+        assert_eq!(
+            command_registry.invoke(&command_id, app.world_mut()),
+            Some(())
+        );
+        let allocations_after = crate::TEST_ALLOCATOR.allocation_count();
+
+        assert_eq!(allocations_after - allocations_before, 0);
+        assert_eq!(app.world().resource::<InvocationCount>().0, 2);
     }
 
     #[test]

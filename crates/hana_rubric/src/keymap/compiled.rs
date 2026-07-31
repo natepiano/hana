@@ -131,6 +131,8 @@ mod tests {
         const DESCRIPTION: &'static str = "A global command used by the compiled keymap test.";
         const CAPABILITY: Capability = Capability::OneShot;
 
+        fn build() -> Self { Self }
+
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
 

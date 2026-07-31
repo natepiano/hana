@@ -22,6 +22,10 @@ pub trait KeymapCommand: Event + Reflect {
     /// Keymap binding capability declared for this command.
     const CAPABILITY: Capability;
 
+    /// Constructs this event when the command registry dispatches it.
+    #[must_use]
+    fn build() -> Self;
+
     /// Returns the requested transition for a held semantic event.
     ///
     /// Every command implements this method. Non-held commands return `None`.
@@ -42,19 +46,33 @@ pub struct ReflectKeymapCommand {
     pub description:                   &'static str,
     /// Keymap binding capability.
     pub capability:                    Capability,
+    pub(crate) dispatch:               fn(&mut World),
     pub(crate) register_held_observer: fn(&mut World, CustomInput),
 }
 
-impl<T: KeymapCommand> FromType<T> for ReflectKeymapCommand {
+impl<T> FromType<T> for ReflectKeymapCommand
+where
+    T: KeymapCommand,
+    for<'a> T::Trigger<'a>: Default,
+{
     fn from_type() -> Self {
         Self {
             id:                     T::ID,
             title:                  T::TITLE,
             description:            T::DESCRIPTION,
             capability:             T::CAPABILITY,
+            dispatch:               dispatch_command::<T>,
             register_held_observer: register_held_observer::<T>,
         }
     }
+}
+
+fn dispatch_command<T>(world: &mut World)
+where
+    T: KeymapCommand,
+    for<'a> T::Trigger<'a>: Default,
+{
+    world.trigger(T::build());
 }
 
 /// Declares an input action, semantic event, and reflected keymap-command metadata.
@@ -178,7 +196,18 @@ macro_rules! command {
             const TITLE:       &'static str = $title;
             const DESCRIPTION: &'static str = $description;
             const CAPABILITY:  $crate::Capability = $capability;
+            $crate::command!(@build $event_kind);
             $crate::command!(@hold_phase $event_kind);
+        }
+    };
+    (@build unit) => {
+        fn build() -> Self { Self }
+    };
+    (@build held) => {
+        fn build() -> Self {
+            Self {
+                phase: $crate::HoldPhase::Begin,
+            }
         }
     };
     (@hold_phase unit) => {

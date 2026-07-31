@@ -576,6 +576,8 @@ mod tests {
         const DESCRIPTION: &'static str = "Returns the camera to its home position.";
         const CAPABILITY: Capability = Capability::OneShot;
 
+        fn build() -> Self { Self }
+
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
 
@@ -588,6 +590,8 @@ mod tests {
         const TITLE: &'static str = "Camera Reset";
         const DESCRIPTION: &'static str = "Resets the camera position.";
         const CAPABILITY: Capability = Capability::OneShot;
+
+        fn build() -> Self { Self }
 
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
@@ -602,6 +606,8 @@ mod tests {
         const DESCRIPTION: &'static str = "Holds the camera action active.";
         const CAPABILITY: Capability = Capability::Held;
 
+        fn build() -> Self { Self }
+
         fn hold_phase(&self) -> Option<HoldPhase> { Some(HoldPhase::Begin) }
     }
 
@@ -614,6 +620,8 @@ mod tests {
         const TITLE: &'static str = "Recovery Open";
         const DESCRIPTION: &'static str = "Opens the recovery command.";
         const CAPABILITY: Capability = Capability::Unremappable;
+
+        fn build() -> Self { Self }
 
         fn hold_phase(&self) -> Option<HoldPhase> { None }
     }
