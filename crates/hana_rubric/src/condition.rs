@@ -90,13 +90,6 @@ pub(crate) struct ConditionHandle(usize);
 /// Stable condition metadata for schema and companion-file generation.
 pub(crate) struct ConditionInfo<'registry> {
     pub(crate) name:        &'registry ConditionName,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "read by schema and companion-file generation in later phases"
-        )
-    )]
     pub(crate) description: &'registry str,
 }
 

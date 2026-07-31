@@ -25,6 +25,8 @@ use crate::KeystrokeSequence;
 use crate::condition::ConditionHandle;
 use crate::condition::ConditionRegistry;
 
+pub(super) const RECOGNIZED_BLOCK_MEMBERS: [&str; 2] = ["bindings", "context"];
+
 /// The exact valid edits that remain after defaults and user keymaps are layered.
 #[derive(Default)]
 pub(crate) struct ResolvedEdits {
@@ -77,7 +79,6 @@ pub(crate) struct MergedKeymap {
 impl MergedKeymap {
     const MAX_COMMAND_EDIT_DISTANCE: usize = 3;
     const MAX_COMMAND_SUGGESTIONS: usize = 3;
-    const RECOGNIZED_BLOCK_MEMBERS: [&str; 2] = ["bindings", "context"];
 
     /// Parses, validates, and layers defaults followed by an optional user keymap.
     ///
@@ -446,7 +447,7 @@ impl MergedKeymap {
     }
 
     fn closest_block_member(member_name: &str) -> &'static str {
-        Self::RECOGNIZED_BLOCK_MEMBERS
+        RECOGNIZED_BLOCK_MEMBERS
             .iter()
             .min_by_key(|candidate| levenshtein(member_name, candidate))
             .copied()
