@@ -27,7 +27,7 @@ bevy_ecs = { version = "0.19.0", default-features = false, features = [
 bevy_enhanced_input = { version = "0.26.0", default-features = false, features = [
   "reflect",
 ] }
-bevy_kana = { path = "crates/bevy_kana" }
+bevy_kana = "0.3.0"
 bevy_math = { version = "0.19.0", default-features = false, features = [
   "bevy_reflect",
   "std",
@@ -65,7 +65,7 @@ winit = { version = "0.30.13", default-features = false, features = [
 
 # dev-dependencies
 bevy_brp_extras = "0.22.2"
-hana_clerestory = { path = "crates/hana_clerestory" }
+hana_clerestory = "0.3.0"
 hana_lagrange   = { path = "crates/hana_lagrange" }
 clay-layout     = { path = "vendor/clay-layout" }
 criterion       = { version = "0.8.2", features = ["html_reports"] }

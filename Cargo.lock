@@ -1101,6 +1101,16 @@ dependencies = [
 
 [[package]]
 name = "bevy_kana"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55aa77ff65efadc71ad31ba6e96cb1adaf86379e717a526d3d7f38e28c253857"
+dependencies = [
+ "bevy",
+ "bevy_enhanced_input",
+]
+
+[[package]]
+name = "bevy_kana"
 version = "0.4.0-dev"
 dependencies = [
  "bevy",
@@ -2797,8 +2807,8 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_enhanced_input",
- "bevy_kana",
- "hana_clerestory",
+ "bevy_kana 0.3.0",
+ "hana_clerestory 0.3.0",
  "hana_diegetic",
  "hana_lagrange",
  "hana_valence",
@@ -3217,11 +3227,34 @@ dependencies = [
 
 [[package]]
 name = "hana_clerestory"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce0813e36537399df5ab66c485f5b92a88d6ceab3f8d52d2e671f732e48990f5"
+dependencies = [
+ "bevy",
+ "bevy_diagnostic",
+ "bevy_kana 0.3.0",
+ "block2 0.6.2",
+ "dirs",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "ron",
+ "serde",
+ "thiserror 2.0.19",
+ "windows",
+ "winit",
+ "x11rb",
+]
+
+[[package]]
+name = "hana_clerestory"
 version = "0.4.0-dev"
 dependencies = [
  "bevy",
  "bevy_diagnostic",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "bevy_remote",
  "block2 0.6.2",
  "dirs",
@@ -3247,7 +3280,7 @@ name = "hana_conduit"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "fairy_dust",
  "hana_diegetic",
  "hana_lagrange",
@@ -3259,12 +3292,12 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "bitflags 2.13.0",
  "clay-layout",
  "criterion",
  "fairy_dust",
- "hana_clerestory",
+ "hana_clerestory 0.3.0",
  "hana_lagrange",
  "hana_valence",
  "image",
@@ -3296,11 +3329,11 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_enhanced_input",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
- "hana_clerestory",
+ "hana_clerestory 0.3.0",
  "hana_diegetic",
 ]
 
@@ -3310,12 +3343,12 @@ version = "0.2.0-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "bevy_render",
  "bytemuck",
  "fairy_dust",
  "getrandom 0.4.3",
- "hana_clerestory",
+ "hana_clerestory 0.3.0",
  "hana_lagrange",
  "nonmax",
  "rand",
@@ -3326,7 +3359,7 @@ name = "hana_prosody"
 version = "0.0.1"
 dependencies = [
  "bevy",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "bevy_remote",
  "cpal 0.18.1",
  "fairy_dust",
@@ -3346,7 +3379,7 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_enhanced_input",
- "bevy_kana",
+ "bevy_kana 0.3.0",
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
