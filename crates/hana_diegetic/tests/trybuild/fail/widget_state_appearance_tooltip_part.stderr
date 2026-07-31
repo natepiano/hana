@@ -1,17 +1,15 @@
-error[E0308]: mismatched types
-  --> tests/trybuild/fail/widget_state_appearance_tooltip_part.rs:8:9
+error[E0599]: no method named `disabled` found for struct `El` in the current scope
+  --> tests/trybuild/fail/widget_state_appearance_tooltip_part.rs:10:14
    |
- 7 |       let _ = Tooltip::new(
-   |               ------------ arguments to this function are incorrect
  8 | /         El::new()
  9 | |             .background(Color::WHITE)
 10 | |             .disabled(Appearance::new().background(Color::BLACK)),
-   | |_________________________________________________________________^ expected `El<_>`, found `El<Row, WidgetPart>`
+   | |             -^^^^^^^^ method not found in `El`
+   | |_____________|
    |
-   = note: expected struct `El<_, LayoutOnly>`
-              found struct `El<hana_diegetic::Row, WidgetPart>`
-note: associated function defined here
-  --> src/widgets/tooltip.rs
    |
-   |     pub fn new<L>(root: El<L, LayoutOnly>) -> Self
-   |            ^^^
+   = note: the method was found for
+           - `El<L, PressedPart>`
+           - `El<L, WidgetChild>`
+           - `El<L, WidgetElement<W>>`
+           - `El<L, WidgetPart>`

@@ -2339,23 +2339,26 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().slider("level", 0.0..=1.0), |builder| {
             builder.with(
-                El::new()
-                    .background(Color::WHITE)
+                builder
+                    .child(El::new().background(Color::WHITE))
                     .disabled(Appearance::new().background(Color::BLACK)),
                 |_| {},
             );
             builder.with(
-                El::new()
-                    .background(Color::WHITE)
-                    .border(Border::all(1.0, Color::BLACK))
-                    .slider_thumb()
+                builder
+                    .child(
+                        El::new()
+                            .background(Color::WHITE)
+                            .border(Border::all(1.0, Color::BLACK))
+                            .slider_thumb(),
+                    )
                     .disabled(Appearance::new().background(Color::BLACK)),
                 |_| {},
             );
             builder.text(
                 Text::new("LEVEL", TextStyle::new(10.0)).layout(
-                    El::new()
-                        .background(Color::NONE)
+                    builder
+                        .child(El::new().background(Color::NONE))
                         .disabled(Appearance::new().background(Color::BLACK)),
                 ),
             );
@@ -2439,8 +2442,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button("button"), |children| {
             children.with(
-                El::new()
-                    .id("container")
+                children
+                    .child(El::new().id("container"))
                     .disabled(Appearance::new().text_color(Color::BLACK)),
                 |_| {},
             );
@@ -2458,8 +2461,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button("button"), |children| {
             children.with(
-                El::new()
-                    .id("container")
+                children
+                    .child(El::new().id("container"))
                     .disabled(Appearance::new().path_color(Color::BLACK)),
                 |_| {},
             );
@@ -2477,8 +2480,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button("button"), |children| {
             children.with(
-                El::new()
-                    .id("container")
+                children
+                    .child(El::new().id("container"))
                     .disabled(Appearance::new().tint(Color::BLACK)),
                 |_| {},
             );
@@ -2513,9 +2516,12 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button("button"), |children| {
             children.with(
-                El::new()
-                    .id("circle")
-                    .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                children
+                    .child(
+                        El::new()
+                            .id("circle")
+                            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)])),
+                    )
                     .disabled(
                         Appearance::new()
                             .material(Handle::default())

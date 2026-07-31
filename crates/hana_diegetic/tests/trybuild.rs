@@ -11,4 +11,5 @@ fn widget_state_and_tooltip_typestate_signatures_compile() {
     test_cases.compile_fail("tests/trybuild/fail/editable_widget_*.rs");
     test_cases.compile_fail("tests/trybuild/fail/tooltip_*.rs");
     test_cases.compile_fail("tests/trybuild/fail/widget_state_appearance_*.rs");
+    test_cases.compile_fail("tests/trybuild/fail/widget_state_verbs_*.rs");
 }

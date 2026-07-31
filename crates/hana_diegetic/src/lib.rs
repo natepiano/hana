@@ -234,6 +234,7 @@ pub use layout::TextWrap;
 pub use layout::Unit;
 pub use layout::Widget;
 pub use layout::WidgetBuilder;
+pub use layout::WidgetChild;
 pub use layout::WidgetDeclaration;
 pub use layout::WidgetElement;
 pub use layout::WidgetOwner;

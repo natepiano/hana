@@ -1065,7 +1065,8 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(El::new().button("button"), |children| {
             children.text(
-                Text::new("label", TextStyle::new(10.0)).layout(El::new().hovered(appearance)),
+                Text::new("label", TextStyle::new(10.0))
+                    .layout(children.child(El::new()).hovered(appearance)),
             );
         });
         let tree = builder.build();
@@ -1077,8 +1078,11 @@ mod tests {
         builder.with(El::new().button("button"), |children| {
             children.text(
                 Text::new("label", TextStyle::new(10.0)).layout(
-                    El::new()
-                        .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                    children
+                        .child(
+                            El::new()
+                                .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)])),
+                        )
                         .hovered(appearance),
                 ),
             );
@@ -1174,15 +1178,19 @@ mod tests {
         }
     }
 
-    fn rich_part(
+    fn rich_part<W: crate::WidgetOwner>(
+        builder: &crate::WidgetBuilder<'_, W>,
         active_state: WidgetState,
         appearance: Appearance,
     ) -> crate::El<crate::Row, crate::PressedPart> {
-        El::new()
-            .background(PART_NORMAL_FILL)
-            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
-            .material(Handle::<StandardMaterial>::default())
-            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+        builder
+            .child(
+                El::new()
+                    .background(PART_NORMAL_FILL)
+                    .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                    .material(Handle::<StandardMaterial>::default())
+                    .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)])),
+            )
             .focused(state_channel_appearance(
                 active_state,
                 WidgetState::Focused,
@@ -1205,11 +1213,13 @@ mod tests {
             ))
     }
 
-    fn image_part(
+    fn image_part<W: crate::WidgetOwner>(
+        builder: &crate::WidgetBuilder<'_, W>,
         active_state: WidgetState,
         appearance: Appearance,
     ) -> crate::El<crate::Row, crate::PressedPart> {
-        El::new()
+        builder
+            .child(El::new())
             .focused(state_channel_appearance(
                 active_state,
                 WidgetState::Focused,
@@ -1386,14 +1396,17 @@ mod tests {
                         |children| {
                             if matches!(property, MergeProperty::Tint) {
                                 children.image(
-                                    image_part(state, part_appearance),
+                                    image_part(children, state, part_appearance),
                                     Handle::default(),
                                     Color::WHITE,
                                 );
                             } else {
                                 children.text(
-                                    Text::new("part", TextStyle::new(10.0))
-                                        .layout(rich_part(state, part_appearance)),
+                                    Text::new("part", TextStyle::new(10.0)).layout(rich_part(
+                                        children,
+                                        state,
+                                        part_appearance,
+                                    )),
                                 );
                             }
                         },
@@ -1651,9 +1664,12 @@ mod tests {
                 ),
             |children| {
                 children.with(
-                    El::new()
-                        .background(PART_NORMAL_FILL)
-                        .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                    children
+                        .child(
+                            El::new()
+                                .background(PART_NORMAL_FILL)
+                                .border(Border::all(Px(1.0), PART_NORMAL_BORDER)),
+                        )
                         .hovered(Appearance::new().border_color(PART_PROPERTY_COLOR)),
                     |_| {},
                 );
@@ -1690,8 +1706,8 @@ mod tests {
                 .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
             |children| {
                 children.with(
-                    El::new()
-                        .background(PART_NORMAL_FILL)
+                    children
+                        .child(El::new().background(PART_NORMAL_FILL))
                         .hovered(Appearance::new().background(PART_NORMAL_FILL)),
                     |_| {},
                 );
@@ -1727,8 +1743,8 @@ mod tests {
                 .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
             |children| {
                 children.with(
-                    El::new()
-                        .background(PART_NORMAL_FILL)
+                    children
+                        .child(El::new().background(PART_NORMAL_FILL))
                         .hovered(Appearance::new()),
                     |_| {},
                 );
@@ -1788,10 +1804,13 @@ mod tests {
             |children| {
                 children.text(
                     Text::new("part", TextStyle::new(10.0)).layout(
-                        El::new()
-                            .background(PART_NORMAL_FILL)
-                            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
-                            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                        children
+                            .child(
+                                El::new()
+                                    .background(PART_NORMAL_FILL)
+                                    .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                                    .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)])),
+                            )
                             .hovered(Appearance::new().path_color(PART_PROPERTY_COLOR)),
                     ),
                 );
@@ -2012,8 +2031,8 @@ mod tests {
                 .hovered(Appearance::new().background(WIDGET_PROPERTY_COLOR)),
             |children| {
                 children.with(
-                    El::new()
-                        .background(PART_NORMAL_FILL)
+                    children
+                        .child(El::new().background(PART_NORMAL_FILL))
                         .focused(Appearance::new()),
                     |_| {},
                 );
@@ -2191,10 +2210,13 @@ mod tests {
             |children| {
                 children.text(
                     Text::new("part", TextStyle::new(10.0)).layout(
-                        El::new()
-                            .background(PART_NORMAL_FILL)
-                            .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
-                            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)]))
+                        children
+                            .child(
+                                El::new()
+                                    .background(PART_NORMAL_FILL)
+                                    .border(Border::all(Px(1.0), PART_NORMAL_BORDER))
+                                    .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)])),
+                            )
                             .hovered(Appearance::new().path_color(PART_PROPERTY_COLOR)),
                     ),
                 );

@@ -99,6 +99,10 @@ pub struct El<L = Row, Role = LayoutOnly> {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LayoutOnly;
 
+/// An element declared through a widget's child builder.
+#[derive(Clone, Copy, Debug)]
+pub struct WidgetChild(());
+
 /// Marker for an element that declares a panel widget of kind `W`.
 #[derive(Clone, Copy, Debug)]
 pub struct WidgetElement<W>(PhantomData<fn() -> W>);
@@ -236,6 +240,8 @@ impl EditorPartColorRole {
 pub trait ElementRole: private::RoleSealed {}
 
 impl ElementRole for LayoutOnly {}
+
+impl ElementRole for WidgetChild {}
 
 impl<W> ElementRole for WidgetElement<W> {}
 
@@ -1064,39 +1070,6 @@ impl<L, Role> El<L, Role> {
 }
 
 impl<L> El<L, LayoutOnly> {
-    /// Sets the appearance while the enclosing widget is hovered.
-    ///
-    /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
-        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
-        self.into_role()
-    }
-
-    /// Sets the appearance while the enclosing widget's focus indicator is visible.
-    ///
-    /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
-        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
-        self.into_role()
-    }
-
-    /// Sets the appearance while the enclosing widget is disabled.
-    ///
-    /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
-        self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance));
-        self.into_role()
-    }
-
-    /// Sets the appearance while the enclosing widget is held by a press or drag.
-    ///
-    /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: impl IntoAppearance) -> El<L, PressedPart> {
-        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
-        self.into_role()
-    }
-
     /// Marks this element as an editable IME widget.
     ///
     /// The `field_id` is panel-local semantic identity used for hit testing,
@@ -1163,6 +1136,41 @@ impl<L> El<L, LayoutOnly> {
             child_layout: self.child_layout,
             role:         PhantomData,
         }
+    }
+}
+
+impl<L> El<L, WidgetChild> {
+    /// Sets the appearance while the enclosing widget is hovered.
+    ///
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn hovered(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
+        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
+        self.into_role()
+    }
+
+    /// Sets the appearance while the enclosing widget's focus indicator is visible.
+    ///
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn focused(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
+        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
+        self.into_role()
+    }
+
+    /// Sets the appearance while the enclosing widget is disabled.
+    ///
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn disabled(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
+        self.appearance_mut().disabled =
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
+        self.into_role()
+    }
+
+    /// Sets the appearance while the enclosing widget is held by a press or drag.
+    ///
+    /// A later call replaces any bundle an earlier call authored for this state.
+    pub fn pressed(mut self, appearance: impl IntoAppearance) -> El<L, PressedPart> {
+        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
+        self.into_role()
     }
 }
 
@@ -1527,6 +1535,7 @@ mod private {
     use super::Row;
     use super::Slider;
     use super::WidgetBuilder;
+    use super::WidgetChild;
     use super::WidgetElement;
     use super::WidgetPart;
     use crate::layout::child_layout::ChildLayout;
@@ -1554,6 +1563,8 @@ mod private {
     pub trait WidgetOwnerSealed {}
 
     impl RoleSealed for LayoutOnly {}
+
+    impl RoleSealed for WidgetChild {}
 
     impl<W> RoleSealed for WidgetElement<W> {}
 
@@ -1697,9 +1708,15 @@ pub trait AcceptsElement<Role: ElementRole>: private::BuilderSealed {
 /// author ordinary layout content without losing the enclosing widget owner.
 pub trait LayoutContentBuilder: private::BuilderSealed + AcceptsElement<LayoutOnly> {
     /// Adds a child container under the current parent, then fills it in.
-    fn with<L>(&mut self, el: El<L, LayoutOnly>, children: impl FnOnce(&mut Self)) -> &mut Self
+    fn with<L, Role>(
+        &mut self,
+        el: El<L, Role>,
+        children: impl FnOnce(&mut <Self as AcceptsElement<Role>>::ChildBuilder<'_>),
+    ) -> &mut Self
     where
-        L: ChildLayoutState;
+        L: ChildLayoutState,
+        Role: ElementRole,
+        Self: AcceptsElement<Role>;
 
     /// Adds a text leaf as a child of the current parent.
     fn text(&mut self, text: impl Into<Text<LayoutOnly>>) -> &mut Self;
@@ -2010,6 +2027,23 @@ impl<W: WidgetOwner> AcceptsElement<LayoutOnly> for WidgetBuilder<'_, W> {
     }
 }
 
+impl<W: WidgetOwner> AcceptsElement<WidgetChild> for WidgetBuilder<'_, W> {
+    type ChildBuilder<'a>
+        = WidgetBuilder<'a, W>
+    where
+        Self: 'a;
+
+    fn with_child_builder<'a>(
+        child_scope: private::ChildScope<'a>,
+        children: impl FnOnce(&mut Self::ChildBuilder<'a>),
+    ) where
+        Self: 'a,
+    {
+        let mut widget_builder = WidgetBuilder::borrowed(child_scope.into_layout_builder());
+        children(&mut widget_builder);
+    }
+}
+
 impl<W: WidgetOwner> AcceptsElement<WidgetPart> for WidgetBuilder<'_, W> {
     type ChildBuilder<'a>
         = WidgetBuilder<'a, W>
@@ -2045,11 +2079,22 @@ impl<W: Pressable> AcceptsElement<PressedPart> for WidgetBuilder<'_, W> {
 }
 
 impl LayoutContentBuilder for LayoutBuilder {
-    fn with<L>(&mut self, el: El<L, LayoutOnly>, children: impl FnOnce(&mut Self)) -> &mut Self
+    fn with<L, Role>(
+        &mut self,
+        el: El<L, Role>,
+        children: impl FnOnce(&mut <Self as AcceptsElement<Role>>::ChildBuilder<'_>),
+    ) -> &mut Self
     where
         L: ChildLayoutState,
+        Role: ElementRole,
+        Self: AcceptsElement<Role>,
     {
-        self.with_element(el, children);
+        self.with_element(el, |layout_builder| {
+            <Self as AcceptsElement<Role>>::with_child_builder(
+                private::ChildScope::new(layout_builder),
+                children,
+            );
+        });
         self
     }
 
@@ -2068,6 +2113,12 @@ impl LayoutContentBuilder for LayoutBuilder {
 }
 
 impl<W: WidgetOwner> WidgetBuilder<'_, W> {
+    /// Converts an ordinary declaration into a child of this widget.
+    ///
+    /// The returned element can author [`El::hovered`], [`El::focused`],
+    /// [`El::disabled`], and, for pressable widgets, [`El::pressed`].
+    pub fn child<L>(&self, el: El<L, LayoutOnly>) -> El<L, WidgetChild> { el.into_role() }
+
     /// Adds a child container under the current widget-scope parent.
     pub fn with<L, Role>(
         &mut self,
@@ -2121,20 +2172,23 @@ impl<W: WidgetOwner> WidgetBuilder<'_, W> {
 }
 
 impl<W: WidgetOwner> LayoutContentBuilder for WidgetBuilder<'_, W> {
-    fn with<L>(&mut self, el: El<L, LayoutOnly>, children: impl FnOnce(&mut Self)) -> &mut Self
+    fn with<L, Role>(
+        &mut self,
+        el: El<L, Role>,
+        children: impl FnOnce(&mut <Self as AcceptsElement<Role>>::ChildBuilder<'_>),
+    ) -> &mut Self
     where
         L: ChildLayoutState,
+        Role: ElementRole,
+        Self: AcceptsElement<Role>,
     {
-        {
-            let layout_builder = self.layout_builder_mut();
-            let parent = layout_builder.current_parent();
-            let index = layout_builder
-                .tree
-                .add_child(parent, el.into_element(ElementContent::Empty));
-            layout_builder.parent_stack.push(index);
-        }
-        children(self);
-        self.layout_builder_mut().parent_stack.pop();
+        self.layout_builder_mut()
+            .with_element(el, |layout_builder| {
+                <Self as AcceptsElement<Role>>::with_child_builder(
+                    private::ChildScope::new(layout_builder),
+                    children,
+                );
+            });
         self
     }
 

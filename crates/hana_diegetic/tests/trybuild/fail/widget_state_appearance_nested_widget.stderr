@@ -14,6 +14,9 @@ help: `WidgetBuilder<'_, W>` implements trait `AcceptsElement<Role>`
   | impl<W: WidgetOwner> AcceptsElement<LayoutOnly> for WidgetBuilder<'_, W> {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<LayoutOnly>`
 ...
+  | impl<W: WidgetOwner> AcceptsElement<WidgetChild> for WidgetBuilder<'_, W> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<WidgetChild>`
+...
   | impl<W: WidgetOwner> AcceptsElement<WidgetPart> for WidgetBuilder<'_, W> {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<WidgetPart>`
 ...

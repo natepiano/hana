@@ -72,6 +72,7 @@ pub use builder::Text;
 pub use builder::TextSizing;
 pub use builder::Widget;
 pub use builder::WidgetBuilder;
+pub use builder::WidgetChild;
 pub use builder::WidgetDeclaration;
 pub use builder::WidgetElement;
 pub use builder::WidgetOwner;

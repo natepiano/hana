@@ -10,8 +10,8 @@ fn main() {
     let mut builder = LayoutBuilder::new(100.0, 50.0);
     builder.with(El::new().editable_field("editable", field), |builder| {
         builder.with(
-            El::new()
-                .background(Color::WHITE)
+            builder
+                .child(El::new().background(Color::WHITE))
                 .pressed(Appearance::new().background(Color::BLACK)),
             |_| {},
         );

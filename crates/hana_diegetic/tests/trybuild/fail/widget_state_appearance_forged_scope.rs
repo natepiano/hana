@@ -13,8 +13,8 @@ fn main() {
         &mut panel,
         |widget| {
             widget.with(
-                El::new()
-                    .background(Color::WHITE)
+                widget
+                    .child(El::new().background(Color::WHITE))
                     .disabled(Appearance::new().background(Color::BLACK)),
                 |_| {},
             );

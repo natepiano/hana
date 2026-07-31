@@ -1249,7 +1249,8 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                             .alignment(AlignX::Center, AlignY::Center),
                         |builder| {
                             builder.with(
-                                El::new()
+                                builder
+                                    .child(El::new())
                                     .width(Sizing::GROW)
                                     .height(Sizing::fixed(SLIDER_TRACK_HEIGHT))
                                     .background(SLIDER_TRACK_FILL)
@@ -1266,7 +1267,8 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                             .alignment(AlignX::Left, AlignY::Center),
                         |builder| {
                             builder.with(
-                                El::new()
+                                builder
+                                    .child(El::new())
                                     .size(SLIDER_THUMB_DIAMETER, SLIDER_THUMB_DIAMETER)
                                     .background(SLIDER_THUMB_FILL)
                                     .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_THUMB_BORDER))

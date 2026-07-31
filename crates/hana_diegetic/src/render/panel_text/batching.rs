@@ -2567,7 +2567,8 @@ mod tests {
             El::new().background(Color::WHITE).button("styled"),
             |builder| {
                 builder.text(
-                    Text::new("Alpha", TextStyle::new(10.0)).layout(El::new().hovered(appearance)),
+                    Text::new("Alpha", TextStyle::new(10.0))
+                        .layout(builder.child(El::new()).hovered(appearance)),
                 );
             },
         );
@@ -2579,9 +2580,12 @@ mod tests {
         builder.with(El::new().button("styled"), |builder| {
             builder.text(
                 Text::new("Alpha", TextStyle::new(10.0)).layout(
-                    El::new()
-                        .background(Color::WHITE)
-                        .border(Border::all(1.0, Color::BLACK))
+                    builder
+                        .child(
+                            El::new()
+                                .background(Color::WHITE)
+                                .border(Border::all(1.0, Color::BLACK)),
+                        )
                         .hovered(appearance),
                 ),
             );

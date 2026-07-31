@@ -3,8 +3,8 @@ error[E0277]: the trait bound `EditableField: Pressable` is not satisfied
    |
 12 |           builder.with(
    |                   ---- required by a bound introduced by this call
-13 | /             El::new()
-14 | |                 .background(Color::WHITE)
+13 | /             builder
+14 | |                 .child(El::new().background(Color::WHITE))
 15 | |                 .pressed(Appearance::new().background(Color::BLACK)),
    | |____________________________________________________________________^ the trait `Pressable` is not implemented for `EditableField`
    |

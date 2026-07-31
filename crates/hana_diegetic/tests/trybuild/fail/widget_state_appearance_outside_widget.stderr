@@ -1,55 +1,15 @@
-error[E0277]: `LayoutBuilder` cannot accept `WidgetPart`
-  --> tests/trybuild/fail/widget_state_appearance_outside_widget.rs:9:9
+error[E0599]: no method named `disabled` found for struct `El` in the current scope
+  --> tests/trybuild/fail/widget_state_appearance_outside_widget.rs:11:14
    |
- 8 |       builder.with(
-   |               ---- required by a bound introduced by this call
  9 | /         El::new()
 10 | |             .background(Color::WHITE)
 11 | |             .disabled(Appearance::new().background(Color::BLACK)),
-   | |_________________________________________________________________^ this element is not allowed in the current builder scope
+   | |             -^^^^^^^^ method not found in `El`
+   | |_____________|
    |
-   = help: the trait `AcceptsElement<WidgetPart>` is not implemented for `LayoutBuilder`
-   = note: put state appearance parts (`hovered` / `focused` / `disabled` / `pressed`) inside a widget closure; a widget closure accepts parts and layout content, but not another widget
-help: `LayoutBuilder` implements trait `AcceptsElement<Role>`
-  --> src/layout/builder.rs
    |
-   | impl AcceptsElement<LayoutOnly> for LayoutBuilder {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<LayoutOnly>`
-...
-   | impl<W: WidgetOwner> AcceptsElement<WidgetElement<W>> for LayoutBuilder {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<WidgetElement<W>>`
-note: required by a bound in `LayoutBuilder::with`
-  --> src/layout/builder.rs
-   |
-   |     pub fn with<L, Role>(
-   |            ---- required by a bound in this associated function
-...
-   |         Self: AcceptsElement<Role>,
-   |               ^^^^^^^^^^^^^^^^^^^^ required by this bound in `LayoutBuilder::with`
-
-error[E0277]: expected a `FnOnce(&mut <LayoutBuilder as AcceptsElement<WidgetPart>>::ChildBuilder<'_>)` closure, found `_`
-  --> tests/trybuild/fail/widget_state_appearance_outside_widget.rs:12:9
-   |
- 8 |     builder.with(
-   |             ---- required by a bound introduced by this call
-...
-12 |         |_| {},
-   |         ^^^^^^ expected an `FnOnce(&mut <LayoutBuilder as AcceptsElement<WidgetPart>>::ChildBuilder<'_>)` closure, found `_`
-   |
-   = help: the trait `AcceptsElement<WidgetPart>` is not implemented for `LayoutBuilder`
-help: `LayoutBuilder` implements trait `AcceptsElement<Role>`
-  --> src/layout/builder.rs
-   |
-   | impl AcceptsElement<LayoutOnly> for LayoutBuilder {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<LayoutOnly>`
-...
-   | impl<W: WidgetOwner> AcceptsElement<WidgetElement<W>> for LayoutBuilder {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `AcceptsElement<WidgetElement<W>>`
-note: required by a bound in `LayoutBuilder::with`
-  --> src/layout/builder.rs
-   |
-   |     pub fn with<L, Role>(
-   |            ---- required by a bound in this associated function
-...
-   |         children: impl FnOnce(&mut <Self as AcceptsElement<Role>>::ChildBuilder<'_>),
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `LayoutBuilder::with`
+   = note: the method was found for
+           - `El<L, PressedPart>`
+           - `El<L, WidgetChild>`
+           - `El<L, WidgetElement<W>>`
+           - `El<L, WidgetPart>`

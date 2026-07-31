@@ -1260,7 +1260,8 @@ mod tests {
             .layout(|builder| {
                 builder.with(El::new().button("action"), |builder| {
                     builder.with(
-                        El::new()
+                        builder
+                            .child(El::new())
                             .disabled(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
                         |_| {},
                     );
