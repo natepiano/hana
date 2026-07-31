@@ -20,6 +20,7 @@ use super::ReflectKeymapCommand;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::keymap::runtime::KeymapRuntime;
 
 /// A read-only table that resolves declared command IDs to their runtime registrations.
 #[derive(Resource)]
@@ -150,7 +151,7 @@ impl CommandRegistry {
             .map(|entry| (entry.dispatch)(world))
     }
 
-    fn register_held_observers(&self, world: &mut World) {
+    pub(crate) fn register_held_observers(&self, world: &mut World) {
         for (custom_input, register_held_observer) in &self.held_registrations {
             register_held_observer(world, *custom_input);
         }
@@ -162,10 +163,21 @@ pub(crate) fn register_held_observer<T: KeymapCommand>(
     custom_input: CustomInput,
 ) {
     world.add_observer(
-        move |event: On<T>, mut custom_inputs: ResMut<CustomInputs>| {
+        move |event: On<T>,
+              mut custom_inputs: ResMut<CustomInputs>,
+              keymap_runtime: Option<ResMut<KeymapRuntime>>| {
             let Some(hold_phase) = event.event().hold_phase() else {
                 return;
             };
+
+            if let Some(mut keymap_runtime) = keymap_runtime {
+                keymap_runtime.set_event_source(
+                    custom_input,
+                    matches!(hold_phase, HoldPhase::Begin),
+                    &mut custom_inputs,
+                );
+                return;
+            }
 
             let input_is_active = custom_inputs
                 .get(&custom_input)
@@ -193,6 +205,8 @@ pub(crate) struct CommandEntry {
 }
 
 impl CommandEntry {
+    pub(crate) const fn dispatch(&self) -> fn(&mut World) { self.dispatch }
+
     pub(crate) const fn invocation(&self) -> Invocation { self.invocation }
 }
 

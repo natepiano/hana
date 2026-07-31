@@ -1,13 +1,9 @@
 //! Matcher construction from a semantically resolved keymap.
 
-#![expect(
-    dead_code,
-    reason = "keymap routing reads compiled matchers after the input runtime is added"
-)]
-
 use std::collections::HashMap;
 
 use bevy::prelude::Resource;
+use bevy::prelude::World;
 
 use super::MergedKeymap;
 use crate::CommandRegistry;
@@ -24,6 +20,11 @@ pub(crate) struct Generation(pub(crate) usize);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CommandHandle(usize);
 
+#[cfg(test)]
+impl CommandHandle {
+    pub(super) const fn from_index(index: usize) -> Self { Self(index) }
+}
+
 /// One complete set of matchers and command handles for a keymap generation.
 #[derive(Resource)]
 pub(crate) struct CompiledKeymap {
@@ -36,6 +37,13 @@ pub(crate) struct CompiledKeymap {
 impl CompiledKeymap {
     /// Builds a replacement keymap with one resolved matcher for every registered condition.
     #[must_use]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reload transaction constructs replacement keymaps in the next phase"
+        )
+    )]
     pub(crate) fn from_merged(
         generation: Generation,
         merged_keymap: &MergedKeymap,
@@ -91,6 +99,12 @@ impl CompiledKeymap {
         self.commands
             .get(command_handle.0)
             .map(CommandEntry::invocation)
+    }
+
+    pub(crate) fn dispatch(&self, command_handle: CommandHandle) -> Option<fn(&mut World)> {
+        self.commands
+            .get(command_handle.0)
+            .map(CommandEntry::dispatch)
     }
 }
 

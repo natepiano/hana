@@ -4,17 +4,15 @@ mod compiled;
 mod constants;
 mod document;
 mod merged;
+pub(crate) mod runtime;
 mod schema;
 
+pub(super) use compiled::CommandHandle;
 pub(crate) use compiled::CompiledKeymap;
 pub(crate) use compiled::Generation;
 pub(crate) use document::KeymapDocument;
 pub(crate) use merged::MergedKeymap;
-#[expect(
-    unused_imports,
-    reason = "keymap reload inspects resolved edits before compiling a replacement"
-)]
-pub(crate) use merged::ResolvedEdits;
+pub(crate) use runtime::route_input;
 #[cfg_attr(
     not(test),
     expect(

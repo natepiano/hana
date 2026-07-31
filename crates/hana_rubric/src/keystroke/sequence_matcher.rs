@@ -85,6 +85,10 @@ impl<T: Copy> SequenceMatcher<T> {
     /// Discards a pending prefix without resolving its deferred value.
     pub const fn cancel_pending(&mut self) { self.pending = None; }
 
+    /// Reports whether a prefix is waiting for another keystroke or its timeout.
+    #[must_use]
+    pub const fn is_pending(&self) -> bool { self.pending.is_some() }
+
     /// Resolves a pending complete sequence when its timeout has elapsed.
     ///
     /// The timeout is measured from the most recent matched keystroke. A partial prefix without a
@@ -299,6 +303,7 @@ mod tests {
             MatchOutcome::Deferred(1)
         );
         sequence_matcher.cancel_pending();
+        assert!(!sequence_matcher.is_pending());
         assert_eq!(
             sequence_matcher.resolve_timeout(now + TIMEOUT, TIMEOUT),
             None

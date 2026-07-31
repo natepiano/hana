@@ -60,8 +60,22 @@ impl ResolvedEdits {
 
 #[derive(Clone)]
 enum ResolvedEdit {
-    Bind(CommandId),
+    Bind(ResolvedBinding),
     Tombstone,
+}
+
+#[derive(Clone)]
+struct ResolvedBinding {
+    command_id:  CommandId,
+    source:      BindingSource,
+    source_path: String,
+}
+
+#[derive(Clone)]
+struct ScopedBinding {
+    keystroke_sequence: KeystrokeSequence,
+    binding:            ResolvedBinding,
+    origin:             Option<ConditionHandle>,
 }
 
 enum ContextResolution {
@@ -153,6 +167,12 @@ impl MergedKeymap {
                 protected_keystrokes,
             );
         }
+        Self::reject_held_prefixes(
+            &mut resolved_edits,
+            command_registry,
+            condition_registry,
+            &mut diagnostics,
+        );
 
         (
             Self::from_resolved_edits(resolved_edits, condition_registry),
@@ -389,8 +409,137 @@ impl MergedKeymap {
                     return None;
                 }
 
-                Some(ResolvedEdit::Bind(command_id))
+                Some(ResolvedEdit::Bind(ResolvedBinding {
+                    command_id,
+                    source: binding_source.clone(),
+                    source_path: source_path.to_owned(),
+                }))
             },
+        }
+    }
+
+    fn reject_held_prefixes(
+        resolved_edits: &mut ResolvedEdits,
+        command_registry: &CommandRegistry,
+        condition_registry: &ConditionRegistry,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let global_bindings = Self::scoped_bindings(resolved_edits.global(), None);
+        let mut rejected_bindings = Vec::new();
+        Self::collect_held_prefix_rejections(
+            &global_bindings,
+            command_registry,
+            false,
+            diagnostics,
+            &mut rejected_bindings,
+        );
+
+        for condition_info in condition_registry.iter() {
+            let Some(condition_handle) = condition_registry.resolve(condition_info.name.as_str())
+            else {
+                continue;
+            };
+            let mut bindings = global_bindings.clone();
+
+            if let Some(condition_edits) = resolved_edits.for_condition(condition_handle) {
+                for (keystroke_sequence, resolved_edit) in condition_edits {
+                    match resolved_edit {
+                        ResolvedEdit::Bind(binding) => {
+                            bindings.retain(|candidate| {
+                                candidate.keystroke_sequence != *keystroke_sequence
+                            });
+                            bindings.push(ScopedBinding {
+                                keystroke_sequence: keystroke_sequence.clone(),
+                                binding:            binding.clone(),
+                                origin:             Some(condition_handle),
+                            });
+                        },
+                        ResolvedEdit::Tombstone => {
+                            bindings.retain(|candidate| {
+                                candidate.keystroke_sequence != *keystroke_sequence
+                            });
+                        },
+                    }
+                }
+            }
+
+            Self::collect_held_prefix_rejections(
+                &bindings,
+                command_registry,
+                true,
+                diagnostics,
+                &mut rejected_bindings,
+            );
+        }
+
+        for (origin, keystroke_sequence) in rejected_bindings {
+            if let Some(edits) = resolved_edits.entries.get_mut(&origin) {
+                edits.remove(&keystroke_sequence);
+            }
+        }
+    }
+
+    fn scoped_bindings(
+        edits: Option<&HashMap<KeystrokeSequence, ResolvedEdit>>,
+        origin: Option<ConditionHandle>,
+    ) -> Vec<ScopedBinding> {
+        edits.map_or_else(Vec::new, |edits| {
+            edits
+                .iter()
+                .filter_map(|(keystroke_sequence, resolved_edit)| match resolved_edit {
+                    ResolvedEdit::Bind(binding) => Some(ScopedBinding {
+                        keystroke_sequence: keystroke_sequence.clone(),
+                        binding: binding.clone(),
+                        origin,
+                    }),
+                    ResolvedEdit::Tombstone => None,
+                })
+                .collect()
+        })
+    }
+
+    fn collect_held_prefix_rejections(
+        bindings: &[ScopedBinding],
+        command_registry: &CommandRegistry,
+        is_condition_scope: bool,
+        diagnostics: &mut Vec<Diagnostic>,
+        rejected_bindings: &mut Vec<(Option<ConditionHandle>, KeystrokeSequence)>,
+    ) {
+        for held_binding in bindings {
+            let is_held = command_registry.capability(&held_binding.binding.command_id)
+                == Some(Capability::Held);
+            if !is_held || held_binding.keystroke_sequence.len() != 1 {
+                continue;
+            }
+
+            for other_binding in bindings {
+                if (is_condition_scope
+                    && held_binding.origin.is_none()
+                    && other_binding.origin.is_none())
+                    || other_binding.keystroke_sequence.len() <= 1
+                    || other_binding.keystroke_sequence.first()
+                        != held_binding.keystroke_sequence.first()
+                {
+                    continue;
+                }
+
+                diagnostics.push(held_binding.binding.source.diagnostic(
+                    &held_binding.binding.source_path,
+                    held_binding.binding.command_id.to_string(),
+                    DiagnosticKind::HeldCommandInSequence,
+                    DiagnosticSeverity::Failure,
+                    format!(
+                        "Hold-to-act command `{}` shares its keystroke with multi-stroke binding `{}`.",
+                        held_binding.binding.command_id, other_binding.binding.command_id
+                    ),
+                ));
+                rejected_bindings
+                    .push((held_binding.origin, held_binding.keystroke_sequence.clone()));
+                rejected_bindings.push((
+                    other_binding.origin,
+                    other_binding.keystroke_sequence.clone(),
+                ));
+            }
         }
     }
 
@@ -411,8 +560,8 @@ impl MergedKeymap {
             if let Some(condition_edits) = resolved_edits.for_condition(condition_handle) {
                 for (keystroke_sequence, resolved_edit) in condition_edits {
                     match resolved_edit {
-                        ResolvedEdit::Bind(command_id) => {
-                            bindings.insert(keystroke_sequence.clone(), command_id.clone());
+                        ResolvedEdit::Bind(binding) => {
+                            bindings.insert(keystroke_sequence.clone(), binding.command_id.clone());
                         },
                         ResolvedEdit::Tombstone => {
                             bindings.remove(keystroke_sequence);
@@ -437,8 +586,8 @@ impl MergedKeymap {
             edits
                 .iter()
                 .filter_map(|(keystroke_sequence, resolved_edit)| match resolved_edit {
-                    ResolvedEdit::Bind(command_id) => {
-                        Some((keystroke_sequence.clone(), command_id.clone()))
+                    ResolvedEdit::Bind(binding) => {
+                        Some((keystroke_sequence.clone(), binding.command_id.clone()))
                     },
                     ResolvedEdit::Tombstone => None,
                 })
@@ -1001,6 +1150,32 @@ mod tests {
                 && diagnostic.command_id == "recovery::open"
         }));
         assert!(merged_keymap.global().is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn held_prefix_and_longer_binding_are_both_rejected() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": {
+                    "g": "camera::hold",
+                    "g h": "camera::reset"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::HeldCommandInSequence)
+            .ok_or_else(|| String::from("held-prefix diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Failure);
+        assert_eq!(diagnostic.command_id, "camera::hold");
+        assert!(diagnostic.message.contains("camera::hold"));
+        assert!(diagnostic.message.contains("camera::reset"));
+        assert_eq!(command_for_sequence(merged_keymap.global(), "g")?, None);
+        assert_eq!(command_for_sequence(merged_keymap.global(), "g h")?, None);
 
         Ok(())
     }

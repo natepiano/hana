@@ -7,13 +7,13 @@ use bevy::app::App;
 use bevy::app::Plugin;
 use bevy::ecs::change_detection::DetectChanges;
 use bevy::ecs::schedule::IntoScheduleConfigs;
+use bevy::prelude::PreUpdate;
 use bevy::prelude::Reflect;
 use bevy::prelude::Res;
 use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use bevy::prelude::State;
 use bevy::prelude::States;
-use bevy::prelude::Update;
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
 
@@ -70,17 +70,28 @@ impl<T> KeymapContext for T where
 /// comparing names.
 #[derive(Debug, Default, Resource)]
 pub struct ActiveCondition {
-    handle: Option<ConditionHandle>,
+    handle:         Option<ConditionHandle>,
+    is_initialized: bool,
 }
 
 impl ActiveCondition {
-    /// Returns whether context synchronization has resolved an active condition handle.
+    /// Returns whether input routing can select the active condition or the global matcher.
     #[must_use]
-    pub const fn is_initialized(&self) -> bool { self.handle.is_some() }
+    pub const fn is_initialized(&self) -> bool { self.is_initialized }
+
+    pub(crate) const fn handle(&self) -> Option<ConditionHandle> { self.handle }
 
     const fn update(&mut self, condition_handle: ConditionHandle) {
         self.handle = Some(condition_handle);
+        self.is_initialized = true;
     }
+
+    pub(crate) const fn await_context(&mut self) {
+        self.handle = None;
+        self.is_initialized = false;
+    }
+
+    pub(crate) const fn enable_global(&mut self) { self.is_initialized = true; }
 }
 
 /// A condition's compact registry identity.
@@ -179,20 +190,28 @@ struct ConditionEntry {
 }
 
 pub(crate) fn sync_resource_condition<C: KeymapContext + Resource>(
-    context: Res<C>,
+    context: Option<Res<C>>,
     condition_registry: Res<ConditionRegistry>,
     mut active_condition: ResMut<ActiveCondition>,
 ) {
+    let Some(context) = context else {
+        return;
+    };
+
     if context.is_changed() {
         update_active_condition(*context, &condition_registry, &mut active_condition);
     }
 }
 
 pub(crate) fn sync_state_condition<C: KeymapContext + States>(
-    state: Res<State<C>>,
+    state: Option<Res<State<C>>>,
     condition_registry: Res<ConditionRegistry>,
     mut active_condition: ResMut<ActiveCondition>,
 ) {
+    let Some(state) = state else {
+        return;
+    };
+
     if state.is_changed() {
         update_active_condition(*state.get(), &condition_registry, &mut active_condition);
     }
@@ -244,7 +263,7 @@ where
     fn build(&self, app: &mut App) {
         if register_context::<C>(app).is_ok() {
             app.add_systems(
-                Update,
+                PreUpdate,
                 sync_resource_condition::<C>.in_set(KeymapSystems::UpdateActiveCondition),
             );
         }
@@ -270,7 +289,7 @@ where
     fn build(&self, app: &mut App) {
         if register_context::<C>(app).is_ok() {
             app.add_systems(
-                Update,
+                PreUpdate,
                 sync_state_condition::<C>.in_set(KeymapSystems::UpdateActiveCondition),
             );
         }
@@ -278,12 +297,11 @@ where
 }
 
 fn register_context<C: KeymapContext>(app: &mut App) -> Result<(), Vec<Diagnostic>> {
-    app.init_resource::<ConditionRegistry>()
-        .init_resource::<ActiveCondition>()
-        .configure_sets(
-            Update,
-            (KeymapSystems::UpdateActiveCondition, KeymapSystems::Route).chain(),
-        );
+    crate::KeymapPlugin::install_runtime(app);
+    app.world_mut()
+        .resource_mut::<ActiveCondition>()
+        .await_context();
+    app.init_resource::<ConditionRegistry>();
 
     let result = app
         .world_mut()
@@ -460,7 +478,30 @@ mod tests {
             .resource_mut::<NextState<StateContext>>()
             .set(StateContext::Paused);
         app.update();
+        app.update();
         assert_active_condition(&app, "paused");
+    }
+
+    #[test]
+    fn missing_state_resource_leaves_the_active_condition_unchanged() -> Result<(), String> {
+        let mut app = App::new();
+        app.add_plugins(KeymapPlugin::new().for_state_context::<StateContext>());
+        let paused = app
+            .world()
+            .resource::<ConditionRegistry>()
+            .resolve("paused")
+            .ok_or_else(|| "state context did not register paused".to_owned())?;
+        app.world_mut()
+            .resource_mut::<ActiveCondition>()
+            .update(paused);
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ActiveCondition>().handle(),
+            Some(paused)
+        );
+        Ok(())
     }
 
     fn assert_keymap_context<C: KeymapContext>() {}
