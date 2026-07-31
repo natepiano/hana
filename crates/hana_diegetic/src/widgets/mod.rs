@@ -151,6 +151,7 @@ pub(crate) use visual::WidgetVisualSlots;
 
 use crate::PanelSystems;
 use crate::cascade;
+use crate::cascade::CascadeSet;
 use crate::ime::ImeSystemSet;
 use crate::screen_space::ScreenSpaceSystems;
 
@@ -267,7 +268,7 @@ fn configure_widget_system_sets(app: &mut App) {
             WidgetSystems::PresentationCommandsApplied
                 .after(WidgetSystems::FocusCommandsApplied)
                 .after(WidgetSystems::ReifyCommandsApplied)
-                .after(cascade::CascadeSet::Propagate),
+                .after(CascadeSet::Propagate),
         ),
     );
 }
@@ -324,17 +325,17 @@ impl Plugin for WidgetsPlugin {
                 button::present_button_state
                     .after(WidgetSystems::FocusCommandsApplied)
                     .after(WidgetSystems::ReifyCommandsApplied)
-                    .after(cascade::CascadeSet::Propagate)
+                    .after(CascadeSet::Propagate)
                     .before(WidgetSystems::PresentationCommandsApplied),
                 editable::present_editable_state
                     .after(WidgetSystems::FocusCommandsApplied)
                     .after(WidgetSystems::ReifyCommandsApplied)
-                    .after(cascade::CascadeSet::Propagate)
+                    .after(CascadeSet::Propagate)
                     .before(WidgetSystems::PresentationCommandsApplied),
                 slider::present_slider_state
                     .after(WidgetSystems::FocusCommandsApplied)
                     .after(WidgetSystems::ReifyCommandsApplied)
-                    .after(cascade::CascadeSet::Propagate)
+                    .after(CascadeSet::Propagate)
                     .before(WidgetSystems::PresentationCommandsApplied),
                 ApplyDeferred.in_set(WidgetSystems::PresentationCommandsApplied),
                 visual::dispatch_visual_overrides.after(WidgetSystems::PresentationCommandsApplied),

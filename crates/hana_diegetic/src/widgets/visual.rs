@@ -704,6 +704,7 @@ mod tests {
     use crate::WidgetPressedAppearance;
     use crate::cascade::Cascade;
     use crate::cascade::Resolved;
+    use crate::ime::ImePlugin;
     use crate::layout::BoundingBox;
     use crate::layout::PanelCircle;
     use crate::layout::PanelDraw;
@@ -1266,7 +1267,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(DiegeticTextMeasurer::default())
-            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, crate::ime::ImePlugin));
+            .add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ImePlugin));
         let window = app.world_mut().spawn(Window::default()).id();
         let panel = DiegeticPanel::screen()
             .size(Px(100.0), Px(40.0))
