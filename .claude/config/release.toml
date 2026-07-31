@@ -16,3 +16,7 @@ version = "0.3.0"
 [[publish_path_pins]]
 dep     = "hana_clerestory"
 version = "0.3.0"
+
+[[publish_path_pins]]
+dep     = "hana_lagrange"
+version = "0.4.0"
