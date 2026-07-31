@@ -47,6 +47,7 @@ use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
 use hana_diegetic::Appearance;
+use hana_diegetic::BackgroundColor;
 use hana_diegetic::Border;
 use hana_diegetic::Button;
 use hana_diegetic::ButtonCanceled;
@@ -1457,8 +1458,8 @@ type ButtonElement = El<Row, WidgetElement<Button>>;
 /// distance the cube panel sits from the camera.
 fn apply_state_appearance(element: ButtonElement) -> ButtonElement {
     element
-        .hovered(BUTTON_FILL_HOVERED)
-        .pressed(BUTTON_FILL_PRESSED)
+        .hovered(BackgroundColor(BUTTON_FILL_HOVERED))
+        .pressed(BackgroundColor(BUTTON_FILL_PRESSED))
         .focused(
             Appearance::new()
                 .border_color(BUTTON_BORDER_FOCUSED)

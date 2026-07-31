@@ -36,7 +36,7 @@ use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 use crate::layout::Unit;
 use crate::widgets;
-use crate::widgets::Appearance;
+use crate::widgets::IntoAppearance;
 use crate::widgets::PanelPicking;
 use crate::widgets::WidgetDisabledAppearance;
 use crate::widgets::WidgetFocusedAppearance;
@@ -419,33 +419,33 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
 
     /// Sets the appearance inherited by widgets while they are hovered.
     #[must_use]
-    pub fn widget_hovered_appearance(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn widget_hovered_appearance(mut self, appearance: impl IntoAppearance) -> Self {
         self.data.widget_hovered_appearance =
-            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
+            Cascade::Override(WidgetHoveredAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance inherited by widgets while they are pressed.
     #[must_use]
-    pub fn widget_pressed_appearance(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn widget_pressed_appearance(mut self, appearance: impl IntoAppearance) -> Self {
         self.data.widget_pressed_appearance =
-            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
+            Cascade::Override(WidgetPressedAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance inherited by widgets while their focus indicator is visible.
     #[must_use]
-    pub fn widget_focused_appearance(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn widget_focused_appearance(mut self, appearance: impl IntoAppearance) -> Self {
         self.data.widget_focused_appearance =
-            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
+            Cascade::Override(WidgetFocusedAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance inherited by widgets while they are disabled.
     #[must_use]
-    pub fn widget_disabled_appearance(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn widget_disabled_appearance(mut self, appearance: impl IntoAppearance) -> Self {
         self.data.widget_disabled_appearance =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 }

@@ -69,6 +69,7 @@ use crate::render::HairlineFade;
 use crate::widgets::Appearance;
 use crate::widgets::Button;
 use crate::widgets::ButtonClicked;
+use crate::widgets::IntoAppearance;
 use crate::widgets::Slider;
 use crate::widgets::SliderDirection;
 use crate::widgets::SliderResetBehavior;
@@ -1066,36 +1067,33 @@ impl<L> El<L, LayoutOnly> {
     /// Sets the appearance while the enclosing widget is hovered.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> El<L, WidgetPart> {
-        self.appearance_mut().hovered =
-            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
+    pub fn hovered(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
+        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
         self.into_role()
     }
 
     /// Sets the appearance while the enclosing widget's focus indicator is visible.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: impl Into<Appearance>) -> El<L, WidgetPart> {
-        self.appearance_mut().focused =
-            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
+    pub fn focused(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
+        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
         self.into_role()
     }
 
     /// Sets the appearance while the enclosing widget is disabled.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> El<L, WidgetPart> {
+    pub fn disabled(mut self, appearance: impl IntoAppearance) -> El<L, WidgetPart> {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self.into_role()
     }
 
     /// Sets the appearance while the enclosing widget is held by a press or drag.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> El<L, PressedPart> {
-        self.appearance_mut().pressed =
-            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
+    pub fn pressed(mut self, appearance: impl IntoAppearance) -> El<L, PressedPart> {
+        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
         self.into_role()
     }
 
@@ -1182,9 +1180,8 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().hovered =
-            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
+    pub fn hovered(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
         self
     }
 
@@ -1193,9 +1190,8 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().focused =
-            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
+    pub fn focused(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
         self
     }
 
@@ -1204,9 +1200,9 @@ impl<L, W> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn disabled(mut self, appearance: impl IntoAppearance) -> Self {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 
@@ -1265,9 +1261,8 @@ impl<L, W: Pressable> El<L, WidgetElement<W>> {
     /// See [`Appearance`] for each property's retained record and ordinary
     /// declaration requirement.
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().pressed =
-            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
+    pub fn pressed(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
         self
     }
 }
@@ -1276,36 +1271,33 @@ impl<L> El<L, WidgetPart> {
     /// Sets the appearance while the enclosing widget is hovered.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().hovered =
-            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
+    pub fn hovered(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance while the enclosing widget's focus indicator is visible.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().focused =
-            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
+    pub fn focused(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance while the enclosing widget is disabled.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn disabled(mut self, appearance: impl IntoAppearance) -> Self {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance while the enclosing widget is held by a press or drag.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> El<L, PressedPart> {
-        self.appearance_mut().pressed =
-            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
+    pub fn pressed(mut self, appearance: impl IntoAppearance) -> El<L, PressedPart> {
+        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
         self.into_role()
     }
 }
@@ -1314,36 +1306,33 @@ impl<L> El<L, PressedPart> {
     /// Sets the appearance while the enclosing widget is hovered.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn hovered(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().hovered =
-            Cascade::Override(WidgetHoveredAppearance::new(appearance.into()));
+    pub fn hovered(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().hovered = Cascade::Override(WidgetHoveredAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance while the enclosing widget's focus indicator is visible.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn focused(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().focused =
-            Cascade::Override(WidgetFocusedAppearance::new(appearance.into()));
+    pub fn focused(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().focused = Cascade::Override(WidgetFocusedAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance while the enclosing widget is disabled.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn disabled(mut self, appearance: impl Into<Appearance>) -> Self {
+    pub fn disabled(mut self, appearance: impl IntoAppearance) -> Self {
         self.appearance_mut().disabled =
-            Cascade::Override(WidgetDisabledAppearance::new(appearance.into()));
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 
     /// Sets the appearance while the enclosing widget is held by a press or drag.
     ///
     /// A later call replaces any bundle an earlier call authored for this state.
-    pub fn pressed(mut self, appearance: impl Into<Appearance>) -> Self {
-        self.appearance_mut().pressed =
-            Cascade::Override(WidgetPressedAppearance::new(appearance.into()));
+    pub fn pressed(mut self, appearance: impl IntoAppearance) -> Self {
+        self.appearance_mut().pressed = Cascade::Override(WidgetPressedAppearance::new(appearance));
         self
     }
 }

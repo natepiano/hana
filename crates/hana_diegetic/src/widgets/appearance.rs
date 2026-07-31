@@ -14,7 +14,12 @@ use core::mem::size_of;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-use bevy::prelude::*;
+use bevy::prelude::Color;
+use bevy::prelude::Handle;
+use bevy::prelude::Reflect;
+use bevy::prelude::ReflectResource;
+use bevy::prelude::Resource;
+use bevy::prelude::StandardMaterial;
 use bevy_kana::CascadeRootResource;
 
 use super::VisualSlotOverride;
@@ -41,9 +46,9 @@ impl<T> VisualChange<T> {
 
 /// The visual properties a widget state replaces.
 ///
-/// State methods on [`crate::El`] accept an `Appearance` bundle or a bare
-/// [`Color`] that declares the state's background. Each builder below replaces
-/// values on a retained record layout emits:
+/// State methods on [`crate::El`] accept an `Appearance` bundle or a
+/// property-specific color wrapper. Each builder below replaces values on a
+/// retained record layout emits:
 ///
 /// | Builder | Retained record |
 /// | --- | --- |
@@ -79,6 +84,7 @@ impl<T> VisualChange<T> {
 /// ```no_run
 /// use bevy::color::Color;
 /// use hana_diegetic::Appearance;
+/// use hana_diegetic::BackgroundColor;
 /// use hana_diegetic::Border;
 /// use hana_diegetic::El;
 /// use hana_diegetic::Px;
@@ -88,7 +94,7 @@ impl<T> VisualChange<T> {
 ///     .background(Color::NONE)
 ///     .border(Border::all(Px(0.0), Color::WHITE))
 ///     .button("apply")
-///     .hovered(Color::BLACK)
+///     .hovered(BackgroundColor(Color::BLACK))
 ///     .focused(Appearance::new().border_width(Px(2.0)))
 ///     .pressed(Appearance::new().border_color(Color::WHITE))
 ///     .disabled(Appearance::new().material(Default::default()));
@@ -96,7 +102,7 @@ impl<T> VisualChange<T> {
 ///     .background(Color::NONE)
 ///     .border(Border::all(Px(0.0), Color::WHITE))
 ///     .widget("level", Slider::new(0.0..=1.0))
-///     .hovered(Appearance::new().background(Color::BLACK))
+///     .hovered(BackgroundColor(Color::BLACK))
 ///     .focused(Appearance::new().border_width(Px(2.0)))
 ///     .pressed(Appearance::new().border_color(Color::WHITE))
 ///     .disabled(Appearance::new().material(Default::default()));
@@ -226,11 +232,78 @@ impl Appearance {
     }
 }
 
-/// A bare [`Color`] declares an [`Appearance`] background.
-///
-/// For `.hovered(Default::default())`, write `.hovered(Appearance::default())`.
-impl From<Color> for Appearance {
-    fn from(color: Color) -> Self { Self::new().background(color) }
+/// A color that replaces a state appearance's background property.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BackgroundColor(
+    /// The replacement color.
+    pub Color,
+);
+
+impl From<Color> for BackgroundColor {
+    fn from(color: Color) -> Self { Self(color) }
+}
+
+/// A color that replaces a state appearance's border property.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BorderColor(
+    /// The replacement color.
+    pub Color,
+);
+
+impl From<Color> for BorderColor {
+    fn from(color: Color) -> Self { Self(color) }
+}
+
+/// A color that replaces a state appearance's text property.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextColor(
+    /// The replacement color.
+    pub Color,
+);
+
+impl From<Color> for TextColor {
+    fn from(color: Color) -> Self { Self(color) }
+}
+
+/// A color that replaces a state appearance's panel-draw property.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PathColor(
+    /// The replacement color.
+    pub Color,
+);
+
+impl From<Color> for PathColor {
+    fn from(color: Color) -> Self { Self(color) }
+}
+
+/// Converts a state appearance bundle or property-specific color into an [`Appearance`].
+#[diagnostic::on_unimplemented(
+    message = "a bare `Color` does not say which property it sets",
+    label = "wrap it: `BackgroundColor({Self})`, `TextColor({Self})`, `BorderColor({Self})`, or `PathColor({Self})`"
+)]
+pub trait IntoAppearance {
+    /// Returns the corresponding state appearance bundle.
+    fn into_appearance(self) -> Appearance;
+}
+
+impl IntoAppearance for Appearance {
+    fn into_appearance(self) -> Appearance { self }
+}
+
+impl IntoAppearance for BackgroundColor {
+    fn into_appearance(self) -> Appearance { Appearance::new().background(self.0) }
+}
+
+impl IntoAppearance for BorderColor {
+    fn into_appearance(self) -> Appearance { Appearance::new().border_color(self.0) }
+}
+
+impl IntoAppearance for TextColor {
+    fn into_appearance(self) -> Appearance { Appearance::new().text_color(self.0) }
+}
+
+impl IntoAppearance for PathColor {
+    fn into_appearance(self) -> Appearance { Appearance::new().path_color(self.0) }
 }
 
 static EMPTY_APPEARANCE: LazyLock<Arc<Appearance>> = LazyLock::new(|| Arc::new(Appearance::new()));
@@ -248,7 +321,9 @@ pub struct WidgetHoveredAppearance(Arc<Appearance>);
 impl WidgetHoveredAppearance {
     /// Wraps one appearance bundle as the hovered-state attribute value.
     #[must_use]
-    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
+    pub fn new(appearance: impl IntoAppearance) -> Self {
+        Self(Arc::new(appearance.into_appearance()))
+    }
 
     /// Borrows this hovered-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -291,7 +366,9 @@ pub struct WidgetPressedAppearance(Arc<Appearance>);
 impl WidgetPressedAppearance {
     /// Wraps one appearance bundle as the pressed-state attribute value.
     #[must_use]
-    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
+    pub fn new(appearance: impl IntoAppearance) -> Self {
+        Self(Arc::new(appearance.into_appearance()))
+    }
 
     /// Borrows this pressed-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -334,7 +411,9 @@ pub struct WidgetFocusedAppearance(Arc<Appearance>);
 impl WidgetFocusedAppearance {
     /// Wraps one appearance bundle as the focused-state attribute value.
     #[must_use]
-    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
+    pub fn new(appearance: impl IntoAppearance) -> Self {
+        Self(Arc::new(appearance.into_appearance()))
+    }
 
     /// Borrows this focused-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -377,7 +456,9 @@ pub struct WidgetDisabledAppearance(Arc<Appearance>);
 impl WidgetDisabledAppearance {
     /// Wraps one appearance bundle as the disabled-state attribute value.
     #[must_use]
-    pub fn new(appearance: impl Into<Appearance>) -> Self { Self(Arc::new(appearance.into())) }
+    pub fn new(appearance: impl IntoAppearance) -> Self {
+        Self(Arc::new(appearance.into_appearance()))
+    }
 
     /// Borrows this disabled-state bundle.
     pub(crate) fn appearance(&self) -> &Appearance { &self.0 }
@@ -639,10 +720,20 @@ fn render_border_widths(width: Dimension, panel: &DiegeticPanel) -> Option<[f32;
 )]
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
-    use bevy::prelude::*;
+    use bevy::prelude::App;
+    use bevy::prelude::Assets;
+    use bevy::prelude::Color;
+    use bevy::prelude::DetectChanges;
+    use bevy::prelude::Entity;
+    use bevy::prelude::MinimalPlugins;
+    use bevy::prelude::StandardMaterial;
 
     use super::Appearance;
+    use super::BackgroundColor;
+    use super::BorderColor;
+    use super::PathColor;
     use super::StateAppearance;
+    use super::TextColor;
     use super::VisualChange;
     use super::WidgetDisabledAppearance;
     use super::WidgetFocusedAppearance;
@@ -748,14 +839,13 @@ mod tests {
     }
 
     #[test]
-    fn bare_and_explicit_hovered_backgrounds_resolve_to_the_same_appearance() {
+    fn background_color_sets_only_the_background_appearance() {
         let mut app = cascade_test_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(El::new().button("bare").hovered(HOVER_FILL), |_| {});
         builder.with(
             El::new()
-                .button("explicit")
-                .hovered(Appearance::new().background(HOVER_FILL)),
+                .button("background")
+                .hovered(BackgroundColor(HOVER_FILL)),
             |_| {},
         );
         let panel = DiegeticPanel::world()
@@ -767,10 +857,10 @@ mod tests {
 
         app.update();
 
-        let bare = resolve_widget(&mut app, panel, "bare");
+        let widget = resolve_widget(&mut app, panel, "background");
         assert_resolved_appearance!(
             &app,
-            bare,
+            widget,
             WidgetHoveredAppearance,
             Appearance {
                 background:   VisualChange::To(HOVER_FILL),
@@ -781,17 +871,104 @@ mod tests {
                 material:     VisualChange::Unchanged,
             },
         );
-        let explicit = resolve_widget(&mut app, panel, "explicit");
+    }
+
+    #[test]
+    fn border_color_sets_only_the_border_appearance() {
+        let mut app = cascade_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .button("border")
+                .hovered(BorderColor(FOCUS_BORDER)),
+            |_| {},
+        );
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(builder.build())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "border");
         assert_resolved_appearance!(
             &app,
-            explicit,
+            widget,
             WidgetHoveredAppearance,
             Appearance {
-                background:   VisualChange::To(HOVER_FILL),
-                border_color: VisualChange::Unchanged,
+                background:   VisualChange::Unchanged,
+                border_color: VisualChange::To(FOCUS_BORDER),
                 border_width: VisualChange::Unchanged,
                 text_color:   VisualChange::Unchanged,
                 path_color:   VisualChange::Unchanged,
+                material:     VisualChange::Unchanged,
+            },
+        );
+    }
+
+    #[test]
+    fn text_color_sets_only_the_text_appearance() {
+        let mut app = cascade_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().button("text").hovered(TextColor(HOVER_TEXT)),
+            |_| {},
+        );
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(builder.build())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "text");
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetHoveredAppearance,
+            Appearance {
+                background:   VisualChange::Unchanged,
+                border_color: VisualChange::Unchanged,
+                border_width: VisualChange::Unchanged,
+                text_color:   VisualChange::To(HOVER_TEXT),
+                path_color:   VisualChange::Unchanged,
+                material:     VisualChange::Unchanged,
+            },
+        );
+    }
+
+    #[test]
+    fn path_color_sets_only_the_panel_draw_appearance() {
+        let mut app = cascade_test_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().button("path").hovered(PathColor(FOCUS_PATH)),
+            |_| {},
+        );
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(builder.build())
+            .build()
+            .expect("a sized panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let widget = resolve_widget(&mut app, panel, "path");
+        assert_resolved_appearance!(
+            &app,
+            widget,
+            WidgetHoveredAppearance,
+            Appearance {
+                background:   VisualChange::Unchanged,
+                border_color: VisualChange::Unchanged,
+                border_width: VisualChange::Unchanged,
+                text_color:   VisualChange::Unchanged,
+                path_color:   VisualChange::To(FOCUS_PATH),
                 material:     VisualChange::Unchanged,
             },
         );
