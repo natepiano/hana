@@ -8,8 +8,8 @@ use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::CustomInput;
 use bevy_enhanced_input::prelude::CustomInputs;
 
-use super::super::Generation;
 use crate::condition::ConditionHandle;
+use crate::keymap::Generation;
 
 #[derive(Resource)]
 pub(crate) struct KeymapRuntime {

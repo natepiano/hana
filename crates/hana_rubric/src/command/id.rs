@@ -1,4 +1,7 @@
+use std::error::Error;
 use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::str::FromStr;
 
 use bevy::prelude::Reflect;
@@ -61,8 +64,8 @@ impl AsRef<str> for CommandId {
     fn as_ref(&self) -> &str { self.as_str() }
 }
 
-impl fmt::Display for CommandId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for CommandId {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
@@ -71,13 +74,13 @@ impl fmt::Display for CommandId {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CommandIdParseError;
 
-impl fmt::Display for CommandIdParseError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for CommandIdParseError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str("command IDs require one :: separator and snake-case segments")
     }
 }
 
-impl std::error::Error for CommandIdParseError {}
+impl Error for CommandIdParseError {}
 
 impl TryFrom<&str> for CommandId {
     type Error = CommandIdParseError;

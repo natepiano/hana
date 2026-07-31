@@ -2,10 +2,13 @@ use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -72,21 +75,21 @@ fn existing_regular_file_matches(destination: &Path, contents: &[u8]) -> io::Res
     match fs::symlink_metadata(destination) {
         Ok(metadata) if metadata.file_type().is_file() => Ok(fs::read(destination)? == contents),
         Ok(_) => Ok(false),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
     }
 }
 
-fn create_temporary_file(destination: &Path) -> io::Result<(File, std::path::PathBuf)> {
+fn create_temporary_file(destination: &Path) -> io::Result<(File, PathBuf)> {
     let directory = destination.parent().ok_or_else(|| {
         io::Error::new(
-            io::ErrorKind::InvalidInput,
+            ErrorKind::InvalidInput,
             "companion destination has no parent directory",
         )
     })?;
     let file_name = destination.file_name().ok_or_else(|| {
         io::Error::new(
-            io::ErrorKind::InvalidInput,
+            ErrorKind::InvalidInput,
             "companion destination has no file name",
         )
     })?;
@@ -106,13 +109,13 @@ fn create_temporary_file(destination: &Path) -> io::Result<(File, std::path::Pat
             .open(&temporary_path)
         {
             Ok(file) => return Ok((file, temporary_path)),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {},
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {},
             Err(error) => return Err(error),
         }
     }
 
     Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
+        ErrorKind::AlreadyExists,
         "could not create a unique companion temporary file",
     ))
 }
@@ -141,7 +144,7 @@ fn replace_file(temporary_path: &Path, destination: &Path) -> io::Result<()> {
 
 fn remove_temporary_file(temporary_path: &Path) { let _ = fs::remove_file(temporary_path); }
 
-fn companion_diagnostic(path: &Path, error: io::Error) -> Diagnostic {
+fn companion_diagnostic(path: &Path, error: Error) -> Diagnostic {
     Diagnostic {
         source_path:        path.display().to_string(),
         byte_range:         0..0,
@@ -173,12 +176,12 @@ mod tests {
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
 
-    use super::super::paths::ENVIRONMENT_LOCK;
-    use super::super::paths::KeymapPaths;
-    use super::super::paths::TestDirectory;
-    use super::super::paths::XdgConfigHome;
     use super::publish_companion_files;
     use crate::DiagnosticKind;
+    use crate::disk::paths::ENVIRONMENT_LOCK;
+    use crate::disk::paths::KeymapPaths;
+    use crate::disk::paths::TestDirectory;
+    use crate::disk::paths::XdgConfigHome;
 
     const DEFAULT_BYTES: &[u8] = b"// generated default\n{\"bindings\": []}\n";
     const SCHEMA_BYTES: &[u8] = b"{\"type\": \"object\"}\n";

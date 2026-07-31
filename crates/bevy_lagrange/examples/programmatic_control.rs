@@ -10,13 +10,13 @@
 //!   H — home the camera
 
 use bevy::prelude::*;
-use hana_rubric::event;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
+use hana_rubric::event;
 
 const EXAMPLE_TITLE: &str = "Programmatic Control";
 

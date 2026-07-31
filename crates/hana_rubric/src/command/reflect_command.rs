@@ -6,7 +6,7 @@ use bevy_enhanced_input::prelude::CustomInput;
 
 use super::Capability;
 use super::HoldPhase;
-use super::registry::register_held_observer;
+use super::registry;
 
 /// Metadata declaration for a semantic event that can be invoked from a keymap.
 ///
@@ -62,7 +62,7 @@ where
             description:            T::DESCRIPTION,
             capability:             T::CAPABILITY,
             dispatch:               dispatch_command::<T>,
-            register_held_observer: register_held_observer::<T>,
+            register_held_observer: registry::register_held_observer::<T>,
         }
     }
 }

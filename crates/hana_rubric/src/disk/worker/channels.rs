@@ -1,3 +1,4 @@
+use std::io::Error;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,15 +8,15 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 
-use super::super::constants::MAX_RETAINED_DIAGNOSTICS;
 #[cfg(test)]
 use super::watch::TestWatcher;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
 
 /// A complete user-keymap state produced by the disk worker.
 #[cfg_attr(
@@ -51,7 +52,7 @@ pub(crate) struct DiskWorkerMessage {
 )]
 pub(crate) struct DiskWorkerChannels {
     pub(super) slot:           CoalescingSlot,
-    pub(super) control_sender: mpsc::Sender<WorkerControl>,
+    pub(super) control_sender: Sender<WorkerControl>,
     pub(super) join_handle:    Option<JoinHandle<()>>,
     pub(super) status:         Arc<WorkerStatus>,
     #[cfg(test)]
@@ -226,11 +227,7 @@ pub(super) enum WorkerControl {
     Stop,
 }
 
-pub(super) fn disk_error_diagnostic(
-    path: &Path,
-    action: &str,
-    error: &std::io::Error,
-) -> Diagnostic {
+pub(super) fn disk_error_diagnostic(path: &Path, action: &str, error: &Error) -> Diagnostic {
     disk_diagnostic(path, &format!("{action}: {error}"))
 }
 
@@ -266,16 +263,16 @@ fn discarded_diagnostics_diagnostic(discarded_diagnostics: usize) -> Diagnostic 
 mod tests {
     use std::sync::Arc;
 
-    use super::super::super::constants::MAX_RETAINED_DIAGNOSTICS;
-    use super::super::runtime::WorkerTimings;
     use super::CoalescingSlot;
     use super::DiskSnapshot;
     use super::DiskWorkerMessage;
     use super::disk_diagnostic;
     use crate::disk::KeymapPaths;
+    use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
     use crate::disk::paths::ENVIRONMENT_LOCK;
     use crate::disk::paths::TestDirectory;
     use crate::disk::paths::XdgConfigHome;
+    use crate::disk::worker::runtime::WorkerTimings;
 
     const TEST_APP_NAME: &str = "hana-rubric-channel-test";
     const SNAPSHOT_BURST_COUNT: usize = 1000;

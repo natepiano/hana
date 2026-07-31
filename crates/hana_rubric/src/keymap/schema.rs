@@ -8,6 +8,7 @@
     )
 )]
 
+use serde_json_lenient::Error;
 use serde_json_lenient::Map;
 use serde_json_lenient::Value;
 
@@ -19,7 +20,7 @@ use crate::condition::ConditionRegistry;
 pub(crate) fn schema_bytes(
     command_registry: &CommandRegistry,
     condition_registry: &ConditionRegistry,
-) -> Result<Vec<u8>, serde_json_lenient::Error> {
+) -> Result<Vec<u8>, Error> {
     serde_json_lenient::to_vec_pretty(&schema_document(command_registry, condition_registry))
 }
 
@@ -149,18 +150,19 @@ mod tests {
     use bevy::prelude::ReflectEvent;
     use bevy::reflect::TypeRegistry;
     use bevy_enhanced_input::prelude::CustomInputs;
+    use serde_json_lenient::Value;
     use strum::AsRefStr;
     use strum::EnumIter;
     use strum::EnumMessage;
 
-    use super::super::merged::RECOGNIZED_BLOCK_MEMBERS;
     use crate::Capability;
     use crate::CommandRegistry;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::ReflectKeymapCommand;
     use crate::condition::ConditionRegistry;
-    use crate::keymap::schema_bytes;
+    use crate::keymap;
+    use crate::keymap::merged::RECOGNIZED_BLOCK_MEMBERS;
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
     #[strum(serialize_all = "snake_case")]
@@ -235,45 +237,35 @@ mod tests {
     fn generated_schema(
         command_registry: &CommandRegistry,
         condition_registry: &ConditionRegistry,
-    ) -> Result<serde_json_lenient::Value, String> {
-        let bytes = schema_bytes(command_registry, condition_registry)
+    ) -> Result<Value, String> {
+        let bytes = keymap::schema_bytes(command_registry, condition_registry)
             .map_err(|error| format!("schema serialization error: {error}"))?;
 
         serde_json_lenient::from_slice(&bytes)
             .map_err(|error| format!("schema JSON parse error: {error}"))
     }
 
-    fn value_field<'value>(
-        value: &'value serde_json_lenient::Value,
-        field: &str,
-    ) -> Result<&'value serde_json_lenient::Value, String> {
+    fn value_field<'value>(value: &'value Value, field: &str) -> Result<&'value Value, String> {
         value
             .get(field)
             .ok_or_else(|| format!("schema is missing `{field}`"))
     }
 
-    fn value_array<'value>(
-        value: &'value serde_json_lenient::Value,
-        field: &str,
-    ) -> Result<&'value [serde_json_lenient::Value], String> {
+    fn value_array<'value>(value: &'value Value, field: &str) -> Result<&'value [Value], String> {
         value_field(value, field)?
             .as_array()
             .map(Vec::as_slice)
             .ok_or_else(|| format!("schema `{field}` is not an array"))
     }
 
-    fn block_schema(
-        schema: &serde_json_lenient::Value,
-    ) -> Result<&serde_json_lenient::Value, String> {
+    fn block_schema(schema: &Value) -> Result<&Value, String> {
         value_field(
             value_field(value_field(schema, "properties")?, "bindings")?,
             "items",
         )
     }
 
-    fn binding_value_schema(
-        schema: &serde_json_lenient::Value,
-    ) -> Result<&serde_json_lenient::Value, String> {
+    fn binding_value_schema(schema: &Value) -> Result<&Value, String> {
         value_field(
             value_field(block_schema(schema)?, "properties")?
                 .get("bindings")
@@ -283,9 +275,9 @@ mod tests {
     }
 
     fn alternatives_with_type<'schema>(
-        schema: &'schema serde_json_lenient::Value,
+        schema: &'schema Value,
         value_type: &str,
-    ) -> Result<Vec<&'schema serde_json_lenient::Value>, String> {
+    ) -> Result<Vec<&'schema Value>, String> {
         Ok(value_array(schema, "anyOf")?
             .iter()
             .filter(|alternative| {
@@ -298,9 +290,9 @@ mod tests {
     }
 
     fn alternative_for_const<'value>(
-        alternatives: &'value [serde_json_lenient::Value],
+        alternatives: &'value [Value],
         constant: &str,
-    ) -> Result<&'value serde_json_lenient::Value, String> {
+    ) -> Result<&'value Value, String> {
         alternatives
             .iter()
             .find(|alternative| {
@@ -312,10 +304,7 @@ mod tests {
             .ok_or_else(|| format!("schema has no completion for `{constant}`"))
     }
 
-    fn validate_against_schema(
-        schema: &serde_json_lenient::Value,
-        value: &serde_json_lenient::Value,
-    ) -> Result<(), String> {
+    fn validate_against_schema(schema: &Value, value: &Value) -> Result<(), String> {
         if let Some(constant) = schema.get("const")
             && value != constant
         {
@@ -390,10 +379,10 @@ mod tests {
             }
 
             match schema.get("additionalProperties") {
-                Some(serde_json_lenient::Value::Bool(false)) => {
+                Some(Value::Bool(false)) => {
                     return Err(format!("object has unrecognized `{field}`"));
                 },
-                Some(serde_json_lenient::Value::Bool(true)) | None => {},
+                Some(Value::Bool(true)) | None => {},
                 Some(property_schema) => validate_against_schema(property_schema, field_value)?,
             }
         }

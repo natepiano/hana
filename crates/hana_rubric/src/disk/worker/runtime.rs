@@ -2,37 +2,39 @@
 
 use std::fs;
 use std::fs::OpenOptions;
-use std::io;
+use std::io::ErrorKind;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
 use notify::RecommendedWatcher;
 
-use super::super::companion_files::publish_companion_files;
-use super::super::constants::DEBOUNCE_INTERVAL;
-use super::super::constants::POLL_INTERVAL;
-use super::super::constants::RETRY_INTERVAL;
-use super::super::paths::KeymapPaths;
+use super::channels;
 use super::channels::CoalescingSlot;
 use super::channels::DiskSnapshot;
 use super::channels::DiskWorkerChannels;
 use super::channels::DiskWorkerMessage;
 use super::channels::WorkerControl;
 use super::channels::WorkerStatus;
-use super::channels::disk_diagnostic;
-use super::channels::disk_error_diagnostic;
 #[cfg(test)]
 use super::watch::TestWatcher;
 use super::watch::WatchMode;
 use super::watch::WatchNotifications;
 use crate::Diagnostic;
+use crate::disk::companion_files;
+use crate::disk::constants::DEBOUNCE_INTERVAL;
+use crate::disk::constants::POLL_INTERVAL;
+use crate::disk::constants::RETRY_INTERVAL;
+use crate::disk::paths::KeymapPaths;
 
 const USER_KEYMAP_STUB: &[u8] = br#"{
   "$schema": "./keymap.schema.json",
@@ -125,13 +127,13 @@ pub(super) struct DiskWorker {
     default_keymap:                   Vec<u8>,
     schema:                           Vec<u8>,
     slot:                             CoalescingSlot,
-    control_receiver:                 mpsc::Receiver<WorkerControl>,
+    control_receiver:                 Receiver<WorkerControl>,
     pub(super) status:                Arc<WorkerStatus>,
     pub(super) worker_timings:        WorkerTimings,
     pub(super) watch_mode:            WatchMode,
     pub(super) watcher:               Option<RecommendedWatcher>,
     pub(super) watcher_notifications: Option<Arc<Mutex<WatchNotifications>>>,
-    pub(super) watcher_receiver:      Option<mpsc::Receiver<()>>,
+    pub(super) watcher_receiver:      Option<Receiver<()>>,
     observed_keymap:                  ObservedKeymap,
     pub(super) dirty_at:              Option<Instant>,
     missing_retry_at:                 Option<Instant>,
@@ -144,14 +146,14 @@ pub(super) struct DiskWorker {
 impl DiskWorker {
     fn run(mut self) {
         let Some(paths) = KeymapPaths::new(&self.app_name) else {
-            self.report_diagnostics(vec![disk_diagnostic(
+            self.report_diagnostics(vec![channels::disk_diagnostic(
                 Path::new(&self.app_name),
                 "Could not resolve a configuration directory for the keymap application.",
             )]);
             return;
         };
 
-        self.report_diagnostics(publish_companion_files(
+        self.report_diagnostics(companion_files::publish_companion_files(
             &paths,
             &self.default_keymap,
             &self.schema,
@@ -170,15 +172,15 @@ impl DiskWorker {
             match self.watcher_receiver.as_ref() {
                 Some(watcher_receiver) => match watcher_receiver.recv_timeout(timeout) {
                     Ok(()) => self.handle_watcher_notifications(&paths),
-                    Err(mpsc::RecvTimeoutError::Timeout) => {},
-                    Err(mpsc::RecvTimeoutError::Disconnected) => self.handle_watcher_failure(
+                    Err(RecvTimeoutError::Timeout) => {},
+                    Err(RecvTimeoutError::Disconnected) => self.handle_watcher_failure(
                         &paths,
                         String::from("The keymap watcher notification channel disconnected."),
                     ),
                 },
                 None => match self.control_receiver.recv_timeout(timeout) {
-                    Ok(WorkerControl::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                    Ok(WorkerControl::Stop) | Err(RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Timeout) => {},
                 },
             }
         }
@@ -188,8 +190,8 @@ impl DiskWorker {
 
     fn process_control(&self) -> bool {
         match self.control_receiver.try_recv() {
-            Ok(WorkerControl::Stop) | Err(mpsc::TryRecvError::Disconnected) => false,
-            Err(mpsc::TryRecvError::Empty) => true,
+            Ok(WorkerControl::Stop) | Err(TryRecvError::Disconnected) => false,
+            Err(TryRecvError::Empty) => true,
         }
     }
 
@@ -226,7 +228,7 @@ impl DiskWorker {
 
     fn create_user_stub(&self, paths: &KeymapPaths) {
         if let Err(error) = fs::create_dir_all(paths.config_directory()) {
-            self.report_diagnostics(vec![disk_error_diagnostic(
+            self.report_diagnostics(vec![channels::disk_error_diagnostic(
                 paths.config_directory(),
                 "Could not create the keymap configuration directory",
                 &error,
@@ -243,15 +245,15 @@ impl DiskWorker {
         match stub_file {
             Ok(mut stub_file) => {
                 if let Err(error) = stub_file.write_all(USER_KEYMAP_STUB) {
-                    self.report_diagnostics(vec![disk_error_diagnostic(
+                    self.report_diagnostics(vec![channels::disk_error_diagnostic(
                         user_keymap,
                         "Could not write the first-launch keymap stub",
                         &error,
                     )]);
                 }
             },
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {},
-            Err(error) => self.report_diagnostics(vec![disk_error_diagnostic(
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {},
+            Err(error) => self.report_diagnostics(vec![channels::disk_error_diagnostic(
                 user_keymap,
                 "Could not create the first-launch keymap stub",
                 &error,
@@ -265,7 +267,7 @@ impl DiskWorker {
 
         match fs::read(paths.user_keymap()) {
             Ok(contents) => self.observe_contents(paths, Arc::from(contents)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(error) if error.kind() == ErrorKind::NotFound => {
                 #[cfg(test)]
                 self.status
                     .not_found_observations
@@ -276,7 +278,7 @@ impl DiskWorker {
                 let message = error.to_string();
 
                 if self.reported_read_error.as_deref() != Some(message.as_str()) {
-                    self.report_diagnostics(vec![disk_error_diagnostic(
+                    self.report_diagnostics(vec![channels::disk_error_diagnostic(
                         paths.user_keymap(),
                         "Could not read the user keymap",
                         &error,

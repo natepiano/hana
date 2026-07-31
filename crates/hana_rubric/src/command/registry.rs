@@ -384,6 +384,7 @@ mod tests {
     use bevy::prelude::On;
     use bevy::prelude::Reflect;
     use bevy::prelude::ReflectEvent;
+    use bevy::prelude::ResMut;
     use bevy::prelude::Resource;
     use bevy::reflect::TypeRegistry;
     use bevy_enhanced_input::prelude::ActionValue;
@@ -433,7 +434,7 @@ mod tests {
         const ID: &'static str = "registry::duplicate";
         const TITLE: &'static str = "First Duplicate";
         const DESCRIPTION: &'static str = "The first duplicate command declaration.";
-        const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+        const CAPABILITY: crate::Capability = Capability::OneShot;
 
         fn build() -> Self { Self }
 
@@ -448,7 +449,7 @@ mod tests {
         const ID: &'static str = "registry::duplicate";
         const TITLE: &'static str = "Second Duplicate";
         const DESCRIPTION: &'static str = "The second duplicate command declaration.";
-        const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+        const CAPABILITY: crate::Capability = Capability::OneShot;
 
         fn build() -> Self { Self }
 
@@ -463,7 +464,7 @@ mod tests {
         const ID: &'static str = "registry::empty_title";
         const TITLE: &'static str = "";
         const DESCRIPTION: &'static str = "A command declaration with an empty title.";
-        const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+        const CAPABILITY: crate::Capability = Capability::OneShot;
 
         fn build() -> Self { Self }
 
@@ -478,7 +479,7 @@ mod tests {
         const ID: &'static str = "registry::empty_description";
         const TITLE: &'static str = "Empty Description";
         const DESCRIPTION: &'static str = "";
-        const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+        const CAPABILITY: crate::Capability = Capability::OneShot;
 
         fn build() -> Self { Self }
 
@@ -493,7 +494,7 @@ mod tests {
         const ID: &'static str = "invalid";
         const TITLE: &'static str = "Invalid ID";
         const DESCRIPTION: &'static str = "A command declaration with malformed ID text.";
-        const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+        const CAPABILITY: crate::Capability = Capability::OneShot;
 
         fn build() -> Self { Self }
 
@@ -508,7 +509,7 @@ mod tests {
         const ID: &'static str = "registry::event_not_reflected";
         const TITLE: &'static str = "Event Not Reflected";
         const DESCRIPTION: &'static str = "A command event without ReflectEvent type data.";
-        const CAPABILITY: crate::Capability = crate::Capability::OneShot;
+        const CAPABILITY: crate::Capability = Capability::OneShot;
 
         fn build() -> Self { Self }
 
@@ -585,8 +586,7 @@ mod tests {
         let mut app = App::new();
         app.world_mut().init_resource::<InvocationCount>();
         app.world_mut().add_observer(
-            |_: On<RegistryOneShot>,
-             mut invocation_count: bevy::prelude::ResMut<InvocationCount>| {
+            |_: On<RegistryOneShot>, mut invocation_count: ResMut<InvocationCount>| {
                 invocation_count.0 += 1;
             },
         );
@@ -619,8 +619,7 @@ mod tests {
         let mut app = App::new();
         app.world_mut().init_resource::<InvocationCount>();
         app.world_mut().add_observer(
-            |_: On<RegistryUnremappable>,
-             mut invocation_count: bevy::prelude::ResMut<InvocationCount>| {
+            |_: On<RegistryUnremappable>, mut invocation_count: ResMut<InvocationCount>| {
                 invocation_count.0 += 1;
             },
         );
@@ -745,7 +744,7 @@ mod tests {
         let mut app = App::new();
         app.world_mut().init_resource::<InvocationCount>();
         app.world_mut().add_observer(
-            |_: On<RegistryHeld>, mut invocation_count: bevy::prelude::ResMut<InvocationCount>| {
+            |_: On<RegistryHeld>, mut invocation_count: ResMut<InvocationCount>| {
                 invocation_count.0 += 1;
             },
         );

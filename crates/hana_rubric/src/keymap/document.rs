@@ -7,11 +7,13 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::fmt::Formatter;
 use std::ops::Range;
 
 use serde::Deserialize;
 use serde::de::MapAccess;
 use serde::de::Visitor;
+use serde_json_lenient::Error;
 use serde_json_lenient::Value;
 
 use crate::CommandId;
@@ -564,11 +566,7 @@ fn context_diagnostic(
     }
 }
 
-fn serde_diagnostic(
-    source_path: &str,
-    source: &str,
-    error: serde_json_lenient::Error,
-) -> Diagnostic {
+fn serde_diagnostic(source_path: &str, source: &str, error: Error) -> Diagnostic {
     let byte_offset = byte_offset(source, error.line(), error.column());
 
     document_diagnostic(
@@ -710,7 +708,7 @@ impl<'de> Deserialize<'de> for WireBindings {
         impl<'de> Visitor<'de> for WireBindingsVisitor {
             type Value = WireBindings;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a keymap bindings object")
             }
 

@@ -15,6 +15,7 @@ use crate::KeymapContext;
 use crate::condition::ConditionRegistry;
 use crate::condition::ResourceContextPlugin;
 use crate::condition::StateContextPlugin;
+use crate::keymap;
 
 /// Registers the application's keymap context enum.
 ///
@@ -59,7 +60,7 @@ impl KeymapPlugin {
             )
             .add_systems(
                 PreUpdate,
-                crate::keymap::route_input
+                keymap::route_input
                     .in_set(KeymapSystems::Route)
                     .after(InputSystems)
                     .before(EnhancedInputSystems::Update),

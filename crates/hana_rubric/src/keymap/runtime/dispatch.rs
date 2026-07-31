@@ -4,8 +4,6 @@ use bevy::input::keyboard::KeyCode;
 use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::CustomInputs;
 
-use super::super::CommandHandle;
-use super::super::CompiledKeymap;
 use super::held::ActiveMatcher;
 use super::held::KeymapRuntime;
 use super::key_edge;
@@ -14,6 +12,8 @@ use crate::MatchOutcome;
 use crate::SequenceMatcher;
 use crate::command::Invocation;
 use crate::condition::ConditionHandle;
+use crate::keymap::CommandHandle;
+use crate::keymap::CompiledKeymap;
 use crate::keymap::constants::SEQUENCE_TIMEOUT;
 
 #[cfg_attr(
@@ -984,19 +984,17 @@ mod tests {
             .init_resource::<DispatchCounts>()
             .init_resource::<HeldTransitionCounts>();
         app.world_mut().add_observer(
-            |_: On<RuntimeOneShot>, mut dispatch_counts: bevy::prelude::ResMut<DispatchCounts>| {
+            |_: On<RuntimeOneShot>, mut dispatch_counts: ResMut<DispatchCounts>| {
                 dispatch_counts.one_shot += 1;
             },
         );
         app.world_mut().add_observer(
-            |_: On<RuntimeTwoStroke>,
-             mut dispatch_counts: bevy::prelude::ResMut<DispatchCounts>| {
+            |_: On<RuntimeTwoStroke>, mut dispatch_counts: ResMut<DispatchCounts>| {
                 dispatch_counts.two_stroke += 1;
             },
         );
         app.world_mut().add_observer(
-            |_: On<RuntimeUnremappable>,
-             mut dispatch_counts: bevy::prelude::ResMut<DispatchCounts>| {
+            |_: On<RuntimeUnremappable>, mut dispatch_counts: ResMut<DispatchCounts>| {
                 dispatch_counts.unremappable += 1;
             },
         );

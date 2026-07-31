@@ -3,14 +3,17 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+#[cfg(test)]
+use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
+use notify::Event;
 use notify::RecursiveMode;
 use notify::Watcher;
 
-use super::super::paths::KeymapPaths;
-use super::channels::disk_diagnostic;
+use super::channels;
 use super::runtime::DiskWorker;
+use crate::disk::paths::KeymapPaths;
 
 #[derive(Default)]
 pub(super) struct WatchNotifications {
@@ -21,7 +24,7 @@ pub(super) struct WatchNotifications {
 #[cfg(test)]
 pub(super) struct TestWatcher {
     pub(super) watcher_notifications: Arc<Mutex<WatchNotifications>>,
-    pub(super) watcher_sender:        mpsc::SyncSender<()>,
+    pub(super) watcher_sender:        SyncSender<()>,
 }
 
 #[derive(Clone, Copy)]
@@ -80,7 +83,10 @@ impl DiskWorker {
 
     pub(super) fn handle_watcher_failure(&mut self, paths: &KeymapPaths, message: String) {
         if self.reported_watch_error.as_deref() != Some(message.as_str()) {
-            self.report_diagnostics(vec![disk_diagnostic(paths.config_directory(), &message)]);
+            self.report_diagnostics(vec![channels::disk_diagnostic(
+                paths.config_directory(),
+                &message,
+            )]);
             self.reported_watch_error = Some(message);
         }
 
@@ -143,7 +149,7 @@ impl DiskWorker {
         let watch_notifications = Arc::new(Mutex::new(WatchNotifications::default()));
         let callback_notifications = Arc::clone(&watch_notifications);
         let (watcher_sender, watcher_receiver) = mpsc::sync_channel(1);
-        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
             let mut notifications = callback_notifications
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -205,7 +211,7 @@ impl DiskWorker {
 
     fn report_watcher_setup_failure(&mut self, path: &Path, message: String) {
         if self.reported_watch_error.as_deref() != Some(message.as_str()) {
-            self.report_diagnostics(vec![disk_diagnostic(path, &message)]);
+            self.report_diagnostics(vec![channels::disk_diagnostic(path, &message)]);
             self.reported_watch_error = Some(message);
         }
     }
@@ -223,14 +229,14 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
-    use super::super::channels::DiskWorkerChannels;
-    use super::super::runtime::WorkerTimings;
-    use super::super::runtime::start_disk_worker_with;
     use super::WatchMode;
     use crate::disk::KeymapPaths;
     use crate::disk::paths::ENVIRONMENT_LOCK;
     use crate::disk::paths::TestDirectory;
     use crate::disk::paths::XdgConfigHome;
+    use crate::disk::worker::channels::DiskWorkerChannels;
+    use crate::disk::worker::runtime;
+    use crate::disk::worker::runtime::WorkerTimings;
 
     const DEFAULT_KEYMAP: &[u8] = b"{\"bindings\": []}";
     const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
@@ -257,7 +263,7 @@ mod tests {
     }
 
     fn start_worker(worker_timings: WorkerTimings, watch_mode: WatchMode) -> DiskWorkerChannels {
-        start_disk_worker_with(
+        runtime::start_disk_worker_with(
             TEST_APP_NAME,
             DEFAULT_KEYMAP.to_vec(),
             b"{}".to_vec(),
