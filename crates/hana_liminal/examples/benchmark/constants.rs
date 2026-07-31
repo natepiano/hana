@@ -82,7 +82,7 @@ pub(super) const OUTLINE_PRESENCE_ENABLED_LABEL: &str = "on";
 pub(super) const BENCHMARK_CSV_FRAMES_PER_SECOND_PRECISION: usize = 0;
 pub(super) const BENCHMARK_CSV_HEADER: &str = "scenario,frames,average_ms,median_ms,percentile_95_ms,percentile_99_ms,min_ms,max_ms,average_frames_per_second";
 pub(super) const BENCHMARK_CSV_MILLISECONDS_PRECISION: usize = 2;
-pub(super) const BENCHMARK_RESULTS_BANNER: &str = "\n=== bevy_liminal Benchmark Results ===\n";
+pub(super) const BENCHMARK_RESULTS_BANNER: &str = "\n=== hana_liminal Benchmark Results ===\n";
 pub(super) const BENCHMARK_RESULTS_FILE_PREFIX: &str = "benchmark_";
 pub(super) const BENCHMARK_RESULTS_FILE_SUFFIX: &str = ".csv";
 pub(super) const BENCHMARK_RESULTS_FRAMES_COLUMN_WIDTH: usize = 6;
@@ -176,7 +176,7 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
 ];
 
 // startup
-pub(super) const BENCHMARK_WINDOW_TITLE: &str = "bevy_liminal benchmark";
+pub(super) const BENCHMARK_WINDOW_TITLE: &str = "hana_liminal benchmark";
 pub(super) const INITIALIZING_BENCHMARK_TEXT: &str = "Initializing benchmark...";
 
 // tick

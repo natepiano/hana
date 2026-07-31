@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed from `bevy_liminal` to `hana_liminal`. No API changes; update the
+  dependency name and any `bevy_liminal::` paths, including reflected
+  `TypePath` strings in serialized scenes and the `bevy_liminal::view_helpers`
+  shader import path. `bevy_liminal` 0.0.6 is a deprecated re-export shim and
+  the final release under the old name.
+
 ## [0.0.5] - 2026-07-29
 
 ### Changed

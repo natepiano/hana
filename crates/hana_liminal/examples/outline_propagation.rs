@@ -5,16 +5,16 @@
 
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_liminal::LiminalPlugin;
-use bevy_liminal::NoOutline;
-use bevy_liminal::Outline;
-use bevy_liminal::OutlineBarrier;
-use bevy_liminal::OutlineCamera;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TitleBar;
+use hana_liminal::LiminalPlugin;
+use hana_liminal::NoOutline;
+use hana_liminal::Outline;
+use hana_liminal::OutlineBarrier;
+use hana_liminal::OutlineCamera;
 
 const EXAMPLE_TITLE: &str = "Outline Exclusions";
 

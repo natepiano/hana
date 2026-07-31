@@ -1,4 +1,4 @@
-# Future Creative Effects: bevy_liminal
+# Future Creative Effects: hana_liminal
 
 Ideas for post-v1.0 exploration. None of these are committed — they're here so we don't lose them.
 

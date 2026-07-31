@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_liminal::OutlineMethod;
+use hana_liminal::OutlineMethod;
 
 use crate::benchmark_state::OutlinePresence;
 use crate::grid::GridSpawnSpec;

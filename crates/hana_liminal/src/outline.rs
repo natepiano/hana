@@ -109,8 +109,8 @@ impl OutlineActivity {
 ///
 /// ```rust,no_run
 /// # use bevy::prelude::*;
-/// # use bevy_liminal::Outline;
-/// # use bevy_liminal::OverlapMode;
+/// # use hana_liminal::Outline;
+/// # use hana_liminal::OverlapMode;
 /// // `JumpFlood` — screen-space silhouette, works on all geometry
 /// Outline::jump_flood(4.0).with_color(Color::WHITE).build();
 ///
@@ -177,7 +177,7 @@ impl Outline {
 ///
 /// ```rust,no_run
 /// # use bevy::prelude::*;
-/// # use bevy_liminal::NoOutline;
+/// # use hana_liminal::NoOutline;
 /// // Invisible pick plane that should not receive outline propagation
 /// commands.spawn((
 ///     Name::new("Backside Pick Plane"),
@@ -205,8 +205,8 @@ pub struct NoOutline;
 ///
 /// ```rust,no_run
 /// # use bevy::prelude::*;
-/// # use bevy_liminal::Outline;
-/// # use bevy_liminal::OutlineBarrier;
+/// # use hana_liminal::Outline;
+/// # use hana_liminal::OutlineBarrier;
 /// # fn setup(mut commands: Commands) {
 /// // A jack mounted on a screen: the screen's outline stops at the jack,
 /// // and hovering the jack outlines only the jack's own subtree.

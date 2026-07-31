@@ -1,6 +1,6 @@
-# bevy_liminal Design Improvements
+# hana_liminal Design Improvements
 
-Capabilities found in `bevy_mod_outline` that are not present in `bevy_liminal`, evaluated for potential adoption.
+Capabilities found in `bevy_mod_outline` that are not present in `hana_liminal`, evaluated for potential adoption.
 
 ## Rendering & Visual Quality
 
@@ -12,9 +12,9 @@ UV-mapped texture-based alpha masking with channel selection (R, G, B, A) and th
 
 ### Flat/Billboard Extrusion Modes
 
-Vertex extrusion flattened into a billboard plane, plus double-sided variants. Produces different visual results than `bevy_liminal`'s world/screen hull approaches.
+Vertex extrusion flattened into a billboard plane, plus double-sided variants. Produces different visual results than `hana_liminal`'s world/screen hull approaches.
 
-**Desirability: Low** — bevy_liminal's three methods (JumpFlood, WorldHull, ScreenHull) cover the primary use cases well.
+**Desirability: Low** — hana_liminal's three methods (JumpFlood, WorldHull, ScreenHull) cover the primary use cases well.
 
 ### Anti-Aliasing Infrastructure
 
@@ -34,7 +34,7 @@ Explicit support for FXAA, SMAA, TAA, and MSAA with a dedicated writeback pass b
 
 `OutlinePlaneDepth` component with model-space origin and view-dependent offset. Solves z-fighting when outlines overlap, with parent-child sharing for hierarchical consistency.
 
-**Desirability: Medium** — useful for complex overlapping outlines, but bevy_liminal's depth prepass approach handles simple cases automatically.
+**Desirability: Medium** — useful for complex overlapping outlines, but hana_liminal's depth prepass approach handles simple cases automatically.
 
 ## Animation & Performance
 
@@ -62,7 +62,7 @@ Custom instance buffers with GPU preprocessing support and fine-grained batching
 
 `AsyncSceneInheritOutline` component for automatic outline propagation into loaded scenes. Hooks-based async handling that waits for `SceneInstanceReady`.
 
-**Desirability: Low** — bevy_liminal's observer-based propagation is more idiomatic for modern Bevy and covers the same use cases.
+**Desirability: Low** — hana_liminal's observer-based propagation is more idiomatic for modern Bevy and covers the same use cases.
 
 ### Feature Flags
 
@@ -74,7 +74,7 @@ Optional features (`flood`, `interpolation`, `reflect`, `scene`) for lighter bui
 
 `OutlineWarmUp` pre-specializes shader pipelines to avoid frame stuttering when outline parameters change at runtime. Configurable warmups for render layers, stencil/volume states, transparency, and vertex offsets.
 
-**Desirability: Deferred** — bevy_liminal has fewer pipeline specialization axes than `bevy_mod_outline`, so this may not be needed. Revisit if frame stuttering is observed after implementing other improvements.
+**Desirability: Deferred** — hana_liminal has fewer pipeline specialization axes than `bevy_mod_outline`, so this may not be needed. Revisit if frame stuttering is observed after implementing other improvements.
 
 ## Priority Summary
 
@@ -90,4 +90,4 @@ Optional features (`flood`, `interpolation`, `reflect`, `scene`) for lighter bui
 | Specialized GPU batching | Low | Standard batching is sufficient |
 | Async scene inheritance | Low | Observer pattern is more idiomatic |
 | Feature flags | Low | Maintenance cost outweighs benefit currently |
-| Warm-up system | Deferred | May not be needed — bevy_liminal has fewer specialization axes |
+| Warm-up system | Deferred | May not be needed — hana_liminal has fewer specialization axes |

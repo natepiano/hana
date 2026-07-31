@@ -2,7 +2,7 @@ use std::env::var;
 
 use bevy::prelude::*;
 use bevy_kana::ToUsize;
-use bevy_liminal::OutlineMethod;
+use hana_liminal::OutlineMethod;
 
 use crate::constants::AUTO_EXIT_DELAY_SECS;
 use crate::constants::AUTO_MODE_ENV_VAR;

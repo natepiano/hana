@@ -2,9 +2,9 @@ use bevy::color::palettes::css::YELLOW;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
-use bevy_liminal::Outline;
-use bevy_liminal::OutlineMethod;
-use bevy_liminal::OverlapMode;
+use hana_liminal::Outline;
+use hana_liminal::OutlineMethod;
+use hana_liminal::OverlapMode;
 use rand::RngExt;
 use rand::rng;
 

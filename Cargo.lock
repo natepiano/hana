@@ -1179,23 +1179,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_liminal"
-version = "0.1.0-dev"
-dependencies = [
- "bevy",
- "bevy_brp_extras",
- "bevy_clerestory",
- "bevy_kana",
- "bevy_lagrange",
- "bevy_render",
- "bytemuck",
- "fairy_dust",
- "getrandom 0.4.3",
- "nonmax",
- "rand",
-]
-
-[[package]]
 name = "bevy_log"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3319,6 +3302,23 @@ dependencies = [
  "fairy_dust",
  "hana_diegetic",
  "tracing",
+]
+
+[[package]]
+name = "hana_liminal"
+version = "0.1.0-dev"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_clerestory",
+ "bevy_kana",
+ "bevy_lagrange",
+ "bevy_render",
+ "bytemuck",
+ "fairy_dust",
+ "getrandom 0.4.3",
+ "nonmax",
+ "rand",
 ]
 
 [[package]]

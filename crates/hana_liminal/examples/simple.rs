@@ -1,26 +1,28 @@
-//! Emissive outlines with bloom and oscillating intensity.
+//! Basic outline on a rotating mesh with adjustable width.
 
-use bevy::camera::Hdr;
-use bevy::color::palettes::css::BLUE;
-use bevy::color::palettes::css::RED;
 use bevy::color::palettes::css::SILVER;
-use bevy::post_process::bloom::Bloom;
+use bevy::color::palettes::css::YELLOW;
+use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_liminal::LiminalPlugin;
-use bevy_liminal::Outline;
-use bevy_liminal::OutlineCamera;
+use hana_liminal::LiminalPlugin;
+use hana_liminal::Outline;
+use hana_liminal::OutlineCamera;
 
 // animation
-const ROTATION_X_SPEED: f32 = 1.0;
-const ROTATION_Y_SPEED: f32 = 0.5;
+const ROTATION_X_SPEED: f32 = 1.0 / 3.0;
+const ROTATION_Y_SPEED: f32 = 1.0 / 6.0;
+const WIDTH_STEP: f32 = 0.1;
 
 // camera
 const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CAMERA_POSITION: Vec3 = Vec3::new(3.0, 2.0, 3.0);
+
+// display formatting
+const WIDTH_DISPLAY_PRECISION: usize = 1;
 
 // lighting
 const LIGHT_INTENSITY: f32 = 10_000_000.0;
@@ -29,14 +31,14 @@ const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
 // scene
-const GLOW_SINE_REMAP_OFFSET: f32 = 0.5;
-const GLOW_SINE_REMAP_SCALE: f32 = 0.5;
 const GROUND_SIZE: f32 = 50.0;
 const GROUND_SUBDIVISIONS: u32 = 10;
 const INITIAL_OUTLINE_WIDTH: f32 = 10.0;
-const OUTLINE_GLOW_INTENSITY: f32 = 20.0;
-const OUTLINE_GLOW_PERIOD: f32 = 0.2;
 const OUTLINED_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+
+// ui
+const UI_FONT_SIZE: f32 = 16.0;
+const UI_PADDING: f32 = 10.0;
 
 fn main() {
     App::new()
@@ -45,16 +47,19 @@ fn main() {
             LagrangePlugin,
             LiminalPlugin,
         ))
-        .add_systems(Startup, setup)
-        .add_systems(FixedUpdate, (rotate, oscillate_intensity))
+        .add_systems(Startup, (setup, setup_ui))
+        .add_systems(
+            FixedUpdate,
+            (
+                rotate,
+                handle_width_input.run_if(on_message::<KeyboardInput>),
+            ),
+        )
         .run();
 }
 
 #[derive(Component)]
-struct OutlineGlow {
-    intensity: f32,
-    period:    f32,
-}
+struct WidthText;
 
 fn setup(
     mut commands: Commands,
@@ -67,9 +72,6 @@ fn setup(
         OrbitCam::default(),
         OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         OutlineCamera,
-        Camera::default(),
-        Hdr,
-        Bloom::default(),
     ));
 
     commands.spawn((
@@ -98,16 +100,10 @@ fn setup(
 
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::default())),
-        MeshMaterial3d(materials.add(Color::from(BLUE))),
+        MeshMaterial3d(materials.add(Color::from(YELLOW))),
         Transform::from_translation(OUTLINED_CUBE_POSITION),
         // Add an `Outline` component built from `Outline::jump_flood`.
-        Outline::jump_flood(INITIAL_OUTLINE_WIDTH)
-            .with_color(Color::from(RED))
-            .build(),
-        OutlineGlow {
-            intensity: OUTLINE_GLOW_INTENSITY,
-            period:    OUTLINE_GLOW_PERIOD,
-        },
+        Outline::jump_flood(INITIAL_OUTLINE_WIDTH).build(),
     ));
 }
 
@@ -120,15 +116,47 @@ fn rotate(mut outline_query: Query<&mut Transform, With<Outline>>, time: Res<Tim
     }
 }
 
-fn oscillate_intensity(
-    mut outline_glow_query: Query<(&mut Outline, &OutlineGlow)>,
-    time: Res<Time>,
+fn handle_width_input(
+    input: Res<ButtonInput<KeyCode>>,
+    mut outline: Single<&mut Outline>,
+    mut text_query: Single<&mut Text, With<WidthText>>,
 ) {
-    for (mut outline, glow) in &mut outline_glow_query {
-        let t = (time.elapsed_secs() / glow.period)
-            .sin()
-            .mul_add(GLOW_SINE_REMAP_SCALE, GLOW_SINE_REMAP_OFFSET);
+    let mut delta = 0.0;
 
-        outline.intensity = glow.intensity * t;
+    if input.pressed(KeyCode::KeyQ) {
+        delta -= WIDTH_STEP;
+    } else if input.pressed(KeyCode::KeyW) {
+        delta += WIDTH_STEP;
     }
+
+    if delta == 0.0 {
+        return;
+    }
+
+    outline.width += delta;
+    text_query.0 = width_text(outline.width);
+}
+
+fn setup_ui(mut commands: Commands) {
+    commands.spawn((
+        Text::new(width_text(INITIAL_OUTLINE_WIDTH)),
+        TextFont {
+            font_size: FontSize::Px(UI_FONT_SIZE),
+            ..default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(UI_PADDING),
+            right: Val::Px(UI_PADDING),
+            ..default()
+        },
+        WidthText,
+    ));
+}
+
+fn width_text(width: f32) -> String {
+    format!(
+        "Decrease width (Q)\nIncrease width (W)\nCurrent width: {width:.WIDTH_DISPLAY_PRECISION$}"
+    )
 }

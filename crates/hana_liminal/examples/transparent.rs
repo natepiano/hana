@@ -9,9 +9,9 @@ use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_liminal::LiminalPlugin;
-use bevy_liminal::Outline;
-use bevy_liminal::OutlineCamera;
+use hana_liminal::LiminalPlugin;
+use hana_liminal::Outline;
+use hana_liminal::OutlineCamera;
 
 // animation
 const ROTATION_X_SPEED: f32 = 1.0 / 3.0;

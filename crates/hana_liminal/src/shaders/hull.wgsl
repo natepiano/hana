@@ -5,7 +5,7 @@
     morph::morph,
     view_transformations::{position_world_to_clip, direction_world_to_clip, frag_coord_to_uv},
 }
-#import bevy_liminal::view_helpers::get_viewport
+#import hana_liminal::view_helpers::get_viewport
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,

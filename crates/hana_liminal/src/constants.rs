@@ -58,7 +58,7 @@ pub(super) const GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR: &str =
     "`get_index_and_compare_data` should never be called in CPU mesh uniform building mode";
 pub(super) const HULL_OUTLINE_RENDER_ERROR: &str =
     "Error encountered while rendering hull outline phase";
-pub(super) const LIMINAL_TRACING_TARGET: &str = "bevy_liminal";
+pub(super) const LIMINAL_TRACING_TARGET: &str = "hana_liminal";
 pub(super) const NO_GLOBAL_DEPTH_TEXTURE_WARNING: &str = "No global depth texture found";
 pub(super) const NO_MESH_FOUND_WARNING: &str = "No mesh found for entity";
 pub(super) const NO_MESH_INSTANCE_FOUND_WARNING: &str = "No mesh instance found for entity";

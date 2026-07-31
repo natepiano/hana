@@ -14,11 +14,11 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
-use bevy_liminal::LiminalPlugin;
-use bevy_liminal::Outline;
-use bevy_liminal::OutlineCamera;
-use bevy_liminal::OutlineMethod;
-use bevy_liminal::OverlapMode;
+use hana_liminal::LiminalPlugin;
+use hana_liminal::Outline;
+use hana_liminal::OutlineCamera;
+use hana_liminal::OutlineMethod;
+use hana_liminal::OverlapMode;
 
 // assets
 const SCENE_ASSET_PATH: &str = "spaceship.glb#Scene0";

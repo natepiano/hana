@@ -1,4 +1,4 @@
-#define_import_path bevy_liminal::view_helpers
+#define_import_path hana_liminal::view_helpers
 
 #import bevy_pbr::mesh_view_bindings as view_bindings
 
