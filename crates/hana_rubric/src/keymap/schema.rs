@@ -343,90 +343,17 @@ mod tests {
             .ok_or_else(|| format!("schema has no completion for `{constant}`"))
     }
 
-    fn validate_against_schema(schema: &Value, value: &Value) -> Result<(), String> {
-        if let Some(constant) = schema.get("const")
-            && value != constant
-        {
-            return Err(format!("value does not equal schema const `{constant}`"));
-        }
+    fn draft_seven_validator(schema: &Value) -> Result<jsonschema::Validator, String> {
+        let schema = serde_json::to_value(schema)
+            .map_err(|error| format!("schema JSON conversion error: {error}"))?;
 
-        if let Some(alternatives) = schema.get("anyOf") {
-            let alternatives = alternatives
-                .as_array()
-                .ok_or_else(|| String::from("schema `anyOf` is not an array"))?;
-            if !alternatives
-                .iter()
-                .any(|alternative| validate_against_schema(alternative, value).is_ok())
-            {
-                return Err(String::from("value does not match any schema alternative"));
-            }
-        }
+        jsonschema::draft7::new(&schema)
+            .map_err(|error| format!("Draft-07 schema compilation error: {error}"))
+    }
 
-        if schema.get("not").is_some() {
-            return Err(String::from("value is excluded by the schema"));
-        }
-
-        if let Some(value_type) = schema
-            .get("type")
-            .and_then(serde_json_lenient::Value::as_str)
-        {
-            let type_matches = match value_type {
-                "array" => value.is_array(),
-                "null" => value.is_null(),
-                "object" => value.is_object(),
-                "string" => value.is_string(),
-                _ => return Err(format!("unsupported schema type `{value_type}`")),
-            };
-            if !type_matches {
-                return Err(format!("value is not a `{value_type}`"));
-            }
-        }
-
-        if let Some(items) = schema.get("items") {
-            let array = value
-                .as_array()
-                .ok_or_else(|| String::from("schema items requires an array value"))?;
-            for item in array {
-                validate_against_schema(items, item)?;
-            }
-        }
-
-        let Some(object) = value.as_object() else {
-            return Ok(());
-        };
-        if let Some(required) = schema.get("required") {
-            for field in required
-                .as_array()
-                .ok_or_else(|| String::from("schema `required` is not an array"))?
-            {
-                let field = field
-                    .as_str()
-                    .ok_or_else(|| String::from("schema `required` contains a non-string"))?;
-                if !object.contains_key(field) {
-                    return Err(format!("object is missing required `{field}`"));
-                }
-            }
-        }
-
-        let properties = schema
-            .get("properties")
-            .and_then(serde_json_lenient::Value::as_object);
-        for (field, field_value) in object {
-            if let Some(property_schema) = properties.and_then(|properties| properties.get(field)) {
-                validate_against_schema(property_schema, field_value)?;
-                continue;
-            }
-
-            match schema.get("additionalProperties") {
-                Some(Value::Bool(false)) => {
-                    return Err(format!("object has unrecognized `{field}`"));
-                },
-                Some(Value::Bool(true)) | None => {},
-                Some(property_schema) => validate_against_schema(property_schema, field_value)?,
-            }
-        }
-
-        Ok(())
+    fn jsonc_document(source: &str) -> Result<serde_json::Value, String> {
+        serde_json_lenient::from_str::<serde_json::Value>(source)
+            .map_err(|error| format!("keymap JSONC parse error: {error}"))
     }
 
     #[test]
@@ -497,6 +424,7 @@ mod tests {
     fn null_is_a_described_binding_tombstone() -> Result<(), String> {
         let (command_registry, condition_registry) = registries()?;
         let schema = generated_schema(&command_registry, &condition_registry)?;
+        let validator = draft_seven_validator(&schema)?;
         let binding_value_schema = binding_value_schema(&schema)?;
         let null_alternative =
             alternatives_with_type(binding_value_schema, "null").and_then(|alternatives| {
@@ -505,42 +433,101 @@ mod tests {
                     .next()
                     .ok_or_else(|| String::from("schema has no null binding alternative"))
             })?;
-        let document = serde_json_lenient::json!({
-            "bindings": [{ "bindings": { "ctrl-k": null } }]
-        });
+        let document = jsonc_document(
+            r#"{
+                "bindings": [{
+                    "bindings": { "ctrl-k": null }
+                }]
+            }"#,
+        )?;
 
         assert!(
             value_field(null_alternative, "description")?
                 .as_str()
                 .is_some_and(|description| description.contains("inert"))
         );
-        validate_against_schema(&schema, &document)?;
+        assert!(
+            validator.is_valid(&document),
+            "null binding tombstone should be accepted"
+        );
 
         Ok(())
     }
 
     #[test]
-    fn root_and_block_reject_additional_properties() -> Result<(), String> {
+    fn generated_schema_compiles_as_draft_seven() -> Result<(), String> {
         let (command_registry, condition_registry) = registries()?;
         let schema = generated_schema(&command_registry, &condition_registry)?;
-        let misspelled_block_member = serde_json_lenient::json!({
-            "bindings": [{
-                "bindings": { "ctrl-k": "camera::home" },
-                "contxt": "dimension_lock"
-            }]
-        });
 
-        assert_eq!(
-            value_field(&schema, "additionalProperties")?.as_bool(),
-            Some(false)
+        draft_seven_validator(&schema)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn misspelled_root_member_fails_draft_seven_validation() -> Result<(), String> {
+        let (command_registry, condition_registry) = registries()?;
+        let schema = generated_schema(&command_registry, &condition_registry)?;
+        let validator = draft_seven_validator(&schema)?;
+        let document = jsonc_document(
+            r#"{
+                // A misspelling must not become an ignored keymap setting.
+                "bindings": [],
+                "bindngs": []
+            }"#,
+        )?;
+
+        assert!(
+            !validator.is_valid(&document),
+            "misspelled root member should be rejected"
         );
-        assert_eq!(
-            value_field(block_schema(&schema)?, "additionalProperties")?.as_bool(),
-            Some(false)
+
+        Ok(())
+    }
+
+    #[test]
+    fn misspelled_block_member_fails_draft_seven_validation() -> Result<(), String> {
+        let (command_registry, condition_registry) = registries()?;
+        let schema = generated_schema(&command_registry, &condition_registry)?;
+        let validator = draft_seven_validator(&schema)?;
+        let document = jsonc_document(
+            r#"{
+                "bindings": [{
+                    "bindings": { "ctrl-k": "camera::home" },
+                    // A misspelling must not become an ignored context.
+                    "contxt": "dimension_lock"
+                }]
+            }"#,
+        )?;
+
+        assert!(
+            !validator.is_valid(&document),
+            "misspelled block member should be rejected"
         );
-        let error = validate_against_schema(&schema, &misspelled_block_member)
-            .expect_err("misspelled block member should be rejected");
-        assert!(error.contains("contxt"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn correct_document_passes_draft_seven_validation() -> Result<(), String> {
+        let (command_registry, condition_registry) = registries()?;
+        let schema = generated_schema(&command_registry, &condition_registry)?;
+        let validator = draft_seven_validator(&schema)?;
+        let document = jsonc_document(
+            r#"{
+                // The editor reads this path to find the generated schema.
+                "$schema": "keymap.schema.json",
+                "bindings": [{
+                    "context": "dimension_lock",
+                    "bindings": { "ctrl-k": "camera::home" }
+                }]
+            }"#,
+        )?;
+
+        assert!(
+            validator.is_valid(&document),
+            "correct keymap document should be accepted"
+        );
 
         Ok(())
     }
