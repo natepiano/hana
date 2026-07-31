@@ -1077,20 +1077,34 @@ mod tests {
 
     #[test]
     fn protected_keystroke_aliases_reject_bare_and_prefix_bindings() -> Result<(), String> {
-        let protected_keystroke = "cmd-p"
+        let protected_keystroke = "secondary-p"
             .parse::<Keystroke>()
             .map_err(|error| format!("invalid protected keystroke: {error}"))?;
-        let defaults = r#"{
-            "bindings": [{
-                "bindings": {
-                    "cmd-p": "camera::home",
-                    "super-p x": "camera::home",
-                    "win-p": "camera::home",
-                    "cmd-left-p": "camera::home",
-                    "cmd-right-p": "camera::home"
-                }
-            }]
-        }"#;
+        let defaults = if cfg!(target_os = "macos") {
+            r#"{
+                "bindings": [{
+                    "bindings": {
+                        "cmd-p": "camera::home",
+                        "super-p x": "camera::home",
+                        "win-p": "camera::home",
+                        "cmd-left-p": "camera::home",
+                        "cmd-right-p": "camera::home"
+                    }
+                }]
+            }"#
+        } else {
+            r#"{
+                "bindings": [{
+                    "bindings": {
+                        "ctrl-p": "camera::home",
+                        "control-p x": "camera::home",
+                        "ctrlleft-p": "camera::home",
+                        "ctrl-right-p": "camera::home",
+                        "controlleft-p": "camera::home"
+                    }
+                }]
+            }"#
+        };
         let (merged_keymap, diagnostics, _, _) =
             merged_keymap(defaults, None, &[protected_keystroke])?;
 
@@ -1152,7 +1166,7 @@ mod tests {
 
     #[test]
     fn control_p_is_platform_specific_against_a_protected_platform_chord() -> Result<(), String> {
-        let protected_keystroke = "cmd-p"
+        let protected_keystroke = "secondary-p"
             .parse::<Keystroke>()
             .map_err(|error| format!("invalid protected keystroke: {error}"))?;
         let defaults = r#"{ "bindings": [{ "bindings": { "ctrl-p": "camera::home" } }] }"#;

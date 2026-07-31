@@ -18,8 +18,6 @@ pub use sequence::KeystrokeSequenceParseError;
 pub use sequence_matcher::MatchOutcome;
 pub use sequence_matcher::SequenceMatcher;
 
-use crate::platform_shortcut_mode::PlatformShortcutMode;
-
 bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
     struct ModifierFlags: u8 {
@@ -30,10 +28,10 @@ bitflags! {
     }
 }
 
-/// Keyboard modifiers stored in their platform-canonical form.
+/// Keyboard modifiers stored as physical key modifiers.
 ///
-/// The platform modifier is distinct from control on macOS and is normalized to control on every
-/// other platform.
+/// The platform modifier represents physical Super and remains distinct from physical Control on
+/// every platform.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Modifiers(ModifierFlags);
 
@@ -70,17 +68,12 @@ impl Modifiers {
         ))
     }
 
-    /// Returns this set with the platform shortcut modifier enabled.
-    ///
-    /// This is command on macOS and control on all other platforms.
+    /// Returns this set with the physical Super modifier enabled.
     #[must_use]
     pub const fn with_platform(self) -> Self {
-        match PlatformShortcutMode::current() {
-            PlatformShortcutMode::Command => Self(ModifierFlags::from_bits_retain(
-                self.0.bits() | ModifierFlags::PLATFORM.bits(),
-            )),
-            PlatformShortcutMode::Control => self.with_control(),
-        }
+        Self(ModifierFlags::from_bits_retain(
+            self.0.bits() | ModifierFlags::PLATFORM.bits(),
+        ))
     }
 
     /// Reports whether control is enabled.
@@ -95,15 +88,13 @@ impl Modifiers {
     #[must_use]
     pub const fn has_shift(self) -> bool { self.0.contains(ModifierFlags::SHIFT) }
 
-    /// Reports whether the platform shortcut modifier is enabled.
+    /// Reports whether physical Super is enabled.
     #[must_use]
     pub const fn has_platform(self) -> bool { self.0.contains(ModifierFlags::PLATFORM) }
 
     /// Creates canonical modifiers from the modifier keys currently held down.
     ///
-    /// On macOS, physical Super keys are the platform shortcut modifier and Control keys remain
-    /// control. On every other platform, physical Control keys are the platform shortcut modifier
-    /// and physical Super keys do not contribute a modifier.
+    /// Physical Control keys set control and physical Super keys set platform on every platform.
     #[must_use]
     pub fn from_pressed(pressed: &ButtonInput<KeyCode>) -> Self {
         let mut modifiers = Self::none();
@@ -115,14 +106,10 @@ impl Modifiers {
             modifiers = modifiers.with_shift();
         }
 
-        if cfg!(target_os = "macos") {
-            if modifier_pair_pressed(pressed, KeyCode::SuperLeft, KeyCode::SuperRight) {
-                modifiers = modifiers.with_platform();
-            }
-            if modifier_pair_pressed(pressed, KeyCode::ControlLeft, KeyCode::ControlRight) {
-                modifiers = modifiers.with_control();
-            }
-        } else if modifier_pair_pressed(pressed, KeyCode::ControlLeft, KeyCode::ControlRight) {
+        if modifier_pair_pressed(pressed, KeyCode::ControlLeft, KeyCode::ControlRight) {
+            modifiers = modifiers.with_control();
+        }
+        if modifier_pair_pressed(pressed, KeyCode::SuperLeft, KeyCode::SuperRight) {
             modifiers = modifiers.with_platform();
         }
 
@@ -277,6 +264,11 @@ fn parse_modifier(token: &str) -> Option<Modifier> {
         "alt" | "opt" | "option" | "altleft" | "altright" | "optleft" | "optright"
         | "optionleft" | "optionright" => Some(Modifier::Alt),
         "shift" | "shiftleft" | "shiftright" => Some(Modifier::Shift),
+        "secondary" => Some(if cfg!(target_os = "macos") {
+            Modifier::Platform
+        } else {
+            Modifier::Control
+        }),
         "cmd" | "command" | "super" | "win" | "platform" | "cmdleft" | "cmdright"
         | "commandleft" | "commandright" | "superleft" | "superright" | "winleft" | "winright"
         | "platformleft" | "platformright" => Some(Modifier::Platform),
@@ -474,47 +466,21 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn control_and_platform_are_distinct_on_macos() -> Result<(), KeystrokeParseError> {
+    fn control_and_platform_are_distinct_on_every_platform() -> Result<(), KeystrokeParseError> {
         assert_ne!(parsed("ctrl-p")?, parsed("platform-p")?);
 
         Ok(())
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
-    fn control_and_platform_are_equal_off_macos() -> Result<(), KeystrokeParseError> {
-        assert_eq!(parsed("ctrl-p")?, parsed("platform-p")?);
-
-        Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn constructed_platform_keystroke_equals_parsed_command_on_macos()
+    fn constructed_platform_keystroke_equals_parsed_command_on_every_platform()
     -> Result<(), KeystrokeParseError> {
         let constructed = Keystroke::new(
             Modifiers::none().with_platform().with_shift(),
             KeyCode::KeyP,
         );
         let parsed = parsed("cmd-shift-p")?;
-
-        assert_eq!(constructed, parsed);
-        assert_eq!(parsed, constructed);
-
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn constructed_platform_keystroke_equals_parsed_control_off_macos()
-    -> Result<(), KeystrokeParseError> {
-        let constructed = Keystroke::new(
-            Modifiers::none().with_platform().with_shift(),
-            KeyCode::KeyP,
-        );
-        let parsed = parsed("ctrl-shift-p")?;
 
         assert_eq!(constructed, parsed);
         assert_eq!(parsed, constructed);
@@ -533,23 +499,51 @@ mod tests {
     }
 
     #[test]
-    fn pressed_control_matches_parsed_control() -> Result<(), KeystrokeParseError> {
-        let keys = pressed(&[KeyCode::ControlLeft]);
+    fn physical_control_g_matches_ctrl_g_on_every_platform() -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::ControlLeft, KeyCode::KeyG]);
+        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
 
-        assert_eq!(
-            Modifiers::from_pressed(&keys),
-            parsed("ctrl-p")?.modifiers()
-        );
+        assert_eq!(physical, parsed("ctrl-g")?);
+        assert!(physical.modifiers.has_control());
+        assert!(!physical.modifiers.has_platform());
+        assert_ne!(physical, parsed("platform-g")?);
 
         Ok(())
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
-    fn pressed_control_matches_parsed_command_off_macos() -> Result<(), KeystrokeParseError> {
-        let keys = pressed(&[KeyCode::ControlLeft]);
+    fn physical_control_and_super_g_preserve_both_modifiers() -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::ControlLeft, KeyCode::SuperLeft, KeyCode::KeyG]);
+        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
 
-        assert_eq!(Modifiers::from_pressed(&keys), parsed("cmd-p")?.modifiers());
+        assert_eq!(physical, parsed("platform-ctrl-g")?);
+        assert!(physical.modifiers.has_control());
+        assert!(physical.modifiers.has_platform());
+        assert_ne!(physical, parsed("ctrl-g")?);
+        assert_ne!(physical, parsed("platform-g")?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn secondary_g_matches_the_platform_shortcut_modifier() -> Result<(), KeystrokeParseError> {
+        let keys = if cfg!(target_os = "macos") {
+            pressed(&[KeyCode::SuperLeft, KeyCode::KeyG])
+        } else {
+            pressed(&[KeyCode::ControlLeft, KeyCode::KeyG])
+        };
+        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
+        let secondary = parsed("secondary-g")?;
+        let display = secondary.to_string();
+
+        assert_eq!(physical, secondary);
+        if cfg!(target_os = "macos") {
+            assert_eq!(display, "platform-g");
+        } else {
+            assert_eq!(display, "ctrl-g");
+        }
+        assert!(!display.contains("secondary-"));
+        assert_eq!(secondary, parsed(&display)?);
 
         Ok(())
     }
@@ -566,22 +560,19 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn pressed_super_matches_parsed_command_on_macos() -> Result<(), KeystrokeParseError> {
-        let keys = pressed(&[KeyCode::SuperLeft]);
+    fn physical_super_g_matches_platform_aliases_without_matching_ctrl_or_bare_g()
+    -> Result<(), KeystrokeParseError> {
+        let keys = pressed(&[KeyCode::SuperLeft, KeyCode::KeyG]);
+        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
 
-        assert_eq!(Modifiers::from_pressed(&keys), parsed("cmd-p")?.modifiers());
+        assert_eq!(physical, parsed("cmd-g")?);
+        assert_eq!(physical, parsed("super-g")?);
+        assert_eq!(physical, parsed("win-g")?);
+        assert_ne!(physical, parsed("ctrl-g")?);
+        assert_ne!(physical, parsed("g")?);
 
         Ok(())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn pressed_super_is_empty_off_macos() {
-        let keys = pressed(&[KeyCode::SuperLeft]);
-
-        assert_eq!(Modifiers::from_pressed(&keys), Modifiers::none());
     }
 
     #[test]
