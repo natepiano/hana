@@ -936,8 +936,8 @@ impl ScreenConversionSource<'_> {
 }
 
 impl DiegeticPanelCommands for Commands<'_, '_> {
-    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) -> Result<(), PanelBuildError> {
-        widgets::validate_tree(&tree)?;
+    fn set_tree(&mut self, entity: Entity, mut tree: LayoutTree) -> Result<(), PanelBuildError> {
+        widgets::validate_tree(&mut tree)?;
         self.run_system_cached_with(set_tree_command, (entity, tree));
         Ok(())
     }

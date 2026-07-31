@@ -2421,7 +2421,7 @@ mod tests {
         let mut overrides = WidgetVisualOverrides::default();
         overrides.set(
             TEST_SLOT,
-            VisualSlotOverride::default().with_color(Color::BLACK),
+            VisualSlotOverride::default().with_fill_color(Color::BLACK),
         );
         app.world_mut().entity_mut(widget).insert(overrides);
         app.update();

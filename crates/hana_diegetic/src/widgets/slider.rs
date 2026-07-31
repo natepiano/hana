@@ -151,8 +151,8 @@ impl SliderStep {
 /// Declare one inline with [`El::slider`](crate::El::slider), or build one here
 /// and attach it with [`El::widget`](crate::El::widget). Reified sliders store
 /// their applied value in [`SliderState`] and propose changes through
-/// [`SliderChangeRequested`]. A slider carries behavior and its own thumb and
-/// disabled colors; the root's resting look stays on the element's ordinary
+/// [`SliderChangeRequested`]. A slider carries behavior and an optional thumb
+/// focus border color; the root's resting look stays on the element's ordinary
 /// [`El::background`](crate::El::background),
 /// [`El::border`](crate::El::border), and [`El::material`](crate::El::material)
 /// declarations, and its per-state look on the element's state builders.
@@ -169,7 +169,6 @@ pub struct Slider {
     direction:                  SliderDirection,
     reset_behavior:             SliderResetBehavior,
     focused_thumb_border_color: Option<Color>,
-    disabled_color:             Option<Color>,
 }
 
 impl Slider {
@@ -188,7 +187,6 @@ impl Slider {
             direction: SliderDirection::default(),
             reset_behavior: SliderResetBehavior::default(),
             focused_thumb_border_color: None,
-            disabled_color: None,
         }
     }
 
@@ -217,21 +215,8 @@ impl Slider {
     }
 
     /// Sets the marked thumb's border color while keyboard focus is visible.
-    ///
-    /// Requires an authored border on the element marked with
-    /// [`El::slider_thumb`](crate::El::slider_thumb).
     pub const fn focused_thumb_border_color(mut self, color: Color) -> Self {
         self.focused_thumb_border_color = Some(color);
-        self
-    }
-
-    /// Sets the color applied to every authored slider visual while disabled.
-    ///
-    /// The color covers the slider root and all of its ordinary descendants,
-    /// including text, track, and marked thumb records. Clearing the disabled
-    /// state restores each record's authored color.
-    pub const fn disabled_color(mut self, color: Color) -> Self {
-        self.disabled_color = Some(color);
         self
     }
 
@@ -1114,9 +1099,8 @@ fn thumb_translation(slots: &WidgetVisualSlots, state: &SliderState) -> Option<V
 /// for presentation. Writes go through [`visual::write_widget_overrides`],
 /// which compares immutably first, so an unchanged state never marks
 /// [`WidgetVisualOverrides`] changed. The thumb slot combines its value-derived
-/// translation with the authored focus border color. `Slider::disabled_color`
-/// recolors every element owned by the slider, while the disabled state removes
-/// the focused thumb border so the complete control uses that one color.
+/// translation with the authored focus border color; a disabled element
+/// appearance can replace that border through the element override channel.
 pub(super) fn present_slider_state(
     changed: Query<
         (Entity, &WidgetKind),
@@ -1174,7 +1158,6 @@ pub(super) fn present_slider_state(
             present.focused,
         );
         let mut desired = WidgetVisualOverrides::default();
-        desired.set_subtree_color(disabled.then_some(slider.disabled_color).flatten());
         let active = [
             focused.then_some(WidgetState::Focused),
             matches!(
@@ -1214,7 +1197,7 @@ pub(super) fn present_slider_state(
                 offset: Some(offset),
                 ..VisualSlotOverride::default()
             });
-        if focused && !(disabled && slider.disabled_color.is_some()) {
+        if focused {
             thumb_override.border_color = slider.focused_thumb_border_color;
         }
         if thumb_override != VisualSlotOverride::default() {
@@ -1928,8 +1911,10 @@ mod tests {
     use crate::PanelWidgetReader;
     use crate::Px;
     use crate::RequestWidgetFocus;
+    use crate::Text;
     use crate::TextStyle;
     use crate::WidgetHoveredAppearance;
+    use crate::WidgetInput;
     use crate::WidgetInputPlugin;
     use crate::WidgetInteractivity;
     use crate::WidgetPressedAppearance;
@@ -2016,8 +2001,7 @@ mod tests {
             .step(0.25)
             .direction(SliderDirection::TopToBottom)
             .reset_behavior(SliderResetBehavior::DoubleClick)
-            .focused_thumb_border_color(Color::WHITE)
-            .disabled_color(Color::BLACK);
+            .focused_thumb_border_color(Color::WHITE);
         let config = slider.validated().expect("authored slider validates");
 
         assert_eq!(config.range, range(-1.0, 2.0));
@@ -2026,7 +2010,6 @@ mod tests {
         assert_eq!(slider.direction, SliderDirection::TopToBottom);
         assert_eq!(slider.reset_behavior, SliderResetBehavior::DoubleClick);
         assert_eq!(slider.focused_thumb_border_color, Some(Color::WHITE));
-        assert_eq!(slider.disabled_color, Some(Color::BLACK));
     }
 
     #[test]
@@ -2965,6 +2948,7 @@ mod tests {
         widget: Entity,
         panel:  Entity,
         camera: Entity,
+        window: Entity,
         target: NormalizedRenderTarget,
     }
 
@@ -3030,6 +3014,7 @@ mod tests {
             widget,
             panel,
             camera,
+            window,
             target,
         }
     }
@@ -3074,6 +3059,7 @@ mod tests {
             widget,
             panel,
             camera,
+            window,
             target,
         }
     }
@@ -3131,6 +3117,23 @@ mod tests {
             scene.widget,
         ));
         scene.app.world_mut().flush();
+    }
+
+    /// Queues the production release path so the next app update owns the
+    /// command-flush boundary that removes `SliderDrag`.
+    fn queue_release(scene: &mut Scene, position: Vec2) {
+        scene.app.world_mut().trigger(Pointer::new(
+            CAPTURE_POINTER,
+            Location {
+                target: scene.target.clone(),
+                position,
+            },
+            Release {
+                button: PointerButton::Primary,
+                hit:    HitData::new(scene.camera, 0.0, None, None),
+            },
+            scene.widget,
+        ));
     }
 
     fn pointer_cancel(scene: &mut Scene) {
@@ -5011,9 +5014,13 @@ mod tests {
     }
 
     const STATE_DISABLED_COLOR: Color = Color::srgb(0.35, 0.35, 0.35);
+    const STATE_DISABLED_FILL: Color = Color::srgb(0.2, 0.3, 0.4);
+    const STATE_DISABLED_LABEL_TEXT: Color = Color::srgb(0.7, 0.5, 0.2);
     const STATE_FOCUS_BORDER: Color = Color::srgb(0.9, 0.8, 0.2);
     const STATE_HOVER_FILL: Color = Color::srgb(0.2, 0.4, 0.6);
     const STATE_THUMB_FOCUS_BORDER: Color = Color::srgb(0.95, 0.75, 0.1);
+    const STATE_SLIDER_LABEL_SLOT: VisualSlotId = VisualSlotId::new(1);
+    const STATE_SLIDER_TRACK_SLOT: VisualSlotId = VisualSlotId::new(2);
     const THUMB_ID: &str = "thumb";
 
     fn plain_slider(value: f32) -> Slider {
@@ -5057,26 +5064,58 @@ mod tests {
         builder.build()
     }
 
-    fn complete_slider_tree(id: &str, slider: Slider) -> LayoutTree {
+    fn focused_thumb_state_tree(slider: Slider, disabled: Appearance) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.with(
             El::overlay()
-                .size(40.0, 16.0)
+                .size(100.0, 50.0)
                 .background(Color::WHITE)
-                .widget(id, slider),
+                .widget("level", slider)
+                .pressed(Appearance::new().background(STATE_PRESS_FILL))
+                .disabled(disabled),
             |builder| {
-                builder.text(("Value", TextStyle::new(10.0)));
+                builder.with(
+                    El::new()
+                        .size(8.0, 8.0)
+                        .background(Color::BLACK)
+                        .id(THUMB_ID)
+                        .slider_thumb(),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn disabled_slider_state_tree(slider: Slider) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::column()
+                .size(40.0, 16.0)
+                .background(Color::srgb(0.15, 0.25, 0.35))
+                .widget("level", slider)
+                .disabled(
+                    Appearance::new()
+                        .background(STATE_DISABLED_FILL)
+                        .text_color(STATE_DISABLED_LABEL_TEXT),
+                ),
+            |builder| {
+                builder.text(
+                    Text::new("Level", TextStyle::new(10.0).with_color(Color::WHITE))
+                        .layout(El::new().visual_slot(STATE_SLIDER_LABEL_SLOT)),
+                );
                 builder.with(
                     El::new()
                         .size(32.0, 2.0)
-                        .background(Color::srgb(0.1, 0.7, 0.9)),
+                        .background(Color::srgb(0.1, 0.7, 0.9))
+                        .visual_slot(STATE_SLIDER_TRACK_SLOT),
                     |_| {},
                 );
                 builder.with(
                     El::new()
                         .size(8.0, 8.0)
-                        .background(Color::srgb(0.1, 0.7, 0.9))
-                        .border(Border::all(1.0, Color::WHITE))
+                        .background(Color::srgb(0.9, 0.3, 0.1))
+                        .border(Border::all(Px(1.0), Color::srgb(0.1, 0.2, 0.3)))
                         .id(THUMB_ID)
                         .slider_thumb(),
                     |_| {},
@@ -5276,83 +5315,151 @@ mod tests {
     }
 
     #[test]
-    fn disabled_color_recolors_every_slider_element_and_suppresses_focus_border() {
+    fn focused_thumb_border_composes_with_disabled_state_and_drag_offset() {
+        for (disabled_appearance, expected_released_fill, expected_border) in [
+            (
+                Appearance::new().background(STATE_DISABLED_COLOR),
+                Some(STATE_DISABLED_COLOR),
+                STATE_THUMB_FOCUS_BORDER,
+            ),
+            (
+                Appearance::new().border_color(STATE_DISABLED_BORDER),
+                None,
+                STATE_DISABLED_BORDER,
+            ),
+        ] {
+            let mut scene = projecting_scene(focused_thumb_state_tree(
+                plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER),
+                disabled_appearance.clone(),
+            ));
+            let widget = scene.widget;
+            let panel = scene.panel;
+            let thumb_index = slots_of(&scene.app, widget)
+                .element_index(VisualSlotId::SLIDER_THUMB)
+                .expect("slider should expose its thumb element");
+            let idle_offset =
+                thumb_offset(&scene.app, widget).expect("thumb should have an offset");
+
+            scene.app.world_mut().trigger(RequestWidgetFocus {
+                window: scene.window,
+                widget,
+            });
+            scene.app.world_mut().flush();
+            scene.app.update();
+            press(&mut scene, CAPTURE_VIEWPORT * 0.5);
+            scene.app.update();
+            scene.app.world_mut().write_message(WidgetInput::FocusNext {
+                window: scene.window,
+            });
+            scene.app.update();
+
+            let dragging =
+                indexed_root(&scene.app, panel, thumb_index).expect("dragging thumb override");
+            assert_eq!(dragging.offset, Some(idle_offset));
+            assert_eq!(dragging.fill_color, Some(STATE_PRESS_FILL));
+            assert_eq!(
+                dragging.border_color,
+                Some(STATE_THUMB_FOCUS_BORDER),
+                "the focus border precedes normal state composition",
+            );
+
+            // The pointer release queues `SliderDrag` removal through
+            // `resolve_release`. The disabled marker joins that same update,
+            // so the presentation system observes the production command
+            // boundary instead of a test-side component removal.
+            queue_release(&mut scene, CAPTURE_VIEWPORT * 0.5);
+            scene
+                .app
+                .world_mut()
+                .entity_mut(widget)
+                .insert(WidgetDisabled::test_marker());
+            scene.app.update();
+            assert!(
+                scene.app.world().get::<SliderDrag>(widget).is_none(),
+                "the queued release should remove SliderDrag before the next frame completes",
+            );
+            assert!(
+                scene.app.world().get::<WidgetDisabled>(widget).is_some(),
+                "the disabled marker should activate the disabled state",
+            );
+            assert_eq!(
+                scene
+                    .app
+                    .world()
+                    .get::<crate::cascade::Resolved<crate::WidgetDisabledAppearance>>(widget)
+                    .expect("the slider should resolve its disabled appearance")
+                    .0
+                    .appearance(),
+                &disabled_appearance,
+            );
+
+            let disabled =
+                indexed_root(&scene.app, panel, thumb_index).expect("disabled thumb override");
+            assert_eq!(disabled.offset, Some(idle_offset));
+            assert_eq!(disabled.fill_color, expected_released_fill);
+            assert_eq!(disabled.border_color, Some(expected_border));
+        }
+    }
+
+    #[test]
+    fn disabled_slider_appearance_routes_each_property_to_its_authored_part() {
         let mut app = test_app();
-        let window = app.world_mut().spawn(Window::default()).id();
-        let slider = plain_slider(0.5)
-            .focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER)
-            .disabled_color(STATE_DISABLED_COLOR);
-        let panel = spawn_panel(&mut app, complete_slider_tree("level", slider));
+        let panel = spawn_panel(&mut app, disabled_slider_state_tree(plain_slider(0.5)));
         app.update();
         let widget = resolve_widget(&mut app, panel, "level");
-        let idle = thumb_override(&app, widget).expect("thumb override present");
-        let elements = slots_of(&app, widget).elements().to_vec();
-        assert_eq!(elements.len(), 4);
+        let slots = slots_of(&app, widget);
+        let root_index = slots
+            .element_index(VisualSlotId::SLIDER_ROOT)
+            .expect("slider root should expose its visual slot");
+        let label_index = slots
+            .element_index(STATE_SLIDER_LABEL_SLOT)
+            .expect("slider label should expose its visual slot");
+        let track_index = slots
+            .element_index(STATE_SLIDER_TRACK_SLOT)
+            .expect("slider track should expose its visual slot");
+        let thumb_index = slots
+            .element_index(VisualSlotId::SLIDER_THUMB)
+            .expect("slider thumb should expose its visual slot");
 
-        app.world_mut()
-            .trigger(RequestWidgetFocus { window, widget });
-        app.world_mut().flush();
         app.world_mut()
             .entity_mut(widget)
             .insert(WidgetDisabled::test_marker());
         app.update();
 
-        let disabled = thumb_override(&app, widget).expect("disabled thumb override present");
-        assert_eq!(disabled.offset, idle.offset);
-        assert_eq!(disabled.border_color, None);
-        {
-            let index = app.world().resource::<VisualOverrideIndex>();
-            for &(element_index, _) in &elements {
-                assert_eq!(
-                    index
-                        .get(panel, element_index)
-                        .and_then(|value| value.color),
-                    Some(STATE_DISABLED_COLOR)
-                );
-                assert_eq!(
-                    index
-                        .get(panel, element_index)
-                        .and_then(|value| value.text_color),
-                    Some(STATE_DISABLED_COLOR)
-                );
-                assert_eq!(
-                    index
-                        .get(panel, element_index)
-                        .and_then(|value| value.path_color),
-                    Some(STATE_DISABLED_COLOR)
-                );
-            }
-        }
+        let root = indexed_root(&app, panel, root_index).expect("disabled root override");
+        assert_eq!(root.fill_color, Some(STATE_DISABLED_FILL));
+        let track = indexed_root(&app, panel, track_index).expect("disabled track override");
+        assert_eq!(track.fill_color, Some(STATE_DISABLED_FILL));
+        let thumb = indexed_root(&app, panel, thumb_index).expect("disabled thumb override");
+        assert_eq!(thumb.fill_color, Some(STATE_DISABLED_FILL));
+        let label = indexed_root(&app, panel, label_index).expect("disabled label override");
+        assert_eq!(label.text_color, Some(STATE_DISABLED_LABEL_TEXT));
 
         app.world_mut()
             .entity_mut(widget)
             .remove::<WidgetDisabled>();
         app.update();
 
-        let enabled = thumb_override(&app, widget).expect("enabled thumb override present");
-        assert_eq!(enabled.offset, idle.offset);
-        assert_eq!(enabled.border_color, Some(STATE_THUMB_FOCUS_BORDER));
-        let index = app.world().resource::<VisualOverrideIndex>();
-        for (element_index, _) in elements {
-            assert_eq!(
-                index
-                    .get(panel, element_index)
-                    .and_then(|value| value.color),
-                None
-            );
-            assert_eq!(
-                index
-                    .get(panel, element_index)
-                    .and_then(|value| value.text_color),
-                None
-            );
-            assert_eq!(
-                index
-                    .get(panel, element_index)
-                    .and_then(|value| value.path_color),
-                None
-            );
-        }
+        assert_eq!(
+            indexed_root(&app, panel, root_index)
+                .and_then(|override_value| override_value.fill_color),
+            None,
+        );
+        assert_eq!(
+            indexed_root(&app, panel, track_index)
+                .and_then(|override_value| override_value.fill_color),
+            None,
+        );
+        assert_eq!(
+            indexed_root(&app, panel, thumb_index)
+                .and_then(|override_value| override_value.fill_color),
+            None,
+        );
+        assert_eq!(
+            indexed_root(&app, panel, label_index)
+                .and_then(|override_value| override_value.text_color),
+            None,
+        );
     }
 
     #[test]
@@ -5463,24 +5570,32 @@ mod tests {
     }
 
     #[test]
-    fn focused_thumb_border_requires_an_authored_thumb_border() {
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.with(
-            El::overlay()
-                .widget(
-                    "level",
-                    plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER),
-                )
-                .size(40.0, 16.0),
-            |builder| {
-                builder.with(El::new().size(8.0, 8.0).slider_thumb(), |_| {});
-            },
+    fn focused_thumb_border_without_authored_border_builds_and_presents() {
+        let mut app = test_app();
+        let window = app.world_mut().spawn(Window::default()).id();
+        let panel = spawn_panel(
+            &mut app,
+            focused_thumb_state_tree(
+                plain_slider(0.5).focused_thumb_border_color(STATE_THUMB_FOCUS_BORDER),
+                Appearance::default(),
+            ),
         );
-        assert!(matches!(
-            build_world_panel(builder.build()),
-            Err(PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(id))
-                if id == PanelElementId::named("level")
-        ));
+        app.update();
+        let widget = resolve_widget(&mut app, panel, "level");
+        let thumb_index = slots_of(&app, widget)
+            .element_index(VisualSlotId::SLIDER_THUMB)
+            .expect("slider should expose its thumb element");
+
+        app.world_mut()
+            .trigger(RequestWidgetFocus { window, widget });
+        app.world_mut().flush();
+        app.update();
+
+        assert_eq!(
+            indexed_root(&app, panel, thumb_index)
+                .and_then(|override_value| override_value.border_color),
+            Some(STATE_THUMB_FOCUS_BORDER),
+        );
     }
 
     #[test]
@@ -5947,7 +6062,6 @@ mod tests {
             let offset = value.offset.expect("offset present");
             assert_close(active_offset(offset, direction), expected_active);
             assert_close(cross_offset(offset, direction), 0.0);
-            assert_eq!(value.color, None);
             assert_eq!(value.fill_color, None);
             assert_eq!(value.border_color, None);
             assert!(value.material.is_none());

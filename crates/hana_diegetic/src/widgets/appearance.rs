@@ -243,7 +243,11 @@ impl Appearance {
     /// `StandardMaterial::base_color` — so without [`crate::El::background`]
     /// or [`crate::El::border`], layout emits a [`Color::NONE`] fill record
     /// for this material to re-key. Text and panel-draw recipients need no
-    /// additional fill record.
+    /// additional fill record. Repeated state transitions should use materials
+    /// with matching pipeline and resource compatibility so the renderer can
+    /// update material-table rows in place. An incompatible material remains
+    /// supported and moves only its affected retained records to a compatible
+    /// batch.
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
         self.material = VisualChange::To(material);
         self

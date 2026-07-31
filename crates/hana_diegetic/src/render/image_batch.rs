@@ -625,10 +625,7 @@ fn apply_image_visual_override(
         return (texture, tint, local_transform);
     };
     let texture = slot_override.texture.clone().unwrap_or(texture);
-    let tint = slot_override
-        .tint
-        .or(slot_override.color)
-        .map_or(tint, linear_tint);
+    let tint = slot_override.tint.map_or(tint, linear_tint);
     let mut local_transform = local_transform;
     if let Some(offset) = slot_override.offset {
         local_transform.translation += offset.extend(0.0);

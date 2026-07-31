@@ -181,11 +181,10 @@ impl WidgetVisualSlots {
 
 /// State-only presentation override for one visual slot.
 ///
-/// `color` recolors the slot's authored fill, border, or image tint without
-/// changing batch routing. `tint` replaces only an image tint. `text_color`
-/// and `path_color` replace text glyphs and panel-draw primitives respectively.
-/// `fill_color` and `border_color` recolor only the slot's SDF fill or border
-/// role and take precedence over `color` for that role. `border_widths`
+/// `tint` replaces only an image tint. `text_color` and `path_color` replace
+/// text glyphs and panel-draw primitives respectively. `fill_color` and
+/// `border_color` recolor only the slot's SDF fill or border role.
+/// `border_widths`
 /// replaces the slot's authored SDF border widths, which grow inward from the
 /// authored outer bounds and so change no geometry layout solved. `offset`
 /// translates
@@ -198,8 +197,6 @@ impl WidgetVisualSlots {
 /// the destination `ImageBatchKey`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct VisualSlotOverride {
-    /// Fallback replacement color for authored SDF fill, SDF border, and image tint.
-    pub color:         Option<Color>,
     /// Replacement tint multiplied against an image's decoded texture sample.
     pub tint:          Option<Color>,
     /// Replacement color for text glyphs only.
@@ -226,11 +223,10 @@ pub(crate) struct VisualSlotOverride {
     pub texture:       Option<Handle<Image>>,
 }
 
-const _: () = assert!(size_of::<VisualSlotOverride>() <= 200);
+const _: () = assert!(size_of::<VisualSlotOverride>() == 184);
 
 impl VisualSlotOverride {
     fn apply(&mut self, overlay: &Self) {
-        self.color = overlay.color.or(self.color);
         self.tint = overlay.tint.or(self.tint);
         self.text_color = overlay.text_color.or(self.text_color);
         self.path_color = overlay.path_color.or(self.path_color);
@@ -282,12 +278,6 @@ impl VisualSlotOverride {
 #[cfg(test)]
 impl VisualSlotOverride {
     #[must_use]
-    pub(crate) const fn with_color(mut self, color: Color) -> Self {
-        self.color = Some(color);
-        self
-    }
-
-    #[must_use]
     pub(crate) const fn with_text_color(mut self, color: Color) -> Self {
         self.text_color = Some(color);
         self
@@ -296,6 +286,12 @@ impl VisualSlotOverride {
     #[must_use]
     pub(crate) const fn with_path_color(mut self, color: Color) -> Self {
         self.path_color = Some(color);
+        self
+    }
+
+    #[must_use]
+    pub(crate) const fn with_tint(mut self, color: Color) -> Self {
+        self.tint = Some(color);
         self
     }
 
@@ -339,20 +335,11 @@ impl VisualSlotOverride {
 /// Changed-only override authoring owned by one widget entity.
 #[derive(Clone, Component, Debug, Default, PartialEq)]
 pub(crate) struct WidgetVisualOverrides {
-    subtree_color: Option<Color>,
-    slots:         Vec<(VisualSlotId, VisualSlotOverride)>,
-    elements:      Vec<(usize, VisualSlotOverride)>,
+    slots:    Vec<(VisualSlotId, VisualSlotOverride)>,
+    elements: Vec<(usize, VisualSlotOverride)>,
 }
 
 impl WidgetVisualOverrides {
-    /// Recolors every retained record authored inside the widget subtree.
-    pub(crate) const fn set_subtree_color(&mut self, color: Option<Color>) {
-        self.subtree_color = color;
-    }
-
-    #[must_use]
-    const fn subtree_color(&self) -> Option<Color> { self.subtree_color }
-
     /// Returns the stored override for `slot`.
     #[cfg(test)]
     #[must_use]
@@ -653,19 +640,6 @@ pub(crate) fn dispatch_visual_overrides(
     for (widget, widget_of, slots, overrides) in &changed_widgets {
         let entries = overrides.map_or_else(Vec::new, |overrides| {
             let mut by_element = HashMap::<usize, VisualSlotOverride>::new();
-            if let Some(color) = overrides.subtree_color() {
-                for &(element_index, _) in slots.elements() {
-                    by_element.insert(
-                        element_index,
-                        VisualSlotOverride {
-                            color: Some(color),
-                            text_color: Some(color),
-                            path_color: Some(color),
-                            ..VisualSlotOverride::default()
-                        },
-                    );
-                }
-            }
             for (slot, value) in overrides.slot_overrides() {
                 let Some(element_index) = slots.element_index(slot) else {
                     continue;
@@ -1055,7 +1029,7 @@ mod tests {
         color: Color,
     ) -> Entity {
         let mut overrides = WidgetVisualOverrides::default();
-        overrides.set(SLOT, VisualSlotOverride::default().with_color(color));
+        overrides.set(SLOT, VisualSlotOverride::default().with_fill_color(color));
         app.world_mut()
             .spawn((
                 PanelWidget::new(PanelElementId::named(name)),
@@ -1066,15 +1040,15 @@ mod tests {
             .id()
     }
 
-    fn indexed_color(app: &App, panel: Entity) -> Option<Color> {
-        indexed_color_at(app, panel, SLOT_ELEMENT_INDEX)
+    fn indexed_fill_color(app: &App, panel: Entity) -> Option<Color> {
+        indexed_fill_color_at(app, panel, SLOT_ELEMENT_INDEX)
     }
 
-    fn indexed_color_at(app: &App, panel: Entity, element_index: usize) -> Option<Color> {
+    fn indexed_fill_color_at(app: &App, panel: Entity, element_index: usize) -> Option<Color> {
         app.world()
             .resource::<VisualOverrideIndex>()
             .get(panel, element_index)
-            .and_then(|value| value.color)
+            .and_then(|value| value.fill_color)
     }
 
     fn hovered_part_appearance() -> StateAppearance {
@@ -2345,7 +2319,7 @@ mod tests {
         let mut overrides = WidgetVisualOverrides::default();
         overrides.set(
             SLOT,
-            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
         );
         overrides.set_element(
             SLOT_ELEMENT_INDEX,
@@ -2367,7 +2341,7 @@ mod tests {
                 .resource::<VisualOverrideIndex>()
                 .get(panel, SLOT_ELEMENT_INDEX),
             Some(&VisualSlotOverride {
-                color: Some(OVERRIDE_COLOR),
+                fill_color: Some(OVERRIDE_COLOR),
                 text_color: Some(TEXT_OVERRIDE_COLOR),
                 path_color: Some(PATH_OVERRIDE_COLOR),
                 ..VisualSlotOverride::default()
@@ -2708,17 +2682,17 @@ mod tests {
         let panel = app.world_mut().spawn_empty().id();
         let widget = spawn_slotted_widget(&mut app, panel);
         app.update();
-        assert_eq!(indexed_color(&app, panel), None);
+        assert_eq!(indexed_fill_color(&app, panel), None);
 
         let mut overrides = WidgetVisualOverrides::default();
         overrides.set(
             SLOT,
-            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
         );
         app.world_mut().entity_mut(widget).insert(overrides);
         app.update();
 
-        assert_eq!(indexed_color(&app, panel), Some(OVERRIDE_COLOR));
+        assert_eq!(indexed_fill_color(&app, panel), Some(OVERRIDE_COLOR));
         assert!(
             app.world()
                 .resource::<VisualOverrideIndex>()
@@ -2736,7 +2710,7 @@ mod tests {
         let mut overrides = WidgetVisualOverrides::default();
         overrides.set(
             VisualSlotId::new(99),
-            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
         );
         app.world_mut().entity_mut(widget).insert(overrides);
         app.update();
@@ -2757,11 +2731,11 @@ mod tests {
         let mut overrides = WidgetVisualOverrides::default();
         overrides.set(
             SLOT,
-            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
         );
         app.world_mut().entity_mut(widget).insert(overrides);
         app.update();
-        assert_eq!(indexed_color(&app, panel), Some(OVERRIDE_COLOR));
+        assert_eq!(indexed_fill_color(&app, panel), Some(OVERRIDE_COLOR));
 
         let mut overrides = app
             .world_mut()
@@ -2769,7 +2743,7 @@ mod tests {
             .expect("widget should keep its override component");
         overrides.clear(SLOT);
         app.update();
-        assert_eq!(indexed_color(&app, panel), None);
+        assert_eq!(indexed_fill_color(&app, panel), None);
 
         let mut overrides = app
             .world_mut()
@@ -2777,29 +2751,29 @@ mod tests {
             .expect("widget should keep its override component");
         overrides.set(
             SLOT,
-            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
         );
         app.update();
-        assert_eq!(indexed_color(&app, panel), Some(OVERRIDE_COLOR));
+        assert_eq!(indexed_fill_color(&app, panel), Some(OVERRIDE_COLOR));
 
         app.world_mut()
             .entity_mut(widget)
             .remove::<WidgetVisualOverrides>();
         app.update();
-        assert_eq!(indexed_color(&app, panel), None);
+        assert_eq!(indexed_fill_color(&app, panel), None);
 
         let mut overrides = WidgetVisualOverrides::default();
         overrides.set(
             SLOT,
-            VisualSlotOverride::default().with_color(OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(OVERRIDE_COLOR),
         );
         app.world_mut().entity_mut(widget).insert(overrides);
         app.update();
-        assert_eq!(indexed_color(&app, panel), Some(OVERRIDE_COLOR));
+        assert_eq!(indexed_fill_color(&app, panel), Some(OVERRIDE_COLOR));
 
         app.world_mut().entity_mut(widget).despawn();
         app.update();
-        assert_eq!(indexed_color(&app, panel), None);
+        assert_eq!(indexed_fill_color(&app, panel), None);
     }
 
     #[test]
@@ -2822,11 +2796,11 @@ mod tests {
         );
         app.update();
         assert_eq!(
-            indexed_color_at(&app, panel, SLOT_ELEMENT_INDEX),
+            indexed_fill_color_at(&app, panel, SLOT_ELEMENT_INDEX),
             Some(OVERRIDE_COLOR),
         );
         assert_eq!(
-            indexed_color_at(&app, panel, PEER_ELEMENT_INDEX),
+            indexed_fill_color_at(&app, panel, PEER_ELEMENT_INDEX),
             Some(PEER_OVERRIDE_COLOR),
         );
 
@@ -2842,12 +2816,12 @@ mod tests {
         app.update();
 
         assert_eq!(
-            indexed_color_at(&app, panel, SLOT_ELEMENT_INDEX),
+            indexed_fill_color_at(&app, panel, SLOT_ELEMENT_INDEX),
             Some(PEER_OVERRIDE_COLOR),
             "the removed widget's stale key must not delete the renumbered widget's entry",
         );
         assert_eq!(
-            indexed_color_at(&app, panel, PEER_ELEMENT_INDEX),
+            indexed_fill_color_at(&app, panel, PEER_ELEMENT_INDEX),
             None,
             "the renumbered widget's old key must retire",
         );
@@ -2886,11 +2860,11 @@ mod tests {
         app.update();
 
         assert_eq!(
-            indexed_color_at(&app, panel, PEER_ELEMENT_INDEX),
+            indexed_fill_color_at(&app, panel, PEER_ELEMENT_INDEX),
             Some(OVERRIDE_COLOR),
         );
         assert_eq!(
-            indexed_color_at(&app, panel, SLOT_ELEMENT_INDEX),
+            indexed_fill_color_at(&app, panel, SLOT_ELEMENT_INDEX),
             Some(PEER_OVERRIDE_COLOR),
         );
     }

@@ -68,9 +68,6 @@ pub enum PanelBuildError {
     /// A slider subtree marks more than one thumb.
     #[error("slider `{0}` contains more than one thumb")]
     SliderHasMultipleThumbs(PanelElementId),
-    /// A slider authored a focused thumb border color without a bordered thumb.
-    #[error("slider `{0}` focused thumb border color requires an authored thumb border")]
-    SliderFocusedThumbBorderColorRequiresThumbBorder(PanelElementId),
     /// A widget part named a state text color without emitting text itself.
     #[error("widget part `{0}` state text color requires text; add a text child")]
     StateTextColorRequiresText(PanelElementId),
@@ -842,7 +839,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
             }
         }
 
-        if let Some(tree) = self.data.tree.as_ref() {
+        if let Some(tree) = self.data.tree.as_mut() {
             widgets::validate_tree(tree)?;
         }
 
@@ -961,7 +958,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         }
         let _ = (has_dynamic_width, has_dynamic_height);
 
-        if let Some(tree) = self.data.tree.as_ref() {
+        if let Some(tree) = self.data.tree.as_mut() {
             widgets::validate_tree(tree)?;
         }
 
@@ -1053,12 +1050,6 @@ mod tests {
             (
                 PanelBuildError::SliderHasMultipleThumbs(PanelElementId::named("volume")),
                 "slider `volume` contains more than one thumb",
-            ),
-            (
-                PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(
-                    PanelElementId::named("volume"),
-                ),
-                "slider `volume` focused thumb border color requires an authored thumb border",
             ),
             (
                 PanelBuildError::StateTintRequiresImage(PanelElementId::named("image")),

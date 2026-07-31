@@ -49,6 +49,7 @@ use hana_diegetic::Anchor;
 use hana_diegetic::Appearance;
 use hana_diegetic::BackgroundColor;
 use hana_diegetic::Border;
+use hana_diegetic::BorderColor;
 use hana_diegetic::Button;
 use hana_diegetic::ButtonCanceled;
 use hana_diegetic::ButtonClicked;
@@ -217,6 +218,7 @@ const SLIDER_THUMB_ID: &str = "slider-thumb";
 const SLIDER_THUMB_RADIUS: Px = Px(8.0);
 const SLIDER_TRACK_FILL: Color = Color::srgba(0.00, 0.62, 0.78, 0.98);
 const SLIDER_TRACK_HEIGHT: Px = Px(5.0);
+const SLIDER_TRACK_HOVERED: Color = Color::srgba(0.08, 0.74, 0.90, 0.98);
 const SLIDER_TRACK_INSET: Px = SLIDER_THUMB_RADIUS;
 const SLIDER_TRACK_RADIUS: Px = Px(2.5);
 const STATUS_BACKGROUND: Color = Color::srgba(0.01, 0.06, 0.08, 0.88);
@@ -1161,8 +1163,6 @@ fn slider_declaration() -> Slider {
         .step(SLIDER_STEP)
         .direction(SliderDirection::LeftToRight)
         .reset_behavior(SliderResetBehavior::DoubleClick)
-        .focused_thumb_border_color(SLIDER_THUMB_FOCUSED_BORDER)
-        .disabled_color(SLIDER_DISABLED_COLOR)
 }
 
 fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip) -> LayoutTree {
@@ -1210,6 +1210,11 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
             .gap(SLIDER_LABEL_GAP)
             .alignment(AlignX::Center, AlignY::Center)
             .widget(SLIDER_ID, slider)
+            .disabled(
+                Appearance::new()
+                    .background(SLIDER_DISABLED_COLOR)
+                    .text_color(SLIDER_DISABLED_COLOR),
+            )
             .tooltip(slider_tooltip),
         |builder| {
             builder.with(
@@ -1248,6 +1253,7 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                                     .width(Sizing::GROW)
                                     .height(Sizing::fixed(SLIDER_TRACK_HEIGHT))
                                     .background(SLIDER_TRACK_FILL)
+                                    .hovered(BackgroundColor(SLIDER_TRACK_HOVERED))
                                     .corner_radius(CornerRadius::all(SLIDER_TRACK_RADIUS)),
                                 |_| {},
                             );
@@ -1266,7 +1272,8 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                                     .border(Border::all(CONTROL_BORDER_WIDTH, SLIDER_THUMB_BORDER))
                                     .corner_radius(CornerRadius::all(SLIDER_THUMB_RADIUS))
                                     .id(SLIDER_THUMB_ID)
-                                    .slider_thumb(),
+                                    .slider_thumb()
+                                    .focused(BorderColor(SLIDER_THUMB_FOCUSED_BORDER)),
                                 |_| {},
                             );
                         },

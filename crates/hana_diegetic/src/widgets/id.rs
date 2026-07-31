@@ -256,7 +256,7 @@ impl ComputedWidgetRecord {
     }
 }
 
-pub(crate) fn validate_tree(tree: &LayoutTree) -> Result<(), PanelBuildError> {
+pub(crate) fn validate_tree(tree: &mut LayoutTree) -> Result<(), PanelBuildError> {
     if let Some(duplicate) = tree.duplicate_named_element_id() {
         return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
     }

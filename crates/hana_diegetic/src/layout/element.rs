@@ -41,6 +41,7 @@ use super::engine;
 use crate::ImePanelField;
 use crate::PanelBuildError;
 use crate::PanelElementId;
+use crate::Px;
 use crate::cascade::Cascade;
 use crate::panel::PanelFieldPresentation;
 use crate::render::AntiAlias;
@@ -793,12 +794,13 @@ impl LayoutTree {
         None
     }
 
-    pub(crate) fn validate_widgets(&self) -> Result<(), PanelBuildError> {
+    pub(crate) fn validate_widgets(&mut self) -> Result<(), PanelBuildError> {
         let Some(root) = self.root else {
             return Ok(());
         };
         let mut sliders_with_thumb = HashSet::new();
-        let mut thumb_border_requirements = Vec::new();
+        let mut sliders_with_focused_thumb_border = HashSet::new();
+        let mut thumbs_needing_synthesized_border = Vec::new();
         let mut stack = vec![(
             root,
             Option::<(PanelElementId, WidgetKind)>::None,
@@ -818,18 +820,10 @@ impl LayoutTree {
                     if !sliders_with_thumb.insert(slider_id.clone()) {
                         return Err(PanelBuildError::SliderHasMultipleThumbs(slider_id.clone()));
                     }
-                    if let Some(position) = thumb_border_requirements
-                        .iter()
-                        .position(|required| required == slider_id)
+                    if sliders_with_focused_thumb_border.contains(slider_id)
+                        && element.border.is_none()
                     {
-                        if element.border.is_none() {
-                            return Err(
-                                PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(
-                                    slider_id.clone(),
-                                ),
-                            );
-                        }
-                        thumb_border_requirements.swap_remove(position);
+                        thumbs_needing_synthesized_border.push(index);
                     }
                 } else {
                     let thumb_id = element
@@ -842,20 +836,23 @@ impl LayoutTree {
 
             validate_part_state_colors(element, index, owning_widget.as_ref())?;
 
-            let next_owning_widget = validated_element_widget_owner(
-                element,
-                index,
-                owning_widget,
-                precompose,
-                &mut thumb_border_requirements,
-            )?;
+            let next_owning_widget =
+                validated_element_widget_owner(element, index, owning_widget, precompose)?;
+            if let Some(WidgetSpec::Slider(slider)) = &element.widget
+                && slider.has_focused_thumb_border_color()
+                && let Some((slider_id, WidgetKind::Slider)) = next_owning_widget.as_ref()
+            {
+                sliders_with_focused_thumb_border.insert(slider_id.clone());
+            }
 
             for &child in self.children_of(index).iter().rev() {
                 stack.push((child, next_owning_widget.clone(), precompose));
             }
         }
-        if let Some(id) = thumb_border_requirements.pop() {
-            return Err(PanelBuildError::SliderFocusedThumbBorderColorRequiresThumbBorder(id));
+        for index in thumbs_needing_synthesized_border {
+            if let Some(thumb) = self.elements.get_mut(index) {
+                thumb.border = Some(Border::all(Px(0.0), Color::NONE));
+            }
         }
         Ok(())
     }
@@ -1305,7 +1302,6 @@ fn validated_element_widget_owner(
     index: usize,
     owning_widget: Option<(PanelElementId, WidgetKind)>,
     precompose: PrecomposeMode,
-    thumb_border_requirements: &mut Vec<PanelElementId>,
 ) -> Result<Option<(PanelElementId, WidgetKind)>, PanelBuildError> {
     if let Some(widget) = &element.widget {
         let id = element
@@ -1317,9 +1313,6 @@ fn validated_element_widget_owner(
             slider
                 .validated()
                 .map_err(|error| PanelBuildError::SliderConfig(id.clone(), error))?;
-            if slider.has_focused_thumb_border_color() {
-                thumb_border_requirements.push(id.clone());
-            }
         }
         return Ok(Some((id, widget.kind())));
     }
@@ -2367,7 +2360,7 @@ mod tests {
                 ),
             );
         });
-        let tree = builder.build();
+        let mut tree = builder.build();
 
         assert!(tree.validate_widgets().is_ok());
 

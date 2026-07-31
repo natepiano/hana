@@ -1345,11 +1345,9 @@ fn route_sdf_batch_records(
 ///
 /// Runs inside `route_sdf_batch_records`, so the override reaches the same
 /// frame material rows, `SdfBatchKey` selection, and `SdfBatchStore` upsert
-/// as authored data: a color patches every authored role's material row in
-/// place — an element authoring both a fill and a border recolors both,
-/// while the role-specific `fill_color`/`border_color` recolor one role and
-/// take precedence over `color` for it — replacement border widths restate
-/// the record's inward inset without moving its outer bounds, an
+/// as authored data: `fill_color` and `border_color` patch their authored
+/// material rows in place. Replacement border widths restate the record's
+/// inward inset without moving its outer bounds, an
 /// offset translates only its `local_transform`, and a replacement material
 /// that changes `PipelineCompatibility`/`ResourceCompatibility` re-keys the
 /// record to its compatible destination batch. Authored registry surfaces
@@ -1361,12 +1359,12 @@ fn apply_sdf_visual_override<'a>(
 ) {
     let fill_authored = surface.fill_material.authorship.is_authored();
     let border_authored = surface.border_material.authorship.is_authored();
-    if let Some(color) = slot_override.fill_color.or(slot_override.color)
+    if let Some(color) = slot_override.fill_color
         && fill_authored
     {
         surface.fill_material.color = Some(color);
     }
-    if let Some(color) = slot_override.border_color.or(slot_override.color)
+    if let Some(color) = slot_override.border_color
         && border_authored
     {
         surface.border_material.color = Some(color);
@@ -1820,6 +1818,12 @@ mod tests {
     const TEST_SLOT: VisualSlotId = VisualSlotId::new(1);
     const TOOLTIP_REVEAL_SETTLE_FRAMES: usize = 6;
     const WIDGET_FILL_COLOR: Color = Color::srgb(0.8, 0.2, 0.1);
+    const WIDGET_LABEL_FILL_COLOR: Color = Color::srgb(0.7, 0.2, 0.4);
+    const WIDGET_LABEL_SLOT: VisualSlotId = VisualSlotId::new(2);
+    const WIDGET_THUMB_FILL_COLOR: Color = Color::srgb(0.2, 0.7, 0.4);
+    const WIDGET_THUMB_SLOT: VisualSlotId = VisualSlotId::new(4);
+    const WIDGET_TRACK_FILL_COLOR: Color = Color::srgb(0.2, 0.4, 0.7);
+    const WIDGET_TRACK_SLOT: VisualSlotId = VisualSlotId::new(3);
 
     fn zero_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -4662,6 +4666,43 @@ mod tests {
         builder.build()
     }
 
+    fn slotted_widget_label_track_thumb_fill_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .button("styled"),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_LABEL_FILL_COLOR)
+                        .visual_slot(WIDGET_LABEL_SLOT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_TRACK_FILL_COLOR)
+                        .visual_slot(WIDGET_TRACK_SLOT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_THUMB_FILL_COLOR)
+                        .visual_slot(WIDGET_THUMB_SLOT),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
     fn slotted_widget_bordered_fill_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
         builder.with(
@@ -4701,14 +4742,57 @@ mod tests {
     }
 
     fn set_slot_override(app: &mut App, widget: Entity, value: VisualSlotOverride) {
+        set_slot_overrides(app, widget, [(TEST_SLOT, value)]);
+    }
+
+    fn set_slot_overrides(
+        app: &mut App,
+        widget: Entity,
+        values: impl IntoIterator<Item = (VisualSlotId, VisualSlotOverride)>,
+    ) {
         let mut entity = app.world_mut().entity_mut(widget);
         if let Some(mut overrides) = entity.get_mut::<WidgetVisualOverrides>() {
-            overrides.set(TEST_SLOT, value);
+            for (slot, value) in values {
+                overrides.set(slot, value);
+            }
         } else {
             let mut overrides = WidgetVisualOverrides::default();
-            overrides.set(TEST_SLOT, value);
+            for (slot, value) in values {
+                overrides.set(slot, value);
+            }
             entity.insert(overrides);
         }
+    }
+
+    fn sdf_record_key_for_fill_color(app: &App, color: Color) -> SdfRecordKey {
+        sdf_records(app)
+            .into_iter()
+            .find(|record| fill_row_color(app, record) == linear_color(color))
+            .map(|record| record.record_key)
+            .expect("the widget part fill record should exist")
+    }
+
+    fn sdf_record_batch_snapshot(
+        app: &App,
+        record_key: SdfRecordKey,
+    ) -> (SdfBatchKey, Entity, ResolvedSdfBatchRecord) {
+        app.world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find_map(|(batch_key, batch)| {
+                batch
+                    .records()
+                    .iter()
+                    .find(|record| record.record_key == record_key)
+                    .map(|record| {
+                        (
+                            batch_key.clone(),
+                            batch.entity.expect("widget part batch should be spawned"),
+                            record.clone(),
+                        )
+                    })
+            })
+            .expect("the widget part record should remain retained")
     }
 
     fn clear_slot_override(app: &mut App, widget: Entity) {
@@ -4873,7 +4957,7 @@ mod tests {
     }
 
     #[test]
-    fn color_override_patches_material_row_without_rekeying() {
+    fn fill_color_override_patches_material_row_without_rekeying() {
         let mut app = widget_sdf_pipeline_app();
         spawn_sdf_panel(
             &mut app,
@@ -4891,7 +4975,7 @@ mod tests {
         set_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_fill_color(SLOT_OVERRIDE_COLOR),
         );
         app.update();
 
@@ -4901,7 +4985,7 @@ mod tests {
         assert_eq!(
             sdf_upload_count(&app),
             0,
-            "a color override flows through the frame material table, not the record buffer",
+            "a fill color override flows through the frame material table, not the record buffer",
         );
 
         clear_slot_override(&mut app, widget);
@@ -4911,7 +4995,152 @@ mod tests {
     }
 
     #[test]
-    fn color_override_recolors_every_authored_role() {
+    fn compatible_material_override_keeps_the_widget_batch_and_entities() {
+        let mut app = widget_sdf_pipeline_app();
+        let compatible_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic: 0.6,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(1),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let entities_before = live_sdf_batch_entities(&mut app);
+        let widget_key_before = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find(|(key, _)| key.z_index == 0.into())
+            .map(|(key, _)| key.clone())
+            .expect("the widget fill batch should exist");
+        let widget = styled_widget(&mut app);
+
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_material(compatible_material),
+        );
+        app.update();
+
+        let widget_key_after = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find(|(key, _)| key.z_index == 0.into())
+            .map(|(key, _)| key.clone())
+            .expect("the widget fill batch should remain");
+        assert_eq!(widget_key_after, widget_key_before);
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+    }
+
+    #[test]
+    fn compatible_material_overrides_keep_all_widget_part_batches_and_entities() {
+        let mut app = widget_sdf_pipeline_app();
+        let compatible_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic: 0.6,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_label_track_thumb_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = styled_widget(&mut app);
+        let part_keys = [
+            sdf_record_key_for_fill_color(&app, WIDGET_LABEL_FILL_COLOR),
+            sdf_record_key_for_fill_color(&app, WIDGET_TRACK_FILL_COLOR),
+            sdf_record_key_for_fill_color(&app, WIDGET_THUMB_FILL_COLOR),
+        ];
+        let batches_before =
+            part_keys.map(|record_key| sdf_record_batch_snapshot(&app, record_key));
+        let entities_before = live_sdf_batch_entities(&mut app);
+
+        set_slot_overrides(
+            &mut app,
+            widget,
+            [
+                (
+                    WIDGET_LABEL_SLOT,
+                    VisualSlotOverride::default().with_material(compatible_material.clone()),
+                ),
+                (
+                    WIDGET_TRACK_SLOT,
+                    VisualSlotOverride::default().with_material(compatible_material.clone()),
+                ),
+                (
+                    WIDGET_THUMB_SLOT,
+                    VisualSlotOverride::default().with_material(compatible_material),
+                ),
+            ],
+        );
+        app.update();
+
+        let batches_after = part_keys.map(|record_key| sdf_record_batch_snapshot(&app, record_key));
+        for ((key_before, entity_before, _), (key_after, entity_after, _)) in
+            batches_before.iter().zip(&batches_after)
+        {
+            assert_eq!(key_after, key_before);
+            assert_eq!(entity_after, entity_before);
+        }
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+    }
+
+    #[test]
+    fn incompatible_material_overrides_migrate_only_changed_widget_parts() {
+        let mut app = widget_sdf_pipeline_app();
+        let incompatible_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_label_track_thumb_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = styled_widget(&mut app);
+        let label_key = sdf_record_key_for_fill_color(&app, WIDGET_LABEL_FILL_COLOR);
+        let track_key = sdf_record_key_for_fill_color(&app, WIDGET_TRACK_FILL_COLOR);
+        let thumb_key = sdf_record_key_for_fill_color(&app, WIDGET_THUMB_FILL_COLOR);
+        let label_before = sdf_record_batch_snapshot(&app, label_key);
+        let track_before = sdf_record_batch_snapshot(&app, track_key);
+        let thumb_before = sdf_record_batch_snapshot(&app, thumb_key);
+
+        set_slot_overrides(
+            &mut app,
+            widget,
+            [(
+                WIDGET_THUMB_SLOT,
+                VisualSlotOverride::default().with_material(incompatible_material),
+            )],
+        );
+        app.update();
+
+        let label_after = sdf_record_batch_snapshot(&app, label_key);
+        let track_after = sdf_record_batch_snapshot(&app, track_key);
+        let thumb_after = sdf_record_batch_snapshot(&app, thumb_key);
+        assert_eq!(label_after, label_before);
+        assert_eq!(track_after, track_before);
+        assert_ne!(thumb_after.0, thumb_before.0);
+        assert_ne!(thumb_after.1, thumb_before.1);
+        assert_eq!(sdf_records(&app).len(), 3);
+    }
+
+    #[test]
+    fn fill_and_border_color_overrides_recolor_their_authored_roles() {
         let mut app = widget_sdf_pipeline_app();
         spawn_sdf_panel(
             &mut app,
@@ -4934,7 +5163,9 @@ mod tests {
         set_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(SLOT_OVERRIDE_COLOR),
         );
         app.update();
 
@@ -4946,7 +5177,7 @@ mod tests {
         assert_eq!(
             border_row_color(&app, &records[0]),
             linear_color(SLOT_OVERRIDE_COLOR),
-            "an element authoring fill and border recolors both roles",
+            "each SDF role receives its own color override",
         );
 
         clear_slot_override(&mut app, widget);
@@ -5016,20 +5247,20 @@ mod tests {
             &mut app,
             widget,
             VisualSlotOverride::default()
-                .with_color(PEER_FILL_COLOR)
-                .with_fill_color(SLOT_OVERRIDE_COLOR),
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(PEER_FILL_COLOR),
         );
         app.update();
         let records = sdf_records(&app);
         assert_eq!(
             fill_row_color(&app, &records[0]),
             linear_color(SLOT_OVERRIDE_COLOR),
-            "the role-specific color wins over the shared color for its role",
+            "the fill color remains independent from the border color",
         );
         assert_eq!(
             border_row_color(&app, &records[0]),
             linear_color(PEER_FILL_COLOR),
-            "the shared color still recolors the role without a specific color",
+            "the border color updates independently from the fill color",
         );
     }
 
@@ -5136,7 +5367,7 @@ mod tests {
     }
 
     #[test]
-    fn color_override_never_authors_a_missing_fill_role() {
+    fn border_color_override_never_authors_a_missing_fill_role() {
         let mut app = widget_sdf_pipeline_app();
         spawn_sdf_panel(
             &mut app,
@@ -5152,7 +5383,7 @@ mod tests {
         set_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_border_color(SLOT_OVERRIDE_COLOR),
         );
         app.update();
 
@@ -5506,7 +5737,7 @@ mod tests {
         set_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_tint(SLOT_OVERRIDE_COLOR),
         );
         app.update();
 
@@ -5532,7 +5763,7 @@ mod tests {
         set_slot_override(
             &mut app,
             widget,
-            VisualSlotOverride::default().with_color(SLOT_OVERRIDE_COLOR),
+            VisualSlotOverride::default().with_tint(SLOT_OVERRIDE_COLOR),
         );
         app.update();
         assert_eq!(image_records(&app), records_after);
@@ -5587,7 +5818,7 @@ mod tests {
             widget,
             VisualSlotOverride::default()
                 .with_texture(image_b.clone())
-                .with_color(SLOT_OVERRIDE_COLOR),
+                .with_tint(SLOT_OVERRIDE_COLOR),
         );
         app.update();
         let destination_tints: Vec<Vec4> = app

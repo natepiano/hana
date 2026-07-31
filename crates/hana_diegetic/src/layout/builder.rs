@@ -1382,13 +1382,6 @@ impl<L> El<L, WidgetElement<Slider>> {
         self.configure_slider(|slider| slider.focused_thumb_border_color(color))
     }
 
-    /// Sets the color applied to every authored slider visual while disabled.
-    ///
-    /// See [`Slider::disabled_color`].
-    pub fn disabled_color(self, color: Color) -> Self {
-        self.configure_slider(|slider| slider.disabled_color(color))
-    }
-
     fn configure_slider(mut self, configure: impl FnOnce(Slider) -> Slider) -> Self {
         if let Some(WidgetSpec::Slider(slider)) = self.widget_mut() {
             *slider = configure(slider.clone());
