@@ -15,13 +15,6 @@ use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_kana::ToF32;
-use bevy_lagrange::Focus;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitAngles;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Radius;
-use bevy_lagrange::ScalarLimit;
-use bevy_lagrange::ZoomToFit;
 use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
@@ -38,6 +31,13 @@ use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
+use hana_lagrange::Focus;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitAngles;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::Radius;
+use hana_lagrange::ScalarLimit;
+use hana_lagrange::ZoomToFit;
 
 // ── Layout ───────────────────────────────────────────────────────────
 const PANEL_WIDTH: f32 = 60.0; // mm

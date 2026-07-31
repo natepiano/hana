@@ -21,7 +21,6 @@
 //! example controls hard to read.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
@@ -57,6 +56,7 @@ use hana_diegetic::Unit;
 use hana_diegetic::default_panel_material;
 use hana_diegetic::resolved_font_unit;
 use hana_diegetic::resolved_text_alpha;
+use hana_lagrange::OrbitCamPreset;
 
 const EXAMPLE_TITLE: &str = "Text Cascade";
 const STANDALONE_TITLE_TEXT: &str = "Standalone World Text";

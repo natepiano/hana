@@ -35,6 +35,6 @@ tracing        = { workspace = true }
 bevy                = { workspace = true, features = ["default"] }
 bevy_enhanced_input = { workspace = true }
 bevy_kana           = { workspace = true, features = ["input"] }
-bevy_lagrange       = { workspace = true }
+hana_lagrange       = { workspace = true }
 fairy_dust          = { workspace = true }
 hana_diegetic       = { workspace = true }

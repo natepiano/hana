@@ -50,8 +50,6 @@ use bevy::render::renderer::RenderGraph;
 use bevy::render::renderer::RenderGraphSystems;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
 use diagnostics::DrawCounts;
 use diagnostics::MainThreadMs;
 use diagnostics::RenderThreadSpans;
@@ -91,6 +89,8 @@ use hana_diegetic::Sizing;
 use hana_diegetic::StableTransparency;
 use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
 
 // ── App — plugin wiring, resources, startup/update systems, shortcuts ────────
 

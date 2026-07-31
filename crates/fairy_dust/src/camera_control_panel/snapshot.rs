@@ -3,17 +3,17 @@
 //! components, and supplies the label helpers used by the layout pass.
 
 use bevy::prelude::*;
-use bevy_lagrange::CameraControlBinding;
-use bevy_lagrange::CameraControlSummary;
-use bevy_lagrange::ControlSpeed;
-use bevy_lagrange::FreeCam;
-use bevy_lagrange::FreeCamActiveDirections;
-use bevy_lagrange::FreeCamInputMode;
-use bevy_lagrange::InteractionSources;
-use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::ZoomDirection;
-use bevy_lagrange::describe_controls;
-use bevy_lagrange::describe_controls_for;
+use hana_lagrange::CameraControlBinding;
+use hana_lagrange::CameraControlSummary;
+use hana_lagrange::ControlSpeed;
+use hana_lagrange::FreeCam;
+use hana_lagrange::FreeCamActiveDirections;
+use hana_lagrange::FreeCamInputMode;
+use hana_lagrange::InteractionSources;
+use hana_lagrange::OrbitCamInputMode;
+use hana_lagrange::ZoomDirection;
+use hana_lagrange::describe_controls;
+use hana_lagrange::describe_controls_for;
 
 use super::guidance;
 use super::guidance::CameraGuidance;
@@ -133,21 +133,21 @@ pub(super) const fn speed_label(speed: ControlSpeed) -> &'static str {
 #[cfg(test)]
 mod tests {
     use bevy_enhanced_input::prelude::ModKeys;
-    use bevy_lagrange::BindingsError;
-    use bevy_lagrange::CameraControlActivation;
-    use bevy_lagrange::CameraControlBindingKind;
-    use bevy_lagrange::CameraInputScalePolicy;
-    use bevy_lagrange::CameraSlowMode;
-    use bevy_lagrange::FreeCamControlDirection;
-    use bevy_lagrange::FreeCamKeyboardMousePreset;
-    use bevy_lagrange::FreeCamLookPitch;
-    use bevy_lagrange::FreeCamPreset;
-    use bevy_lagrange::InputGain;
-    use bevy_lagrange::OrbitCamBindings;
-    use bevy_lagrange::OrbitCamBlenderLikePreset;
-    use bevy_lagrange::OrbitCamInputGain;
-    use bevy_lagrange::OrbitCamMouseDrag;
-    use bevy_lagrange::OrbitCamPreset;
+    use hana_lagrange::BindingsError;
+    use hana_lagrange::CameraControlActivation;
+    use hana_lagrange::CameraControlBindingKind;
+    use hana_lagrange::CameraInputScalePolicy;
+    use hana_lagrange::CameraSlowMode;
+    use hana_lagrange::FreeCamControlDirection;
+    use hana_lagrange::FreeCamKeyboardMousePreset;
+    use hana_lagrange::FreeCamLookPitch;
+    use hana_lagrange::FreeCamPreset;
+    use hana_lagrange::InputGain;
+    use hana_lagrange::OrbitCamBindings;
+    use hana_lagrange::OrbitCamBlenderLikePreset;
+    use hana_lagrange::OrbitCamInputGain;
+    use hana_lagrange::OrbitCamMouseDrag;
+    use hana_lagrange::OrbitCamPreset;
 
     use super::*;
     use crate::camera_control_panel::guidance::CameraGuidanceAction;

@@ -17,13 +17,6 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
-use bevy_lagrange::AnimationBegin;
-use bevy_lagrange::AnimationEnd;
-use bevy_lagrange::AnimationSource;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::Radius;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -64,6 +57,13 @@ use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::TextWrap;
 use hana_diegetic::Unit;
+use hana_lagrange::AnimationBegin;
+use hana_lagrange::AnimationEnd;
+use hana_lagrange::AnimationSource;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::Radius;
+use hana_lagrange::ZoomToFit;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
 const A4: PaperSize = PaperSize::A4;

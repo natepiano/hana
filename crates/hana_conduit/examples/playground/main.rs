@@ -36,7 +36,6 @@ mod ui;
 
 use animation::LightAnimation;
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use constants::CATENARY_SECTION_INDEX;
 use constants::EXAMPLE_TITLE;
 use constants::GROUND_DEPTH;
@@ -56,6 +55,7 @@ use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
 use hana_conduit::CatenaryPlugin;
+use hana_lagrange::OrbitCamPreset;
 use input::SlackMinusPulseBegin;
 use input::SlackMinusPulseEnd;
 use input::SlackPlusPulseBegin;

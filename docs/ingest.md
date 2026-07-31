@@ -2,7 +2,7 @@
 
 A reusable recipe for moving a Cargo crate from a standalone git repo into `crates/<crate_name>/` alongside the existing workspace members. Pure relocation — no API changes, no version bump, no publishing.
 
-Throughout, `<crate_name>` is the name of the incoming crate (e.g. `bevy_lagrange`, `hana_diegetic`) and `<source_repo_path>` is the path to its standalone git checkout (e.g. `~/rust/<crate_name>`).
+Throughout, `<crate_name>` is the name of the incoming crate (e.g. `hana_lagrange`, `hana_diegetic`) and `<source_repo_path>` is the path to its standalone git checkout (e.g. `~/rust/<crate_name>`).
 
 ## Steps
 

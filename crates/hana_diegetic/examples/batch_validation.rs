@@ -20,7 +20,6 @@ use bevy::post_process::bloom::BloomPrefilter;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -70,6 +69,7 @@ use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::TextWrap;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::OrbitCamPreset;
 
 const PANEL_W: f32 = 170.0;
 const PANEL_H: f32 = 132.0;

@@ -4,12 +4,12 @@
 //! the purple arm and its pink hand.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TitleBar;
+use hana_lagrange::OrbitCamPreset;
 use hana_liminal::LiminalPlugin;
 use hana_liminal::NoOutline;
 use hana_liminal::Outline;

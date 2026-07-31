@@ -45,7 +45,7 @@ ttf-parser = { workspace = true }
 bevy            = { workspace = true, features = ["default_font", "tonemapping_luts"] }
 bevy_brp_extras = { workspace = true }
 hana_clerestory = { workspace = true }
-bevy_lagrange   = { workspace = true, features = ["fit_overlay"] }
+hana_lagrange   = { workspace = true, features = ["fit_overlay"] }
 clay-layout     = { workspace = true }
 criterion       = { workspace = true }
 fairy_dust      = { workspace = true }

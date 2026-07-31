@@ -1,9 +1,9 @@
 //! `StudioLightingBuilder` impls.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamPreset;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamBindings;
+use hana_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;

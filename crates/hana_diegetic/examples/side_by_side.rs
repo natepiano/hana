@@ -31,8 +31,6 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -64,6 +62,8 @@ use hana_diegetic::Sizing;
 use hana_diegetic::TextDimensions;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitCam;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

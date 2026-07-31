@@ -1105,24 +1105,9 @@ version = "0.4.0-dev"
 dependencies = [
  "bevy",
  "bevy_enhanced_input",
- "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
-]
-
-[[package]]
-name = "bevy_lagrange"
-version = "0.4.0-dev"
-dependencies = [
- "bevy",
- "bevy_brp_extras",
- "bevy_enhanced_input",
- "bevy_kana",
- "bitflags 2.13.0",
- "fairy_dust",
- "float-cmp",
- "hana_clerestory",
- "hana_diegetic",
+ "hana_lagrange",
 ]
 
 [[package]]
@@ -2813,9 +2798,9 @@ dependencies = [
  "bevy_brp_extras",
  "bevy_enhanced_input",
  "bevy_kana",
- "bevy_lagrange",
  "hana_clerestory",
  "hana_diegetic",
+ "hana_lagrange",
  "hana_valence",
  "trybuild",
 ]
@@ -3263,9 +3248,9 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_kana",
- "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
 ]
 
 [[package]]
@@ -3275,12 +3260,12 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_kana",
- "bevy_lagrange",
  "bitflags 2.13.0",
  "clay-layout",
  "criterion",
  "fairy_dust",
  "hana_clerestory",
+ "hana_lagrange",
  "hana_valence",
  "image",
  "parley",
@@ -3298,10 +3283,25 @@ dependencies = [
  "bevy_app",
  "bevy_asset",
  "bevy_ecs",
- "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
  "tracing",
+]
+
+[[package]]
+name = "hana_lagrange"
+version = "0.4.0-dev"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_enhanced_input",
+ "bevy_kana",
+ "bitflags 2.13.0",
+ "fairy_dust",
+ "float-cmp",
+ "hana_clerestory",
+ "hana_diegetic",
 ]
 
 [[package]]
@@ -3311,12 +3311,12 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_kana",
- "bevy_lagrange",
  "bevy_render",
  "bytemuck",
  "fairy_dust",
  "getrandom 0.4.3",
  "hana_clerestory",
+ "hana_lagrange",
  "nonmax",
  "rand",
 ]
@@ -3327,11 +3327,11 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_kana",
- "bevy_lagrange",
  "bevy_remote",
  "cpal 0.18.1",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
  "hound",
  "serde",
  "serde_json",
@@ -3347,7 +3347,6 @@ dependencies = [
  "bevy_ecs",
  "bevy_enhanced_input",
  "bevy_kana",
- "bevy_lagrange",
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
@@ -3356,6 +3355,7 @@ dependencies = [
  "bevy_tween",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
  "tracing",
 ]
 

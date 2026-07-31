@@ -12,10 +12,10 @@
 //! layouts from any animation state.
 
 use bevy::prelude::*;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeEntity;
 use fairy_dust::FairyDustOrbitCam;
 use hana_diegetic::DiegeticPanelCommands;
+use hana_lagrange::ZoomToFit;
 use hana_valence::AnchorPose;
 
 use crate::anchor_demo::AnchorChain;

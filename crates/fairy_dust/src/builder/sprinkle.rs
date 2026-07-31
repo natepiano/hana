@@ -12,10 +12,10 @@ use bevy::prelude::*;
 use bevy::window::PresentMode;
 use bevy::window::PrimaryWindow;
 use bevy::winit::WinitSettings;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamPreset;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamBindings;
+use hana_lagrange::OrbitCamInputMode;
+use hana_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::PrimitiveBuilder;
@@ -479,7 +479,7 @@ impl<S> SprinkleBuilder<S> {
 
 // State transition: `NoOrbitCam` → `WithOrbitCam`.
 impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
-    /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
+    /// Add `hana_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
     /// The caller's `configure` closure can set `focus`, `radius`, `yaw`,
     /// `pitch`, sensitivity, limits, or other camera behavior fields. Input
     /// uses `OrbitCamPreset::simple_mouse()` unless another input mode is inserted.
@@ -497,7 +497,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         }
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
     /// insert extra camera-side components such as `OrbitCamInputMode` or
     /// [`CameraGuidance`](crate::CameraGuidance).
     pub fn with_orbit_cam<F, BundleType>(
@@ -519,7 +519,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         }
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
     /// install one built-in input preset.
     pub fn with_orbit_cam_preset<F>(
         self,
@@ -532,7 +532,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         self.with_orbit_cam(configure, OrbitCamInputMode::with_preset(preset))
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
     /// explicit startup pose, and install one built-in input preset.
     pub fn with_orbit_cam_preset_pose(
         self,
@@ -553,7 +553,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         }
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
     /// install one built-in input preset, and insert extra camera-side
     /// components.
     pub fn with_orbit_cam_preset_bundle<F, B>(
@@ -569,7 +569,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         self.with_orbit_cam(configure, (OrbitCamInputMode::with_preset(preset), bundle))
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
     /// explicit startup pose, install one built-in input preset, and insert extra
     /// camera-side components.
     pub fn with_orbit_cam_preset_pose_bundle<B>(
@@ -595,7 +595,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         }
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
     /// install app-owned input bindings.
     pub fn with_orbit_cam_bindings<F>(
         self,
@@ -608,7 +608,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         self.with_orbit_cam(configure, OrbitCamInputMode::Bindings(bindings))
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
+    /// Add `hana_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
     /// install app-owned input bindings, and insert extra camera-side
     /// components.
     pub fn with_orbit_cam_bindings_bundle<F, B>(
@@ -624,7 +624,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         self.with_orbit_cam(configure, (OrbitCamInputMode::Bindings(bindings), bundle))
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin` and spawn a manually driven
+    /// Add `hana_lagrange::LagrangePlugin` and spawn a manually driven
     /// `OrbitCam` entity.
     pub fn with_orbit_cam_manual<F>(self, configure: F) -> SprinkleBuilder<WithOrbitCam>
     where
@@ -633,7 +633,7 @@ impl<Baseline> SprinkleBuilder<NoOrbitCam, Baseline> {
         self.with_orbit_cam(configure, OrbitCamInputMode::Manual)
     }
 
-    /// Add `bevy_lagrange::LagrangePlugin`, spawn a manually driven `OrbitCam`,
+    /// Add `hana_lagrange::LagrangePlugin`, spawn a manually driven `OrbitCam`,
     /// and insert extra camera-side components.
     pub fn with_orbit_cam_manual_bundle<F, B>(
         self,
@@ -716,7 +716,7 @@ impl SprinkleBuilder<WithOrbitCam> {
 mod tests {
     use bevy::asset::AssetPlugin;
     use bevy::asset::AssetServer;
-    use bevy_lagrange::OrbitCamBlenderLikePreset;
+    use hana_lagrange::OrbitCamBlenderLikePreset;
 
     use super::NoOrbitCam;
     use super::SprinkleBuilder;

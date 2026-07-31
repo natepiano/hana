@@ -11,7 +11,6 @@ use std::time::Duration;
 
 use bevy::light::NotShadowReceiver;
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
@@ -42,6 +41,7 @@ use hana_diegetic::ShadowCasting;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 use hana_diegetic::TypographyOverlay;
+use hana_lagrange::OrbitCamPreset;
 
 const DISPLAY_SIZE: f32 = 0.48;
 const DISPLAY_Y: f32 = 0.5;

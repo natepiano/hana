@@ -16,7 +16,6 @@
 //! `OitDepthOffset` path.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -42,6 +41,7 @@ use hana_diegetic::LayoutTree;
 use hana_diegetic::PanelBuildError;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::OrbitCamPreset;
 
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, PANEL_CENTER_Y, 0.0);
 const HOME_MARGIN: f32 = 0.20;

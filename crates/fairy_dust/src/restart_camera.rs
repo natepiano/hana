@@ -9,9 +9,9 @@ use std::str::FromStr;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_lagrange::CameraMove;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::PlayAnimation;
+use hana_lagrange::CameraMove;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::PlayAnimation;
 
 use crate::constants::POSE_ENV;
 use crate::constants::POSE_FIELD_COUNT;

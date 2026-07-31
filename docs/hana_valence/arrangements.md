@@ -6,12 +6,12 @@
 
 ## Delegation Context
 
-- **Project:** `/Users/natemccoy/rust/bevy_hana` workspace — implement the `hana_valence` arrangement/folding redesign, shared `bevy_kana` playback primitives, `bevy_lagrange` retained camera playback, and sibling Hana transport integration.
-- **Stack:** Rust 1.97.0, edition 2024; Bevy 0.19.0 with relationships, entity events, scenes, BSN, and `reflect_auto_register`; `bevy_tween` 0.13.0; `bevy_enhanced_input` 0.26.0; `thiserror` 2.0.18; `hana_valence` 0.1.0; `bevy_kana` 0.2.0-dev; `bevy_lagrange` 0.3.0-dev; sibling Hana workspace 0.1.0.
+- **Project:** `/Users/natemccoy/rust/bevy_hana` workspace — implement the `hana_valence` arrangement/folding redesign, shared `bevy_kana` playback primitives, `hana_lagrange` retained camera playback, and sibling Hana transport integration.
+- **Stack:** Rust 1.97.0, edition 2024; Bevy 0.19.0 with relationships, entity events, scenes, BSN, and `reflect_auto_register`; `bevy_tween` 0.13.0; `bevy_enhanced_input` 0.26.0; `thiserror` 2.0.18; `hana_valence` 0.1.0; `bevy_kana` 0.2.0-dev; `hana_lagrange` 0.3.0-dev; sibling Hana workspace 0.1.0.
 - **Layout:**
   - `crates/bevy_kana/` — semantic math, cascade, shared playback, and external-control primitives.
   - `crates/hana_valence/` — anchor geometry, arrangements, recipes, hinges, fold sequences, tests, and examples.
-  - `crates/bevy_lagrange/` — retained camera sequences, native/external playback, events, and camera-input policy.
+  - `crates/hana_lagrange/` — retained camera sequences, native/external playback, events, and camera-input policy.
   - `crates/hana_diegetic/`, `crates/fairy_dust/` — workspace consumers and the panel-anchoring demonstration.
   - `/Users/natemccoy/rust/hana/crates/hana_animation/` — transport clock and progress bindings.
   - `/Users/natemccoy/rust/hana/crates/hana/` — Hana binary transport UI and camera consumers.
@@ -38,16 +38,16 @@
   - `crates/hana_diegetic/src/panel/{anchoring,mod}.rs`, `crates/hana_diegetic/examples/panel_anchoring/*.rs` — panel arrangement consumer and demonstration.
   - `crates/hana_diegetic/examples/{aa_text,units}.rs` — camera-animation consumers.
   - `crates/fairy_dust/src/{camera_home,lib}.rs`, `crates/fairy_dust/src/camera_control_panel/preset_switch.rs` — camera command consumers.
-  - `crates/bevy_lagrange/Cargo.toml` — shared playback dependency and features.
-  - `crates/bevy_lagrange/src/{lib,system_sets}.rs` — exports and cross-crate ordering.
-  - `crates/bevy_lagrange/src/animation/{mod,constants,events,lifecycle,queue}.rs` — retained sequence, commands, sampling, conflicts, events, and queue removal.
-  - `crates/bevy_lagrange/src/{camera_home,camera_kind}.rs` — camera request integration.
-  - `crates/bevy_lagrange/src/{orbit_cam,free_cam}/controller.rs` — deterministic sequence output and damping bypass.
-  - `crates/bevy_lagrange/src/input/{lifecycle,routing/snapshot}.rs` — native/external input ownership.
-  - `crates/bevy_lagrange/src/fit/mod.rs`, `crates/bevy_lagrange/src/fit/triggers/**/*.rs` — higher-level animation-source migration.
-  - `crates/bevy_lagrange/examples/animation.rs`, `crates/bevy_lagrange/examples/showcase/*.rs`, `crates/bevy_lagrange/examples/{swapped_axis,zoom_to_fit}.rs` — command/event migration and runnable coverage.
-  - `crates/bevy_lagrange/{README.md,CHANGELOG.md}` — retained-camera API and breaking migration documentation.
-  - `/Users/natemccoy/rust/hana/Cargo.toml`, `/Users/natemccoy/rust/hana/Cargo.lock` — compatible `bevy_kana`/`bevy_lagrange` revisions.
+  - `crates/hana_lagrange/Cargo.toml` — shared playback dependency and features.
+  - `crates/hana_lagrange/src/{lib,system_sets}.rs` — exports and cross-crate ordering.
+  - `crates/hana_lagrange/src/animation/{mod,constants,events,lifecycle,queue}.rs` — retained sequence, commands, sampling, conflicts, events, and queue removal.
+  - `crates/hana_lagrange/src/{camera_home,camera_kind}.rs` — camera request integration.
+  - `crates/hana_lagrange/src/{orbit_cam,free_cam}/controller.rs` — deterministic sequence output and damping bypass.
+  - `crates/hana_lagrange/src/input/{lifecycle,routing/snapshot}.rs` — native/external input ownership.
+  - `crates/hana_lagrange/src/fit/mod.rs`, `crates/hana_lagrange/src/fit/triggers/**/*.rs` — higher-level animation-source migration.
+  - `crates/hana_lagrange/examples/animation.rs`, `crates/hana_lagrange/examples/showcase/*.rs`, `crates/hana_lagrange/examples/{swapped_axis,zoom_to_fit}.rs` — command/event migration and runnable coverage.
+  - `crates/hana_lagrange/{README.md,CHANGELOG.md}` — retained-camera API and breaking migration documentation.
+  - `/Users/natemccoy/rust/hana/Cargo.toml`, `/Users/natemccoy/rust/hana/Cargo.lock` — compatible `bevy_kana`/`hana_lagrange` revisions.
   - `/Users/natemccoy/rust/hana/crates/hana_animation/Cargo.toml` — production `bevy_kana` dependency.
   - `/Users/natemccoy/rust/hana/crates/hana_animation/src/{lib,plugin,transport}.rs` — transport API, plugin wiring, direction, rate, and seek behavior.
   - `/Users/natemccoy/rust/hana/crates/hana_animation/src/binding.rs` — planned transport binding implementation.
@@ -72,7 +72,7 @@
   - `FoldSequence` owns stages, targets, and whole-value timing cascades. Authored `Duration` values are unrestricted; use exact `SequenceTime` boundary accounting and deterministic stage/member/endpoint event ordering without per-update transition allocation.
   - `SequencePlayback` is shared state embedded by domain runtime components. Native and external control are mutually exclusive; `ExternalAnimationControl` remains authoritative when a sample is temporarily absent; rejected fold/camera commands emit targeted typed rejection events.
   - External producers write progress before domain evaluation in `Update`; `FoldSystems::Advance` runs in that evaluation phase. Fold pose output follows, then anchor resolution and transform propagation in `PostUpdate`. Reuse resolver scratch allocations and keep the truly idle path write-free.
-  - `bevy_lagrange` retains valid-by-construction `CameraMove` authoring, samples captured immutable endpoints, writes current and target controller values together, bypasses damping, clears produced input while externally controlled, and preserves complete interrupted-move identity in cancellation events.
+  - `hana_lagrange` retains valid-by-construction `CameraMove` authoring, samples captured immutable endpoints, writes current and target controller values together, bypasses damping, clears produced input while externally controlled, and preserves complete interrupted-move identity in cancellation events.
   - `TransportBinding` maintains both external-control claim and progress. Transport direction reverses only the loop-relative playhead while elapsed/procedural clocks remain monotonic. Preserve signed multi-wrap traversal until domains emit every crossed boundary.
   - Public error enums use `thiserror` and preserve downstream sources. Every fallible public constructor and erased selection/capability path needs exact-variant tests; public breaking changes require crate changelogs and all workspace and sibling-Hana consumers must migrate to compatible pinned revisions.
 
@@ -769,7 +769,7 @@ pub struct FoldEventTiming {
 
 #### Work Order
 
-**Goal:** `bevy_lagrange` retains valid camera-move authoring in a nonempty sequence that can later be sampled at arbitrary positions.
+**Goal:** `hana_lagrange` retains valid camera-move authoring in a nonempty sequence that can later be sampled at arbitrary positions.
 
 **Spec:**
 
@@ -817,12 +817,12 @@ let sequence = CameraSequence::new(first_move)
 
 **Files:**
 
-- `crates/bevy_lagrange/src/animation/{queue,sequence}.rs` — opaque moves, sequence authoring, prepared state.
-- `crates/bevy_lagrange/src/animation/{mod,events,lifecycle}.rs` — temporary compatibility wiring.
-- `crates/bevy_lagrange/src/lib.rs` — exports.
-- `crates/bevy_lagrange/src/fit/triggers/**/*.rs`, `crates/bevy_lagrange/src/camera_home.rs` — constructor migration.
+- `crates/hana_lagrange/src/animation/{queue,sequence}.rs` — opaque moves, sequence authoring, prepared state.
+- `crates/hana_lagrange/src/animation/{mod,events,lifecycle}.rs` — temporary compatibility wiring.
+- `crates/hana_lagrange/src/lib.rs` — exports.
+- `crates/hana_lagrange/src/fit/triggers/**/*.rs`, `crates/hana_lagrange/src/camera_home.rs` — constructor migration.
 - Current `bevy_hana` examples/consumers constructing `CameraMove` — constructor migration only.
-- `crates/bevy_lagrange/{README.md,CHANGELOG.md}` — constructor/sequence addition.
+- `crates/hana_lagrange/{README.md,CHANGELOG.md}` — constructor/sequence addition.
 
 **Constraints from prior phases:** Embed Phase 2 `SequencePlayback`/boundary concepts and use Phase 3 external contract only in the prepared state; do not duplicate playback logic. Preserve Phase 1 invariant-reflection policy.
 
@@ -890,12 +890,12 @@ pub enum AnimationSource {
 
 **Files:**
 
-- `crates/bevy_lagrange/src/animation/{mod,sequence,events,lifecycle,queue}.rs` — evaluator, commands, state, compatibility adapter, lifecycle.
-- `crates/bevy_lagrange/src/{orbit_cam,free_cam}/controller.rs` — current/target writes and damping bypass.
-- `crates/bevy_lagrange/src/input/{lifecycle,routing/snapshot}.rs` — native/external input ownership.
-- `crates/bevy_lagrange/src/{lib,system_sets}.rs` — exports and `SequencePlaybackSystems` order.
-- `crates/bevy_lagrange` unit tests — playback, events, policy, idle writes.
-- `crates/bevy_lagrange/CHANGELOG.md` — event/command transition notes (final removals in Phase 14).
+- `crates/hana_lagrange/src/animation/{mod,sequence,events,lifecycle,queue}.rs` — evaluator, commands, state, compatibility adapter, lifecycle.
+- `crates/hana_lagrange/src/{orbit_cam,free_cam}/controller.rs` — current/target writes and damping bypass.
+- `crates/hana_lagrange/src/input/{lifecycle,routing/snapshot}.rs` — native/external input ownership.
+- `crates/hana_lagrange/src/{lib,system_sets}.rs` — exports and `SequencePlaybackSystems` order.
+- `crates/hana_lagrange` unit tests — playback, events, policy, idle writes.
+- `crates/hana_lagrange/CHANGELOG.md` — event/command transition notes (final removals in Phase 14).
 
 **Constraints from prior phases:** Use Phase 12 retained authoring/captured endpoints, Phase 2 traversal/timing, and Phase 3 external control/rejection. Camera evaluation runs in `SequencePlaybackSystems::EvaluateSequences` and does not write shared progress.
 
@@ -914,19 +914,19 @@ pub enum AnimationSource {
 - `ZoomBegin`/`ZoomEnd` keep their useful flat fields and nest the corresponding animation lifecycle; `ZoomEnd` uses `AnimationEndReason`. Target entity lives in target-bearing `AnimationSource`, not duplicate optional target fields.
 - Update `CameraKind` registration, fit/look request support, camera home/flyover paths, input snapshots, Fairy Dust controls, Hana Diegetic examples, and all direct event observers to the retained API.
 - Update the animation, showcase, swapped-axis, and zoom examples to demonstrate every `CameraCommand`, retained replacement, external progress, backward/forward traversal, input conflict, move/endpoint events, and valid `CameraMove` construction.
-- `crates/bevy_lagrange/CHANGELOG.md` explicitly documents: `PlayAnimation`/`CameraMoveList` removal and replacement; `AnimationReason` to `AnimationEndReason`; start/end outcomes; direction on begin; move index/direction; target-bearing sources and removed target fields; complete cancellation move; and `ZoomContext`/`ZoomReason` removal.
+- `crates/hana_lagrange/CHANGELOG.md` explicitly documents: `PlayAnimation`/`CameraMoveList` removal and replacement; `AnimationReason` to `AnimationEndReason`; start/end outcomes; direction on begin; move index/direction; target-bearing sources and removed target fields; complete cancellation move; and `ZoomContext`/`ZoomReason` removal.
 
 **Files:**
 
-- `crates/bevy_lagrange/src/animation/{mod,events,lifecycle,queue,sequence}.rs` — remove compatibility/destructive queue and finalize exports.
-- `crates/bevy_lagrange/src/{camera_home,camera_kind}.rs` — retained request integration.
-- `crates/bevy_lagrange/src/fit/mod.rs`, `crates/bevy_lagrange/src/fit/triggers/**/*.rs` — higher-level source/zoom migration.
-- `crates/bevy_lagrange/src/input/{lifecycle,routing/snapshot}.rs` — remove queue-era checks.
-- `crates/bevy_lagrange/src/lib.rs` — final public surface.
-- `crates/bevy_lagrange/examples/animation.rs`, `crates/bevy_lagrange/examples/showcase/*.rs`, `crates/bevy_lagrange/examples/{swapped_axis,zoom_to_fit}.rs` — runnable migration.
+- `crates/hana_lagrange/src/animation/{mod,events,lifecycle,queue,sequence}.rs` — remove compatibility/destructive queue and finalize exports.
+- `crates/hana_lagrange/src/{camera_home,camera_kind}.rs` — retained request integration.
+- `crates/hana_lagrange/src/fit/mod.rs`, `crates/hana_lagrange/src/fit/triggers/**/*.rs` — higher-level source/zoom migration.
+- `crates/hana_lagrange/src/input/{lifecycle,routing/snapshot}.rs` — remove queue-era checks.
+- `crates/hana_lagrange/src/lib.rs` — final public surface.
+- `crates/hana_lagrange/examples/animation.rs`, `crates/hana_lagrange/examples/showcase/*.rs`, `crates/hana_lagrange/examples/{swapped_axis,zoom_to_fit}.rs` — runnable migration.
 - `crates/fairy_dust/src/{camera_home,lib}.rs`, `crates/fairy_dust/src/camera_control_panel/preset_switch.rs` — command/request consumers.
 - `crates/hana_diegetic/examples/{aa_text,units}.rs` and other compiler-identified workspace consumers — event/request migration.
-- `crates/bevy_lagrange/{README.md,CHANGELOG.md}` — final retained-camera documentation.
+- `crates/hana_lagrange/{README.md,CHANGELOG.md}` — final retained-camera documentation.
 
 **Constraints from prior phases:** Preserve Phase 13 behavior exactly while deleting compatibility. Use Phase 12 fallible move constructors everywhere. Do not retain two runtime playback paths.
 
@@ -940,7 +940,7 @@ pub enum AnimationSource {
 
 **Spec:**
 
-- In the sibling Hana workspace, add a production `bevy_kana` dependency pinned to a compatible `bevy_hana` revision containing Phases 1–3 and 12–14. Pin `bevy_lagrange` to that same compatible source revision; update `Cargo.lock`.
+- In the sibling Hana workspace, add a production `bevy_kana` dependency pinned to a compatible `bevy_hana` revision containing Phases 1–3 and 12–14. Pin `hana_lagrange` to that same compatible source revision; update `Cargo.lock`.
 - Transport playback owns three independent values: `Playback::{Playing, Paused}`, `SequenceDirection::{Forward, Backward}`, and positive finite nonzero `PlaybackRate`.
 
 ```rust
@@ -980,7 +980,7 @@ let instant = TransportRange::try_instant(4.0)?;
 - `/Users/natemccoy/rust/hana/crates/hana_animation/src/binding.rs` — range/binding lifecycle and progress production.
 - `/Users/natemccoy/rust/hana/crates/hana_animation` tests — controls, mapping, lifecycle, wraps, scheduling.
 
-**Constraints from prior phases:** Pin revisions that include Phase 3 external components/system sets and Phase 14 retained cameras. `hana_animation` maps transport only; `bevy_kana`, `hana_valence`, and `bevy_lagrange` must not depend on it.
+**Constraints from prior phases:** Pin revisions that include Phase 3 external components/system sets and Phase 14 retained cameras. `hana_animation` maps transport only; `bevy_kana`, `hana_valence`, and `hana_lagrange` must not depend on it.
 
 **Acceptance gate:** Package tests cover rate validation, explicit controls, seek invariants, forward/backward/unbounded/repeating playback, ascending/descending/instant/negative ranges, many bindings, add/change/remove/repair/takeover lifecycle, same-frame production, inert binding, and signed multi-wrap preservation; `cargo check`/nextest for `hana_animation` pass and the full Hana-repo `clippy` skill passes with the temporary binary shim.
 
@@ -992,7 +992,7 @@ let instant = TransportRange::try_instant(4.0)?;
 
 **Spec:**
 
-- Compose the new `TransportPlugin`/shared sequence sets with retained `bevy_lagrange` camera playback and `hana_valence` arrangement playback using the exact pinned sources from Phase 15.
+- Compose the new `TransportPlugin`/shared sequence sets with retained `hana_lagrange` camera playback and `hana_valence` arrangement playback using the exact pinned sources from Phase 15.
 - Replace transport toggle behavior with explicit pause/resume actions. UI/gesture code owns whether scrubbing pauses and later resumes; the transport API does not infer gesture policy.
 - Connect repeated scrubber updates to `Transport::try_seek()`. Bind camera and arrangement controller entities through colocated `TransportBinding` values; demonstrate synchronized sampling, forward/backward range mapping, and no registry/target list.
 - Migrate Hana camera flyover/editor code from `PlayAnimation` to valid `CameraMove`, retained `CameraSequence`, and `CameraCommand`.
@@ -1077,14 +1077,14 @@ let instant = TransportRange::try_instant(4.0)?;
 - Complete reflection tests proving invalid dynamic values cannot patch opaque math, progress, geometry, sequence, hinge, or camera authoring values.
 - Complete cross-domain examples/tests for direct external progress, optional tween forward/backward/partial ranges and overshoot, transport bindings with several entities/ranges/seeks/loops/rate/direction, retained camera commands/input policy/events, and fold/camera same-frame producer ordering.
 - Sweep public inventory and remove stale exports/references for every approved removal: arrangement indices/placements/tiling/Strip; fold membership/snapshot/actuation/lenses/pivots; destructive camera queue/PlayAnimation; old transport toggle.
-- Update `crates/bevy_kana/CHANGELOG.md`, `crates/hana_valence/CHANGELOG.md`, and `crates/bevy_lagrange/CHANGELOG.md` with all public breaking changes and migration paths. Update crate READMEs and example docs to final names/signatures. Keep [future-work.md](future-work.md) as the home for explicitly deferred diagnostics, closed-loop constraints, richer builders, recipe policies, and other non-V1 work.
+- Update `crates/bevy_kana/CHANGELOG.md`, `crates/hana_valence/CHANGELOG.md`, and `crates/hana_lagrange/CHANGELOG.md` with all public breaking changes and migration paths. Update crate READMEs and example docs to final names/signatures. Keep [future-work.md](future-work.md) as the home for explicitly deferred diagnostics, closed-loop constraints, richer builders, recipe policies, and other non-V1 work.
 - Verify compatible source pins in `/Users/natemccoy/rust/hana`, then build/test both workspaces and exercise the Hana binary against the exact revisions. Record any necessary public API migration in the sibling Hana workspace rather than leaving compatibility shims.
 - Do not convert this plan to an as-built document in this phase. Once all phases are `done`, run `/plan:to_as_built` with the stated amend disposition so the shipped behavior updates both existing Hana Valence as-built docs.
 
 **Files:**
 
 - All test/example/README/CHANGELOG files named in Delegation Context — final coverage and stale-reference sweep only.
-- `crates/bevy_kana/src/{lib,prelude}.rs`, `crates/hana_valence/src/lib.rs`, `crates/bevy_lagrange/src/lib.rs` — final public export audit.
+- `crates/bevy_kana/src/{lib,prelude}.rs`, `crates/hana_valence/src/lib.rs`, `crates/hana_lagrange/src/lib.rs` — final public export audit.
 - `/Users/natemccoy/rust/hana/Cargo.toml`, `/Users/natemccoy/rust/hana/Cargo.lock` — final compatible pins.
 - `docs/hana_valence/future-work.md` — preserve explicit non-V1 routing if cross-links change.
 

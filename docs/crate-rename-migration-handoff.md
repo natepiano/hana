@@ -50,13 +50,30 @@ and `bevy_lagrange 0.3.0` both cap at `^0.2.0`). Releasing hana_clerestory and
 hana_lagrange against kana 0.3.0 collapses nateroids to a single copy — that is
 the point of the next phase.
 
-## Next: bevy_clerestory → hana_clerestory, bevy_lagrange → hana_lagrange
+## Completed: bevy_clerestory → hana_clerestory (2026-07-30)
 
-**Order is forced:** `bevy_lagrange` depends on `bevy_clerestory`, so clerestory
-renames and releases first.
+Published and pushed. Nothing left to do here.
 
-Local versions: `bevy_clerestory 0.3.0-dev`, `bevy_lagrange 0.4.0-dev`. Continue
-those numbers on release (matches how hana_liminal continued `0.1.0-dev` → 0.1.0).
+- `hana_clerestory 0.3.0` on crates.io; tag `hana_clerestory-v0.3.0`; branch
+  `release-hana_clerestory-0.3.0`; GitHub release created. Main at `0.4.0-dev`
+  (commit `7b23ea39`, pushed).
+- `bevy_clerestory 0.2.1` published as a deprecated re-export shim, source at
+  `~/rust/bevy_clerestory-shim/` (outside any repo). All six features forward —
+  `monitor-probe` plus `workaround-winit-{3124,4341,4440,4443,4445}` — with the
+  dep declared `default-features = false` and the shim's own `default` listing
+  the five workarounds, so upstream defaults are reproduced exactly.
+- README compatibility table split (`hana_clerestory 0.3` vs
+  `bevy_clerestory 0.1 – 0.2`); feature example bumped to `"0.3"`.
+- `.claude/config/release.toml` gained a second `[[publish_path_pins]]` entry,
+  `hana_clerestory = 0.3.0` — root `Cargo.toml` declares it path-only, which
+  `cargo publish` rejects, so the hana_lagrange release needs this pin.
+- `clean-fix.conf` renamed via `project_rename.py` (both `[build]` and
+  `[projects]`, plus style-history keys).
+
+## Next: bevy_lagrange → hana_lagrange
+
+Local version `bevy_lagrange 0.4.0-dev` → release as 0.4.0; shim
+`bevy_lagrange 0.3.1`. Continue the number (matches clerestory and hana_liminal).
 
 **In-workspace dependents to update:**
 
@@ -127,35 +144,36 @@ removes. When that branch lands, nateroids moves to `hana_rubric` for input.
 
 ## Immediate next step
 
-**bevy_clerestory → hana_clerestory is IN PROGRESS on `main`, uncommitted.**
+**bevy_lagrange → hana_lagrange. Rename DONE and uncommitted on `main`
+(258 files); waiting on commit approval. Steps 1–4 below are complete.**
 
-Done so far:
-- `git mv crates/bevy_clerestory crates/hana_clerestory`
-- `git mv docs/bevy_clerestory docs/hana_clerestory`
-- Blanket `bevy_clerestory` → `hana_clerestory` across the repo, excluding
-  `Cargo.lock` (cargo regenerates) and this handoff doc (its prose names the old
-  crate deliberately). 22 files touched, including root `Cargo.toml`'s
-  `[workspace.dependencies]` entry, `crates/bevy_lagrange/Cargo.toml`,
-  `fairy_dust`, `hana_diegetic`, `hana_liminal` examples, and several docs.
-- README rename banner and CHANGELOG `[Unreleased] → Changed` entry added.
-  Version stays `0.3.0-dev`; release as `0.3.0`. Shim will be
-  `bevy_clerestory 0.2.1`.
-
-Remaining for clerestory:
-1. `cargo build --workspace --all-targets` (unsandboxed) then
-   `cargo +nightly fmt`. Verify `rg -l bevy_clerestory` returns only
-   `Cargo.lock` and this doc.
-2. Commit the rename (ask first — standing rule).
-3. `/release hana_clerestory 0.3.0`.
-4. Shim at `~/rust/bevy_clerestory-shim/`: `pub use hana_clerestory::*;`,
-   dep `hana_clerestory = "0.3"`, and **all six features mirrored** —
-   `monitor-probe` plus `workaround-winit-{3124,4341,4440,4443,4445}`, with
-   `default = [the five workaround features]` reproduced exactly. Each forwards
-   as `["hana_clerestory/<name>"]`. `monitor-probe` is `["dep:tracing"]`
-   upstream, so in the shim it must forward, not re-declare the dep.
-5. `python3 ~/.claude/scripts/clean-fix/project_rename.py bevy_clerestory bevy_hana/crates/hana_clerestory`
-6. Then repeat the whole sequence for `bevy_lagrange` → `hana_lagrange`
-   (version `0.4.0-dev` → 0.4.0, shim `bevy_lagrange 0.3.1`, forward
-   `fit_overlay`).
-7. Finally update nateroids to the two new names, which collapses it to a single
+1. ~~`git mv crates/bevy_lagrange crates/hana_lagrange` and
+   `git mv docs/bevy_lagrange docs/hana_lagrange`.~~ DONE
+2. ~~Blanket `bevy_lagrange` → `hana_lagrange` across the repo, excluding
+   `Cargo.lock` (cargo regenerates) and this handoff doc (its prose names the
+   old crate deliberately).~~ DONE — 195 files rewritten via `sed -i ''`
+   (needed `dangerouslyDisableSandbox`).
+3. ~~README rename banner + compatibility-table split, CHANGELOG
+   `[Unreleased] → Changed` entry naming the `TypePath` caveat.~~ DONE
+4. ~~`cargo build --workspace --all-targets` (unsandboxed) then
+   `cargo +nightly fmt`.~~ DONE — BUILD_EXIT=0, FMT_EXIT=0.
+   `rg -l bevy_lagrange -g '!Cargo.lock'` returns exactly three files: this
+   doc, `crates/hana_lagrange/README.md`, `crates/hana_lagrange/CHANGELOG.md`.
+5. **← YOU ARE HERE.** Commit (ask first — standing rule), then
+   `/release hana_lagrange 0.4.0`.
+6. Shim at `~/rust/bevy_lagrange-shim/`, version `0.3.1`, modeled on
+   `~/rust/bevy_clerestory-shim/`: `pub use hana_lagrange::*;`, dep
+   `hana_lagrange = "0.4"`, and the `fit_overlay` feature forwarded. Check
+   `crates/hana_lagrange/Cargo.toml` `[features]` for anything else and mirror
+   `default` exactly if one exists.
+7. `python3 ~/.claude/scripts/clean-fix/project_rename.py bevy_hana/crates/bevy_lagrange bevy_hana/crates/hana_lagrange`
+8. Add a `[[publish_path_pins]]` entry `hana_lagrange = 0.4.0` **after** the
+   release, never before — root `Cargo.toml:69` is path-only, and pinning the
+   crate being released makes the release branch resolve its own not-yet-
+   published version (same trap as the `bevy_kana` self-release note). The two
+   existing pins (`bevy_kana 0.3.0`, `hana_clerestory 0.3.0`) already cover
+   every versioned dep of `hana_lagrange`; the remaining path-only dev-deps
+   (`fairy_dust`, `hana_diegetic`) get stripped by `cargo publish`.
+9. Finally update nateroids to the two new names, which collapses it to a single
    bevy_kana copy, and commit its still-uncommitted changes.
+10. Delete this doc.

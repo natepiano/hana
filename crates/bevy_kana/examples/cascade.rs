@@ -24,7 +24,6 @@ use bevy_kana::CascadePlugin;
 use bevy_kana::CascadeSet;
 use bevy_kana::Position;
 use bevy_kana::Resolved;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -37,6 +36,7 @@ use fairy_dust::cube_face_label;
 use fairy_dust::diegetic_stats_sections_panel;
 use fairy_dust::diegetic_stats_sections_tree;
 use hana_diegetic::DiegeticPanelCommands;
+use hana_lagrange::OrbitCamPreset;
 
 // camera
 const HOME_MARGIN: f32 = 0.55;

@@ -220,7 +220,7 @@ this plan before implementing widgets.
 - `src/widgets/mod.rs` — systems in `WidgetSystems` after picking
 - `src/widgets/reify.rs` — default `WidgetFocusable` insertion
 - `crates/hana_diegetic/Cargo.toml` — direct `bevy_enhanced_input` dependency
-- Read-only reference: `crates/bevy_lagrange/src/input/`
+- Read-only reference: `crates/hana_lagrange/src/input/`
 
 **Constraints from prior phases:** Phase 2 supplies `WidgetDisabled`; Phase 3 supplies pick targets and `PickingInteraction`; Phase 1 supplies current traversal order. Activation of a focused button lands in Phase 6; this phase routes the action to that later behavior hook.
 

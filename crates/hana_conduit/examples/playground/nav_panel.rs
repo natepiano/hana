@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::Anchor;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::FairyDustOrbitCam;
@@ -23,6 +22,7 @@ use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::ZoomToFit;
 
 use super::constants::CAP_STYLES_SECTION_INDEX;
 use super::constants::CATENARY_SECTION_INDEX;

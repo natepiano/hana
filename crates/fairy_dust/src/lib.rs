@@ -81,8 +81,6 @@ use bevy::render::settings::RenderCreation;
 use bevy::render::settings::WgpuSettings;
 #[cfg(test)]
 use bevy::winit::WinitPlugin;
-use bevy_lagrange::LagrangePlugin;
-pub use bevy_lagrange::OrbitCam;
 pub use builder::AssetRootPending;
 pub use builder::BaselineInstalled;
 pub use builder::CameraHomeBuilder;
@@ -121,6 +119,8 @@ pub use fold_controls::FoldControlDiagnosticReason;
 pub use fold_controls::FoldControlDiagnostics;
 pub use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticUiPlugin;
+use hana_lagrange::LagrangePlugin;
+pub use hana_lagrange::OrbitCam;
 pub use lighting::FairyDustStudioLightingSet;
 pub use orbit_cam::FairyDustOrbitCam;
 pub use orbit_cam::OrbitCamPose;

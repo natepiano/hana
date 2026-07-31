@@ -12,7 +12,6 @@
 //! `PanelText` and `PanelElementId`.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use hana_diegetic::Anchor;
 use hana_diegetic::CornerRadius;
@@ -32,6 +31,7 @@ use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::OrbitCamPreset;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // RUNTIME TEXT MUTATION — DiegeticTextMut<M> for markers, PanelText for ids.

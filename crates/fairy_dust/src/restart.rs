@@ -28,7 +28,7 @@ use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
-use bevy_lagrange::OrbitCam;
+use hana_lagrange::OrbitCam;
 
 use crate::constants::CARGO_BIN;
 use crate::constants::CARGO_EXAMPLE_FLAG;

@@ -18,12 +18,12 @@
 
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticText;
+use hana_lagrange::OrbitCamPreset;
 
 // Camera home pose.
 const HOME_YAW: f32 = 0.015;

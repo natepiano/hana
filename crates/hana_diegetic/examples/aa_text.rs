@@ -19,10 +19,6 @@ use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
 use bevy::render::view::Msaa;
-use bevy_lagrange::CameraMove;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::PlayAnimation;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::CubeSpinConfig;
@@ -60,6 +56,10 @@ use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::CameraMove;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::PlayAnimation;
 
 // =============================================================================
 // CONSTANTS -- static scene data, controls, copy, and panel geometry.

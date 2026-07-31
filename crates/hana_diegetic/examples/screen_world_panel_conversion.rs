@@ -16,8 +16,6 @@ use bevy::light::NotShadowReceiver;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::Window;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
@@ -49,6 +47,8 @@ use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
 
 const HOME_YAW: f32 = 0.4;
 const HOME_PITCH: f32 = 0.35;
