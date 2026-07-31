@@ -9,7 +9,7 @@ license.workspace    = true
 name                 = "hana_clerestory"
 readme               = "README.md"
 repository.workspace = true
-version              = "0.3.0-dev"
+version              = "0.3.0"
 
 [lib]
 name = "hana_clerestory"

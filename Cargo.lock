@@ -3232,7 +3232,7 @@ dependencies = [
 
 [[package]]
 name = "hana_clerestory"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "bevy",
  "bevy_diagnostic",
