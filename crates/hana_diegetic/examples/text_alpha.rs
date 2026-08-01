@@ -15,7 +15,6 @@
 //!   Add · 5 Multiply · 6 Mask · 7 Opaque.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
@@ -31,6 +30,7 @@ use hana_diegetic::Sidedness;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextAlpha;
 use hana_diegetic::TextStyle;
+use hana_lagrange::OrbitCamPreset;
 
 const HOME_YAW: f32 = 0.3;
 const HOME_PITCH: f32 = 0.80;

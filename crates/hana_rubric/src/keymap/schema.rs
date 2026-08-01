@@ -184,6 +184,7 @@ mod tests {
     use bevy::prelude::ReflectEvent;
     use bevy::reflect::TypeRegistry;
     use bevy_enhanced_input::prelude::CustomInputs;
+    use jsonschema::Validator;
     use serde_json_lenient::Value;
     use strum::AsRefStr;
     use strum::EnumIter;
@@ -343,7 +344,7 @@ mod tests {
             .ok_or_else(|| format!("schema has no completion for `{constant}`"))
     }
 
-    fn draft_seven_validator(schema: &Value) -> Result<jsonschema::Validator, String> {
+    fn draft_seven_validator(schema: &Value) -> Result<Validator, String> {
         let schema = serde_json::to_value(schema)
             .map_err(|error| format!("schema JSON conversion error: {error}"))?;
 

@@ -7,9 +7,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
 use hana_diegetic::DiegeticPanel;
@@ -21,6 +19,8 @@ use hana_diegetic::Padding;
 use hana_diegetic::Px;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitCam;
 
 const PANEL_WIDTH: f32 = 480.0;
 const PANEL_HEIGHT: f32 = 310.0;

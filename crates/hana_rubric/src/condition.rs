@@ -22,6 +22,7 @@ use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
 use crate::KeymapLoadFailures;
 use crate::KeymapSystems;
+use crate::keymap_plugin::RegistryValidationFailed;
 
 /// A condition name declared by a [`KeymapContext`] variant.
 ///
@@ -366,8 +367,7 @@ pub(crate) fn register_context<C: KeymapContext>(
         .register::<C>();
 
     if let Err(diagnostics) = &result {
-        app.world_mut()
-            .insert_resource(crate::keymap_plugin::RegistryValidationFailed);
+        app.world_mut().insert_resource(RegistryValidationFailed);
         retain_context_diagnostics(app, diagnostics);
     }
 

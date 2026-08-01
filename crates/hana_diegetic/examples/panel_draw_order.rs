@@ -5,7 +5,6 @@
 //! an `El::overlay()` with both children sharing the panel content rectangle.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -37,6 +36,7 @@ use hana_diegetic::Text;
 use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
 use hana_diegetic::TextWrap;
+use hana_lagrange::OrbitCamPreset;
 
 const HOME_FOCUS: Vec3 = Vec3::ZERO;
 const HOME_MARGIN: f32 = 0.12;
@@ -209,7 +209,9 @@ fn update_panel(
     panel: Single<Entity, With<DrawOrderPanel>>,
 ) {
     sweep.advance(time.delta_secs());
-    commands.set_tree(*panel, draw_order_tree(*state, sweep.x));
+    if let Err(error) = commands.set_tree(*panel, draw_order_tree(*state, sweep.x)) {
+        error!("failed to replace draw-order panel tree: {error}");
+    }
 }
 
 fn set_behind_text(mut state: ResMut<DemoState>) { state.layer = LayerMode::BehindText; }

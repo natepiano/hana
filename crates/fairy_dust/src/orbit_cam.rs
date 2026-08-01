@@ -6,11 +6,11 @@
 use std::sync::Mutex;
 
 use bevy::prelude::*;
-use bevy_lagrange::AnglePairLimit;
-use bevy_lagrange::Initialization;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::ScalarLimit;
-use bevy_lagrange::UpsideDownPolicy;
+use hana_lagrange::AnglePairLimit;
+use hana_lagrange::Initialization;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::ScalarLimit;
+use hana_lagrange::UpsideDownPolicy;
 
 use crate::constants::EXAMPLE_ORBIT_CAM_PITCH_LIMIT;
 use crate::constants::EXAMPLE_ORBIT_CAM_ZOOM_LOWER_LIMIT;

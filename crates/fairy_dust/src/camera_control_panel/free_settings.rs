@@ -2,10 +2,10 @@
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_lagrange::FreeCamInputMode;
-use bevy_lagrange::FreeCamLookPitch;
-use bevy_lagrange::FreeCamPreset;
-use bevy_lagrange::ResolvedCameraInputRoute;
+use hana_lagrange::FreeCamInputMode;
+use hana_lagrange::FreeCamLookPitch;
+use hana_lagrange::FreeCamPreset;
+use hana_lagrange::ResolvedCameraInputRoute;
 use hana_rubric::action;
 use hana_rubric::bind_action_system;
 use hana_rubric::event;
@@ -133,9 +133,9 @@ fn set_look_pitch(mode: &mut FreeCamInputMode, look_pitch: FreeCamLookPitch) -> 
 
 #[cfg(test)]
 mod tests {
-    use bevy_lagrange::BindingsError;
-    use bevy_lagrange::FreeCamBindings;
-    use bevy_lagrange::FreeCamPreset;
+    use hana_lagrange::BindingsError;
+    use hana_lagrange::FreeCamBindings;
+    use hana_lagrange::FreeCamPreset;
 
     use super::*;
 

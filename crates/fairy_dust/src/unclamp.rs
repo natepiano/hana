@@ -7,9 +7,9 @@
 //! observer, so it overrides whatever limits the camera `configure` closure set.
 
 use bevy::prelude::*;
-use bevy_lagrange::AnglePairLimit;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::ScalarLimit;
+use hana_lagrange::AnglePairLimit;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::ScalarLimit;
 
 use crate::constants::UNCLAMPED_ZOOM_LOWER_LIMIT;
 use crate::orbit_cam::FairyDustOrbitCam;

@@ -10,7 +10,9 @@ use bevy::prelude::*;
 use bevy::window::WindowRef;
 
 use super::DiegeticPanel;
+use crate::layout;
 use crate::layout::Dimension;
+use crate::layout::LayoutTree;
 use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 
@@ -132,14 +134,14 @@ impl CoordinateSpace {
 ///
 /// `PanelSpace` duplicates only the `World`/`Screen` discriminant as a
 /// standalone component. It lowers the query requirement (`Query<&PanelSpace>`
-/// instead of pulling the whole panel), enables a native `On<Insert,
-/// PanelSpace>` observer that fires on every space flip — which reconciles
-/// panel-attachment anchoring, see `on_panel_space_changed` — and gives cheap
-/// reflect/BRP inspection of a panel's space.
+/// instead of pulling the whole panel) and gives cheap reflect/BRP inspection
+/// of a panel's space. Attachment and conversion mutations validate
+/// `DiegeticPanel.coordinate_space` directly rather than using this mirror as
+/// an authoring boundary.
 ///
-/// The cost is one duplicated discriminant kept in sync at four write sites:
-/// panel spawn (`sync_panel_space_on_add`) and the three coordinate-space
-/// conversion apply points. `PanelSpace` never carries sizing or screen config;
+/// The cost is one duplicated discriminant kept in sync when a whole panel
+/// component is inserted or replaced (`sync_panel_space_on_insert`) and at the
+/// coordinate-space conversion apply points. `PanelSpace` never carries sizing or screen config;
 /// the field stays the single source for geometry. Removing the field entirely
 /// (true single source) would thread the space through the panel's geometry and
 /// conversion hot paths and is deliberately out of scope.
@@ -163,17 +165,40 @@ impl From<&CoordinateSpace> for PanelSpace {
     }
 }
 
-/// Seeds the [`PanelSpace`] mirror from a panel's coordinate space at spawn.
+pub(crate) fn constrain_fit_width(
+    panel: &mut DiegeticPanel,
+    blueprint: &LayoutTree,
+    max_width: f32,
+) {
+    let unit = panel.layout_unit();
+    let min = Dimension {
+        value: 0.0,
+        unit:  Some(unit),
+    };
+    let max = Dimension {
+        value: max_width,
+        unit:  Some(unit),
+    };
+    match &mut panel.coordinate_space {
+        CoordinateSpace::World { width, .. } | CoordinateSpace::Screen { width, .. } => {
+            *width = Sizing::Fit { min, max };
+        },
+    }
+    let mut tree = blueprint.clone();
+    layout::set_root_fit_width(&mut tree, min, max);
+    panel.replace_tree_full_rebuild(tree);
+}
+
+/// Synchronizes the [`PanelSpace`] mirror after a panel insert or replacement.
 ///
-/// Conversions re-insert `PanelSpace` at their apply points; this observer
-/// covers the initial insert so a freshly spawned panel is queryable and its
-/// anchoring reconciles through `on_panel_space_changed`.
-pub(super) fn sync_panel_space_on_add(
-    added: On<Add, DiegeticPanel>,
+/// In-place conversions re-insert `PanelSpace` at their apply points; this
+/// observer covers initial insertion and whole-component replacement.
+pub(super) fn sync_panel_space_on_insert(
+    inserted: On<Insert, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
     mut commands: Commands,
 ) {
-    let entity = added.entity;
+    let entity = inserted.entity;
     let Ok(panel) = panels.get(entity) else {
         return;
     };

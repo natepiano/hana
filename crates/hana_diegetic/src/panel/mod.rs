@@ -13,6 +13,7 @@ mod diegetic_panel;
 mod events;
 mod field;
 mod gizmos;
+mod lifecycle;
 mod perf;
 mod precompose;
 mod sizing;
@@ -28,25 +29,33 @@ pub use anchor_geometry::PanelPlane;
 pub use anchor_geometry::PanelScreenBounds;
 pub use anchor_geometry::ResolvedPanelAnchorGeometry;
 pub(crate) use anchor_geometry::screen_anchor_position;
-pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
+pub use anchoring::PanelAttachment;
 pub(crate) use anchoring::PanelAttachmentAuthored;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
+pub(crate) use anchoring::WidgetOwnerLayout;
+pub(crate) use anchoring::refresh_world_anchor_globals;
+pub(crate) use anchoring::world_attachment_is_ready;
+pub(crate) use anchoring::write_panel_anchor_offsets;
 pub use arrangement::ArrangedPanel;
 use bevy::ecs::schedule::ApplyDeferred;
+use bevy::ecs::schedule::common_conditions::resource_exists;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
 pub use builder::PanelBuildError;
+pub use builder::PanelEntity;
+pub use builder::PanelEntityReader;
+pub use builder::Screen;
+pub use builder::WidgetEntity;
+pub use builder::World;
 pub use conversion::PanelProjectionError;
 pub use conversion::PanelProjectionParam;
 pub use conversion::PanelScreenConversion;
-pub use conversion::PanelScreenConversionParam;
 pub use conversion::PanelScreenHandoff;
 pub use conversion::PanelScreenProjection;
 pub use conversion::PanelScreenTarget;
 pub use conversion::PanelWorldConversion;
-pub use conversion::PanelWorldConversionParam;
 pub use conversion::PanelWorldProjection;
 pub use conversion::PanelWorldTarget;
 pub use conversion::SavedPanelScreenState;
@@ -60,6 +69,7 @@ pub use coordinate_space::CoordinateSpace;
 pub use coordinate_space::PanelSpace;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
+pub(crate) use coordinate_space::constrain_fit_width;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
@@ -71,11 +81,18 @@ pub use events::PanelChanged;
 pub use events::PanelDimensions;
 pub use events::PanelDimensionsChanged;
 pub(crate) use events::trigger_panel_dimensions_changed;
+pub(crate) use field::PanelFieldPresentation;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
 use hana_valence::AnchorSystems;
 use hana_valence::ResolveDiagnostics;
+pub(crate) use lifecycle::PanelComponentOwnership;
+pub(crate) use lifecycle::PanelOwned;
+pub(crate) use lifecycle::PanelRenderLayersOwnership;
+pub(crate) use lifecycle::remove_owned_component;
+pub(crate) use lifecycle::write_owned_component;
+pub(crate) use lifecycle::write_owned_render_layers;
 pub use perf::BatchPerfStats;
 pub use perf::BatchSummary;
 use perf::DiagnosticsPlugin;
@@ -107,10 +124,23 @@ use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::PanelDefaults;
+use crate::cascade::SdfMaterial;
+use crate::cascade::ShapeMaterial;
+use crate::cascade::TextAlpha;
+use crate::cascade::TextMaterial;
+use crate::layout::GlyphShadowMode;
+use crate::layout::Lighting;
 use crate::layout::ShadowCasting;
 use crate::layout::ShapedTextCache;
+use crate::layout::Sidedness;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusAuthority;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
+use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetPressedAppearance;
 
 /// System sets for ordering panel work and its cross-module dependencies.
 ///
@@ -142,6 +172,38 @@ pub enum PanelSystems {
     AnimateAnchorPose,
 }
 
+macro_rules! add_cascade_ownership_observers {
+    ($app:expr, $($attribute:ty),+ $(,)?) => {
+        $(
+            $app.add_observer(lifecycle::record_resolved_ownership::<$attribute>);
+            $app.add_observer(lifecycle::restore_preserved_resolved::<$attribute>);
+        )+
+    };
+}
+
+fn register_cascade_ownership_observers(app: &mut App) {
+    add_cascade_ownership_observers!(
+        app,
+        FontUnit,
+        AntiAlias,
+        HairlineFade,
+        HdrTextCoverageBias,
+        ShadowCasting,
+        WidgetInteractivity,
+        WidgetHoveredAppearance,
+        WidgetPressedAppearance,
+        WidgetFocusedAppearance,
+        WidgetDisabledAppearance,
+        TextAlpha,
+        Lighting,
+        Sidedness,
+        GlyphShadowMode,
+        SdfMaterial,
+        TextMaterial,
+        ShapeMaterial,
+    );
+}
+
 /// Headless layout runner — schedules `compute_panel_layouts` on `Update`
 /// and initializes the resources it consumes (diagnostics, perf stats,
 /// shaped-text cache).
@@ -149,6 +211,8 @@ pub enum PanelSystems {
 /// External consumers (benchmarks, non-UI apps) register this plugin
 /// instead of [`DiegeticUiPlugin`](crate::DiegeticUiPlugin) when they
 /// only need [`DiegeticPanel`] → [`ComputedDiegeticPanel`] computation.
+/// Client tests that also need widget and IME behavior use
+/// [`HeadlessDiegeticUiPlugin`](crate::HeadlessDiegeticUiPlugin) instead.
 /// The plugin initializes [`PanelDefaults`] itself (idempotent); callers
 /// insert their own [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer)
 /// and optionally override construction defaults before adding this plugin.
@@ -165,16 +229,26 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_plugins(cascade::cascade_plugin::<HdrTextCoverageBias>())
             .add_plugins(cascade::cascade_plugin::<ShadowCasting>())
             .add_observer(diegetic_panel::seed_panel_overrides)
+            .add_observer(diegetic_panel::sync_panel_picking_on_insert);
+
+        register_cascade_ownership_observers(app);
+
+        app.add_observer(
+            lifecycle::finalize_panel_widgets_before_despawn
+                .run_if(resource_exists::<WidgetFocusAuthority>),
+        );
+        app.add_observer(lifecycle::finalize_orphaned_panel_owned)
+            .add_observer(lifecycle::teardown_panel_role)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<PanelDefaults>()
             .init_resource::<ResolveDiagnostics>()
-            .add_observer(coordinate_space::sync_panel_space_on_add)
+            .add_observer(coordinate_space::sync_panel_space_on_insert)
             .add_observer(hana_valence::on_member_added)
             .add_observer(hana_valence::on_member_removed)
+            .add_observer(arrangement::cleanup_panel_member_placement)
             .add_observer(anchoring::on_panel_attachment_inserted)
             .add_observer(anchoring::on_panel_attachment_removed)
-            .add_observer(anchoring::on_panel_space_changed)
             .configure_sets(
                 Update,
                 (
@@ -188,13 +262,7 @@ impl Plugin for HeadlessLayoutPlugin {
                 Update,
                 (
                     ApplyDeferred.in_set(PanelSystems::ApplyTreeChanges),
-                    (
-                        ApplyDeferred,
-                        diegetic_panel::apply_pending_panel_conversions,
-                        ApplyDeferred,
-                    )
-                        .chain()
-                        .in_set(PanelSystems::ApplyConversions),
+                    ApplyDeferred.in_set(PanelSystems::ApplyConversions),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),
@@ -227,6 +295,11 @@ impl Plugin for HeadlessLayoutPlugin {
                         .after(AnchorSystems::FillGeometry)
                         .before(AnchorSystems::AnimatePose),
                     anchoring::write_panel_anchor_offsets.before(AnchorSystems::Resolve),
+                    anchoring::refresh_world_anchor_globals
+                        .after(AnchorSystems::AnimatePose)
+                        .before(anchoring::write_panel_anchor_offsets)
+                        .before(AnchorSystems::Resolve)
+                        .run_if(anchoring::world_anchor_transform_inputs_changed),
                     hana_valence::drive_arrangement_hinges::<hana_valence::QuadTiling>
                         .in_set(AnchorSystems::AnimatePose)
                         .after(PanelSystems::AnimateAnchorPose),
@@ -239,14 +312,13 @@ impl Plugin for HeadlessLayoutPlugin {
     }
 }
 
-/// Full panel integration — headless layout plus gizmo debug rendering.
+/// Panel gizmo debug rendering installed after [`HeadlessLayoutPlugin`].
 /// Registered by [`DiegeticUiPlugin`](crate::DiegeticUiPlugin).
 pub(crate) struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(HeadlessLayoutPlugin)
-            .init_resource::<ShowTextGizmos>()
+        app.init_resource::<ShowTextGizmos>()
             .init_gizmo_group::<DiegeticPanelGizmoGroup>()
             .configure_sets(
                 Update,

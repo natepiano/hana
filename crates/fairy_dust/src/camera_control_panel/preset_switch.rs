@@ -1,7 +1,7 @@
 //! Capability: Shift+C cycles the routed camera through `OrbitCam` presets,
 //! a `FreeCam` preset, and a hidden camera-control panel state.
 //!
-//! Wired through `bevy_enhanced_input` using the `bevy_kana` macros
+//! Wired through `bevy_enhanced_input` using the `hana_rubric` macros
 //! (`action!`, `event!`, `bind_action_system!`), modeled on [`crate::restart`].
 //! Installed alongside the camera control panel, so every panel example gains
 //! the switch. The bound system only acts when the camera is in a built-in
@@ -11,24 +11,24 @@
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_lagrange::CameraBasis;
-use bevy_lagrange::CameraHomePending;
-use bevy_lagrange::FreeCam;
-use bevy_lagrange::FreeCamHomePose;
-use bevy_lagrange::FreeCamInput;
-use bevy_lagrange::FreeCamInputContext;
-use bevy_lagrange::FreeCamInputMode;
-use bevy_lagrange::FreeCamLookPitch;
-use bevy_lagrange::FreeCamPreset;
-use bevy_lagrange::FreeCamPresetKind;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamHomePose;
-use bevy_lagrange::OrbitCamInput;
-use bevy_lagrange::OrbitCamInputContext;
-use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::OrbitCamPresetKind;
-use bevy_lagrange::ResolvedCameraInputRoute;
+use hana_lagrange::CameraBasis;
+use hana_lagrange::CameraHomePending;
+use hana_lagrange::FreeCam;
+use hana_lagrange::FreeCamHomePose;
+use hana_lagrange::FreeCamInput;
+use hana_lagrange::FreeCamInputContext;
+use hana_lagrange::FreeCamInputMode;
+use hana_lagrange::FreeCamLookPitch;
+use hana_lagrange::FreeCamPreset;
+use hana_lagrange::FreeCamPresetKind;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamHomePose;
+use hana_lagrange::OrbitCamInput;
+use hana_lagrange::OrbitCamInputContext;
+use hana_lagrange::OrbitCamInputMode;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::OrbitCamPresetKind;
+use hana_lagrange::ResolvedCameraInputRoute;
 use hana_rubric::action;
 use hana_rubric::bind_action_system;
 use hana_rubric::event;
@@ -251,31 +251,31 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::window::WindowRef;
     use bevy_enhanced_input::prelude::Binding;
-    use bevy_lagrange::AnimationEnd;
-    use bevy_lagrange::AnimationReason;
-    use bevy_lagrange::AnimationSource;
-    use bevy_lagrange::CameraBasis;
-    use bevy_lagrange::CameraHomePending;
-    use bevy_lagrange::CameraInputPhase;
-    use bevy_lagrange::CameraInputRoutingConfig;
-    use bevy_lagrange::Focus;
-    use bevy_lagrange::FreeCam;
-    use bevy_lagrange::FreeCamHomePose;
-    use bevy_lagrange::FreeCamInputMode;
-    use bevy_lagrange::FreeCamLookPitch;
-    use bevy_lagrange::FreeCamPresetKind;
-    use bevy_lagrange::InputGain;
-    use bevy_lagrange::LagrangePlugin;
-    use bevy_lagrange::LookAngles;
-    use bevy_lagrange::OrbitAngles;
-    use bevy_lagrange::OrbitCam;
-    use bevy_lagrange::OrbitCamBlenderLikePreset;
-    use bevy_lagrange::OrbitCamHomePose;
-    use bevy_lagrange::OrbitCamInputGain;
-    use bevy_lagrange::OrbitCamSimpleMousePreset;
-    use bevy_lagrange::Position;
-    use bevy_lagrange::Radius;
-    use bevy_lagrange::Roll;
+    use hana_lagrange::AnimationEnd;
+    use hana_lagrange::AnimationReason;
+    use hana_lagrange::AnimationSource;
+    use hana_lagrange::CameraBasis;
+    use hana_lagrange::CameraHomePending;
+    use hana_lagrange::CameraInputPhase;
+    use hana_lagrange::CameraInputRoutingConfig;
+    use hana_lagrange::Focus;
+    use hana_lagrange::FreeCam;
+    use hana_lagrange::FreeCamHomePose;
+    use hana_lagrange::FreeCamInputMode;
+    use hana_lagrange::FreeCamLookPitch;
+    use hana_lagrange::FreeCamPresetKind;
+    use hana_lagrange::InputGain;
+    use hana_lagrange::LagrangePlugin;
+    use hana_lagrange::LookAngles;
+    use hana_lagrange::OrbitAngles;
+    use hana_lagrange::OrbitCam;
+    use hana_lagrange::OrbitCamBlenderLikePreset;
+    use hana_lagrange::OrbitCamHomePose;
+    use hana_lagrange::OrbitCamInputGain;
+    use hana_lagrange::OrbitCamSimpleMousePreset;
+    use hana_lagrange::Position;
+    use hana_lagrange::Radius;
+    use hana_lagrange::Roll;
 
     use super::*;
     use crate::Anchor;

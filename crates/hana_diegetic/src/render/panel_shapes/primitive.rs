@@ -6,9 +6,9 @@ use crate::layout::PanelShapePrimitiveKey;
 
 /// Stable cross-panel source identity for one line primitive record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(super) struct PanelShapeRenderKey {
+pub(crate) struct PanelShapeRenderKey {
     /// Panel entity that owns the primitive source.
-    pub panel:  Entity,
+    pub(crate) panel:  Entity,
     /// Stable primitive key inside the panel's resolved command stream.
-    pub source: PanelShapePrimitiveKey,
+    pub(crate) source: PanelShapePrimitiveKey,
 }

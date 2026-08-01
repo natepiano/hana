@@ -272,11 +272,11 @@ so nothing verifies it. The migration reaches these entries.
 #### BRP type paths
 
 `run_test.py` addresses `RestoreDiagnostics` by its private module path
-(`bevy_clerestory::restore::target_position::target::RestoreDiagnostics`). §1 already edits that
+(`hana_clerestory::restore::target_position::target::RestoreDiagnostics`). §1 already edits that
 file. An unregistered path in `data.components` / `filter.with` returns an empty result with no
 error, and in `data.option` it is silently dropped — reported by the harness as "RestoreDiagnostics
 missing (restore did not run?)", pointing at the wrong subsystem. The crate already solved this for
-five `monitors` types with `#[type_path = "bevy_clerestory::monitors"]` plus a pin test. Do the same
+five `monitors` types with `#[type_path = "hana_clerestory::monitors"]` plus a pin test. Do the same
 for `TargetPosition` and `RestoreDiagnostics`.
 
 ---

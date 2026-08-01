@@ -17,23 +17,6 @@ mod snapshot;
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_lagrange::CameraHomed;
-use bevy_lagrange::CameraSlowModeState;
-use bevy_lagrange::FreeCam;
-use bevy_lagrange::FreeCamInputMode;
-use bevy_lagrange::FreeCamInteractionEnded;
-use bevy_lagrange::FreeCamInteractionSourcesChanged;
-use bevy_lagrange::FreeCamInteractionSpeedChanged;
-use bevy_lagrange::FreeCamInteractionStarted;
-use bevy_lagrange::FreeCamInteractionState;
-use bevy_lagrange::InteractionSources;
-use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamInteractionEnded;
-use bevy_lagrange::OrbitCamInteractionSourcesChanged;
-use bevy_lagrange::OrbitCamInteractionSpeedChanged;
-use bevy_lagrange::OrbitCamInteractionStarted;
-use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::ResolvedCameraInputRoute;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
@@ -45,7 +28,25 @@ use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticUiPlugin;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::PanelChanged;
+use hana_lagrange::CameraHomed;
+use hana_lagrange::CameraSlowModeState;
+use hana_lagrange::FreeCam;
+use hana_lagrange::FreeCamInputMode;
+use hana_lagrange::FreeCamInteractionEnded;
+use hana_lagrange::FreeCamInteractionSourcesChanged;
+use hana_lagrange::FreeCamInteractionSpeedChanged;
+use hana_lagrange::FreeCamInteractionStarted;
+use hana_lagrange::FreeCamInteractionState;
+use hana_lagrange::InteractionSources;
+use hana_lagrange::OrbitCamInputMode;
+use hana_lagrange::OrbitCamInteractionEnded;
+use hana_lagrange::OrbitCamInteractionSourcesChanged;
+use hana_lagrange::OrbitCamInteractionSpeedChanged;
+use hana_lagrange::OrbitCamInteractionStarted;
+use hana_lagrange::OrbitCamInteractionState;
+use hana_lagrange::ResolvedCameraInputRoute;
 use layout::build_guidance_tree;
 pub(crate) use preset_switch::CameraPresetSwitching;
 use snapshot::CameraGuidanceSnapshot;
@@ -113,6 +114,7 @@ fn ensure_panel_plugins(app: &mut App) {
 fn spawn_panel(
     mut commands: Commands,
     background: Res<CameraControlPanelBackground>,
+    fonts: Res<FontRegistry>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let snapshot = default_snapshot();
@@ -123,7 +125,12 @@ fn spawn_panel(
         .anchor(Anchor::BottomRight)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_guidance_tree(&snapshot, display, background.0))
+        .with_tree(build_guidance_tree(
+            &snapshot,
+            display,
+            background.0,
+            &fonts,
+        ))
         .build();
 
     match panel {
@@ -184,6 +191,7 @@ fn rebind_panel_on_route_change(
         &mut CameraGuidanceDisplayState,
     )>,
     background: Res<CameraControlPanelBackground>,
+    fonts: Res<FontRegistry>,
 ) {
     // Before routing selects a camera, follow the first panel-capable camera so
     // the panel shows a real preset instead of the fabricated default.
@@ -230,10 +238,12 @@ fn rebind_panel_on_route_change(
         display_state.restore_home_highlight(home, home_release);
     }
     commands.entity(panel_entity).insert(snapshot.clone());
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         panel_entity,
-        build_guidance_tree(&snapshot, display_state.display(), background.0),
-    );
+        build_guidance_tree(&snapshot, display_state.display(), background.0, &fonts),
+    ) {
+        warn!("failed to replace camera control panel tree: {error}");
+    }
 }
 
 fn refresh_on_interaction_started(
@@ -417,15 +427,18 @@ fn repaint_panel_display(
         &mut CameraGuidanceDisplayState,
     )>,
     background: Res<CameraControlPanelBackground>,
+    fonts: Res<FontRegistry>,
 ) {
     let (panel_entity, snapshot, mut display) = panel.into_inner();
     if display.render_state == RenderState::Idle {
         return;
     }
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         panel_entity,
-        build_guidance_tree(snapshot, display.display(), background.0),
-    );
+        build_guidance_tree(snapshot, display.display(), background.0, &fonts),
+    ) {
+        warn!("failed to replace camera control panel tree: {error}");
+    }
     display.render_state = RenderState::Idle;
 }
 

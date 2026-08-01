@@ -1,19 +1,19 @@
 //! Display state: mirrors the per-kind interaction sources, speed, and live
 //! zoom direction the panel highlights. lagrange debounces the reported sources
-//! (see `bevy_lagrange::CameraInputReportingDebounce`), and the panel holds
+//! (see `hana_lagrange::CameraInputReportingDebounce`), and the panel holds
 //! released sources briefly so highlights can fade after input ends.
 
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_lagrange::ControlSpeed;
-use bevy_lagrange::FreeCamActiveDirections;
-use bevy_lagrange::FreeCamInteractionKind;
-use bevy_lagrange::FreeCamInteractionState;
-use bevy_lagrange::InteractionSources;
-use bevy_lagrange::OrbitCamInteractionKind;
-use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::ZoomDirection;
+use hana_lagrange::ControlSpeed;
+use hana_lagrange::FreeCamActiveDirections;
+use hana_lagrange::FreeCamInteractionKind;
+use hana_lagrange::FreeCamInteractionState;
+use hana_lagrange::InteractionSources;
+use hana_lagrange::OrbitCamInteractionKind;
+use hana_lagrange::OrbitCamInteractionState;
+use hana_lagrange::ZoomDirection;
 
 use super::constants::HIGHLIGHT_RELEASE_HOLD;
 use super::constants::HOME_HIGHLIGHT_HOLD;

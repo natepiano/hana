@@ -110,11 +110,13 @@ pub(crate) fn reconcile_info_panel(
         return;
     }
     *last = Some(current);
-    if let Ok(info_panel) = info_panels.single() {
-        commands.set_tree(
+    if let Ok(info_panel) = info_panels.single()
+        && let Err(error) = commands.set_tree(
             info_panel,
             build_info_panel_tree(*selection, *selected, glow, active.index, chain),
-        );
+        )
+    {
+        error!("failed to replace anchor info panel tree: {error}");
     }
 }
 

@@ -8,6 +8,7 @@ use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::El;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Sizing;
@@ -117,6 +118,7 @@ fn show_or_toggle_help(
     preset_switching: Option<Res<CameraPresetSwitching>>,
     mut bars: Query<&mut TitleBarControlState>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    fonts: Res<FontRegistry>,
 ) {
     if !overlay.is_empty() {
         for entity in &overlay {
@@ -144,6 +146,7 @@ fn show_or_toggle_help(
             home_marker,
             camera_preset,
         },
+        &fonts,
         &mut materials,
     );
     set_help_chip(&mut bars, ControlActivation::Active);
@@ -172,6 +175,7 @@ fn set_help_chip(bars: &mut Query<&mut TitleBarControlState>, activation: Contro
 fn spawn_help_overlay(
     commands: &mut Commands,
     shortcuts: HelpShortcuts,
+    fonts: &FontRegistry,
     materials: &mut Assets<StandardMaterial>,
 ) {
     let unlit = super::screen_panel_material_handle(materials);
@@ -180,7 +184,7 @@ fn spawn_help_overlay(
         .anchor(Anchor::Center)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_help_tree(shortcuts))
+        .with_tree(build_help_tree(shortcuts, fonts))
         .build();
 
     match panel {
@@ -211,16 +215,19 @@ fn spawn_help_overlay(
     }
 }
 
-fn build_help_tree(shortcuts: HelpShortcuts) -> LayoutTree {
+fn build_help_tree(shortcuts: HelpShortcuts, fonts: &FontRegistry) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    build_help_layout(&mut builder, shortcuts);
+    build_help_layout(&mut builder, shortcuts, fonts);
     builder.build()
 }
 
-fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
-    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let hint = TextStyle::new(HELP_CLOSE_HINT_SIZE).with_color(BODY_COLOR);
-    let label = TextStyle::new(LABEL_SIZE).with_color(BODY_COLOR);
+fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, fonts: &FontRegistry) {
+    let title =
+        TextStyle::new(super::integral_advance_size(fonts, TITLE_SIZE)).with_color(TITLE_COLOR);
+    let hint = TextStyle::new(super::integral_advance_size(fonts, HELP_CLOSE_HINT_SIZE))
+        .with_color(BODY_COLOR);
+    let label =
+        TextStyle::new(super::integral_advance_size(fonts, LABEL_SIZE)).with_color(BODY_COLOR);
 
     screen_panel_frame(
         builder,

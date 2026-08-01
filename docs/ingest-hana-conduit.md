@@ -92,7 +92,7 @@ The root already has the other dependencies `hana_conduit` needs:
 - `bevy`
 - `bevy_brp_extras`
 - `bevy_kana`
-- `bevy_lagrange`
+- `hana_lagrange`
 
 Do not expect the existing registry `bevy_kana 0.1.0` package to disappear from
 `Cargo.lock` just because `hana_conduit` now uses the workspace `bevy_kana`;
@@ -132,7 +132,7 @@ bevy_kana = { workspace = true }
 [dev-dependencies]
 bevy            = { workspace = true, features = ["default"] }
 bevy_brp_extras = { workspace = true }
-bevy_lagrange   = { workspace = true, features = ["fit_overlay"] }
+hana_lagrange   = { workspace = true, features = ["fit_overlay"] }
 
 [[example]]
 name = "playground"

@@ -130,7 +130,7 @@ impl KeymapRuntime {
         self.pending_inputs.extend(input_changes);
     }
 
-    pub(crate) fn set_event_source(
+    pub(super) fn set_event_source(
         &mut self,
         custom_input: CustomInput,
         is_active: bool,

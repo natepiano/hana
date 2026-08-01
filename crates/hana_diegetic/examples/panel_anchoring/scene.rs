@@ -12,10 +12,10 @@
 //! layouts from any animation state.
 
 use bevy::prelude::*;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeEntity;
 use fairy_dust::FairyDustOrbitCam;
 use hana_diegetic::DiegeticPanelCommands;
+use hana_lagrange::ZoomToFit;
 use hana_valence::AnchorPose;
 
 use crate::anchor_demo::AnchorChain;
@@ -27,7 +27,6 @@ use crate::anchor_demo::Spin;
 use crate::anchor_demo::begin_spin;
 use crate::anchor_demo::build_tile_tree;
 use crate::anchor_demo::collect_tiles_by_order;
-use crate::anchor_demo::fan_anchoring_relation;
 use crate::anchor_demo::freeze_spin;
 use crate::anchor_demo::spawn_anchor_scene;
 use crate::anchor_demo::tile_link_delta;
@@ -214,10 +213,12 @@ fn arm_mode_morph(
     commands: &mut Commands,
 ) {
     for (entity, tile, _, pose) in tiles {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             entity,
             build_tile_tree(to_index, tile.order, count, selection, show_marker),
-        );
+        ) {
+            error!("failed to replace anchor tile {entity:?} tree: {error}");
+        }
         if tile.order == 0 {
             continue;
         }
@@ -275,7 +276,7 @@ pub(crate) fn advance_mode_morph(
     if morph.timer < MODE_MORPH_SECS {
         return;
     }
-    finalize_mode_morph(morph.to_index, *selection, &all_tiles, &mut commands);
+    finalize_mode_morph(morph.to_index, &all_tiles, &mut commands);
     if morph.to_index == SPIN_INDEX {
         // Landing on Spin from another mode starts the envelope immediately;
         // `finalize_mode_morph` already left each anchored tile a pose to drive.
@@ -291,19 +292,16 @@ pub(crate) fn advance_mode_morph(
 /// pose so each tile rests on its relation.
 fn finalize_mode_morph(
     to_index: usize,
-    selection: AnchorSelection,
     all_tiles: &Query<(Entity, &AnchorTile)>,
     commands: &mut Commands,
 ) {
     let (by_order, live) = collect_tiles_by_order(all_tiles);
-    for order in 1..live {
-        let entity = by_order[order];
+    for &entity in by_order.iter().take(live).skip(1) {
         let mut tile = commands.entity(entity);
         tile.remove::<TileMorph>();
         if to_index == HINGE_CHAIN_INDEX {
             continue;
         }
-        tile.insert(fan_anchoring_relation(by_order[order - 1], selection));
         if to_index == SPIN_INDEX {
             tile.insert(AnchorPose::default());
         } else {

@@ -31,9 +31,6 @@ use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
 use clay_layout::Clay;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -47,6 +44,7 @@ use clay_layout::layout::LayoutDirection;
 use clay_layout::math::Dimensions;
 use clay_layout::render_commands::RenderCommandConfig;
 use clay_layout::text::TextElementConfigWrapMode;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Border;
@@ -64,6 +62,8 @@ use hana_diegetic::Sizing;
 use hana_diegetic::TextDimensions;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitCam;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -553,7 +553,10 @@ fn rebuild_diegetic_panel(
     }
     let rows = build_rows(&dynamic, &sizing, DIEGETIC_RENDERER);
     for entity in &panels {
-        commands.set_tree(entity, build_diegetic_tree(&rows, sizing.world_size));
+        if let Err(error) = commands.set_tree(entity, build_diegetic_tree(&rows, sizing.world_size))
+        {
+            error!("failed to replace side-by-side panel tree: {error}");
+        }
     }
 }
 

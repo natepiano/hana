@@ -22,7 +22,9 @@ use bevy::pbr::MaterialExtension;
 use bevy::pbr::MaterialExtensionKey;
 use bevy::pbr::MaterialExtensionPipeline;
 use bevy::pbr::MaterialPlugin;
+use bevy::pbr::MeshMaterial3d;
 use bevy::pbr::StandardMaterial;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
@@ -41,6 +43,7 @@ use super::BatchAlphaMode;
 use super::BatchRenderLayers;
 use super::CommandIndex;
 use super::Dirty;
+use super::ElementIndex;
 use super::batch_key;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
@@ -59,19 +62,22 @@ use super::draw_order::DrawOrderIndex;
 use super::draw_order::DrawZIndexRank;
 use super::material;
 use super::material_table;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
 use super::material_table::FrameMaterialTableBuilder;
 use super::material_table::GpuMaterialSlotId;
 use super::material_table::MaterialSlotAppend;
-use super::material_table::MaterialSlotAppended;
 use super::material_table::MaterialSlotCandidate;
+use super::material_table::MaterialSlotId;
 use super::material_table::MaterialSlotInput;
 use super::material_table::MaterialTableAppendReady;
+use super::material_table::RetainedBatchBufferUploads;
 #[cfg(test)]
 use super::material_table::SdfDriverRunOrder;
 use super::material_table::SdfPaintMaterial;
 use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
+use super::panel_geometry::SdfRecordRole;
 use crate::DrawZIndex;
 use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
@@ -83,6 +89,8 @@ use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
+use crate::widgets::VisualOverrideIndex;
+use crate::widgets::VisualSlotOverride;
 
 /// Extra `clip_depth_nudge` layer-units pushing an opaque/alpha-mask SDF fill away
 /// from the camera so coplanar panel text, drawn at its true depth, wins the
@@ -159,17 +167,20 @@ pub(crate) enum SdfMaterialRole {
 /// Material source identity for one SDF fill or border role.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfMaterialSourceKey {
-    /// Panel entity whose command stream produced this role.
-    pub panel:         Entity,
-    /// Command index of the resolved SDF surface.
-    pub command_index: CommandIndex,
+    /// Panel entity that owns this role.
+    pub panel:           Entity,
+    /// Source element in the panel's layout tree.
+    pub element:         ElementIndex,
+    /// Adjacent-child pair ordinal within `element`; `None` means this role belongs to the
+    /// element itself.
+    pub divider_ordinal: Option<usize>,
     /// Role within the resolved SDF surface.
-    pub role:          SdfMaterialRole,
+    pub role:            SdfMaterialRole,
 }
 
 /// Append-time source material for one SDF material-table role.
 pub(crate) struct SdfMaterialSlotInput<'a> {
-    /// Source identity returned with the appended frame-local slot.
+    /// Source identity returned with the retained slot.
     pub key:            SdfMaterialSourceKey,
     /// Resolved `StandardMaterial` source; defaults are folded before this input exists.
     pub base_material:  &'a StandardMaterial,
@@ -201,13 +212,17 @@ impl MaterialSlotInput for SdfMaterialSlotInput<'_> {
     }
 }
 
-/// Per-command SDF record identity without a fill/border role.
+/// Identity for one retained SDF surface record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfRecordKey {
-    /// Panel entity whose command stream produced this record.
-    pub panel:         Entity,
-    /// Command index of the resolved SDF surface.
-    pub command_index: CommandIndex,
+    /// Panel entity that owns this record.
+    pub panel:           Entity,
+    /// Source element in the panel's layout tree.
+    pub element:         ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for an element surface.
+    pub divider_ordinal: Option<usize>,
+    /// Role produced when clipping separates a fill from its border.
+    pub role:            SdfRecordRole,
 }
 
 /// Panel-local rounded-rectangle SDF half-size in world units.
@@ -332,8 +347,10 @@ pub(crate) struct SdfRecordMaterialSlots {
 /// CPU-side SDF record retained by `SdfBatchStore`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedSdfBatchRecord {
-    /// Per-command SDF record identity.
+    /// Retained-record identity.
     pub record_key:       SdfRecordKey,
+    /// Original command order used to break equal-depth draw ties.
+    pub draw_order:       CommandIndex,
     /// Fill material source identity.
     pub fill_source:      SdfMaterialSourceKey,
     /// Border material source identity.
@@ -380,14 +397,16 @@ impl ResolvedSdfBatchRecord {
     ) -> Self {
         let pipeline_compatibility = sdf_record_pipeline_compatibility(surface, &materials);
         let fill_source = SdfMaterialSourceKey {
-            panel:         surface.panel_entity,
-            command_index: surface.command_index,
-            role:          SdfMaterialRole::Fill,
+            panel:           surface.panel_entity,
+            element:         surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            role:            SdfMaterialRole::Fill,
         };
         let border_source = SdfMaterialSourceKey {
-            panel:         surface.panel_entity,
-            command_index: surface.command_index,
-            role:          SdfMaterialRole::Border,
+            panel:           surface.panel_entity,
+            element:         surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            role:            SdfMaterialRole::Border,
         };
         let batch_key = SdfBatchKey {
             z_index: surface.draw_depth.z_index(),
@@ -402,9 +421,12 @@ impl ResolvedSdfBatchRecord {
         let paint_mask = SdfPaintMask::from_materials(materials.fill, materials.border);
         Self {
             record_key: SdfRecordKey {
-                panel:         surface.panel_entity,
-                command_index: surface.command_index,
+                panel:           surface.panel_entity,
+                element:         surface.element_index,
+                divider_ordinal: surface.divider_ordinal,
+                role:            surface.record_role,
             },
+            draw_order: surface.command_index,
             fill_source,
             border_source,
             draw_depth: surface.draw_depth,
@@ -443,6 +465,9 @@ impl ResolvedSdfBatchRecord {
     pub(crate) fn update_world_transform(&mut self, panel_transform: &GlobalTransform) {
         self.transform = panel_transform.to_matrix() * self.local_transform.to_matrix();
     }
+
+    /// Keeps this record allocated while preventing the SDF shader from drawing it.
+    const fn mark_hidden(&mut self) { self.paint_mask = SdfPaintMask::empty(); }
 }
 
 impl MemberRecord for ResolvedSdfBatchRecord {
@@ -586,6 +611,10 @@ pub(crate) struct SdfBatch {
     pub record_upload:      Dirty,
     /// Bounds recomputation state for this batch.
     pub bounds_update:      Dirty,
+    /// Deferred sort state for retained records changed in the append pass.
+    sort_pending:           Dirty,
+    #[cfg(test)]
+    sort_count:             usize,
     /// Lowest `DrawOrderIndex` in this batch.
     ///
     /// `SdfRenderRecord::clip_depth_nudge` is uploaded relative to this value;
@@ -633,16 +662,26 @@ impl SdfBatch {
     }
 
     fn sort_records(&mut self) {
+        #[cfg(test)]
+        {
+            self.sort_count += 1;
+        }
         self.records.sort_by(|left, right| {
             left.draw_depth
                 .draw_order_index()
                 .cmp(&right.draw_depth.draw_order_index())
-                .then(
-                    left.record_key
-                        .command_index
-                        .cmp(&right.record_key.command_index),
-                )
+                .then(left.draw_order.cmp(&right.draw_order))
         });
+    }
+
+    /// Sorts changed records once after the route finishes appending them.
+    fn sort_pending_records(&mut self) {
+        if !self.sort_pending.is_set() {
+            return;
+        }
+        self.sort_records();
+        self.refresh_first_draw_order_index();
+        self.sort_pending.clear();
     }
 
     fn upsert_record(&mut self, mut record: ResolvedSdfBatchRecord) {
@@ -661,8 +700,7 @@ impl SdfBatch {
         } else {
             self.records.push(record);
         }
-        self.sort_records();
-        self.refresh_first_draw_order_index();
+        self.sort_pending.mark();
         self.record_upload.mark();
         self.bounds_update.mark();
     }
@@ -985,7 +1023,7 @@ pub(crate) fn append_sdf_record_materials(
     asset_server: &AssetServer,
     default_material: &SdfMaterial,
 ) -> Option<SdfRecordMaterialSlots> {
-    let rollback_row_count = builder.row_count();
+    let assignment_checkpoint = builder.assignment_checkpoint();
     let fill = append_sdf_role(
         builder,
         surface,
@@ -996,6 +1034,10 @@ pub(crate) fn append_sdf_record_materials(
         asset_server,
         default_material,
     );
+    if matches!(fill, SdfRoleAppend::DroppedLimit | SdfRoleAppend::Held) {
+        builder.rollback_assignments_after(assignment_checkpoint);
+        return None;
+    }
     let border = append_sdf_role(
         builder,
         surface,
@@ -1007,13 +1049,9 @@ pub(crate) fn append_sdf_record_materials(
         default_material,
     );
     match (fill, border) {
-        (SdfRoleAppend::DroppedLimit, _) | (_, SdfRoleAppend::DroppedLimit) => {
-            builder.truncate_rows(rollback_row_count);
-            builder.record_dropped_limit();
-            None
-        },
-        (SdfRoleAppend::Held, _) | (_, SdfRoleAppend::Held) => {
-            builder.truncate_rows(rollback_row_count);
+        (SdfRoleAppend::DroppedLimit | SdfRoleAppend::Held, _)
+        | (_, SdfRoleAppend::DroppedLimit | SdfRoleAppend::Held) => {
+            builder.rollback_assignments_after(assignment_checkpoint);
             None
         },
         (SdfRoleAppend::NotAuthored, SdfRoleAppend::NotAuthored) => None,
@@ -1026,13 +1064,23 @@ pub(crate) fn append_sdf_record_materials(
 #[derive(Clone, Debug, PartialEq)]
 enum SdfRoleAppend {
     NotAuthored,
-    Appended(MaterialSlotAppended<SdfMaterialSourceKey>),
+    Appended(SdfMaterialSlotAppended),
     Held,
     DroppedLimit,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct SdfMaterialSlotAppended {
+    /// Stable row assigned by `FrameMaterialTableBuilder`.
+    slot:                   MaterialSlotId,
+    /// Pipeline compatibility used to choose the batch material.
+    pipeline_compatibility: PipelineCompatibility,
+    /// Resource compatibility used to create the batch material.
+    resource_compatibility: ResourceCompatibility,
+}
+
 impl SdfRoleAppend {
-    fn into_appended(self) -> Option<MaterialSlotAppended<SdfMaterialSourceKey>> {
+    fn into_appended(self) -> Option<SdfMaterialSlotAppended> {
         match self {
             Self::Appended(appended) => Some(appended),
             Self::NotAuthored | Self::Held | Self::DroppedLimit => None,
@@ -1042,8 +1090,8 @@ impl SdfRoleAppend {
 
 impl SdfRecordMaterialSlots {
     fn from_appended(
-        fill: Option<MaterialSlotAppended<SdfMaterialSourceKey>>,
-        border: Option<MaterialSlotAppended<SdfMaterialSourceKey>>,
+        fill: Option<SdfMaterialSlotAppended>,
+        border: Option<SdfMaterialSlotAppended>,
     ) -> Option<Self> {
         let fill_material = fill
             .as_ref()
@@ -1092,9 +1140,6 @@ fn append_sdf_role(
     if !material.authorship.is_authored() {
         return SdfRoleAppend::NotAuthored;
     }
-    if !builder.has_remaining_rows(1) {
-        return SdfRoleAppend::DroppedLimit;
-    }
     let handle = material
         .base_material
         .cloned()
@@ -1107,7 +1152,8 @@ fn append_sdf_role(
     let input = SdfMaterialSlotInput {
         key: SdfMaterialSourceKey {
             panel: surface.panel_entity,
-            command_index: surface.command_index,
+            element: surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
             role,
         },
         base_material,
@@ -1116,7 +1162,13 @@ fn append_sdf_role(
         sidedness: panel_sidedness,
     };
     match material_table::append_material_slot(builder, &input) {
-        MaterialSlotAppend::Appended(appended) => SdfRoleAppend::Appended(appended),
+        MaterialSlotAppend::Appended(appended) => {
+            SdfRoleAppend::Appended(SdfMaterialSlotAppended {
+                slot:                   appended.slot,
+                pipeline_compatibility: appended.pipeline_compatibility,
+                resource_compatibility: appended.resource_compatibility,
+            })
+        },
         MaterialSlotAppend::DroppedLimit => SdfRoleAppend::DroppedLimit,
     }
 }
@@ -1193,6 +1245,7 @@ impl Plugin for FillBatchPlugin {
         app.init_resource::<SdfBatchStore>()
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<SdfRecordDiagnostics>()
+            .init_resource::<VisualOverrideIndex>()
             .add_plugins(MaterialPlugin::<SdfExtendedMaterial>::default())
             .add_systems(
                 PostUpdate,
@@ -1208,6 +1261,7 @@ impl Plugin for FillBatchPlugin {
                 PostUpdate,
                 reconcile_sdf_batch_entities
                     .after(update_sdf_batch_world_transforms)
+                    .in_set(BatchAssetWrites)
                     .before(VisibilitySystems::CalculateBounds)
                     .in_set(BatchResourcesReady),
             )
@@ -1229,8 +1283,7 @@ impl Plugin for FillBatchPlugin {
                 PostUpdate,
                 commit_sdf_batch_buffers
                     .after(material_table::register_sdf_batch_materials::<DiegeticSdfFillBatch>)
-                    .after(update_sdf_batch_bounds)
-                    .after(VisibilitySystems::CheckVisibility)
+                    .before(update_sdf_batch_bounds)
                     .in_set(BatchResourcesReady),
             );
     }
@@ -1245,6 +1298,7 @@ fn route_sdf_batch_records(
     sdf_material_default: Res<SdfMaterial>,
     lighting_default: Res<Lighting>,
     sidedness_default: Res<Sidedness>,
+    visual_overrides: Res<VisualOverrideIndex>,
     panels: Query<(
         &DiegeticPanel,
         Option<&RenderLayers>,
@@ -1274,30 +1328,39 @@ fn route_sdf_batch_records(
             stale_panels.insert(stored_surface.panel_entity());
             continue;
         };
-        if matches!(panel_visibility, Some(Visibility::Hidden)) {
-            continue;
-        }
+        // Hidden panels keep their frame-table rows and SDF batch records so a
+        // `Visibility` change updates the existing GPU buffer allocation.
+        let panel_visibility = panel_visibility.copied().unwrap_or(Visibility::Inherited);
         let panel_lighting = resolved_lighting.map_or(*lighting_default, |resolved| resolved.0);
         let panel_sidedness = resolved_sidedness.map_or(*sidedness_default, |resolved| resolved.0);
         let panel_shadow_casting =
             resolved_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0);
-        resolved_surfaces.push((
-            stored_surface.as_resolved(
-                panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
-                panel_shadow_casting,
-            ),
-            panel_lighting,
-            panel_sidedness,
-        ));
+        let mut resolved = stored_surface.as_resolved(
+            panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
+            panel_shadow_casting,
+        );
+        if let Some(slot_override) =
+            stored_surface
+                .visual_source_element()
+                .and_then(|element_index| {
+                    visual_overrides.get(stored_surface.panel_entity(), element_index.get())
+                })
+        {
+            apply_sdf_visual_override(&mut resolved, slot_override);
+        }
+        resolved_surfaces.push((resolved, panel_lighting, panel_sidedness, panel_visibility));
     }
     let mut appended = Vec::new();
+    let mut hidden_records = HashSet::new();
     let builder = build.builder_mut();
-    for (surface, panel_lighting, panel_sidedness) in &resolved_surfaces {
+    for (surface, panel_lighting, panel_sidedness, panel_visibility) in &resolved_surfaces {
         let record_key = SdfRecordKey {
-            panel:         surface.panel_entity,
-            command_index: surface.command_index,
+            panel:           surface.panel_entity,
+            element:         surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            role:            surface.record_role,
         };
-        if let Some(materials) = append_sdf_record_materials(
+        let materials = append_sdf_record_materials(
             builder,
             surface,
             *panel_lighting,
@@ -1305,19 +1368,76 @@ fn route_sdf_batch_records(
             &standard_materials,
             &asset_server,
             &sdf_material_default,
-        ) {
-            active_records.insert(record_key);
-            appended.push((materials, surface));
+        );
+        let Some(materials) = materials else {
+            continue;
+        };
+        if *panel_visibility == Visibility::Hidden {
+            hidden_records.insert(record_key);
         }
+        active_records.insert(record_key);
+        appended.push((materials, surface));
     }
 
-    for record in assign_contiguous_runs(appended) {
+    for mut record in assign_contiguous_runs(appended) {
+        if hidden_records.contains(&record.record_key) {
+            record.mark_hidden();
+        }
         store.upsert_record(record);
     }
     store.retain_records(&active_records);
+    for (_, batch) in store.batches_mut() {
+        batch.sort_pending_records();
+    }
     drop(resolved_surfaces);
     for panel_entity in stale_panels {
         surfaces.remove_panel(panel_entity);
+    }
+}
+
+/// Applies one widget visual-slot override to a routed SDF surface.
+///
+/// Runs inside `route_sdf_batch_records`, so the override reaches the same
+/// frame material rows, `SdfBatchKey` selection, and `SdfBatchStore` upsert
+/// as authored data: `fill_color` and `border_color` patch their authored
+/// material rows in place. Replacement border widths restate the record's
+/// inward inset without moving its outer bounds, an
+/// offset translates only its `local_transform`, and a replacement material
+/// that changes `PipelineCompatibility`/`ResourceCompatibility` re-keys the
+/// record to its compatible destination batch. Authored registry surfaces
+/// stay untouched, and every branch checks `SdfRoleAuthorship` first:
+/// overrides never author a missing fill or border role.
+fn apply_sdf_visual_override<'a>(
+    surface: &mut ResolvedSdfSurface<'a>,
+    slot_override: &'a VisualSlotOverride,
+) {
+    let fill_authored = surface.fill_material.authorship.is_authored();
+    let border_authored = surface.border_material.authorship.is_authored();
+    if let Some(color) = slot_override.fill_color
+        && fill_authored
+    {
+        surface.fill_material.color = Some(color);
+    }
+    if let Some(color) = slot_override.border_color
+        && border_authored
+    {
+        surface.border_material.color = Some(color);
+    }
+    if let Some(border_widths) = slot_override.border_widths
+        && border_authored
+    {
+        surface.border_widths = border_widths;
+    }
+    if let Some(material) = &slot_override.material {
+        if fill_authored {
+            surface.fill_material.base_material = Some(material);
+        }
+        if border_authored {
+            surface.border_material.base_material = Some(material);
+        }
+    }
+    if let Some(offset) = slot_override.offset {
+        surface.local_transform.translation += offset.extend(0.0);
     }
 }
 
@@ -1497,6 +1617,7 @@ pub(crate) fn spawn_sdf_batch_entity(
         DiegeticSdfFillBatch,
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
+        Pickable::IGNORE,
         Visibility::Inherited,
         NoAutoAabb,
         Aabb::default(),
@@ -1578,7 +1699,7 @@ pub(crate) fn update_sdf_batch_bounds(
 pub(crate) fn commit_sdf_batch_buffers(
     #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
     mut store: ResMut<SdfBatchStore>,
-    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut staged_uploads: ResMut<RetainedBatchBufferUploads>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut diagnostics: ResMut<SdfRecordDiagnostics>,
 ) {
@@ -1634,10 +1755,12 @@ pub(crate) fn commit_sdf_batch_buffers(
             gpu.capacity,
         );
         batch.record_upload.clear();
-        if let Some(mut buffer) = storage_buffers.get_mut(&gpu.records) {
-            buffer.set_data(payload);
-            uploads += 1;
-        }
+        material_table::stage_retained_batch_buffer_upload(
+            &mut staged_uploads,
+            &gpu.records,
+            ShaderBuffer::from(payload),
+        );
+        uploads += 1;
     }
     perf.panel_geometry.sdf_batches = batches;
     perf.panel_geometry.sdf_records = records;
@@ -1657,24 +1780,44 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use bevy::asset::Asset;
     use bevy::asset::AssetEvent;
     use bevy::asset::AssetPlugin;
     use bevy::camera::visibility::RenderLayers;
+    use bevy::ecs::change_detection::Tick;
     use bevy::ecs::message::Messages;
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::image::Image;
+    use bevy::picking::hover::PickingInteraction;
     use bevy::prelude::AlphaMode;
     use bevy::render::render_resource::Face;
     use bevy::render::render_resource::FragmentState;
     use bevy::shader::Shader;
     use bevy::shader::ShaderDefVal;
+    use bevy::window::PrimaryWindow;
     use bevy_kana::ToF32;
 
     use super::*;
+    use crate::AlignX;
+    use crate::AlignY;
+    use crate::BorderColor;
     use crate::Mm;
+    use crate::Padding;
+    use crate::PanelElementId;
+    use crate::PanelWidget;
+    use crate::PanelWidgetReader;
+    use crate::Px;
+    use crate::Slider;
+    use crate::SliderDirection;
+    use crate::SliderState;
+    use crate::Tooltip;
+    use crate::TooltipPlacementPolicy;
+    use crate::Tooltips;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
+    use crate::layout::ChildDivider;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -1687,6 +1830,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
+    use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::PathExtendedMaterial;
@@ -1698,6 +1842,7 @@ mod tests {
     use crate::render::material_table::INVALID_GPU_MATERIAL_SLOT;
     use crate::render::material_table::MATERIAL_TABLE_BINDING;
     use crate::render::material_table::MaterialSlotId;
+    use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableBuffer;
     use crate::render::material_table::MaterialTablePlugin;
     use crate::render::material_table::SDF_MESH_BINDING;
@@ -1706,15 +1851,41 @@ mod tests {
     use crate::render::panel_geometry::ResolvedSdfMaterial;
     use crate::render::panel_geometry::ResolvedSdfSurface;
     use crate::render::panel_geometry::SdfRoleAuthorship;
+    use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
+    use crate::widgets::ComputedWidgetRecord;
+    use crate::widgets::VisualOverrideIndex;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetAnchorRect;
+    use crate::widgets::WidgetVisualOverrides;
+    use crate::widgets::WidgetVisualSlots;
+    use crate::widgets::WidgetsPlugin;
 
     const ANIMATED_BASE_BLUE_SPEED: f32 = 0.29;
     const ANIMATED_BASE_COLOR_SWING: f32 = 0.05;
     const ANIMATED_BASE_GREEN_SPEED: f32 = 0.23;
     const ANIMATED_BASE_RED_SPEED: f32 = 0.19;
+    const CHILD_DIVIDER_COLOR: Color = Color::srgb(0.1, 0.8, 0.4);
+    const DIVIDER_PANEL_METALLIC: f32 = 0.15;
     const IMAGE_BORDER_COLOR: Color = Color::srgb(0.9, 0.8, 0.2);
     const IMAGE_BORDER_WIDTH_MM: f32 = 1.0;
+    const OVERRIDE_OFFSET: Vec2 = Vec2::new(0.005, -0.002);
+    const PARENT_ELEMENT_CORNER_RADIUS: f32 = 4.0;
+    const PARENT_ELEMENT_METALLIC: f32 = 0.85;
+    const PEER_FILL_COLOR: Color = Color::srgb(0.2, 0.3, 0.8);
     const SDF_SETTLE_FRAMES: usize = 3;
+    const STATE_BORDER_COLOR: Color = Color::srgb(0.9, 0.7, 0.2);
+    const SLOT_OVERRIDE_COLOR: Color = Color::srgb(0.1, 0.9, 0.2);
+    const TEST_SLOT: VisualSlotId = VisualSlotId::new(1);
+    const TOOLTIP_REVEAL_SETTLE_FRAMES: usize = 6;
+    const WIDGET_FILL_COLOR: Color = Color::srgb(0.8, 0.2, 0.1);
+    const WIDGET_LABEL_FILL_COLOR: Color = Color::srgb(0.7, 0.2, 0.4);
+    const WIDGET_LABEL_SLOT: VisualSlotId = VisualSlotId::new(2);
+    const WIDGET_THUMB_FILL_COLOR: Color = Color::srgb(0.2, 0.7, 0.4);
+    const WIDGET_THUMB_SLOT: VisualSlotId = VisualSlotId::new(4);
+    const WIDGET_TRACK_FILL_COLOR: Color = Color::srgb(0.2, 0.4, 0.7);
+    const WIDGET_TRACK_SLOT: VisualSlotId = VisualSlotId::new(3);
 
     fn zero_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -1780,12 +1951,533 @@ mod tests {
             .id()
     }
 
+    fn spawn_sdf_screen_panel(
+        app: &mut App,
+        tree: LayoutTree,
+        material: StandardMaterial,
+        window: Entity,
+        camera_order: isize,
+        render_layers: RenderLayers,
+    ) -> Entity {
+        let material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(material);
+        app.world_mut()
+            .spawn(
+                DiegeticPanel::screen()
+                    .size(Px(320.0), Px(180.0))
+                    .window_entity(window)
+                    .camera_order(camera_order)
+                    .render_layers(render_layers)
+                    .material(material)
+                    .with_tree(tree)
+                    .build()
+                    .expect("screen panel should build"),
+            )
+            .id()
+    }
+
+    fn tooltip_surface_tree(label: &'static str) -> LayoutTree {
+        let mut tooltip = Tooltip::new(
+            El::column()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .padding(Padding::all(2.0))
+                .background(Color::srgb(0.2, 0.8, 0.4)),
+        )
+        .show_after(Duration::ZERO)
+        .hide_after(Duration::ZERO)
+        .placement_policy(TooltipPlacementPolicy::Fixed);
+        tooltip.text((label, TextStyle::new(4.0)));
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .size(40.0, 20.0)
+                .background(WIDGET_FILL_COLOR)
+                .button("tooltip-target")
+                .tooltip(tooltip),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn one_surface_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(10.0), Mm(10.0));
+        builder.with(
+            El::new()
+                .size(10.0, 10.0)
+                .background(Color::srgb(0.1, 0.2, 0.3)),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn assert_tooltip_surface_is_retained(app: &App, controller: Entity) {
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(controller)
+            .expect("tooltip should complete layout");
+        assert!(computed.result().is_some(), "tooltip layout should succeed");
+        assert!(
+            computed
+                .result()
+                .is_some_and(|result| !result.commands.is_empty()),
+            "tooltip layout should contain render commands: {:?}",
+            computed.result().map(|result| &result.commands),
+        );
+        let tooltip_surfaces = app
+            .world()
+            .resource::<ResolvedSdfSurfaceRegistry>()
+            .surfaces()
+            .filter(|surface| surface.panel_entity() == controller)
+            .count();
+        let tooltip_panel = app
+            .world()
+            .get::<DiegeticPanel>(controller)
+            .expect("tooltip should retain its panel role");
+        assert!(
+            tooltip_surfaces > 0,
+            "the tooltip should publish SDF surfaces; size: {}x{}; tree: {:?}; result: {:?}",
+            tooltip_panel.width(),
+            tooltip_panel.height(),
+            tooltip_panel.tree(),
+            computed.result(),
+        );
+        let retained_panels = sdf_records(app)
+            .iter()
+            .map(|record| record.record_key.panel)
+            .collect::<Vec<_>>();
+        assert!(
+            sdf_records(app)
+                .iter()
+                .any(|record| record.record_key.panel == controller),
+            "the reveal should route the tooltip surface; retained panels: {retained_panels:?}",
+        );
+    }
+
+    fn assert_tooltip_retained_transform(app: &App, controller: Entity) {
+        let record = sdf_records(app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("a ready tooltip should have a retained record");
+        let global = app
+            .world()
+            .get::<GlobalTransform>(controller)
+            .expect("revealed tooltip should have a propagated transform");
+        assert_eq!(
+            record.transform,
+            global.to_matrix() * record.local_transform.to_matrix(),
+            "the retained record must contain the reveal frame's final transform",
+        );
+    }
+
+    struct ShownTooltipFixture {
+        app:        App,
+        panel:      Entity,
+        widget:     Entity,
+        controller: Entity,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct SdfBatchGpuIdentity {
+        key:          SdfBatchKey,
+        entity:       Entity,
+        records:      Handle<ShaderBuffer>,
+        mesh_records: Handle<ShaderBuffer>,
+        mesh:         Handle<Mesh>,
+        capacity:     u32,
+    }
+
+    fn sdf_batch_gpu_identity_for_panel(app: &App, panel: Entity) -> SdfBatchGpuIdentity {
+        let store = app.world().resource::<SdfBatchStore>();
+        let (key, batch) = store
+            .batches()
+            .find(|(_, batch)| {
+                batch
+                    .records()
+                    .iter()
+                    .any(|record| record.record_key.panel == panel)
+            })
+            .expect("panel should belong to an SDF batch");
+        let gpu = batch
+            .gpu
+            .as_ref()
+            .expect("the settled SDF batch should own GPU assets");
+        SdfBatchGpuIdentity {
+            key:          key.clone(),
+            entity:       batch
+                .entity
+                .expect("the settled SDF batch should own an entity"),
+            records:      gpu.records.clone(),
+            mesh_records: gpu.mesh_records.clone(),
+            mesh:         gpu.mesh.clone(),
+            capacity:     gpu.capacity,
+        }
+    }
+
+    fn shown_tooltip_fixture() -> ShownTooltipFixture {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let panel = spawn_sdf_panel(
+            &mut app,
+            tooltip_surface_tree("Retained tooltip"),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("tooltip controller should reify");
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
+            app.update();
+        }
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited),
+        );
+        assert_tooltip_surface_is_retained(&app, controller);
+        ShownTooltipFixture {
+            app,
+            panel,
+            widget,
+            controller,
+        }
+    }
+
+    #[test]
+    fn first_tooltip_reveal_preserves_peer_rows_and_material_table_allocation() {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let panel = spawn_sdf_panel(
+            &mut app,
+            tooltip_surface_tree("First tooltip"),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("tooltip controller should reify");
+
+        let initial_capacity = app.world().resource::<MaterialTableBuffer>().capacity;
+        let initial_rows = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .live_row_count();
+        let rows_before_old_growth_boundary = initial_capacity
+            .saturating_mul(3)
+            .checked_div(4)
+            .unwrap_or(0)
+            .saturating_sub(1);
+        let filler_count = rows_before_old_growth_boundary.saturating_sub(initial_rows.to_u32());
+        for _ in 0..filler_count {
+            spawn_sdf_panel(&mut app, one_surface_tree(), StandardMaterial::default());
+        }
+        settle_sdf_pipeline(&mut app);
+
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        let table_handle = table_buffer
+            .handle
+            .clone()
+            .expect("the settled table should have an allocated buffer");
+        let table_capacity = table_buffer.capacity;
+        let table_allocations = table_buffer.allocations;
+        assert_eq!(table_capacity, initial_capacity);
+        let peer_materials = sdf_material_assignments_except(&app, controller);
+        assert!(
+            sdf_records(&app)
+                .iter()
+                .all(|record| record.record_key.panel != controller),
+            "tooltip render records should remain deferred until first reveal",
+        );
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
+            app.update();
+            assert_eq!(
+                sdf_material_assignments_except(&app, controller),
+                peer_materials,
+                "first materialization must not renumber an existing SDF material row",
+            );
+            assert_material_table_buffer_unchanged(
+                &app,
+                &table_handle,
+                table_capacity,
+                table_allocations,
+            );
+        }
+        assert_tooltip_surface_is_retained(&app, controller);
+    }
+
+    #[test]
+    fn tooltip_hide_show_preserves_material_rows_and_table_buffer() {
+        let ShownTooltipFixture {
+            mut app,
+            widget,
+            controller,
+            ..
+        } = shown_tooltip_fixture();
+        let visible_material_table = app.world().resource::<FrameMaterialTableBuild>().table();
+        let visible_material_rows = visible_material_table.row_count();
+        let visible_material_sources = visible_material_table.live_row_count();
+        let visible_tooltip_slots = panel_authored_slot_ids(&app, controller);
+        assert!(
+            !visible_tooltip_slots.is_empty(),
+            "a visible tooltip should reference authored material rows",
+        );
+        let visible_peer_materials = sdf_material_assignments_except(&app, controller);
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        let table_handle = table_buffer
+            .handle
+            .clone()
+            .expect("the material table should have an allocated buffer");
+        let table_capacity = table_buffer.capacity;
+        let table_allocations = table_buffer.allocations;
+        let batch_gpu_identity = sdf_batch_gpu_identity_for_panel(&app, controller);
+        clear_asset_events::<ShaderBuffer>(&mut app);
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::None);
+        app.update();
+        let hidden_record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("hiding should retain the tooltip's SDF record");
+        assert_eq!(hidden_record.paint_mask.bits(), 0);
+        assert_eq!(
+            sdf_batch_gpu_identity_for_panel(&app, controller),
+            batch_gpu_identity,
+            "hiding the tooltip must preserve its SDF batch allocation",
+        );
+        assert_eq!(
+            app.world()
+                .resource::<FrameMaterialTableBuild>()
+                .table()
+                .row_count(),
+            visible_material_rows,
+            "a hidden materialized tooltip should reserve its frame-table rows",
+        );
+        assert_eq!(
+            app.world()
+                .resource::<FrameMaterialTableBuild>()
+                .table()
+                .live_row_count(),
+            visible_material_sources,
+            "hiding a materialized tooltip should keep its material sources live",
+        );
+        assert_eq!(
+            sdf_material_assignments_except(&app, controller),
+            visible_peer_materials,
+            "hiding a tooltip should not renumber another SDF record's material rows",
+        );
+        assert_material_table_buffer_unchanged(
+            &app,
+            &table_handle,
+            table_capacity,
+            table_allocations,
+        );
+        assert_eq!(modified_asset_events_for(&app, &table_handle), 0);
+        clear_asset_events::<ShaderBuffer>(&mut app);
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        let reshown_tooltip_slots = panel_authored_slot_ids(&app, controller);
+        assert_eq!(
+            reshown_tooltip_slots, visible_tooltip_slots,
+            "showing the same tooltip again should restore the same material rows",
+        );
+        let reshown_record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("showing should retain the tooltip's SDF record");
+        assert_ne!(reshown_record.paint_mask.bits(), 0);
+        assert_eq!(
+            sdf_batch_gpu_identity_for_panel(&app, controller),
+            batch_gpu_identity,
+            "showing the tooltip must preserve its SDF batch allocation",
+        );
+        assert_eq!(
+            sdf_material_assignments_except(&app, controller),
+            visible_peer_materials,
+            "showing the tooltip again should not renumber another SDF record's material rows",
+        );
+        assert_material_table_buffer_unchanged(
+            &app,
+            &table_handle,
+            table_capacity,
+            table_allocations,
+        );
+        assert_eq!(modified_asset_events_for(&app, &table_handle), 0);
+    }
+
+    #[test]
+    fn ready_tooltip_reveal_routes_its_final_transform_in_the_same_frame() {
+        let ShownTooltipFixture {
+            mut app,
+            panel,
+            widget,
+            controller,
+        } = shown_tooltip_fixture();
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::None);
+        app.update();
+        let mut panel_transform = app
+            .world_mut()
+            .get_mut::<Transform>(panel)
+            .expect("the tooltip target panel should retain its transform");
+        panel_transform.translation = Vec3::new(0.4, -0.2, 0.3);
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        app.update();
+        assert_tooltip_retained_transform(&app, controller);
+
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, tooltip_surface_tree("Replacement tooltip"))
+                .is_ok()
+        );
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
+            app.update();
+        }
+        let replacement_controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("replacement tooltip controller should reify");
+        assert_ne!(replacement_controller, controller);
+        assert!(app.world().get_entity(controller).is_err());
+        assert_eq!(
+            app.world().get::<Visibility>(replacement_controller),
+            Some(&Visibility::Inherited),
+        );
+        assert_tooltip_surface_is_retained(&app, replacement_controller);
+        assert_tooltip_retained_transform(&app, replacement_controller);
+    }
+
+    #[test]
+    fn secondary_window_tooltip_reveal_routes_its_final_transform() {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins((WidgetsPlugin, ScreenSpacePlugin));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        let secondary_window = app
+            .world_mut()
+            .spawn(Window {
+                resolution: UVec2::new(960, 540).into(),
+                ..Default::default()
+            })
+            .id();
+        let render_layers = RenderLayers::layer(6);
+        let panel = spawn_sdf_screen_panel(
+            &mut app,
+            tooltip_surface_tree("Retained tooltip"),
+            StandardMaterial::default(),
+            secondary_window,
+            37,
+            render_layers.clone(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = app
+            .world_mut()
+            .run_system_once(move |reader: PanelWidgetReader| {
+                reader.entity(panel, &PanelElementId::named("tooltip-target"))
+            })
+            .ok()
+            .flatten()
+            .expect("screen tooltip target widget should reify");
+        let controller = app
+            .world()
+            .get::<Tooltips>(widget)
+            .and_then(|tooltips| tooltips.iter().next())
+            .expect("screen tooltip controller should reify");
+
+        app.world_mut()
+            .entity_mut(widget)
+            .insert(PickingInteraction::Hovered);
+        for _ in 0..TOOLTIP_REVEAL_SETTLE_FRAMES {
+            app.update();
+        }
+
+        assert_eq!(
+            app.world().get::<Visibility>(controller),
+            Some(&Visibility::Inherited),
+        );
+        let panel_layers = app
+            .world()
+            .get::<RenderLayers>(panel)
+            .cloned()
+            .expect("screen panel should carry the overlay camera's view layer");
+        assert_ne!(
+            panel_layers, render_layers,
+            "the screen panel renders on its camera's allocated view layer, not the authored one",
+        );
+        assert_eq!(
+            app.world().get::<RenderLayers>(controller),
+            Some(&panel_layers),
+            "the tooltip should inherit the secondary-window panel's layers",
+        );
+        let record = sdf_records(&app)
+            .into_iter()
+            .find(|record| record.record_key.panel == controller)
+            .expect("the secondary-window tooltip should publish a retained record");
+        let global = app
+            .world()
+            .get::<GlobalTransform>(controller)
+            .expect("revealed screen tooltip should have a propagated transform");
+        assert_eq!(
+            record.transform,
+            global.to_matrix() * record.local_transform.to_matrix(),
+            "the retained screen record must contain the final propagated transform",
+        );
+    }
+
     fn single_surface_tree(color: Color) -> LayoutTree {
         LayoutBuilder::with_root(
             El::new()
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
                 .background(color),
+        )
+        .build()
+    }
+
+    fn rounded_surface_tree(color: Color) -> LayoutTree {
+        LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(color)
+                .corner_radius(4.0),
         )
         .build()
     }
@@ -1798,6 +2490,30 @@ mod tests {
                 .height(Sizing::GROW)
                 .background(first),
             |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(second),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn side_by_side_surface_tree(first: Color, second: Color) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::row().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(first),
+                    |_| {},
+                );
                 builder.with(
                     El::new()
                         .width(Sizing::GROW)
@@ -1975,11 +2691,7 @@ mod tests {
             .batches()
             .flat_map(|(_, batch)| batch.records().iter().cloned())
             .collect();
-        records.sort_by(|left, right| {
-            left.record_key
-                .command_index
-                .cmp(&right.record_key.command_index)
-        });
+        records.sort_by_key(|record| record.draw_order);
         records
     }
 
@@ -2003,6 +2715,32 @@ mod tests {
         let batches: Vec<&SdfBatch> = store.batches().map(|(_, batch)| batch).collect();
         assert_eq!(batches.len(), 1, "expected exactly one SDF batch");
         batches[0].records().to_vec()
+    }
+
+    fn authored_fill_draw_orders(app: &App) -> Vec<CommandIndex> {
+        single_sdf_batch_records(app)
+            .into_iter()
+            .filter(|record| matches!(record.fill_material, SdfPaintMaterial::Authored(_)))
+            .map(|record| record.draw_order)
+            .collect()
+    }
+
+    fn reset_sdf_batch_sort_counts(app: &mut App) {
+        for (_, batch) in app
+            .world_mut()
+            .resource_mut::<SdfBatchStore>()
+            .batches_mut()
+        {
+            batch.sort_count = 0;
+        }
+    }
+
+    fn sdf_batch_sort_counts(app: &App) -> Vec<usize> {
+        app.world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .map(|(_, batch)| batch.sort_count)
+            .collect()
     }
 
     fn live_sdf_batch_count(app: &mut App) -> usize {
@@ -2034,15 +2772,34 @@ mod tests {
     }
 
     fn fill_row_color(app: &App, record: &ResolvedSdfBatchRecord) -> Vec4 {
-        let SdfPaintMaterial::Authored(slot) = record.fill_material else {
-            panic!("record should have an authored fill material");
+        authored_row_color(app, record.fill_material)
+    }
+
+    fn border_row_color(app: &App, record: &ResolvedSdfBatchRecord) -> Vec4 {
+        authored_row_color(app, record.border_material)
+    }
+
+    fn authored_row(app: &App, material: SdfPaintMaterial) -> MaterialSlotValues {
+        let SdfPaintMaterial::Authored(slot) = material else {
+            panic!("material role should be authored");
         };
         let row_index = usize::try_from(slot.as_u32()).expect("slot index should fit usize");
         app.world()
             .resource::<FrameMaterialTableBuild>()
             .table()
             .rows()[row_index]
-            .base_color
+    }
+
+    fn authored_row_color(app: &App, material: SdfPaintMaterial) -> Vec4 {
+        authored_row(app, material).base_color
+    }
+
+    fn fill_row_metallic(app: &App, record: &ResolvedSdfBatchRecord) -> f32 {
+        authored_row(app, record.fill_material).metallic
+    }
+
+    fn assert_same_f32(actual: f32, expected: f32) {
+        assert_eq!(actual.to_bits(), expected.to_bits());
     }
 
     fn frame_material_row_count(app: &App) -> usize {
@@ -2050,6 +2807,13 @@ mod tests {
             .resource::<FrameMaterialTableBuild>()
             .table()
             .row_count()
+    }
+
+    fn frame_material_live_row_count(app: &App) -> usize {
+        app.world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .live_row_count()
     }
 
     fn frame_material_capacity(app: &App) -> u32 {
@@ -2065,6 +2829,53 @@ mod tests {
                 SdfPaintMaterial::NotAuthored => None,
             })
             .collect()
+    }
+
+    fn panel_authored_slot_ids(app: &App, panel: Entity) -> Vec<MaterialSlotId> {
+        let records = sdf_records(app)
+            .into_iter()
+            .filter(|record| record.record_key.panel == panel)
+            .collect::<Vec<_>>();
+        authored_slot_ids(&records)
+    }
+
+    fn sdf_material_assignments_except(
+        app: &App,
+        excluded_panel: Entity,
+    ) -> Vec<(
+        CommandIndex,
+        SdfRecordKey,
+        SdfPaintMaterial,
+        SdfPaintMaterial,
+    )> {
+        let mut assignments: Vec<_> = sdf_records(app)
+            .into_iter()
+            .filter(|record| record.record_key.panel != excluded_panel)
+            .map(|record| {
+                (
+                    record.draw_order,
+                    record.record_key,
+                    record.fill_material,
+                    record.border_material,
+                )
+            })
+            .collect();
+        assignments.sort_by_key(|(draw_order, record_key, _, _)| {
+            (record_key.panel.to_bits(), draw_order.get())
+        });
+        assignments
+    }
+
+    fn assert_material_table_buffer_unchanged(
+        app: &App,
+        expected_handle: &Handle<ShaderBuffer>,
+        expected_capacity: u32,
+        expected_allocations: u32,
+    ) {
+        let table_buffer = app.world().resource::<MaterialTableBuffer>();
+        assert_eq!(table_buffer.handle.as_ref(), Some(expected_handle));
+        assert_eq!(table_buffer.capacity, expected_capacity);
+        assert_eq!(table_buffer.allocations, expected_allocations);
     }
 
     fn authored_slot_count(records: &[ResolvedSdfBatchRecord]) -> usize {
@@ -2124,6 +2935,17 @@ mod tests {
             .resource::<Messages<AssetEvent<A>>>()
             .iter_current_update_messages()
             .filter(|event| matches!(event, AssetEvent::Modified { .. }))
+            .count()
+    }
+
+    fn modified_asset_events_for<A: Asset>(app: &App, handle: &Handle<A>) -> usize {
+        let id = handle.id();
+        app.world()
+            .resource::<Messages<AssetEvent<A>>>()
+            .iter_current_update_messages()
+            .filter(
+                |event| matches!(event, AssetEvent::Modified { id: modified } if *modified == id),
+            )
             .count()
     }
 
@@ -2231,9 +3053,10 @@ mod tests {
     fn fill_input(material: &StandardMaterial, color: Option<Color>) -> SdfMaterialSlotInput<'_> {
         SdfMaterialSlotInput {
             key:            SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Fill,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             },
             base_material:  material,
             color_override: color,
@@ -2275,9 +3098,10 @@ mod tests {
         render::apply_sidedness(&mut base_material, Sidedness::BackOnly);
         let input = SdfMaterialSlotInput {
             key:            SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Fill,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             },
             base_material:  &base_material,
             color_override: None,
@@ -2374,6 +3198,51 @@ mod tests {
         assert!(append.is_none());
         assert_eq!(builder.row_count(), 0);
         assert_eq!(builder.dropped_record_count(), 1);
+    }
+
+    #[test]
+    fn border_limit_drop_counts_each_rolled_back_surface() {
+        let mut builder = FrameMaterialTableBuilder::default();
+        builder.clear(1);
+        let (materials, default_material, material) =
+            material_context_for_test(StandardMaterial::default());
+        let first_surface = resolved_surface_for_test(
+            0,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
+        let second_surface = resolved_surface_for_test(
+            1,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
+        let asset_server = asset_server_for_test();
+
+        let first = append_sdf_record_materials(
+            &mut builder,
+            &first_surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
+            &materials,
+            &asset_server,
+            &default_material,
+        );
+        let second = append_sdf_record_materials(
+            &mut builder,
+            &second_surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
+            &materials,
+            &asset_server,
+            &default_material,
+        );
+
+        assert!(first.is_none());
+        assert!(second.is_none());
+        assert_eq!(builder.row_count(), 0);
+        assert_eq!(builder.dropped_record_count(), 2);
     }
 
     #[test]
@@ -2717,18 +3586,23 @@ mod tests {
         let mut batch = SdfBatch::default();
         let record = ResolvedSdfBatchRecord {
             record_key:       SdfRecordKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfRecordRole::Whole,
             },
+            draw_order:       CommandIndex::from(0),
             fill_source:      SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Fill,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Fill,
             },
             border_source:    SdfMaterialSourceKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
-                role:          SdfMaterialRole::Border,
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfMaterialRole::Border,
             },
             draw_depth:       draw_depth_for_test(0),
             batch_key:        test_batch_key(),
@@ -2813,7 +3687,27 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_sdf_frame_rewrites_only_the_material_table_buffer() {
+    fn sdf_batch_entities_ignore_stock_mesh_picking() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::WHITE),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let entities = live_sdf_batch_entities(&mut app);
+        assert_eq!(entities.len(), 1);
+        let pickable = app
+            .world()
+            .get::<Pickable>(entities[0])
+            .expect("SDF batch entity should carry Pickable::IGNORE");
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
+    }
+
+    #[test]
+    fn unchanged_sdf_frame_modifies_no_main_world_render_assets() {
         let mut app = sdf_pipeline_app();
         spawn_sdf_panel(
             &mut app,
@@ -2832,7 +3726,43 @@ mod tests {
 
         assert_eq!(modified_asset_events::<SdfExtendedMaterial>(&app), 0);
         assert_eq!(modified_asset_events::<PathExtendedMaterial>(&app), 0);
-        assert_eq!(modified_asset_events::<ShaderBuffer>(&app), 1);
+        assert_eq!(modified_asset_events::<ShaderBuffer>(&app), 0);
+    }
+
+    #[test]
+    fn same_capacity_sdf_edit_stages_gpu_update_in_the_same_frame() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::WHITE),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let identity = sdf_batch_gpu_identity_for_panel(&app, panel);
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&identity.records),
+            "an unchanged frame should leave no staged SDF upload",
+        );
+
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, rounded_surface_tree(Color::WHITE))
+                .is_ok()
+        );
+        app.update();
+
+        let after = sdf_batch_gpu_identity_for_panel(&app, panel);
+        assert_eq!(after.records, identity.records);
+        assert!(
+            app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&identity.records),
+            "the retained SDF edit should stage a direct same-frame GPU write",
+        );
     }
 
     #[test]
@@ -2854,9 +3784,12 @@ mod tests {
             (-crate::render::constants::OIT_DEPTH_STEP).to_bits()
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, text_toggle_tree(TextContentState::Removed));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, text_toggle_tree(TextContentState::Removed))
+                .is_ok()
+        );
         settle_sdf_pipeline(&mut app);
 
         let entity_after = live_sdf_batch_entities(&mut app);
@@ -2953,7 +3886,7 @@ mod tests {
             record.border_material,
             SdfPaintMaterial::Authored(_)
         ));
-        assert_eq!(record.record_key.command_index.get(), 0);
+        assert_eq!(record.draw_order.get(), 0);
         assert_eq!(
             record.batch_key.pipeline_compatibility.alpha,
             BatchAlphaMode::Opaque
@@ -2993,7 +3926,7 @@ mod tests {
             border_record.border_material,
             SdfPaintMaterial::Authored(_)
         ));
-        assert!(image_record.record_key.command_index < border_record.record_key.command_index);
+        assert!(image_record.record_key.command_index < border_record.draw_order);
         assert_eq!(
             border_record.batch_key.pipeline_compatibility.alpha,
             BatchAlphaMode::Blend
@@ -3070,6 +4003,10 @@ mod tests {
         }) else {
             panic!("expected one border-only SDF record");
         };
+
+        assert_eq!(fill_record.record_key.role, SdfRecordRole::Fill);
+        assert_eq!(border_record.record_key.role, SdfRecordRole::Border);
+        assert_ne!(fill_record.record_key, border_record.record_key);
 
         assert_eq!(
             fill_record.batch_key.pipeline_compatibility.alpha,
@@ -3155,6 +4092,10 @@ mod tests {
             panic!("expected one border-only SDF record");
         };
 
+        assert_eq!(fill_record.record_key.role, SdfRecordRole::Fill);
+        assert_eq!(border_record.record_key.role, SdfRecordRole::Border);
+        assert_ne!(fill_record.record_key, border_record.record_key);
+
         assert_eq!(
             fill_record.batch_key.pipeline_compatibility.alpha,
             BatchAlphaMode::Opaque
@@ -3236,9 +4177,12 @@ mod tests {
         let entity_before = live_sdf_batch_entities(&mut app);
         assert_eq!(entity_before.len(), 1);
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, single_surface_tree(Color::srgb(0.7, 0.2, 0.1)));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, single_surface_tree(Color::srgb(0.7, 0.2, 0.1)))
+                .is_ok()
+        );
         settle_sdf_pipeline(&mut app);
 
         let entity_after = live_sdf_batch_entities(&mut app);
@@ -3302,14 +4246,19 @@ mod tests {
                 .world_mut()
                 .resource_mut::<Assets<StandardMaterial>>()
                 .add(second_material);
-            app.world_mut().commands().set_tree(
-                panel,
-                two_material_surface_tree(
-                    first_handle,
-                    expected_colors[0],
-                    second_handle,
-                    expected_colors[1],
-                ),
+            assert!(
+                app.world_mut()
+                    .commands()
+                    .set_tree(
+                        panel,
+                        two_material_surface_tree(
+                            first_handle,
+                            expected_colors[0],
+                            second_handle,
+                            expected_colors[1],
+                        ),
+                    )
+                    .is_ok()
             );
             settle_sdf_pipeline(&mut app);
 
@@ -3436,20 +4385,23 @@ mod tests {
         assert_eq!(initial.len(), 2);
         assert_authored_slots_are_distinct(&initial);
         assert_eq!(
-            frame_material_row_count(&app),
+            frame_material_live_row_count(&app),
             authored_slot_count(&initial)
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, single_surface_tree(Color::srgb(0.9, 0.2, 0.1)));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, single_surface_tree(Color::srgb(0.9, 0.2, 0.1)))
+                .is_ok()
+        );
         settle_sdf_pipeline(&mut app);
 
         let reduced = sdf_records(&app);
         assert_eq!(reduced.len(), 1);
         assert_authored_slots_are_distinct(&reduced);
         assert_eq!(
-            frame_material_row_count(&app),
+            frame_material_live_row_count(&app),
             authored_slot_count(&reduced)
         );
     }
@@ -3493,7 +4445,7 @@ mod tests {
     }
 
     #[test]
-    fn visibility_and_layer_changes_rekey_sdf_batches_same_frame() {
+    fn layer_changes_rekey_and_visibility_masks_sdf_records_same_frame() {
         let mut app = sdf_pipeline_app();
         let panel = spawn_sdf_panel(
             &mut app,
@@ -3529,9 +4481,11 @@ mod tests {
         app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
         app.update();
 
-        assert!(sdf_records(&app).is_empty());
-        assert_eq!(app.world().resource::<SdfBatchStore>().batches().count(), 0);
-        assert_eq!(live_sdf_batch_count(&mut app), 0);
+        let hidden_records = sdf_records(&app);
+        assert_eq!(hidden_records.len(), 1);
+        assert_eq!(hidden_records[0].paint_mask.bits(), 0);
+        assert_eq!(app.world().resource::<SdfBatchStore>().batches().count(), 1);
+        assert_eq!(live_sdf_batch_count(&mut app), 1);
     }
 
     #[test]
@@ -3548,18 +4502,21 @@ mod tests {
 
         let initial = sdf_records(&app);
         assert_eq!(initial.len(), 2);
-        assert_eq!(initial[0].record_key.command_index, CommandIndex::from(0));
-        assert_eq!(initial[1].record_key.command_index, CommandIndex::from(1));
+        assert_eq!(initial[0].draw_order, CommandIndex::from(0));
+        assert_eq!(initial[1].draw_order, CommandIndex::from(1));
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, topology_churn_tree(survivor, added));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, topology_churn_tree(survivor, added))
+                .is_ok()
+        );
         app.update();
 
         let churned = sdf_records(&app);
         assert_eq!(churned.len(), 2);
-        assert_eq!(churned[0].record_key.command_index, CommandIndex::from(0));
-        assert_eq!(churned[1].record_key.command_index, CommandIndex::from(1));
+        assert_eq!(churned[0].draw_order, CommandIndex::from(0));
+        assert_eq!(churned[1].draw_order, CommandIndex::from(1));
         assert_eq!(fill_row_color(&app, &churned[0]), linear_color(survivor));
         assert_eq!(fill_row_color(&app, &churned[1]), linear_color(added));
         assert_eq!(app.world().resource::<SdfBatchStore>().batches().count(), 1);
@@ -3584,12 +4541,90 @@ mod tests {
         let records = single_sdf_batch_records(&app);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].record_key.command_index, CommandIndex::from(0));
-        assert_eq!(records[1].record_key.command_index, CommandIndex::from(1));
+        assert_eq!(records[0].draw_order, CommandIndex::from(0));
+        assert_eq!(records[1].draw_order, CommandIndex::from(1));
         assert!(
             records[0].draw_depth.draw_order_index() <= records[1].draw_depth.draw_order_index()
         );
         assert!(records[0].oit_depth_offset < records[1].oit_depth_offset);
+    }
+
+    #[test]
+    fn equal_draw_depths_are_broken_by_draw_order() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            stacked_surface_tree(
+                Color::srgba(0.9, 0.1, 0.1, 0.5),
+                Color::srgba(0.1, 0.1, 0.9, 0.5),
+            ),
+            StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        settle_sdf_pipeline(&mut app);
+
+        {
+            let mut store = app.world_mut().resource_mut::<SdfBatchStore>();
+            let (_, batch) = store
+                .batches_mut()
+                .next()
+                .expect("the two surfaces should share one SDF batch");
+            assert_eq!(batch.records.len(), 2);
+            batch.records[1].draw_depth = batch.records[0].draw_depth;
+            batch.records.swap(0, 1);
+            batch.sort_records();
+        }
+
+        let records = single_sdf_batch_records(&app);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].draw_order, CommandIndex::from(0));
+        assert_eq!(records[1].draw_order, CommandIndex::from(1));
+        assert_eq!(
+            records[0].draw_depth.draw_order_index(),
+            records[1].draw_depth.draw_order_index()
+        );
+    }
+
+    #[test]
+    fn deferred_sdf_record_sort_runs_once_per_dirty_batch() {
+        let first = Color::srgb(0.9, 0.1, 0.1);
+        let second = Color::srgb(0.1, 0.1, 0.9);
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            stacked_surface_tree(first, second),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        reset_sdf_batch_sort_counts(&mut app);
+
+        let updated = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, side_by_side_surface_tree(first, second));
+        assert!(
+            updated.is_ok(),
+            "changing both SDF surface bounds should succeed"
+        );
+        app.update();
+
+        assert_eq!(
+            sdf_batch_sort_counts(&app),
+            vec![1],
+            "one dirty SDF batch sorts once after both changed records append",
+        );
+
+        reset_sdf_batch_sort_counts(&mut app);
+        app.update();
+
+        assert_eq!(
+            sdf_batch_sort_counts(&app),
+            vec![0],
+            "a clean SDF batch performs no deferred sort",
+        );
     }
 
     #[test]
@@ -3798,6 +4833,9 @@ mod tests {
         ResolvedSdfSurface {
             panel_entity:    Entity::from_bits(1),
             command_index:   CommandIndex::from(command_index),
+            element_index:   draw_order::ElementIndex::from(command_index),
+            divider_ordinal: None,
+            record_role:     SdfRecordRole::Whole,
             draw_depth:      draw_depth_for_test(command_index),
             fill_material:   ResolvedSdfMaterial {
                 authorship:    fill_authorship,
@@ -3872,5 +4910,1717 @@ mod tests {
         draw_order::DrawOrder::from_commands(&commands)
             .depth_for(index)
             .expect("draw command should have depth")
+    }
+
+    // ── Widget visual-slot overrides ────────────────────────────────────────
+
+    fn widget_sdf_pipeline_app() -> App {
+        let mut app = sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        app
+    }
+
+    fn slotted_widget_fill_tree(peer_z_index: i8) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_FILL_COLOR)
+                        .button("styled")
+                        .visual_slot(TEST_SLOT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(PEER_FILL_COLOR)
+                        .z_index(peer_z_index),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    enum FocusedBorderState {
+        Absent,
+        Authored,
+    }
+
+    enum BorderCommandState {
+        Absent,
+        Authored,
+    }
+
+    enum SiblingBorderState {
+        Absent,
+        Authored,
+    }
+
+    fn focused_border_insertion_tree(focused_border_state: FocusedBorderState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                let first = El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(WIDGET_FILL_COLOR)
+                    .button("stateful");
+                let first = match focused_border_state {
+                    FocusedBorderState::Absent => first,
+                    FocusedBorderState::Authored => first.focused(BorderColor(STATE_BORDER_COLOR)),
+                };
+                builder.with(first, |_| {});
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(PEER_FILL_COLOR),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn border_command_insertion_tree(border_command_state: BorderCommandState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                let first = El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(WIDGET_FILL_COLOR);
+                let first = match border_command_state {
+                    BorderCommandState::Absent => first,
+                    BorderCommandState::Authored => {
+                        first.border(Border::all(Mm(1.0), STATE_BORDER_COLOR))
+                    },
+                };
+                builder.with(first, |_| {});
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(PEER_FILL_COLOR),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn divider_key_tree(sibling_border_state: SiblingBorderState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(WIDGET_FILL_COLOR)
+                .child_divider(ChildDivider::new(Mm(1.0), CHILD_DIVIDER_COLOR)),
+            |builder| {
+                let first = El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .background(PEER_FILL_COLOR);
+                let first = match sibling_border_state {
+                    SiblingBorderState::Absent => first,
+                    SiblingBorderState::Authored => {
+                        first.border(Border::all(Mm(1.0), STATE_BORDER_COLOR))
+                    },
+                };
+                builder.with(first, |_| {});
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_LABEL_FILL_COLOR),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_TRACK_FILL_COLOR),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn styled_divider_tree(parent_material: Handle<StandardMaterial>) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(WIDGET_FILL_COLOR)
+                .material(parent_material)
+                .corner_radius(PARENT_ELEMENT_CORNER_RADIUS)
+                .child_divider(ChildDivider::new(Mm(1.0), CHILD_DIVIDER_COLOR))
+                .button("styled")
+                .visual_slot(TEST_SLOT),
+            |builder| {
+                for color in [
+                    PEER_FILL_COLOR,
+                    WIDGET_LABEL_FILL_COLOR,
+                    WIDGET_TRACK_FILL_COLOR,
+                ] {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .background(color),
+                        |_| {},
+                    );
+                }
+            },
+        );
+        builder.build()
+    }
+
+    fn slotted_widget_label_track_thumb_fill_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .button("styled"),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_LABEL_FILL_COLOR)
+                        .visual_slot(WIDGET_LABEL_SLOT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_TRACK_FILL_COLOR)
+                        .visual_slot(WIDGET_TRACK_SLOT),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(WIDGET_THUMB_FILL_COLOR)
+                        .visual_slot(WIDGET_THUMB_SLOT),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    fn slotted_widget_bordered_fill_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(WIDGET_FILL_COLOR)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR))
+                .button("styled")
+                .visual_slot(TEST_SLOT),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn slotted_widget_border_only_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR))
+                .button("styled")
+                .visual_slot(TEST_SLOT),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    fn styled_widget(app: &mut App) -> Entity {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<PanelWidget>>();
+        let widgets: Vec<Entity> = query.iter(app.world()).collect();
+        assert_eq!(widgets.len(), 1, "expected exactly one reified widget");
+        widgets[0]
+    }
+
+    fn set_slot_override(app: &mut App, widget: Entity, value: VisualSlotOverride) {
+        set_slot_overrides(app, widget, [(TEST_SLOT, value)]);
+    }
+
+    fn set_slot_overrides(
+        app: &mut App,
+        widget: Entity,
+        values: impl IntoIterator<Item = (VisualSlotId, VisualSlotOverride)>,
+    ) {
+        let mut entity = app.world_mut().entity_mut(widget);
+        if let Some(mut overrides) = entity.get_mut::<WidgetVisualOverrides>() {
+            for (slot, value) in values {
+                overrides.set(slot, value);
+            }
+        } else {
+            let mut overrides = WidgetVisualOverrides::default();
+            for (slot, value) in values {
+                overrides.set(slot, value);
+            }
+            entity.insert(overrides);
+        }
+    }
+
+    fn sdf_record_key_for_fill_color(app: &App, color: Color) -> SdfRecordKey {
+        sdf_records(app)
+            .into_iter()
+            .find(|record| fill_row_color(app, record) == linear_color(color))
+            .map(|record| record.record_key)
+            .expect("the widget part fill record should exist")
+    }
+
+    fn sdf_record_batch_snapshot(
+        app: &App,
+        record_key: SdfRecordKey,
+    ) -> (SdfBatchKey, Entity, ResolvedSdfBatchRecord) {
+        app.world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find_map(|(batch_key, batch)| {
+                batch
+                    .records()
+                    .iter()
+                    .find(|record| record.record_key == record_key)
+                    .map(|record| {
+                        (
+                            batch_key.clone(),
+                            batch.entity.expect("widget part batch should be spawned"),
+                            record.clone(),
+                        )
+                    })
+            })
+            .expect("the widget part record should remain retained")
+    }
+
+    fn clear_slot_override(app: &mut App, widget: Entity) {
+        let mut entity = app.world_mut().entity_mut(widget);
+        if let Some(mut overrides) = entity.get_mut::<WidgetVisualOverrides>() {
+            overrides.clear(TEST_SLOT);
+        }
+    }
+
+    fn sdf_upload_count(app: &App) -> usize {
+        app.world()
+            .resource::<DiegeticPerfStats>()
+            .panel_geometry
+            .sdf_uploads
+    }
+
+    fn assert_ignores_picking(app: &App, entity: Entity) {
+        let pickable = app
+            .world()
+            .get::<Pickable>(entity)
+            .expect("batch entity should carry Pickable::IGNORE");
+        assert!(!pickable.is_hoverable);
+        assert!(!pickable.should_block_lower);
+    }
+
+    /// Widget/panel state that a state-only visual override must not touch.
+    struct WidgetGeometrySnapshot {
+        transform:      Transform,
+        anchor_rect:    WidgetAnchorRect,
+        widget_records: Vec<ComputedWidgetRecord>,
+        panel_tick:     Tick,
+        computed_tick:  Tick,
+    }
+
+    fn widget_geometry_snapshot(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+    ) -> WidgetGeometrySnapshot {
+        WidgetGeometrySnapshot {
+            transform:      *app
+                .world()
+                .get::<Transform>(widget)
+                .expect("widget should carry a transform"),
+            anchor_rect:    *app
+                .world()
+                .get::<WidgetAnchorRect>(widget)
+                .expect("widget should carry an anchor rect"),
+            widget_records: app
+                .world()
+                .get::<ComputedDiegeticPanel>(panel)
+                .expect("panel should have computed output")
+                .widget_records()
+                .to_vec(),
+            panel_tick:     app
+                .world()
+                .entity(panel)
+                .get_ref::<DiegeticPanel>()
+                .expect("panel role should be live")
+                .last_changed(),
+            computed_tick:  app
+                .world()
+                .entity(panel)
+                .get_ref::<ComputedDiegeticPanel>()
+                .expect("panel should have computed output")
+                .last_changed(),
+        }
+    }
+
+    fn assert_widget_geometry_unchanged(
+        app: &App,
+        panel: Entity,
+        widget: Entity,
+        snapshot: &WidgetGeometrySnapshot,
+    ) {
+        let current = widget_geometry_snapshot(app, panel, widget);
+        assert_eq!(
+            current.panel_tick, snapshot.panel_tick,
+            "an override must not fire Changed<DiegeticPanel>",
+        );
+        assert_eq!(
+            current.computed_tick, snapshot.computed_tick,
+            "an override must not fire Changed<ComputedDiegeticPanel> or solve geometry",
+        );
+        assert_eq!(
+            current.transform, snapshot.transform,
+            "an override must not move the widget transform",
+        );
+        assert_eq!(
+            current.anchor_rect, snapshot.anchor_rect,
+            "an override must not change the widget hit rectangle",
+        );
+        assert_eq!(
+            current.widget_records, snapshot.widget_records,
+            "an override must not change widget rects or interaction rank",
+        );
+    }
+
+    #[test]
+    fn same_key_offset_override_dirties_only_the_referenced_sdf_batch() {
+        let mut app = widget_sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(1),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        app.update();
+        assert_eq!(
+            sdf_upload_count(&app),
+            0,
+            "settled pipeline should be quiet"
+        );
+        let records_before = sdf_records(&app);
+        assert_eq!(records_before.len(), 2);
+        assert_eq!(
+            app.world().resource::<SdfBatchStore>().batches().count(),
+            2,
+            "distinct z-indexes should split the two fills into two batches",
+        );
+
+        let widget = styled_widget(&mut app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(OVERRIDE_OFFSET),
+        );
+        app.update();
+
+        assert_eq!(
+            sdf_upload_count(&app),
+            1,
+            "only the referenced batch should re-upload",
+        );
+        let records_after = sdf_records(&app);
+        assert_eq!(
+            records_after[0].local_transform.translation,
+            records_before[0].local_transform.translation + OVERRIDE_OFFSET.extend(0.0),
+        );
+        assert_eq!(records_after[1], records_before[1], "peer record untouched");
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+
+        // Author the identical override a second time: the changed component
+        // re-dispatches, but the routes rebuild equal records, so no retained
+        // record, batch entity, or GPU row changes.
+        let entities_before = live_sdf_batch_entities(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_offset(OVERRIDE_OFFSET),
+        );
+        app.update();
+        assert_eq!(
+            sdf_upload_count(&app),
+            0,
+            "a repeated identical override is a no-op",
+        );
+        assert_eq!(sdf_records(&app), records_after);
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+    }
+
+    #[test]
+    fn fill_color_override_patches_material_row_without_rekeying() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(0),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        assert_eq!(live_sdf_batch_count(&mut app), 1);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 2);
+        assert_fill_row_colors(&app, &records, &[WIDGET_FILL_COLOR, PEER_FILL_COLOR]);
+        let entities_before = live_sdf_batch_entities(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_fill_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_fill_row_colors(&app, &records, &[SLOT_OVERRIDE_COLOR, PEER_FILL_COLOR]);
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+        assert_eq!(
+            sdf_upload_count(&app),
+            0,
+            "a fill color override flows through the frame material table, not the record buffer",
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let records = sdf_records(&app);
+        assert_fill_row_colors(&app, &records, &[WIDGET_FILL_COLOR, PEER_FILL_COLOR]);
+    }
+
+    #[test]
+    fn focused_border_authoring_preserves_sibling_material_source_key() {
+        let mut app = widget_sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            focused_border_insertion_tree(FocusedBorderState::Absent),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let expected = SdfMaterialSourceKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfMaterialRole::Fill,
+        };
+        let expected_record_key = SdfRecordKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfRecordRole::Whole,
+        };
+        let records = sdf_records(&app);
+        let initial_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
+            Some(CommandIndex::from(1))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(1)]
+        );
+        assert!(initial_peer_slot.is_some());
+
+        let updated = app.world_mut().commands().set_tree(
+            panel,
+            focused_border_insertion_tree(FocusedBorderState::Authored),
+        );
+        assert!(
+            updated.is_ok(),
+            "focused-border replacement should be accepted"
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        let updated_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
+            Some(CommandIndex::from(2))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(2)]
+        );
+        assert_eq!(updated_peer_slot, initial_peer_slot);
+    }
+
+    #[test]
+    fn inserted_border_command_preserves_existing_material_source_key() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            border_command_insertion_tree(BorderCommandState::Absent),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let expected = SdfMaterialSourceKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfMaterialRole::Fill,
+        };
+        let expected_record_key = SdfRecordKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfRecordRole::Whole,
+        };
+        let records = sdf_records(&app);
+        let initial_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
+            Some(CommandIndex::from(1))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(1)]
+        );
+        assert!(initial_peer_slot.is_some());
+
+        let updated = app.world_mut().commands().set_tree(
+            panel,
+            border_command_insertion_tree(BorderCommandState::Authored),
+        );
+        assert!(updated.is_ok(), "border replacement should be accepted");
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        let updated_peer_slot = records
+            .iter()
+            .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+            .and_then(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            });
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.fill_source),
+            Some(expected)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
+            Some(CommandIndex::from(2))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(2)]
+        );
+        assert_eq!(updated_peer_slot, initial_peer_slot);
+    }
+
+    #[test]
+    fn divider_material_source_keys_are_distinct_and_stable() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            divider_key_tree(SiblingBorderState::Absent),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let parent_fill = SdfMaterialSourceKey {
+            panel,
+            element: ElementIndex::from(1),
+            divider_ordinal: None,
+            role: SdfMaterialRole::Fill,
+        };
+        let expected = HashSet::from([
+            SdfMaterialSourceKey {
+                panel,
+                element: ElementIndex::from(1),
+                divider_ordinal: Some(0),
+                role: SdfMaterialRole::Fill,
+            },
+            SdfMaterialSourceKey {
+                panel,
+                element: ElementIndex::from(1),
+                divider_ordinal: Some(1),
+                role: SdfMaterialRole::Fill,
+            },
+        ]);
+        let records = sdf_records(&app);
+        let divider_keys: HashSet<_> = records
+            .iter()
+            .map(|record| record.fill_source)
+            .filter(|source| source.divider_ordinal.is_some())
+            .collect();
+        let divider_slots: HashSet<_> = records
+            .iter()
+            .filter(|record| record.fill_source.divider_ordinal.is_some())
+            .filter_map(|record| match record.fill_material {
+                SdfPaintMaterial::Authored(slot) => Some(slot),
+                SdfPaintMaterial::NotAuthored => None,
+            })
+            .collect();
+        let parent_fill_slot = records.iter().find_map(|record| {
+            match (record.fill_source == parent_fill, record.fill_material) {
+                (true, SdfPaintMaterial::Authored(slot)) => Some(slot),
+                _ => None,
+            }
+        });
+        let initial_divider_command_indices: HashMap<_, _> = records
+            .iter()
+            .map(|record| (record.fill_source, record.draw_order))
+            .filter(|(source, _)| source.divider_ordinal.is_some())
+            .collect();
+        assert_eq!(divider_keys, expected);
+        assert!(parent_fill_slot.is_some());
+        assert!(
+            divider_slots
+                .iter()
+                .all(|divider_slot| Some(*divider_slot) != parent_fill_slot)
+        );
+        assert_eq!(divider_slots.len(), 2);
+
+        let updated = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, divider_key_tree(SiblingBorderState::Authored));
+        assert!(updated.is_ok(), "divider replacement should be accepted");
+        settle_sdf_pipeline(&mut app);
+
+        let divider_keys: HashSet<_> = sdf_records(&app)
+            .iter()
+            .map(|record| record.fill_source)
+            .filter(|source| source.divider_ordinal.is_some())
+            .collect();
+        assert_eq!(divider_keys, expected);
+        let updated_divider_command_indices: HashMap<_, _> = sdf_records(&app)
+            .iter()
+            .map(|record| (record.fill_source, record.draw_order))
+            .filter(|(source, _)| source.divider_ordinal.is_some())
+            .collect();
+        assert!(
+            expected.iter().all(|key| {
+                matches!(
+                    (
+                        initial_divider_command_indices.get(key),
+                        updated_divider_command_indices.get(key),
+                    ),
+                    (Some(before), Some(after)) if after > before
+                )
+            }),
+            "the inserted sibling border must shift both divider commands",
+        );
+    }
+
+    #[test]
+    fn dividers_ignore_parent_material_and_visual_slot_overrides() {
+        let mut app = widget_sdf_pipeline_app();
+        let parent_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic: PARENT_ELEMENT_METALLIC,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            styled_divider_tree(parent_material),
+            StandardMaterial {
+                metallic: DIVIDER_PANEL_METALLIC,
+                ..Default::default()
+            },
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_fill_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        let Some(parent_fill) = records.iter().find(|record| {
+            record.fill_source.divider_ordinal.is_none()
+                && fill_row_color(&app, record) == linear_color(SLOT_OVERRIDE_COLOR)
+        }) else {
+            panic!();
+        };
+        let dividers: Vec<_> = records
+            .iter()
+            .filter(|record| record.fill_source.divider_ordinal.is_some())
+            .collect();
+
+        assert_eq!(dividers.len(), 2);
+        assert_eq!(
+            fill_row_color(&app, parent_fill),
+            linear_color(SLOT_OVERRIDE_COLOR)
+        );
+        assert_same_f32(
+            fill_row_metallic(&app, parent_fill),
+            PARENT_ELEMENT_METALLIC,
+        );
+        assert_ne!(parent_fill.corner_radii.value, Vec4::ZERO);
+        for divider in dividers {
+            assert_eq!(
+                fill_row_color(&app, divider),
+                linear_color(CHILD_DIVIDER_COLOR)
+            );
+            assert_same_f32(fill_row_metallic(&app, divider), DIVIDER_PANEL_METALLIC);
+            assert_eq!(divider.corner_radii.value, Vec4::ZERO);
+        }
+    }
+
+    #[test]
+    fn compatible_material_override_keeps_the_widget_batch_and_entities() {
+        let mut app = widget_sdf_pipeline_app();
+        let compatible_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic: 0.6,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(1),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let entities_before = live_sdf_batch_entities(&mut app);
+        let widget_key_before = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find(|(key, _)| key.z_index == 0.into())
+            .map(|(key, _)| key.clone())
+            .expect("the widget fill batch should exist");
+        let widget = styled_widget(&mut app);
+
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_material(compatible_material),
+        );
+        app.update();
+
+        let widget_key_after = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find(|(key, _)| key.z_index == 0.into())
+            .map(|(key, _)| key.clone())
+            .expect("the widget fill batch should remain");
+        assert_eq!(widget_key_after, widget_key_before);
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+    }
+
+    #[test]
+    fn compatible_material_overrides_keep_all_widget_part_batches_and_entities() {
+        let mut app = widget_sdf_pipeline_app();
+        let compatible_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic: 0.6,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_label_track_thumb_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = styled_widget(&mut app);
+        let part_keys = [
+            sdf_record_key_for_fill_color(&app, WIDGET_LABEL_FILL_COLOR),
+            sdf_record_key_for_fill_color(&app, WIDGET_TRACK_FILL_COLOR),
+            sdf_record_key_for_fill_color(&app, WIDGET_THUMB_FILL_COLOR),
+        ];
+        let batches_before =
+            part_keys.map(|record_key| sdf_record_batch_snapshot(&app, record_key));
+        let entities_before = live_sdf_batch_entities(&mut app);
+
+        set_slot_overrides(
+            &mut app,
+            widget,
+            [
+                (
+                    WIDGET_LABEL_SLOT,
+                    VisualSlotOverride::default().with_material(compatible_material.clone()),
+                ),
+                (
+                    WIDGET_TRACK_SLOT,
+                    VisualSlotOverride::default().with_material(compatible_material.clone()),
+                ),
+                (
+                    WIDGET_THUMB_SLOT,
+                    VisualSlotOverride::default().with_material(compatible_material),
+                ),
+            ],
+        );
+        app.update();
+
+        let batches_after = part_keys.map(|record_key| sdf_record_batch_snapshot(&app, record_key));
+        for ((key_before, entity_before, _), (key_after, entity_after, _)) in
+            batches_before.iter().zip(&batches_after)
+        {
+            assert_eq!(key_after, key_before);
+            assert_eq!(entity_after, entity_before);
+        }
+        assert_eq!(live_sdf_batch_entities(&mut app), entities_before);
+    }
+
+    #[test]
+    fn incompatible_material_overrides_migrate_only_changed_widget_parts() {
+        let mut app = widget_sdf_pipeline_app();
+        let incompatible_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_label_track_thumb_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let widget = styled_widget(&mut app);
+        let label_key = sdf_record_key_for_fill_color(&app, WIDGET_LABEL_FILL_COLOR);
+        let track_key = sdf_record_key_for_fill_color(&app, WIDGET_TRACK_FILL_COLOR);
+        let thumb_key = sdf_record_key_for_fill_color(&app, WIDGET_THUMB_FILL_COLOR);
+        let label_before = sdf_record_batch_snapshot(&app, label_key);
+        let track_before = sdf_record_batch_snapshot(&app, track_key);
+        let thumb_before = sdf_record_batch_snapshot(&app, thumb_key);
+
+        set_slot_overrides(
+            &mut app,
+            widget,
+            [(
+                WIDGET_THUMB_SLOT,
+                VisualSlotOverride::default().with_material(incompatible_material),
+            )],
+        );
+        app.update();
+
+        let label_after = sdf_record_batch_snapshot(&app, label_key);
+        let track_after = sdf_record_batch_snapshot(&app, track_key);
+        let thumb_after = sdf_record_batch_snapshot(&app, thumb_key);
+        assert_eq!(label_after, label_before);
+        assert_eq!(track_after, track_before);
+        assert_ne!(thumb_after.0, thumb_before.0);
+        assert_ne!(thumb_after.1, thumb_before.1);
+        assert_eq!(sdf_records(&app).len(), 3);
+    }
+
+    #[test]
+    fn fill_and_border_color_overrides_recolor_their_authored_roles() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_bordered_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(WIDGET_FILL_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(IMAGE_BORDER_COLOR),
+        );
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+            "each SDF role receives its own color override",
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(WIDGET_FILL_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(IMAGE_BORDER_COLOR),
+        );
+    }
+
+    #[test]
+    fn role_specific_colors_recolor_fill_and_border_independently() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_bordered_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(PEER_FILL_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(PEER_FILL_COLOR),
+            "the border role takes its own override color",
+        );
+
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_fill_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(IMAGE_BORDER_COLOR),
+            "a fill-only override leaves the authored border color",
+        );
+
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(PEER_FILL_COLOR),
+        );
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            fill_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+            "the fill color remains independent from the border color",
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(PEER_FILL_COLOR),
+            "the border color updates independently from the fill color",
+        );
+    }
+
+    #[test]
+    fn role_specific_colors_never_author_a_missing_fill_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_border_only_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_fill_color(SLOT_OVERRIDE_COLOR)
+                .with_border_color(PEER_FILL_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].fill_material,
+            SdfPaintMaterial::NotAuthored,
+            "a fill-role color must not author a missing fill role",
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(PEER_FILL_COLOR),
+        );
+    }
+
+    #[test]
+    fn border_width_override_rewrites_widths_without_moving_outer_bounds() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_bordered_fill_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        let authored_widths = records[0].border_widths.value;
+        let authored_half_size = records[0].half_size.value;
+        let widened = authored_widths * 3.0;
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_border_widths(widened.to_array()),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(records[0].border_widths.value, widened);
+        assert_eq!(
+            records[0].half_size.value, authored_half_size,
+            "the border grows inward, so the record's outer bounds stay solved",
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].border_widths.value, authored_widths,
+            "clearing the override restores the authored widths",
+        );
+    }
+
+    #[test]
+    fn border_width_override_never_authors_a_missing_border_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(0),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_border_widths([0.01; 4]),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].border_material,
+            SdfPaintMaterial::NotAuthored,
+            "a width override must not author a missing border role",
+        );
+        assert_eq!(
+            records[0].border_widths.value,
+            Vec4::ZERO,
+            "an unauthored border keeps its zero widths",
+        );
+    }
+
+    #[test]
+    fn border_color_override_never_authors_a_missing_fill_role() {
+        let mut app = widget_sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_border_only_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].fill_material, SdfPaintMaterial::NotAuthored);
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_border_color(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = sdf_records(&app);
+        assert_eq!(
+            records[0].fill_material,
+            SdfPaintMaterial::NotAuthored,
+            "an override must not author a missing fill role",
+        );
+        assert_eq!(
+            border_row_color(&app, &records[0]),
+            linear_color(SLOT_OVERRIDE_COLOR),
+        );
+    }
+
+    #[test]
+    fn material_override_rekeys_record_and_retires_the_emptied_batch() {
+        let mut app = widget_sdf_pipeline_app();
+        let blend_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            });
+        spawn_sdf_panel(
+            &mut app,
+            slotted_widget_fill_tree(1),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        let entities_before = live_sdf_batch_entities(&mut app);
+        assert_eq!(entities_before.len(), 2);
+        let (origin_entity, peer_entity, peer_records) = {
+            let store = app.world().resource::<SdfBatchStore>();
+            let origin = store
+                .batches()
+                .find(|(key, _)| key.z_index == 0.into())
+                .and_then(|(_, batch)| batch.entity)
+                .expect("the widget fill batch should be spawned");
+            let (_, peer_batch) = store
+                .batches()
+                .find(|(key, _)| key.z_index == 1.into())
+                .expect("the peer fill batch should exist");
+            let peer = peer_batch.entity.expect("peer batch should be spawned");
+            (origin, peer, peer_batch.records().to_vec())
+        };
+
+        let widget = styled_widget(&mut app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_material(blend_material.clone()),
+        );
+        app.update();
+
+        let store = app.world().resource::<SdfBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        let blend_entity = store
+            .batches()
+            .find(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Blend)
+            .and_then(|(_, batch)| batch.entity)
+            .expect("the re-keyed record should live in a spawned Blend batch");
+        let blend_records: Vec<ResolvedSdfBatchRecord> = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .filter(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Blend)
+            .flat_map(|(_, batch)| batch.records().iter().cloned())
+            .collect();
+        assert_eq!(blend_records.len(), 1);
+        assert!(!entities_before.contains(&blend_entity));
+        assert_ignores_picking(&app, blend_entity);
+        assert!(
+            app.world().get_entity(origin_entity).is_err(),
+            "the emptied origin batch should be retired",
+        );
+        let peer_after = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .find(|(key, _)| key.z_index == 1.into())
+            .map(|(_, batch)| (batch.entity, batch.records().to_vec()))
+            .expect("the peer batch should survive the re-key");
+        assert_eq!(peer_after, (Some(peer_entity), peer_records));
+
+        // The stable slot resolves the destination batch for later overrides.
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_material(blend_material)
+                .with_offset(OVERRIDE_OFFSET),
+        );
+        app.update();
+        let moved_translation = app
+            .world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .filter(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Blend)
+            .flat_map(|(_, batch)| batch.records().iter())
+            .map(|record| record.local_transform.translation)
+            .next()
+            .expect("moved record should stay resolvable through its slot");
+        assert_eq!(
+            moved_translation,
+            blend_records[0].local_transform.translation + OVERRIDE_OFFSET.extend(0.0),
+        );
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        let store = app.world().resource::<SdfBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        assert!(
+            store
+                .batches()
+                .all(|(key, _)| key.pipeline_compatibility.alpha == BatchAlphaMode::Opaque),
+        );
+        assert!(
+            app.world().get_entity(blend_entity).is_err(),
+            "the emptied Blend batch should be retired",
+        );
+    }
+
+    /// A world-panel vertical slider driving a visible SDF thumb, plus an
+    /// unrelated peer fill. `SliderDirection::BottomToTop` exercises the
+    /// render-frame Y inversion, and the `Mm` world panel applies a non-unit
+    /// world scale, so a raw layout-point offset renders at the wrong place.
+    fn vertical_thumb_slider_tree() -> LayoutTree {
+        let slider = Slider::new(0.0..=1.0)
+            .value(0.0)
+            .direction(SliderDirection::BottomToTop);
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::overlay()
+                .size(20.0, 30.0)
+                .background(WIDGET_FILL_COLOR)
+                .border(Border::all(1.0, IMAGE_BORDER_COLOR))
+                .alignment(AlignX::Center, AlignY::Center)
+                .widget("level", slider),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .size(16.0, 8.0)
+                        .background(SLOT_OVERRIDE_COLOR)
+                        .id("thumb")
+                        .slider_thumb(),
+                    |_| {},
+                );
+            },
+        );
+        builder.with(
+            El::new().size(20.0, 10.0).background(PEER_FILL_COLOR),
+            |_| {},
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn slider_value_change_moves_only_the_thumb_sdf_record_by_the_converted_render_delta() {
+        let mut app = widget_sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            vertical_thumb_slider_tree(),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        app.update();
+
+        let widget = styled_widget(&mut app);
+        let slots = app
+            .world()
+            .get::<WidgetVisualSlots>(widget)
+            .cloned()
+            .expect("slider widget should carry visual slots");
+        let content = slots
+            .content_box(VisualSlotId::SLIDER_ROOT)
+            .expect("slider root content box");
+        let thumb = slots
+            .border_box(VisualSlotId::SLIDER_THUMB)
+            .expect("thumb border box");
+        let thumb_index = slots
+            .element_index(VisualSlotId::SLIDER_THUMB)
+            .expect("thumb element index");
+        let root_index = slots
+            .element_index(VisualSlotId::SLIDER_ROOT)
+            .expect("root element index");
+        assert!(
+            thumb.height < content.height,
+            "the thumb must be shorter than the content for a vertical travel",
+        );
+
+        // Derive the expected render offsets independently from the real panel
+        // scale and the solved slot boxes — not from the production conversion
+        // helper. A `BottomToTop` slider maps value 0 to the bottom (larger
+        // layout Y) and value 1 to the top (smaller layout Y); the render frame
+        // scales both axes and inverts the layout Y axis.
+        let scale = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .expect("panel role component")
+            .points_to_world();
+        assert!(
+            scale.is_finite() && scale > 0.0 && (scale - 1.0).abs() > f32::EPSILON,
+            "the world panel must apply a finite, non-unit, positive scale",
+        );
+        let authored_center = thumb.center().1;
+        let bottom_center = thumb.height.mul_add(-0.5, content.y + content.height);
+        let top_center = thumb.height.mul_add(0.5, content.y);
+        let render_offset = |value: f32| {
+            let desired_center = value.mul_add(top_center - bottom_center, bottom_center);
+            Vec3::new(0.0, -(desired_center - authored_center) * scale, 0.0)
+        };
+        let expected_offset_at_end = render_offset(1.0);
+        let expected_record_delta = render_offset(1.0) - render_offset(0.0);
+        assert!(
+            expected_record_delta.length() > 1e-6,
+            "the value change must move the thumb a measurable amount",
+        );
+
+        let records_before = sdf_records(&app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+
+        // Apply a different applied value; only the thumb presentation reacts.
+        {
+            let mut state = app
+                .world_mut()
+                .get_mut::<SliderState>(widget)
+                .expect("slider widget should carry slider state");
+            assert!(state.set_value(1.0).expect("value applies"));
+        }
+        app.update();
+
+        let records_after = sdf_records(&app);
+        assert_eq!(
+            records_after.len(),
+            records_before.len(),
+            "the value change must not add or drop a retained record",
+        );
+
+        // Exactly one retained record moves, by the converted panel-local
+        // render delta; every other record stays byte-for-byte unchanged.
+        let mut moved = Vec::new();
+        for (index, (before, after)) in records_before.iter().zip(&records_after).enumerate() {
+            let delta = after.local_transform.translation - before.local_transform.translation;
+            if delta.length() > 1e-6 {
+                moved.push(index);
+                assert!(
+                    (delta - expected_record_delta).length() < 1e-6,
+                    "the thumb record must shift by the converted render delta, \
+                     not raw layout points or an uninverted Y",
+                );
+            } else {
+                assert_eq!(
+                    after, before,
+                    "a non-thumb retained record must stay unchanged"
+                );
+            }
+        }
+        assert_eq!(moved.len(), 1, "only the thumb record may move");
+
+        // The moved record is the thumb: its slot carries the converted render
+        // offset in the override index, while the plain slider root carries no
+        // override at all.
+        let index = app.world().resource::<VisualOverrideIndex>();
+        let indexed_thumb_offset = index
+            .get(panel, thumb_index)
+            .and_then(|value| value.offset)
+            .expect("thumb slot should carry a render offset in the override index");
+        assert!(
+            (indexed_thumb_offset - expected_offset_at_end.truncate()).length() < 1e-6,
+            "the indexed thumb offset must equal the independently converted render offset",
+        );
+        assert!(
+            index.get(panel, root_index).is_none(),
+            "a plain slider root writes no override",
+        );
+
+        // The value change moved no widget hit rectangle or panel layout output.
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+    }
+
+    /// Widget image pipeline app plus one panel: a slotted image inside the
+    /// `styled` button widget and an unslotted peer image, both sampling
+    /// `image_a`.
+    fn slotted_image_fixture() -> (App, Entity) {
+        let mut app = image_sdf_pipeline_app();
+        app.add_plugins(WidgetsPlugin);
+        let image_a = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::column().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .button("styled"),
+                    |builder| {
+                        builder.image(
+                            El::new()
+                                .width(Sizing::GROW)
+                                .height(Sizing::GROW)
+                                .visual_slot(TEST_SLOT),
+                            image_a.clone(),
+                            Color::WHITE,
+                        );
+                    },
+                );
+                builder.image(
+                    El::new().width(Sizing::GROW).height(Sizing::GROW),
+                    image_a.clone(),
+                    Color::WHITE,
+                );
+            },
+        );
+        let panel = spawn_sdf_panel(&mut app, builder.build(), StandardMaterial::default());
+        settle_sdf_pipeline(&mut app);
+        (app, panel)
+    }
+
+    /// `ImageRenderRecord` storage buffer of the single live image batch.
+    fn image_record_buffer(app: &App) -> Handle<ShaderBuffer> {
+        let buffers: Vec<Handle<ShaderBuffer>> = app
+            .world()
+            .resource::<ImageBatchStore>()
+            .batches()
+            .filter_map(|(_, batch)| batch.gpu.as_ref().map(|gpu| gpu.records.clone()))
+            .collect();
+        assert_eq!(buffers.len(), 1, "expected exactly one image record buffer");
+        buffers[0].clone()
+    }
+
+    #[test]
+    fn tint_override_patches_only_the_referenced_image_record() {
+        let (mut app, panel) = slotted_image_fixture();
+        let records_before = image_records(&app);
+        assert_eq!(records_before.len(), 2);
+        assert_eq!(
+            app.world().resource::<ImageBatchStore>().batches().count(),
+            1,
+        );
+
+        let widget = styled_widget(&mut app);
+        app.update();
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+        let record_buffer = image_record_buffer(&app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_tint(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+
+        let records = image_records(&app);
+        assert_eq!(records[0].tint, linear_color(SLOT_OVERRIDE_COLOR));
+        assert_eq!(records[1], records_before[1], "peer record untouched");
+        assert_eq!(
+            app.world().resource::<ImageBatchStore>().batches().count(),
+            1,
+        );
+        assert!(
+            app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&record_buffer),
+            "the changed image record should stage a direct same-frame GPU write",
+        );
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+
+        // Author the identical override a second time: the route rebuilds an
+        // equal record, so no retained record changes and the record buffer
+        // does not re-upload.
+        let records_after = image_records(&app);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_tint(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        assert_eq!(image_records(&app), records_after);
+        assert!(
+            !app.world()
+                .resource::<RetainedBatchBufferUploads>()
+                .contains(&record_buffer),
+            "a repeated identical override should stage no GPU write",
+        );
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+    }
+
+    #[test]
+    fn texture_override_moves_image_record_to_the_destination_batch() {
+        let (mut app, panel) = slotted_image_fixture();
+        let image_b = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let records_before = image_records(&app);
+        let origin_entity = app
+            .world()
+            .resource::<ImageBatchStore>()
+            .batches()
+            .next()
+            .and_then(|(_, batch)| batch.entity)
+            .expect("settled image batch should be spawned");
+
+        // A texture override changes the `ImageBatchKey` and moves the record.
+        let widget = styled_widget(&mut app);
+        let snapshot = widget_geometry_snapshot(&app, panel, widget);
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default().with_texture(image_b.clone()),
+        );
+        app.update();
+        assert_widget_geometry_unchanged(&app, panel, widget, &snapshot);
+        let store = app.world().resource::<ImageBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        let destination_entity = store
+            .batches()
+            .find(|(key, _)| key.texture == image_b)
+            .and_then(|(_, batch)| batch.entity)
+            .expect("the moved record should live in a spawned destination batch");
+        assert_ne!(destination_entity, origin_entity);
+        assert_ignores_picking(&app, destination_entity);
+
+        // The stable slot resolves the destination batch for later overrides.
+        set_slot_override(
+            &mut app,
+            widget,
+            VisualSlotOverride::default()
+                .with_texture(image_b.clone())
+                .with_tint(SLOT_OVERRIDE_COLOR),
+        );
+        app.update();
+        let destination_tints: Vec<Vec4> = app
+            .world()
+            .resource::<ImageBatchStore>()
+            .batches()
+            .filter(|(key, _)| key.texture == image_b)
+            .flat_map(|(_, batch)| batch.records().iter())
+            .map(|record| record.tint)
+            .collect();
+        assert_eq!(destination_tints, vec![linear_color(SLOT_OVERRIDE_COLOR)]);
+
+        clear_slot_override(&mut app, widget);
+        app.update();
+        assert_eq!(
+            app.world().resource::<ImageBatchStore>().batches().count(),
+            1,
+        );
+        assert!(
+            app.world().get_entity(destination_entity).is_err(),
+            "the emptied destination batch should be retired",
+        );
+        assert_eq!(image_records(&app), records_before);
     }
 }

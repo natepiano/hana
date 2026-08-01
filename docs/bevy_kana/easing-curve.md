@@ -33,7 +33,7 @@ case requires configurability.
 
 The shared public type should be named `bevy_kana::Easing`. `HanaEasing` would
 incorrectly imply that the type is limited to the Hana application even though
-Hana Valence, `bevy_lagrange`, Fairy Dust, and other Bevy consumers need it.
+Hana Valence, `hana_lagrange`, Fairy Dust, and other Bevy consumers need it.
 
 The intended model is:
 
@@ -64,7 +64,7 @@ replaced or forked, downstream `Easing` and `EasingCurve` APIs remain stable.
 ### Intentional `bevy_kana` public type
 
 Using `Easing` in `hana_valence::FoldSequence` and
-`bevy_lagrange::CameraMove` intentionally exposes a `bevy_kana` type. This is
+`hana_lagrange::CameraMove` intentionally exposes a `bevy_kana` type. This is
 different from accidentally leaking a convenience math wrapper. There is no
 way to let callers choose one shared, reflected, asset-backed easing without
 exposing some common authoring representation.
@@ -240,9 +240,9 @@ does not automatically become asset-backed.
 This migration is follow-up work and must not be folded into the current
 folding implementation or its closeout documentation.
 
-### `bevy_lagrange`
+### `hana_lagrange`
 
-`bevy_lagrange` is the largest public migration because easing is part of its
+`hana_lagrange` is the largest public migration because easing is part of its
 camera-move protocol.
 
 - Change both `CameraMove::ToLookAt::easing` and
@@ -266,14 +266,14 @@ camera-move protocol.
 - Migrate `examples/animation.rs` and `examples/swapped_axis.rs` so their
   authored steps use the shared type.
 
-This is a public API change for individually published `bevy_lagrange`; its
+This is a public API change for individually published `hana_lagrange`; its
 release notes must call out the new `bevy_kana/easing` dependency and the loss
 of `Copy`/`const` easing accessors.
 
 ### Fairy Dust and examples in this workspace
 
 - Change Fairy Dust camera restart/home motion to pass `Easing` through the
-  updated `bevy_lagrange` builders. Fairy Dust remains responsible for controls
+  updated `hana_lagrange` builders. Fairy Dust remains responsible for controls
   and presentation, not sampling.
 - Mechanically migrate the `hana_conduit` playground camera calls.
 - Mechanically migrate the `hana_diegetic` `aa_text` camera-animation example.
@@ -286,7 +286,7 @@ The sibling Hana application currently uses Bevy easings in camera and
 selection paths.
 
 - Migrate `crates/hana/src/camera/editor_camera.rs`, `flyover.rs`, and
-  `zoom_to_target.rs` through the updated `bevy_lagrange` APIs.
+  `zoom_to_target.rs` through the updated `hana_lagrange` APIs.
 - Replace the stock-only selection animation configuration in
   `crates/hana/src/selection/animation.rs` with `Easing` fields for its in, out,
   and in-out profiles. Preserve the existing Bevy defaults through
@@ -370,7 +370,7 @@ The implementation is complete only when:
   rustdoc outside an explicitly named integration module;
 - stock Bevy easing produces the same samples as before migration;
 - a programmatic and a loaded `EasingCurve` both drive Hana Valence folding and
-  `bevy_lagrange` camera moves;
+  `hana_lagrange` camera moves;
 - unavailable assets hold motion without advancing or falling back;
 - forward and reverse playback reach exact endpoints;
 - reflected assets can be selected and edited in Hana;

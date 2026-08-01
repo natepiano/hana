@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::Anchor;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::FairyDustOrbitCam;
@@ -23,6 +22,7 @@ use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::ZoomToFit;
 
 use super::constants::CAP_STYLES_SECTION_INDEX;
 use super::constants::CATENARY_SECTION_INDEX;
@@ -117,10 +117,12 @@ pub(crate) fn refresh_nav_panel(
     if !current_section.is_changed() && !selection.is_changed() {
         return;
     }
-    commands.set_tree(
+    if let Err(error) = commands.set_tree(
         *panel,
         build_nav_tree(current_section.0, selection.direction),
-    );
+    ) {
+        error!("playground: failed to replace nav panel tree: {error}");
+    }
 }
 
 pub(crate) fn request_previous_section(mut requested: ResMut<RequestedNavigation>) {

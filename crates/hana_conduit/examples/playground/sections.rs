@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCam;
+use hana_lagrange::OrbitCam;
 
 use super::constants::NODE_Y;
 use super::constants::SECTION_BOUNDS_CENTER_Y_MULTIPLIER;

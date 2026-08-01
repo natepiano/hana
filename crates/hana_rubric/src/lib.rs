@@ -21,12 +21,11 @@ pub mod prelude;
 ///
 /// Applications call this after a recovery action or focus change should discard the next
 /// keystroke instead of completing an earlier sequence.
-pub fn cancel_pending_sequences(world: &mut bevy::prelude::World) {
-    keymap::runtime::cancel_pending_sequences(world);
-}
+pub fn cancel_pending_sequences(world: &mut World) { keymap::cancel_pending_sequences(world); }
 
 #[cfg(test)]
 pub(crate) use allocation_test_support::TEST_ALLOCATOR;
+use bevy::prelude::World;
 pub use command::Capability;
 pub use command::CommandId;
 pub use command::CommandIdParseError;

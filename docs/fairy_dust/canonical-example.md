@@ -4,7 +4,7 @@ The reference layout every `bevy_hana` example should follow. Use this as the
 checklist when adding a new example or converting an existing one.
 
 The current best example of this structure is
-`crates/bevy_lagrange/examples/zoom_to_fit.rs`.
+`crates/hana_lagrange/examples/zoom_to_fit.rs`.
 
 ## Goals
 
@@ -337,7 +337,7 @@ baseline.
 Examples may spawn `WorldText` or `DiegeticPanel` directly without an explicit
 `add_plugins` call. The `crates/hana_diegetic/examples/*` examples follow the
 same Fairy Dust scene, OrbitCam, lighting, ground, and HUD conventions as
-`bevy_lagrange` examples. Inside those examples, include a one-line comment at
+`hana_lagrange` examples. Inside those examples, include a one-line comment at
 the top of `fn main` noting this so readers don't go hunting for the
 registration:
 
@@ -443,7 +443,7 @@ Implemented shared APIs are tracked in
   separate visible cube?
 - Should the example HUD support per-chip mouse-click activation (turn
   chips into buttons)?
-- Every `bevy_lagrange` example uses `sprinkle_example()`. Eight
+- Every `hana_lagrange` example uses `sprinkle_example()`. Eight
   `hana_diegetic` examples still use raw `App::new()` (`side_by_side.rs`,
   `screen_space.rs`, `paper_sizes.rs`, `dimensions.rs`, `sizes.rs`,
   `font_loading.rs`, `font_features.rs`, `text_renderer_gpu_bench.rs`) —

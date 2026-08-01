@@ -616,33 +616,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_clerestory"
-version = "0.3.0-dev"
-dependencies = [
- "bevy",
- "bevy_diagnostic",
- "bevy_kana",
- "bevy_remote",
- "block2 0.6.2",
- "dirs",
- "fairy_dust",
- "hana_diegetic",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "raw-window-handle",
- "ron",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tracing",
- "windows",
- "winit",
- "x11rb",
-]
-
-[[package]]
 name = "bevy_clipboard"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1132,25 +1105,9 @@ name = "bevy_kana"
 version = "0.4.0-dev"
 dependencies = [
  "bevy",
- "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
-]
-
-[[package]]
-name = "bevy_lagrange"
-version = "0.4.0-dev"
-dependencies = [
- "bevy",
- "bevy_brp_extras",
- "bevy_clerestory",
- "bevy_enhanced_input",
- "bevy_kana",
- "bitflags 2.13.0",
- "fairy_dust",
- "float-cmp",
- "hana_diegetic",
- "hana_rubric",
+ "hana_lagrange",
 ]
 
 [[package]]
@@ -1177,23 +1134,6 @@ dependencies = [
  "smallvec",
  "tracing",
  "wgpu-types",
-]
-
-[[package]]
-name = "bevy_liminal"
-version = "0.1.0-dev"
-dependencies = [
- "bevy",
- "bevy_brp_extras",
- "bevy_clerestory",
- "bevy_kana",
- "bevy_lagrange",
- "bevy_render",
- "bytemuck",
- "fairy_dust",
- "getrandom 0.4.3",
- "nonmax",
- "rand",
 ]
 
 [[package]]
@@ -2892,10 +2832,10 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_clerestory",
  "bevy_enhanced_input",
- "bevy_lagrange",
+ "hana_clerestory",
  "hana_diegetic",
+ "hana_lagrange",
  "hana_rubric",
  "hana_valence",
  "trybuild",
@@ -3355,14 +3295,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "hana_clerestory"
+version = "0.4.0-dev"
+dependencies = [
+ "bevy",
+ "bevy_diagnostic",
+ "bevy_kana",
+ "bevy_remote",
+ "block2 0.6.2",
+ "dirs",
+ "fairy_dust",
+ "hana_diegetic",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "ron",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tracing",
+ "windows",
+ "winit",
+ "x11rb",
+]
+
+[[package]]
 name = "hana_conduit"
 version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_kana",
- "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
 ]
 
 [[package]]
@@ -3371,17 +3338,20 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_clerestory",
+ "bevy_enhanced_input",
  "bevy_kana",
- "bevy_lagrange",
  "bitflags 2.13.0",
  "clay-layout",
  "criterion",
  "fairy_dust",
+ "hana_clerestory",
+ "hana_lagrange",
+ "hana_rubric",
  "hana_valence",
  "image",
  "parley",
  "smallvec",
+ "thiserror 2.0.19",
  "trybuild",
  "ttf-parser",
  "wgpu",
@@ -3395,10 +3365,43 @@ dependencies = [
  "bevy_app",
  "bevy_asset",
  "bevy_ecs",
- "bevy_lagrange",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
  "tracing",
+]
+
+[[package]]
+name = "hana_lagrange"
+version = "0.5.0-dev"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_enhanced_input",
+ "bevy_kana",
+ "bitflags 2.13.0",
+ "fairy_dust",
+ "float-cmp",
+ "hana_clerestory",
+ "hana_diegetic",
+ "hana_rubric",
+]
+
+[[package]]
+name = "hana_liminal"
+version = "0.2.0-dev"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_kana",
+ "bevy_render",
+ "bytemuck",
+ "fairy_dust",
+ "getrandom 0.4.3",
+ "hana_clerestory",
+ "hana_lagrange",
+ "nonmax",
+ "rand",
 ]
 
 [[package]]
@@ -3407,11 +3410,11 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_kana",
- "bevy_lagrange",
  "bevy_remote",
  "cpal 0.18.1",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
  "hound",
  "serde",
  "serde_json",
@@ -3443,7 +3446,6 @@ dependencies = [
  "bevy_ecs",
  "bevy_enhanced_input",
  "bevy_kana",
- "bevy_lagrange",
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
@@ -3452,6 +3454,7 @@ dependencies = [
  "bevy_tween",
  "fairy_dust",
  "hana_diegetic",
+ "hana_lagrange",
  "hana_rubric",
  "tracing",
 ]

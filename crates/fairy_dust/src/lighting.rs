@@ -133,7 +133,7 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
 ///   times [`CASCADE_FIT_RADIUS_MULTIPLE`]. This covers a perspective camera, which frames the
 ///   scene proportionally.
 /// - **Camera** — the [`FairyDustOrbitCam`], when orthographic, parks at a fixed `(near + far) / 2`
-///   distance (see `bevy_lagrange`'s `update_orbit_transform`) that a small scene's geometry term
+///   distance (see `hana_lagrange`'s `update_orbit_transform`) that a small scene's geometry term
 ///   can't reach, so the far cascade must extend to it. Perspective projections leave this term at
 ///   zero.
 ///

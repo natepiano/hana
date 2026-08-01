@@ -23,6 +23,6 @@ bevy = { workspace = true, features = ["bevy_log"] }
 
 [dev-dependencies]
 bevy          = { workspace = true, features = ["3d"] }
-bevy_lagrange = { workspace = true }
 fairy_dust    = { workspace = true }
 hana_diegetic = { workspace = true }
+hana_lagrange = { workspace = true }

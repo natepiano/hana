@@ -1,6 +1,6 @@
 //! Capability: Ctrl+Shift+R rebuilds and re-launches the example via cargo.
 //!
-//! Wires the keybinding through `bevy_enhanced_input` using the `bevy_kana`
+//! Wires the keybinding through `bevy_enhanced_input` using the `hana_rubric`
 //! macros (`action!`, `event!`, `bind_action_system!`). The bound system
 //! relaunches the example as `cargo run --manifest-path <workspace>/Cargo.toml
 //! --example <name>`.
@@ -25,7 +25,7 @@ use std::process::Command;
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
-use bevy_lagrange::OrbitCam;
+use hana_lagrange::OrbitCam;
 use hana_rubric::action;
 use hana_rubric::bind_action_system;
 use hana_rubric::event;

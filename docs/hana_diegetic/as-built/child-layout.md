@@ -120,8 +120,9 @@ only their own axis anchor and offset.
 
 `Border` in `geometry.rs` is only the outer element border. Row/column
 separators use `ChildDivider`, stored inside row/column `ChildLayout` and
-emitted as `RectangleSource::ChildDivider`. Overlay cannot hold or emit child
-dividers.
+emitted as `RectangleSource::ChildDivider { ordinal }`, where `ordinal` is the
+zero-based adjacent-child pair the separator sits between. Overlay cannot hold
+or emit child dividers.
 
 Opt-in compile-time guarantees live in `crates/hana_diegetic/tests/trybuild/**`:
 row/column/overlay helper signatures compile, while `El::overlay().gap(...)`,

@@ -9,6 +9,7 @@ use hana_valence::ResolvedAnchorGeometry;
 
 use super::CoordinateSpace;
 use super::DiegeticPanel;
+use super::lifecycle;
 use crate::layout::Anchor;
 
 const BOTTOM_CENTER_EDGE: u32 = 2;
@@ -59,23 +60,30 @@ impl TryFrom<AnchorId> for Anchor {
 
 pub(super) fn write_panel_anchor_geometry(
     mut commands: Commands,
-    mut panels: Query<
-        (Entity, &DiegeticPanel, Option<&mut ResolvedAnchorGeometry>),
+    panels: Query<
+        (Entity, &DiegeticPanel, Option<&ResolvedAnchorGeometry>),
         Changed<DiegeticPanel>,
     >,
 ) {
-    for (entity, panel, geometry) in &mut panels {
+    for (entity, panel, geometry) in &panels {
         if !matches!(panel.coordinate_space(), CoordinateSpace::World { .. }) {
             continue;
         }
-
-        if let Some(mut geometry) = geometry {
-            let size = Vec2::new(panel.world_width(), panel.world_height());
-            write_geometry(&mut geometry, size, panel.anchor());
-        } else {
-            commands.entity(entity).insert(panel_anchor_geometry(panel));
+        let next_geometry = panel_anchor_geometry(panel);
+        if geometry.is_none_or(|geometry| !same_geometry(geometry, &next_geometry)) {
+            lifecycle::write_owned_component(&mut commands, entity, entity, next_geometry);
         }
     }
+}
+
+fn same_geometry(left: &ResolvedAnchorGeometry, right: &ResolvedAnchorGeometry) -> bool {
+    left.points.len() == right.points.len()
+        && left.points.iter().all(|(anchor_id, left_point)| {
+            right.points.get(anchor_id).is_some_and(|right_point| {
+                left_point.position == right_point.position && left_point.frame == right_point.frame
+            })
+        })
+        && left.edges == right.edges
 }
 
 /// Builds fresh quad anchor geometry for `panel` in its local frame.

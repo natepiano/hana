@@ -1,12 +1,10 @@
 //! [`DiegeticPanelBuilder`] with compile-time state machine enforcing call
 //! order on panel construction.
 
-use core::error::Error;
-use core::fmt::Display;
-use core::fmt::Formatter;
 use std::marker::PhantomData;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 use sealed::CanBuild;
@@ -15,12 +13,14 @@ use super::constants::DEFAULT_SCREEN_SPACE_CAMERA_ORDER;
 use super::constants::DEFAULT_SCREEN_SPACE_RENDER_LAYER;
 use super::constants::MIN_PANEL_WORLD_HEIGHT;
 use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::PanelSpace;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::diegetic_panel::DiegeticPanel;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
 use crate::PanelElementId;
+use crate::SliderConfigError;
 use crate::cascade::Cascade;
 use crate::layout;
 use crate::layout::Anchor;
@@ -35,44 +35,149 @@ use crate::layout::Px;
 use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 use crate::layout::Unit;
+use crate::widgets;
+use crate::widgets::IntoAppearance;
+use crate::widgets::PanelPicking;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
+use crate::widgets::WidgetPressedAppearance;
 
 /// Error returned by [`DiegeticPanelBuilder::build`].
 ///
-/// Either a sizing error or a duplicate author-assigned [`PanelElementId`]: a
-/// build-time `Result` so a repeated id is rejected up front instead of one
-/// element silently replacing another at runtime.
-#[derive(Debug)]
+/// A sizing or layout-tree validation error returned before a panel is built.
+#[derive(thiserror::Error, Debug)]
 pub enum PanelBuildError {
     /// A fixed-size axis was zero or negative.
-    InvalidSize(InvalidSize),
+    #[error("{0}")]
+    InvalidSize(#[from] InvalidSize),
     /// Two elements share the same author-assigned [`PanelElementId`]. Element
     /// ids and editable-field ids share one panel-local namespace, so a name
     /// reused across either kind is a build error.
+    #[error("duplicate panel element id `{0}`")]
     DuplicateElementId(PanelElementId),
-}
-
-impl Display for PanelBuildError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::InvalidSize(error) => write!(formatter, "{error}"),
-            Self::DuplicateElementId(id) => write!(formatter, "duplicate panel element id `{id}`"),
-        }
-    }
-}
-
-impl Error for PanelBuildError {}
-
-impl From<InvalidSize> for PanelBuildError {
-    fn from(error: InvalidSize) -> Self { Self::InvalidSize(error) }
+    /// A widget used a builder-minted auto id instead of a stable authored id.
+    #[error("widget `{0}` requires a named panel element id")]
+    WidgetRequiresNamedId(PanelElementId),
+    /// A widget is inside a subtree rendered through precomposition.
+    #[error("widget `{0}` is inside a precomposed subtree")]
+    WidgetInsidePrecomposedSubtree(PanelElementId),
+    /// A slider-thumb marker sits outside every slider subtree.
+    #[error("slider thumb `{0}` must be inside a slider subtree")]
+    SliderThumbOutsideSlider(PanelElementId),
+    /// A slider subtree marks more than one thumb.
+    #[error("slider `{0}` contains more than one thumb")]
+    SliderHasMultipleThumbs(PanelElementId),
+    /// A widget part named a state text color without emitting text itself.
+    #[error("widget part `{0}` state text color requires text; add a text child")]
+    StateTextColorRequiresText(PanelElementId),
+    /// A widget part named a state path color without emitting a panel draw itself.
+    #[error("widget part `{0}` state path color requires a draw; add a draw")]
+    StatePathColorRequiresDraw(PanelElementId),
+    /// A widget part named a state tint without emitting an image itself.
+    #[error("widget part `{0}` state tint requires an image; add an image")]
+    StateTintRequiresImage(PanelElementId),
+    /// A slider's authored range, value, or step failed validation.
+    #[error("slider `{0}`: {1}")]
+    SliderConfig(PanelElementId, #[source] SliderConfigError),
 }
 
 // ── Typestate marker types ──────────────────────────────────────────────────
 
-/// Marker: panel is placed in 3D world space.
+/// Marker for world-space panel and widget identities.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct World;
 
-/// Marker: panel renders as a screen overlay.
+/// Marker for screen-space panel and widget identities.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Screen;
+
+/// Opaque identity for a live panel in coordinate space `Space`.
+///
+/// Obtain handles through [`PanelEntityReader`]. After a queued coordinate-space
+/// conversion applies, reacquire a handle for the destination space through the
+/// reader.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PanelEntity<Space> {
+    entity: Entity,
+    space:  PanelSpace,
+    marker: PhantomData<fn() -> Space>,
+}
+
+impl<Space> PanelEntity<Space> {
+    /// Returns the underlying Bevy entity for unrelated ECS work.
+    #[must_use]
+    pub const fn entity(&self) -> Entity { self.entity }
+
+    pub(crate) const fn from_validated(entity: Entity, space: PanelSpace) -> Self {
+        Self {
+            entity,
+            space,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) const fn expected_space(&self) -> PanelSpace { self.space }
+}
+
+/// Opaque identity for a live widget owned by a panel in coordinate space
+/// `Space`.
+///
+/// Obtain widget handles through
+/// [`PanelWidgetReader::typed_entity`](crate::PanelWidgetReader::typed_entity).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WidgetEntity<Space> {
+    entity: Entity,
+    owner:  Entity,
+    space:  PanelSpace,
+    marker: PhantomData<fn() -> Space>,
+}
+
+impl<Space> WidgetEntity<Space> {
+    /// Returns the underlying Bevy entity for unrelated ECS work.
+    #[must_use]
+    pub const fn entity(&self) -> Entity { self.entity }
+
+    pub(crate) const fn from_validated(entity: Entity, owner: Entity, space: PanelSpace) -> Self {
+        Self {
+            entity,
+            owner,
+            space,
+            marker: PhantomData,
+        }
+    }
+
+    pub(crate) const fn owner(&self) -> Entity { self.owner }
+
+    pub(crate) const fn expected_space(&self) -> PanelSpace { self.space }
+}
+
+/// Read-only lookup that mints typed identities for live panels.
+#[derive(SystemParam)]
+pub struct PanelEntityReader<'w, 's> {
+    panels: Query<'w, 's, &'static DiegeticPanel>,
+}
+
+impl PanelEntityReader<'_, '_> {
+    /// Returns a world-space handle when `entity` is currently a world panel.
+    #[must_use]
+    pub fn world(&self, entity: Entity) -> Option<PanelEntity<World>> {
+        self.panel(entity, PanelSpace::World)
+            .map(|()| PanelEntity::from_validated(entity, PanelSpace::World))
+    }
+
+    /// Returns a screen-space handle when `entity` is currently a screen panel.
+    #[must_use]
+    pub fn screen(&self, entity: Entity) -> Option<PanelEntity<Screen>> {
+        self.panel(entity, PanelSpace::Screen)
+            .map(|()| PanelEntity::from_validated(entity, PanelSpace::Screen))
+    }
+
+    fn panel(&self, entity: Entity, expected: PanelSpace) -> Option<()> {
+        let panel = self.panels.get(entity).ok()?;
+        (PanelSpace::from(panel.coordinate_space()) == expected).then_some(())
+    }
+}
 
 /// Marker: builder needs `.size()` or `.paper()` before `.layout()` or `.build()`.
 pub struct NeedsSize;
@@ -87,21 +192,26 @@ pub struct Ready;
 
 #[derive(Default)]
 pub(super) struct BuilderData {
-    width:                  f32,
-    height:                 f32,
-    layout_unit:            Unit,
-    font_unit:              Cascade<Unit>,
-    anchor:                 Option<Anchor>,
-    world_width:            Option<f32>,
-    world_height:           Option<f32>,
-    shadow_casting:         Cascade<ShadowCasting>,
-    material:               Cascade<Handle<StandardMaterial>>,
-    text_material:          Cascade<Handle<StandardMaterial>>,
-    shape_material:         Cascade<Handle<StandardMaterial>>,
-    text_alpha_mode:        Cascade<AlphaMode>,
-    hdr_text_coverage_bias: Cascade<f32>,
-    tree:                   Option<LayoutTree>,
-    coordinate_space:       CoordinateSpace,
+    width:                      f32,
+    height:                     f32,
+    layout_unit:                Unit,
+    font_unit:                  Cascade<Unit>,
+    anchor:                     Option<Anchor>,
+    world_width:                Option<f32>,
+    world_height:               Option<f32>,
+    shadow_casting:             Cascade<ShadowCasting>,
+    widget_hovered_appearance:  Cascade<WidgetHoveredAppearance>,
+    widget_pressed_appearance:  Cascade<WidgetPressedAppearance>,
+    widget_focused_appearance:  Cascade<WidgetFocusedAppearance>,
+    widget_disabled_appearance: Cascade<WidgetDisabledAppearance>,
+    material:                   Cascade<Handle<StandardMaterial>>,
+    text_material:              Cascade<Handle<StandardMaterial>>,
+    shape_material:             Cascade<Handle<StandardMaterial>>,
+    text_alpha_mode:            Cascade<AlphaMode>,
+    hdr_text_coverage_bias:     Cascade<f32>,
+    picking:                    PanelPicking,
+    tree:                       Option<LayoutTree>,
+    coordinate_space:           CoordinateSpace,
 }
 
 /// Builder for [`DiegeticPanel`].
@@ -208,6 +318,18 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
         self
     }
 
+    /// Sets the front- and back-face pointer behavior for the panel.
+    ///
+    /// Applied as a seed on spawn or replacement: it installs only when the
+    /// entity has no live [`PanelPicking`], and an installed seed that the
+    /// application never rewrites is removed together with the
+    /// [`DiegeticPanel`] role.
+    #[must_use]
+    pub const fn picking(mut self, panel_picking: PanelPicking) -> Self {
+        self.data.picking = panel_picking;
+        self
+    }
+
     /// Sets the default PBR material handle for backgrounds and borders.
     ///
     /// Create the handle once through `Assets<StandardMaterial>` and pass the
@@ -292,6 +414,38 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     #[must_use]
     pub const fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
         self.data.shadow_casting = Cascade::Override(shadow_casting);
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while they are hovered.
+    #[must_use]
+    pub fn widget_hovered_appearance(mut self, appearance: impl IntoAppearance) -> Self {
+        self.data.widget_hovered_appearance =
+            Cascade::Override(WidgetHoveredAppearance::new(appearance));
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while they are pressed.
+    #[must_use]
+    pub fn widget_pressed_appearance(mut self, appearance: impl IntoAppearance) -> Self {
+        self.data.widget_pressed_appearance =
+            Cascade::Override(WidgetPressedAppearance::new(appearance));
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while their focus indicator is visible.
+    #[must_use]
+    pub fn widget_focused_appearance(mut self, appearance: impl IntoAppearance) -> Self {
+        self.data.widget_focused_appearance =
+            Cascade::Override(WidgetFocusedAppearance::new(appearance));
+        self
+    }
+
+    /// Sets the appearance inherited by widgets while they are disabled.
+    #[must_use]
+    pub fn widget_disabled_appearance(mut self, appearance: impl IntoAppearance) -> Self {
+        self.data.widget_disabled_appearance =
+            Cascade::Override(WidgetDisabledAppearance::new(appearance));
         self
     }
 }
@@ -629,8 +783,9 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidSize`] if both axes are fixed-size and width or
-    /// height is zero or negative.
+    /// Returns [`PanelBuildError::InvalidSize`] if both axes are fixed-size and
+    /// width or height is zero or negative. Returns a widget validation variant
+    /// when ids or interactive nesting violate the layout-tree contract.
     pub fn build(mut self) -> Result<DiegeticPanel, PanelBuildError> {
         let (w_sizing, h_sizing) = match self.data.coordinate_space {
             CoordinateSpace::World { width, height } => (width, height),
@@ -684,10 +839,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
             }
         }
 
-        if let Some(tree) = self.data.tree.as_ref()
-            && let Some(duplicate) = tree.duplicate_named_element_id()
-        {
-            return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
+        if let Some(tree) = self.data.tree.as_ref() {
+            widgets::validate_tree(tree)?;
         }
 
         Ok(build_panel(self.data))
@@ -709,8 +862,10 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidSize`] if width or height is zero or negative
-    /// and no dynamic sizing will fill it later.
+    /// Returns [`PanelBuildError::InvalidSize`] if width or height is zero or
+    /// negative and no dynamic sizing will fill it later. Returns a widget
+    /// validation variant when ids or interactive nesting violate the
+    /// layout-tree contract.
     pub fn build(mut self) -> Result<DiegeticPanel, PanelBuildError> {
         let CoordinateSpace::Screen {
             width: w_sizing,
@@ -803,10 +958,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         }
         let _ = (has_dynamic_width, has_dynamic_height);
 
-        if let Some(tree) = self.data.tree.as_ref()
-            && let Some(duplicate) = tree.duplicate_named_element_id()
-        {
-            return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
+        if let Some(tree) = self.data.tree.as_ref() {
+            widgets::validate_tree(tree)?;
         }
 
         Ok(build_panel(self.data))
@@ -823,29 +976,42 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
     panel.world_width = data.world_width;
     panel.world_height = data.world_height;
     panel.shadow_casting = data.shadow_casting;
+    panel.widget_hovered_appearance = data.widget_hovered_appearance;
+    panel.widget_pressed_appearance = data.widget_pressed_appearance;
+    panel.widget_focused_appearance = data.widget_focused_appearance;
+    panel.widget_disabled_appearance = data.widget_disabled_appearance;
     panel.material = data.material;
     panel.text_material = data.text_material;
     panel.shape_material = data.shape_material;
     panel.text_alpha_mode = data.text_alpha_mode;
     panel.hdr_text_coverage_bias = data.hdr_text_coverage_bias;
+    panel.picking = data.picking;
     panel.coordinate_space = data.coordinate_space;
     panel
 }
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use bevy::prelude::AlphaMode;
+    use bevy::prelude::Color;
+    use bevy::prelude::Handle;
     use bevy_kana::Cascade;
 
     use super::PanelBuildError;
+    use crate::Appearance;
+    use crate::Border;
     use crate::DiegeticPanel;
     use crate::El;
     use crate::Fit;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
+    use crate::InvalidSize;
     use crate::Mm;
     use crate::PanelElementId;
+    use crate::SliderConfigError;
     use crate::Text;
     use crate::TextStyle;
 
@@ -853,6 +1019,70 @@ mod tests {
 
     fn field_spec() -> ImeEditableFieldSpec {
         ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text))
+    }
+
+    #[test]
+    fn panel_build_error_messages_are_stable() {
+        let cases = [
+            (
+                PanelBuildError::from(InvalidSize {
+                    width:  0.0,
+                    height: 12.0,
+                }),
+                "panel dimensions must be positive, got 0×12",
+            ),
+            (
+                PanelBuildError::DuplicateElementId(PanelElementId::named("title")),
+                "duplicate panel element id `title`",
+            ),
+            (
+                PanelBuildError::WidgetRequiresNamedId(PanelElementId::auto(3)),
+                "widget `#auto-3` requires a named panel element id",
+            ),
+            (
+                PanelBuildError::WidgetInsidePrecomposedSubtree(PanelElementId::named("button")),
+                "widget `button` is inside a precomposed subtree",
+            ),
+            (
+                PanelBuildError::SliderThumbOutsideSlider(PanelElementId::named("thumb")),
+                "slider thumb `thumb` must be inside a slider subtree",
+            ),
+            (
+                PanelBuildError::SliderHasMultipleThumbs(PanelElementId::named("volume")),
+                "slider `volume` contains more than one thumb",
+            ),
+            (
+                PanelBuildError::StateTintRequiresImage(PanelElementId::named("image")),
+                "widget part `image` state tint requires an image; add an image",
+            ),
+            (
+                PanelBuildError::SliderConfig(
+                    PanelElementId::named("volume"),
+                    SliderConfigError::UnorderedRange,
+                ),
+                "slider `volume`: slider range start must be less than its end",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn invalid_size_conversion_preserves_source() {
+        let error = PanelBuildError::from(InvalidSize {
+            width:  -2.0,
+            height: 4.0,
+        });
+
+        assert!(matches!(
+            error.source(),
+            Some(source)
+                if source.is::<InvalidSize>()
+                    && source.to_string()
+                        == "panel dimensions must be positive, got -2×4"
+        ));
     }
 
     #[test]
@@ -880,6 +1110,166 @@ mod tests {
             result,
             Err(PanelBuildError::DuplicateElementId(ref id)) if *id == PanelElementId::named("title")
         ));
+    }
+
+    #[test]
+    fn duplicate_widget_ids_use_panel_element_validation() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().button("action"), |_| {});
+                builder.with(El::new().button("action"), |_| {});
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::DuplicateElementId(ref id))
+                if *id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn widget_auto_id_errors_at_build() {
+        let auto_id = PanelElementId::auto(4);
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().button(auto_id.clone()), |_| {});
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::WidgetRequiresNamedId(id)) if id == auto_id
+        ));
+    }
+
+    #[test]
+    fn widget_inside_precomposed_subtree_errors_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::column().precompose_ldr(), |builder| {
+                    builder.with(El::new().button("action"), |_| {});
+                });
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id))
+                if id == PanelElementId::named("action")
+        ));
+    }
+
+    #[test]
+    fn button_state_background_without_background_builds_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .button("action")
+                        .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn button_state_border_color_without_border_builds_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .background(Color::srgb(0.1, 0.1, 0.1))
+                        .button("action")
+                        .focused(Appearance::new().border_color(Color::srgb(0.9, 0.8, 0.2))),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn editable_focus_border_color_without_border_builds_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .editable_field("name", field_spec())
+                        .focused(Appearance::new().border_color(Color::srgb(0.9, 0.8, 0.2))),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn button_state_material_without_surface_builds_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .button("action")
+                        .pressed(Appearance::new().material(Handle::default())),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn button_state_builders_with_authored_targets_build_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .background(Color::srgb(0.1, 0.1, 0.1))
+                        .border(Border::all(1.0, Color::srgb(0.4, 0.4, 0.4)))
+                        .button("action")
+                        .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8)))
+                        .focused(Appearance::new().border_color(Color::srgb(0.9, 0.8, 0.2)))
+                        .pressed(Appearance::new().material(Handle::default())),
+                    |_| {},
+                );
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn widget_part_state_background_without_surface_builds_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().button("action"), |builder| {
+                    builder.with(
+                        builder
+                            .child(El::new())
+                            .disabled(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
+                        |_| {},
+                    );
+                });
+            })
+            .build();
+
+        assert!(result.is_ok());
     }
 
     #[test]

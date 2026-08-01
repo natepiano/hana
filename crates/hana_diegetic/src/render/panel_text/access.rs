@@ -28,7 +28,7 @@ use crate::panel::DiegeticPanelChangeClassification;
 /// Read-only access to panel text runs by [`PanelElementId`].
 ///
 /// Reads come from the `El.text` layout cache, which is authoritative for the
-/// full run string — a wrapped run materializes as one child per visual line,
+/// full run string — a wrapped run reifies as one child per visual line,
 /// each holding a per-line slice, so no single child entity owns the whole
 /// string. Use this in reader systems; it holds no mutable claim and so runs in
 /// parallel with other text readers.
@@ -81,7 +81,7 @@ impl PanelTextReader<'_, '_> {
     /// the lone run is found through the relationship rather than the id index.
     ///
     /// Filters `line_index == 0` rather than taking [`PanelTextRuns::sole`]: a
-    /// wrapped run materializes as one entity per visual line, so its set holds
+    /// wrapped run reifies as one entity per visual line, so its set holds
     /// several entities yet still has one logical run (its line-0 entity).
     /// Returns `None` when the panel has no run or more than one distinct run
     /// (the call is ambiguous then).
@@ -108,7 +108,7 @@ impl PanelTextReader<'_, '_> {
 ///
 /// `set_text` writes the run's string into the panel's authoritative `El.text`
 /// cache, while `set_style` writes its authored `El.config`. Either edit bumps
-/// the tree revision, so the next layout and reconcile derive the run child
+/// the tree revision, so the next layout and reification derive the run child
 /// from the same source. Passing the whole string works for both single-line
 /// and wrapped runs. Reads also come from the `El.text` cache. Both go through a single
 /// `&mut DiegeticPanel` query, so this cannot embed a [`PanelTextReader`] (its
@@ -201,8 +201,8 @@ impl PanelText<'_, '_> {
     /// Sets a named run's authored style, returning whether a run was found.
     ///
     /// The panel tree's `El.config` is authoritative for both measurement and
-    /// rendering; the materialized run child is derived output. `set_style`
-    /// writes the tree config and lets the next layout and reconcile apply the
+    /// rendering; the reified run child is derived output. `set_style`
+    /// writes the tree config and lets the next layout and reification apply the
     /// style, so a font change also refits the panel and a cascade-authoring
     /// change remains in force after later text edits. An unchanged style does
     /// not dirty the panel.
@@ -253,9 +253,9 @@ impl PanelText<'_, '_> {
 ///
 /// `text_child` is an unchecked index read; the `layouts` query confirms the
 /// entity is still a live run (TR-Q). A stale index entry (entity despawned out
-/// of flow before reconcile rebuilt the index) falls to the miss path, but its
+/// of flow before reification rebuilt the index) falls to the miss path, but its
 /// id is still valid in the tree — authoritative for valid ids at build time,
-/// unlike the reconcile-timed index — so a `#[cfg(debug_assertions)]` `warn!`
+/// unlike the reification-timed index — so a `#[cfg(debug_assertions)]` `warn!`
 /// fires only on a genuine typo, leaving the first-frame / post-`set_tree`
 /// window quiet.
 fn resolve_run_entity(
@@ -333,7 +333,7 @@ impl TextEdit<'_> {
     }
 
     /// Writes the whole run string into the `El.text` cache, bumping the tree
-    /// revision so layout re-wraps and reconcile re-derives the child, and
+    /// revision so layout re-wraps and reification re-derives the child, and
     /// recording the edit as `VisualOnly` for the geometry-stable skip. An
     /// unchanged string is skipped before the `&mut` access, so it neither
     /// dirties the panel, records a change, nor triggers a relayout.
@@ -355,7 +355,7 @@ impl TextEdit<'_> {
 ///
 /// A standalone label is a one-element panel: the marker `M` sits on the panel
 /// entity, while the run text is stored in the panel's authoritative `El.text`
-/// tree cache (the run child's `TextContent` is derived output reconcile
+/// tree cache (the run child's `TextContent` is derived output reification
 /// rewrites). This `SystemParam` traverses the panel→run relationship
 /// internally, so a caller
 /// names only its own marker and never touches [`PanelTextRuns`] / the tree /
@@ -453,7 +453,7 @@ impl<M: Component> DiegeticTextMut<'_, '_, M> {
     /// the run child — the run's style is a `for_shaping`-derived projection the
     /// layout engine never measures. So this edits the tree config in place and
     /// relayouts: the new style reaches both measurement (the panel re-fits to
-    /// the new font) and rendering (reconcile re-derives the run from the config).
+    /// the new font) and rendering (reification re-derives the run from the config).
     /// Mutating the run style alone would render the new font while measuring the
     /// old one, the exact mismatch this routes around.
     pub fn for_each_style_mut(&mut self, mut f: impl FnMut(&mut TextStyle)) -> usize {
@@ -513,7 +513,7 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
-    use crate::render::panel_text::reconcile;
+    use crate::render::panel_text::reify;
     use crate::text::DiegeticTextMeasurer;
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
@@ -553,17 +553,17 @@ mod tests {
         }
     }
 
-    /// Headless layout plus the reconcile pass (`PostUpdate`), so the public
+    /// Headless layout plus the reification pass (`PostUpdate`), so the public
     /// `PanelText` / `DiegeticTextMut` get/set is exercised against a live index:
     /// a write goes straight to the authoritative tree (`El.text`), the layout
-    /// pipeline relayouts, and reconcile re-derives the run child. Parameterized
+    /// pipeline relayouts, and reification re-derives the run child. Parameterized
     /// by measurer so a test can choose one whose output depends on the font.
     fn app_with_measurer(measurer: DiegeticTextMeasurer) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(measurer);
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
+        app.add_systems(PostUpdate, reify::reify_text_entities);
         app
     }
 
@@ -596,7 +596,7 @@ mod tests {
     fn empty_tree() -> LayoutTree { LayoutBuilder::new(100.0, 50.0).build() }
 
     /// One text element that wraps at explicit newlines into `n` visual lines,
-    /// so its run materializes as `n` entities sharing one id (`line_index`
+    /// so its run reifies as `n` entities sharing one id (`line_index`
     /// 0..n).
     fn wrapped_tree(text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -616,7 +616,7 @@ mod tests {
             .id()
     }
 
-    /// Spawns and runs two frames so the run materializes and the layout settles
+    /// Spawns and runs two frames so the run reifies and the layout settles
     /// before a test edits it.
     fn settled_panel(app: &mut App, tree: LayoutTree) -> Entity {
         let panel = spawn_panel(app, tree);
@@ -806,7 +806,7 @@ mod tests {
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
 
         // Despawn the run out of flow. The panel's `text_index` still maps the id
-        // to the now-dead entity until the next reconcile rebuilds it, so the
+        // to the now-dead entity until the next reification rebuilds it, so the
         // liveness check inside the SystemParam is what must yield `None`.
         let run = first_run_entity(&mut app);
         app.world_mut().entity_mut(run).despawn();
@@ -860,7 +860,7 @@ mod tests {
         let runs = app
             .world()
             .get::<PanelTextRuns>(panel)
-            .expect("a reconciled panel should carry PanelTextRuns");
+            .expect("a reified panel should carry PanelTextRuns");
         assert_eq!(runs.len(), 1, "a single-line label has exactly one run");
         assert!(
             runs.sole().is_some(),
@@ -977,7 +977,7 @@ mod tests {
         let runs = app
             .world()
             .get::<PanelTextRuns>(panel)
-            .expect("a reconciled panel should carry PanelTextRuns");
+            .expect("a reified panel should carry PanelTextRuns");
         assert_eq!(runs.len(), 2, "two distinct elements spawn two runs");
         assert!(runs.sole().is_none(), "a two-run set has no lone run");
 
@@ -1048,7 +1048,7 @@ mod tests {
         let runs = app
             .world()
             .get::<PanelTextRuns>(panel)
-            .expect("a reconciled panel should carry PanelTextRuns");
+            .expect("a reified panel should carry PanelTextRuns");
         assert_eq!(
             runs.len(),
             3,
@@ -1093,7 +1093,7 @@ mod tests {
         );
     }
 
-    /// A named run that wraps at explicit newlines, so it materializes as one
+    /// A named run that wraps at explicit newlines, so it reifies as one
     /// entity per line while staying id-addressable.
     fn named_wrapped_tree(id: &PanelElementId, text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -1111,11 +1111,11 @@ mod tests {
         let id = PanelElementId::named("body");
         let panel = settled_panel(&mut app, named_wrapped_tree(&id, "one\ntwo"));
 
-        // Two wrapped lines materialize as two run entities sharing the id.
+        // Two wrapped lines reify as two run entities sharing the id.
         let runs = app
             .world()
             .get::<PanelTextRuns>(panel)
-            .expect("a reconciled panel should carry PanelTextRuns");
+            .expect("a reified panel should carry PanelTextRuns");
         assert_eq!(runs.len(), 2, "two wrapped lines, two run entities");
 
         // Write a three-line replacement through the id-addressed `set_text`. It
@@ -1146,7 +1146,7 @@ mod tests {
         let runs_after = app
             .world()
             .get::<PanelTextRuns>(panel)
-            .expect("a reconciled panel should carry PanelTextRuns");
+            .expect("a reified panel should carry PanelTextRuns");
         assert_eq!(
             runs_after.len(),
             3,
@@ -1197,7 +1197,7 @@ mod tests {
         assert!(wrote, "the edit is accepted");
 
         // Run several frames. The edit must drive exactly one relayout: the write
-        // lands once in the authoritative tree, reconcile re-derives the run child
+        // lands once in the authoritative tree, reification re-derives the run child
         // from it, and — with no child→tree sync-back — nothing oscillates after.
         app.update();
         app.update();

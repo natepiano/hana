@@ -1,6 +1,7 @@
 //! Compiled-keymap replacement from disk-worker source snapshots.
 
 use std::str;
+use std::str::Utf8Error;
 
 use bevy::ecs::world::World;
 use bevy::prelude::Resource;
@@ -172,7 +173,7 @@ fn next_generation(world: &World) -> Generation {
         })
 }
 
-fn utf8_diagnostic(source_path: String, error: str::Utf8Error) -> Diagnostic {
+fn utf8_diagnostic(source_path: String, error: Utf8Error) -> Diagnostic {
     Diagnostic {
         source_path,
         byte_range: 0..0,
@@ -276,8 +277,8 @@ mod tests {
     use crate::ReflectKeymapCommand;
     use crate::condition::ConditionRegistry;
     use crate::keymap::CompiledKeymap;
+    use crate::keymap::runtime;
     use crate::keymap::runtime::KeymapRuntime;
-    use crate::keymap::runtime::route_input;
 
     const DEFAULTS_PATH: &str = "published-defaults.jsonc";
     const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
@@ -399,7 +400,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(key);
-        route_input(app.world_mut());
+        runtime::route_input(app.world_mut());
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear_just_pressed(key);
@@ -409,7 +410,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(key);
-        route_input(app.world_mut());
+        runtime::route_input(app.world_mut());
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear_just_released(key);
@@ -473,7 +474,7 @@ mod tests {
         press(&mut app, KeyCode::KeyA);
         queue_user_snapshot(&mut app, defaults.as_bytes());
         commit_reload(app.world_mut());
-        route_input(app.world_mut());
+        runtime::route_input(app.world_mut());
 
         assert_eq!(
             app.world().resource::<CustomInputs>().get(&custom_input),
@@ -500,7 +501,7 @@ mod tests {
             }"#,
         );
         commit_reload(app.world_mut());
-        route_input(app.world_mut());
+        runtime::route_input(app.world_mut());
         release(&mut app, KeyCode::KeyA);
         press(&mut app, KeyCode::KeyA);
 
@@ -559,7 +560,7 @@ mod tests {
         press(&mut app, KeyCode::KeyB);
         queue_user_snapshot(&mut app, defaults.as_bytes());
         commit_reload(app.world_mut());
-        route_input(app.world_mut());
+        runtime::route_input(app.world_mut());
 
         assert_eq!(
             app.world().resource::<CustomInputs>().get(&custom_input),

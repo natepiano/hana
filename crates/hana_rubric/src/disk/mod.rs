@@ -26,3 +26,9 @@ pub(crate) use worker::DiskSnapshot;
 pub(crate) use worker::DiskWorkerChannels;
 pub(crate) use worker::DiskWorkerMessage;
 pub(crate) use worker::start_disk_worker;
+
+pub(super) fn take_worker_message(
+    disk_worker_channels: &DiskWorkerChannels,
+) -> Option<DiskWorkerMessage> {
+    worker::take_worker_message(disk_worker_channels)
+}

@@ -1,34 +1,62 @@
 //! Editable panel field records computed at the panel boundary.
 
 use bevy::math::Vec2;
+use bevy::prelude::Color;
 
+use crate::AlignX;
+use crate::AlignY;
+use crate::Border;
+use crate::CornerRadius;
 use crate::ImeEditableFieldSpec;
+use crate::Padding;
 use crate::PanelElementId;
+use crate::TextStyle;
 use crate::layout::BoundingBox;
+use crate::layout::EditorPart;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
+
+/// Authored visual presentation copied by the transient field editor.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct PanelFieldPresentation {
+    pub(crate) background:        Option<Color>,
+    pub(crate) border:            Option<Border>,
+    pub(crate) corner_radius:     CornerRadius,
+    pub(crate) padding:           Padding,
+    pub(crate) align_x:           AlignX,
+    pub(crate) align_y:           AlignY,
+    pub(crate) text_style:        Option<TextStyle>,
+    pub(crate) editor_text:       Option<EditorPart>,
+    pub(crate) editor_selection:  Option<EditorPart>,
+    pub(crate) editor_caret:      Option<EditorPart>,
+    pub(crate) editor_validation: Option<EditorPart>,
+}
 
 /// Computed editable field on a laid-out panel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelFieldRecord {
     /// Panel-local semantic identity.
-    pub field_id:      PanelElementId,
+    pub field_id:            PanelElementId,
     /// Element bounds in panel-local layout points.
-    pub bounds:        BoundingBox,
+    pub bounds:              BoundingBox,
     /// Editable behavior authored for this field.
-    pub field_spec:    ImeEditableFieldSpec,
+    pub field_spec:          ImeEditableFieldSpec,
     /// Text displayed by this field when the record was computed.
-    pub display_text:  String,
+    pub display_text:        String,
     /// Source element index in the panel's `LayoutTree`.
-    pub element_index: usize,
+    pub element_index:       usize,
     /// Whether this id is duplicated elsewhere in the panel.
-    pub duplicate_id:  bool,
+    pub duplicate_id:        bool,
+    /// Authored surface and text presentation for the transient editor.
+    pub(crate) presentation: PanelFieldPresentation,
 }
 
 impl PanelFieldRecord {
     /// Returns `true` when `panel_local` lies inside this record's bounds.
     #[must_use]
     pub fn contains(&self, panel_local: Vec2) -> bool { self.bounds.contains(panel_local) }
+
+    pub(crate) const fn presentation(&self) -> &PanelFieldPresentation { &self.presentation }
 }
 
 pub(super) fn collect_panel_field_records(
@@ -41,6 +69,9 @@ pub(super) fn collect_panel_field_records(
 
     for (element_index, computed) in result.computed.iter().enumerate() {
         let Some(field) = tree.editable_field(element_index) else {
+            continue;
+        };
+        let Some(presentation) = tree.editable_field_presentation(element_index) else {
             continue;
         };
         if seen.contains(&field.field_id) && !duplicates.contains(&field.field_id) {
@@ -57,6 +88,7 @@ pub(super) fn collect_panel_field_records(
                 .to_owned(),
             element_index,
             duplicate_id: false,
+            presentation,
         });
     }
 

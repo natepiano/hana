@@ -11,9 +11,11 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::SystemCondition;
 use bevy::ecs::system::IntoSystem;
 use bevy::ecs::system::RunSystemError;
+use bevy::prelude::Mut;
 use bevy::prelude::NextState;
 use bevy::prelude::On;
 use bevy::prelude::PreUpdate;
+use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use bevy::prelude::State;
 use bevy::prelude::World;
@@ -27,11 +29,8 @@ use crate::DiagnosticSeverity;
 use crate::KeymapContext;
 use crate::KeymapPlugin;
 use crate::KeymapSystems;
+use crate::condition;
 use crate::condition::ContextSource;
-use crate::condition::condition_diagnostic;
-use crate::condition::register_context;
-use crate::condition::retain_context_diagnostics;
-use crate::condition::sync_state_condition;
 
 pub(crate) struct DerivedContextPlugin<C> {
     keymap_plugin:   KeymapPlugin,
@@ -59,7 +58,7 @@ where
         if !app.is_plugin_added::<StatesPlugin>() {
             app.add_plugins(StatesPlugin);
         }
-        if register_context::<C>(app, ContextSource::Derived).is_ok() {
+        if condition::register_context::<C>(app, ContextSource::Derived).is_ok() {
             let derived_context = self
                 .derived_context
                 .lock()
@@ -69,7 +68,7 @@ where
                 return;
             };
             let diagnostics = validate_derived_context(&mut derived_context);
-            retain_context_diagnostics(app, &diagnostics);
+            condition::retain_context_diagnostics(app, &diagnostics);
             app.insert_state(derived_context.fallback);
             for (_, condition) in &mut derived_context.rules {
                 condition.initialize(app.world_mut());
@@ -82,7 +81,8 @@ where
                 )
                 .add_systems(
                     PreUpdate,
-                    sync_state_condition::<C>.in_set(KeymapSystems::UpdateActiveCondition),
+                    condition::sync_state_condition::<C>
+                        .in_set(KeymapSystems::UpdateActiveCondition),
                 );
         }
     }
@@ -157,7 +157,7 @@ where
             .iter()
             .any(|(rule_context, _)| *rule_context == context)
         {
-            diagnostics.push(condition_diagnostic(
+            diagnostics.push(condition::condition_diagnostic(
                 context.as_ref(),
                 DiagnosticSeverity::Advisory,
                 format!(
@@ -170,7 +170,7 @@ where
 
     derived_context.rules.retain(|(context, _)| {
         if *context == derived_context.fallback {
-            diagnostics.push(condition_diagnostic(
+            diagnostics.push(condition::condition_diagnostic(
                 context.as_ref(),
                 DiagnosticSeverity::Advisory,
                 format!(
@@ -192,7 +192,7 @@ where
             .count()
             > 1
         {
-            diagnostics.push(condition_diagnostic(
+            diagnostics.push(condition::condition_diagnostic(
                 context.as_ref(),
                 DiagnosticSeverity::Advisory,
                 format!(
@@ -208,7 +208,7 @@ where
 
 fn check_derived_context_change_ticks<C: KeymapContext>(
     check_change_ticks: On<CheckChangeTicks>,
-    mut derived_context_rules: bevy::prelude::ResMut<DerivedContextRules<C>>,
+    mut derived_context_rules: ResMut<DerivedContextRules<C>>,
 ) {
     for (_, condition) in &mut derived_context_rules.rules {
         condition.check_change_tick(*check_change_ticks);
@@ -220,7 +220,7 @@ where
     C: KeymapContext + FreelyMutableState,
 {
     world.resource_scope(
-        |world, mut derived_context_rules: bevy::prelude::Mut<DerivedContextRules<C>>| {
+        |world, mut derived_context_rules: Mut<DerivedContextRules<C>>| {
             let context = derived_context_rules
                 .rules
                 .iter_mut()

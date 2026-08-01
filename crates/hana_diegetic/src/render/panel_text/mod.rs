@@ -5,7 +5,7 @@ mod alpha;
 mod batching;
 mod glyph_cascade;
 mod layout;
-mod reconcile;
+mod reify;
 mod relationship;
 mod shaping;
 
@@ -24,12 +24,13 @@ use self::batching::update_panel_text_batches;
 use self::batching::write_batch_run_transforms;
 use self::glyph_cascade::seed_panel_text_child_glyph;
 pub use self::layout::PanelTextLayout;
-use self::reconcile::reconcile_panel_text_children;
+use self::reify::reify_text_entities;
 pub use self::relationship::PanelTextRuns;
 pub use self::relationship::TextRunOf;
 use self::shaping::shape_panel_text_children;
 use super::PanelChildSystems;
 use super::material_table;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
 use super::material_table::MaterialTableAppendReady;
 use super::precompose;
@@ -46,6 +47,7 @@ use crate::layout::Sidedness;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPerfStats;
 use crate::text::PreparedTextRun;
+use crate::widgets::VisualOverrideIndex;
 
 /// Stores a prepared text run for a panel [`TextContent`](crate::TextContent) child.
 ///
@@ -76,7 +78,7 @@ pub(super) struct PreparedPanelText {
 
 /// Plugin that adds text rendering for diegetic panels.
 ///
-/// Reconciles panel text children, runs text shaping for panel text, and builds
+/// Reifies panel text entities, runs text shaping for panel text, and builds
 /// the glyph meshes.
 pub(super) struct TextRenderPlugin;
 
@@ -91,6 +93,7 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
+        app.init_resource::<VisualOverrideIndex>();
         app.add_systems(
             PostUpdate,
             (
@@ -101,13 +104,13 @@ impl Plugin for TextRenderPlugin {
                 precompose::cleanup_retired_precompose_images
                     .in_set(PanelChildSystems::Build)
                     .after(precompose::activate_pending_precompose_cameras),
-                reconcile_panel_text_children
+                reify_text_entities
                     .in_set(PanelChildSystems::Build)
                     .after(precompose::ensure_panel_precompose_caches),
-                // `reconcile_panel_text_children` is the sole writer for
-                // `DiegeticPerfStats::reconcile_ms`; `ImageBatchPlugin` routes
+                // `reify_text_entities` is the sole writer for
+                // `DiegeticPerfStats::reify_ms`; `ImageBatchPlugin` routes
                 // image records without adding to this text-child timing.
-                shape_panel_text_children.after(reconcile_panel_text_children),
+                shape_panel_text_children.after(reify_text_entities),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );
@@ -121,6 +124,7 @@ impl Plugin for TextRenderPlugin {
                 update_panel_text_batches
                     .after(shape_panel_text_children)
                     .after(MaterialTableAppendReady)
+                    .in_set(BatchAssetWrites)
                     .before(TransformSystems::Propagate)
                     .before(BatchResourcesReady),
                 material_table::register_path_batch_materials::<DiegeticTextBatch>

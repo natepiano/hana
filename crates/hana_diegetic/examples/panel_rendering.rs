@@ -11,8 +11,6 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_kana::ToU8;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
@@ -37,6 +35,8 @@ use hana_diegetic::Px;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::ZoomToFit;
 
 // ── Colors ──────────────────────────────────────────────────────────
 const DARK_BG: Color = Color::srgba(0.3, 0.3, 0.35, 1.0);
@@ -477,7 +477,9 @@ fn refresh_preset_panel(
     if !preset.is_changed() {
         return;
     }
-    commands.set_tree(*panel, build_preset_panel_tree(*preset));
+    if let Err(error) = commands.set_tree(*panel, build_preset_panel_tree(*preset)) {
+        error!("failed to replace rendering preset panel tree: {error}");
+    }
 }
 
 fn refresh_title_bar_light_readout(

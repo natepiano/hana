@@ -1,6 +1,10 @@
 //! Matcher construction from a semantically resolved keymap.
 
 use std::collections::HashMap;
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 use bevy::prelude::Resource;
 use bevy::prelude::World;
@@ -107,8 +111,8 @@ impl CompiledKeymap {
     pub(crate) fn match_global(
         &mut self,
         keystroke: crate::Keystroke,
-        now: std::time::Instant,
-        timeout: std::time::Duration,
+        now: Instant,
+        timeout: Duration,
     ) -> crate::MatchOutcome<CommandHandle> {
         self.global.match_keystroke(keystroke, now, timeout)
     }

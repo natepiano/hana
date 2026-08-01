@@ -1,8 +1,3 @@
-use std::error::Error;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
-
 use bevy::math::Vec2;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
@@ -36,26 +31,35 @@ pub struct Glyph {
 }
 
 /// Errors produced by the outline loader.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(thiserror::Error, Clone, Debug, PartialEq, Eq)]
 pub enum OutlineError {
     /// Font bytes could not be parsed.
+    #[error("font bytes could not be parsed")]
     InvalidFont,
     /// The requested glyph ID has no outline entry in the font.
+    #[error("font does not contain glyph id {0}")]
     MissingGlyphId(u16),
 }
 
-impl Display for OutlineError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidFont => formatter.write_str("font bytes could not be parsed"),
-            Self::MissingGlyphId(glyph_id) => {
-                write!(formatter, "font does not contain glyph id {glyph_id}")
-            },
+#[cfg(test)]
+mod tests {
+    use super::OutlineError;
+
+    #[test]
+    fn outline_error_messages_are_stable() {
+        let cases = [
+            (OutlineError::InvalidFont, "font bytes could not be parsed"),
+            (
+                OutlineError::MissingGlyphId(42),
+                "font does not contain glyph id 42",
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
         }
     }
 }
-
-impl Error for OutlineError {}
 
 /// Loads one glyph by resolved font face and glyph ID.
 pub fn load_glyph_by_id_from_face(

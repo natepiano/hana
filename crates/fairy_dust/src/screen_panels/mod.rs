@@ -14,16 +14,24 @@ use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticUiPlugin;
 use hana_diegetic::El;
+use hana_diegetic::FontId;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::Padding;
+use hana_diegetic::PanelPicking;
+use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::default_panel_material;
 pub use performance::StatsPanelRow;
 pub use performance::StatsPanelSection;
 pub use performance::diegetic_stats_panel;
+pub use performance::diegetic_stats_panel_with_integral_advance;
 pub use performance::diegetic_stats_sections_panel;
+pub use performance::diegetic_stats_sections_panel_with_integral_advance;
 pub use performance::diegetic_stats_sections_tree;
+pub use performance::diegetic_stats_sections_tree_with_integral_advance;
 pub use performance::diegetic_stats_tree;
+pub use performance::diegetic_stats_tree_with_integral_advance;
 pub use performance::fps_stats_panel;
 pub use performance::gpu_meter_panel;
 pub use title_bar::ControlActivation;
@@ -57,8 +65,10 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(
         Startup,
-        move |mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>| {
-            description::spawn_description_panel(&mut commands, &panel, &mut materials);
+        move |mut commands: Commands,
+              fonts: Res<FontRegistry>,
+              mut materials: ResMut<Assets<StandardMaterial>>| {
+            description::spawn_description_panel(&mut commands, &panel, &fonts, &mut materials);
         },
     );
 }
@@ -73,14 +83,16 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
         Startup,
         move |mut commands: Commands,
               mut materials: ResMut<Assets<StandardMaterial>>,
+              fonts: Res<FontRegistry>,
               home: Option<Res<CameraHomeConfig>>,
-              registry: Option<Res<TitleBarControlRegistry>>| {
+              control_registry: Option<Res<TitleBarControlRegistry>>| {
             title_bar::spawn_title_bar_with_home_chip(
                 &mut commands,
                 &mut materials,
                 &title_bar,
+                &fonts,
                 home.as_deref(),
-                registry.as_deref(),
+                control_registry.as_deref(),
             );
         },
     );
@@ -113,6 +125,27 @@ pub fn screen_panel_material_handle(
     materials: &mut Assets<StandardMaterial>,
 ) -> Handle<StandardMaterial> {
     materials.add(screen_panel_material())
+}
+
+/// Resolves a screen-panel request to the nearest size whose monospace glyph
+/// advance spans a whole logical pixel.
+pub(crate) fn integral_advance_size(fonts: &FontRegistry, requested: Pt) -> Pt {
+    let Some(font) = fonts.font(FontId::MONOSPACE) else {
+        bevy::log::warn_once!(
+            "fairy_dust: embedded monospace font is unavailable; using requested text size"
+        );
+        return requested;
+    };
+    match font.nearest_integral_advance_size(requested) {
+        Ok(size) => size,
+        Err(error) => {
+            bevy::log::warn_once!(
+                "fairy_dust: cannot resolve an integral-advance screen text size: {error}; \
+                 using requested size"
+            );
+            requested
+        },
+    }
 }
 
 /// Adds the standard Fairy Dust screen-panel frame, then lets the caller
@@ -152,17 +185,17 @@ pub(super) const fn default_inner_background() -> Color { INNER_BACKGROUND }
 
 fn ignore_screen_panel_picking(
     trigger: On<Add, DiegeticPanel>,
-    panels: Query<&DiegeticPanel>,
+    panels: Query<(&DiegeticPanel, Has<PanelPicking>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let Ok(panel) = panels.get(entity) else {
+    let Ok((panel, has_authored_picking)) = panels.get(entity) else {
         return;
     };
-    if panel.coordinate_space().is_screen() {
+    if panel.coordinate_space().is_screen() && !has_authored_picking {
         commands
             .entity(entity)
-            .insert((FairyDustOverlayPanel, Pickable::IGNORE));
+            .insert((FairyDustOverlayPanel, PanelPicking::PASS_THROUGH));
     }
 }
 
@@ -220,20 +253,48 @@ mod tests {
     use bevy::picking::Pickable;
     use bevy::prelude::*;
     use hana_diegetic::DiegeticPanel;
+    use hana_diegetic::PanelPicking;
     use hana_diegetic::Sizing;
 
     use super::FairyDustOverlayPanel;
     use super::install_overlay_picking;
 
     #[test]
-    fn screen_panel_root_ignores_picking() -> Result<(), String> {
+    fn screen_panel_root_passes_pointer_through() -> Result<(), String> {
         let mut app = App::new();
         install_overlay_picking(&mut app);
 
         let panel = spawn_screen_panel(&mut app)?;
 
-        assert_eq!(app.world().get::<Pickable>(panel), Some(&Pickable::IGNORE));
+        // The overlay root installs pass-through picking so it cannot block the
+        // diegetic backend for the widgets example or any panel behind it.
+        assert_eq!(
+            app.world().get::<PanelPicking>(panel),
+            Some(&PanelPicking::PASS_THROUGH),
+        );
         assert!(app.world().get::<FairyDustOverlayPanel>(panel).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_screen_panel_picking_remains_authoritative() -> Result<(), String> {
+        let mut app = App::new();
+        install_overlay_picking(&mut app);
+
+        let panel = DiegeticPanel::screen()
+            .size(Sizing::FIT, Sizing::FIT)
+            .build()
+            .map_err(|error| format!("{error}"))?;
+        let entity = app
+            .world_mut()
+            .spawn((panel, PanelPicking::INTERACTIVE))
+            .id();
+
+        assert_eq!(
+            app.world().get::<PanelPicking>(entity),
+            Some(&PanelPicking::INTERACTIVE),
+        );
+        assert!(app.world().get::<FairyDustOverlayPanel>(entity).is_none());
         Ok(())
     }
 

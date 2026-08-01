@@ -20,7 +20,6 @@ use bevy::post_process::bloom::BloomPrefilter;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -32,14 +31,13 @@ use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
-use fairy_dust::diegetic_stats_sections_panel;
-use fairy_dust::diegetic_stats_sections_tree;
+use fairy_dust::diegetic_stats_sections_panel_with_integral_advance;
+use fairy_dust::diegetic_stats_sections_tree_with_integral_advance;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::BatchSummary;
 use hana_diegetic::Border;
 use hana_diegetic::CalloutCap;
@@ -49,6 +47,7 @@ use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticPerfStats;
 use hana_diegetic::El;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::HdrTextCoverageBias;
 use hana_diegetic::LayoutBuilder;
@@ -57,9 +56,11 @@ use hana_diegetic::LineStyle;
 use hana_diegetic::Mm;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorOffset;
+use hana_diegetic::PanelAttachment;
 use hana_diegetic::PanelCircle;
 use hana_diegetic::PanelCoord;
 use hana_diegetic::PanelDraw;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::PanelLine;
 use hana_diegetic::PanelPoint;
 use hana_diegetic::Px;
@@ -70,6 +71,7 @@ use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
 use hana_diegetic::TextWrap;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::OrbitCamPreset;
 
 const PANEL_W: f32 = 170.0;
 const PANEL_H: f32 = 132.0;
@@ -1027,7 +1029,9 @@ fn apply_tonemapping_selection(
         return;
     }
     for entity in &selectors {
-        commands.set_tree(entity, tonemapping_selector_tree(selection.index));
+        if let Err(error) = commands.set_tree(entity, tonemapping_selector_tree(selection.index)) {
+            error!("failed to replace tonemapping selector tree: {error}");
+        }
     }
     for (entity, tonemapping) in &cameras {
         set_tonemapping_component(entity, tonemapping, selection.mode(), &mut commands);
@@ -1108,10 +1112,16 @@ fn apply_alpha_selection(
         return;
     }
     for entity in &selectors {
-        commands.set_tree(entity, alpha_selector_tree(selection.index));
+        if let Err(error) = commands.set_tree(entity, alpha_selector_tree(selection.index)) {
+            error!("failed to replace alpha selector tree: {error}");
+        }
     }
     for entity in &text_panels {
-        commands.set_tree(entity, build_text_panel(&text_materials, selection.mode()));
+        if let Err(error) =
+            commands.set_tree(entity, build_text_panel(&text_materials, selection.mode()))
+        {
+            error!("failed to replace text panel tree: {error}");
+        }
     }
 }
 
@@ -1156,9 +1166,13 @@ fn validation_panel(
     }
 }
 
-fn spawn_stats_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn spawn_stats_panel(
+    mut commands: Commands,
+    fonts: Res<FontRegistry>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let sections = runtime_stats_sections(None, 0.0, 0.0);
-    match diegetic_stats_sections_panel(&sections, &mut materials) {
+    match diegetic_stats_sections_panel_with_integral_advance(&sections, &fonts, &mut materials) {
         Ok(panel) => {
             commands.spawn((BatchValidationStatsPanel, panel, Transform::default()));
         },
@@ -1236,65 +1250,85 @@ fn build_tonemapping_selector_panel(
 // Pins the alpha selector's top-right corner just under the stats panel's
 // bottom-right, so the diagnostics controls stay grouped on the right edge. Two
 // observers cover either spawn order.
-fn alpha_selector_stats_anchor(stats_panel: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(stats_panel, Anchor::TopRight, Anchor::BottomRight)
+fn alpha_selector_stats_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
 }
 
 fn anchor_alpha_selector_when_added(
     trigger: On<Add, AlphaSelectorPanel>,
     stats_panels: Query<Entity, With<BatchValidationStatsPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
     let Ok(stats_panel) = stats_panels.single() else {
         return;
     };
-    commands
-        .entity(trigger.entity)
-        .insert(alpha_selector_stats_anchor(stats_panel));
+    let (Some(source), Some(target)) = (
+        panel_entities.screen(trigger.entity),
+        panel_entities.screen(stats_panel),
+    ) else {
+        return;
+    };
+    attachments.attach_to_panel(source, target, alpha_selector_stats_attachment());
 }
 
 fn anchor_alpha_selector_when_stats_added(
     trigger: On<Add, BatchValidationStatsPanel>,
     selectors: Query<Entity, With<AlphaSelectorPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
+    let Some(target) = panel_entities.screen(trigger.entity) else {
+        return;
+    };
     for selector in &selectors {
-        commands
-            .entity(selector)
-            .insert(alpha_selector_stats_anchor(trigger.entity));
+        let Some(source) = panel_entities.screen(selector) else {
+            continue;
+        };
+        attachments.attach_to_panel(source, target, alpha_selector_stats_attachment());
     }
 }
 
 // Pins the tonemapping selector's top-right corner just under the alpha
 // selector's bottom-right, so both diagnostic controls move as one stack.
-fn tonemapping_selector_alpha_anchor(alpha_selector: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(alpha_selector, Anchor::TopRight, Anchor::BottomRight)
+fn tonemapping_selector_alpha_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::TopRight, Anchor::BottomRight)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
 }
 
 fn anchor_tonemapping_selector_when_added(
     trigger: On<Add, TonemappingSelectorPanel>,
     alpha_selectors: Query<Entity, With<AlphaSelectorPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
     let Ok(alpha_selector) = alpha_selectors.single() else {
         return;
     };
-    commands
-        .entity(trigger.entity)
-        .insert(tonemapping_selector_alpha_anchor(alpha_selector));
+    let (Some(source), Some(target)) = (
+        panel_entities.screen(trigger.entity),
+        panel_entities.screen(alpha_selector),
+    ) else {
+        return;
+    };
+    attachments.attach_to_panel(source, target, tonemapping_selector_alpha_attachment());
 }
 
 fn anchor_tonemapping_selector_when_alpha_added(
     trigger: On<Add, AlphaSelectorPanel>,
     tonemapping_selectors: Query<Entity, With<TonemappingSelectorPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
+    let Some(target) = panel_entities.screen(trigger.entity) else {
+        return;
+    };
     for selector in &tonemapping_selectors {
-        commands
-            .entity(selector)
-            .insert(tonemapping_selector_alpha_anchor(trigger.entity));
+        let Some(source) = panel_entities.screen(selector) else {
+            continue;
+        };
+        attachments.attach_to_panel(source, target, tonemapping_selector_alpha_attachment());
     }
 }
 
@@ -1438,6 +1472,7 @@ fn update_diagnostic_panels(
     mut last: ResMut<LastDisplayedDiagnostics>,
     mut commands: Commands,
     mut timer: Local<Option<Timer>>,
+    fonts: Res<FontRegistry>,
 ) {
     let timer = timer.get_or_insert_with(|| {
         Timer::from_seconds(DIAGNOSTIC_UPDATE_INTERVAL, TimerMode::Repeating)
@@ -1462,13 +1497,20 @@ fn update_diagnostic_panels(
     }
     last.key = key;
     for panel in &stats_panels {
-        commands.set_tree(panel, diegetic_stats_sections_tree(&stats_sections));
+        if let Err(error) = commands.set_tree(
+            panel,
+            diegetic_stats_sections_tree_with_integral_advance(&stats_sections, &fonts),
+        ) {
+            error!("failed to replace stats panel tree: {error}");
+        }
     }
     for panel in &ledger_panels {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             panel,
             expected_batches_tree(Some(&diegetic_perf), &validation.state),
-        );
+        ) {
+            error!("failed to replace batch ledger panel tree: {error}");
+        }
     }
 }
 

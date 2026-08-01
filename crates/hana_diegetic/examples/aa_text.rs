@@ -19,10 +19,6 @@ use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
 use bevy::render::view::Msaa;
-use bevy_lagrange::CameraMove;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::PlayAnimation;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::CubeSpinConfig;
@@ -60,6 +56,10 @@ use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
 use hana_diegetic::default_panel_material;
+use hana_lagrange::CameraMove;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::PlayAnimation;
 
 // =============================================================================
 // CONSTANTS -- static scene data, controls, copy, and panel geometry.
@@ -741,7 +741,9 @@ fn refresh_aa_panel(
     if !aa.is_changed() && !post.is_changed() {
         return;
     }
-    commands.set_tree(*panel, build_aa_tree(*aa, *post));
+    if let Err(error) = commands.set_tree(*panel, build_aa_tree(*aa, *post)) {
+        error!("failed to replace anti-alias panel tree: {error}");
+    }
 }
 
 /// Swaps the upper-right info copy when OIT or POST changes, so the panel
@@ -755,7 +757,9 @@ fn refresh_demo_panel(
     if !oit.is_changed() && !post.is_changed() {
         return;
     }
-    commands.set_tree(*panel, build_demo_panel_tree(oit.0, *post));
+    if let Err(error) = commands.set_tree(*panel, build_demo_panel_tree(oit.0, *post)) {
+        error!("failed to replace demo panel tree: {error}");
+    }
 }
 
 /// Builds the bottom-left panel tree: two columns, each chip highlighted when it
@@ -1146,9 +1150,11 @@ fn refresh_cube_compatibility_panels(
         return;
     }
     for entity in &panels {
-        commands.set_tree(
+        if let Err(error) = commands.set_tree(
             entity,
             build_cube_compatibility_tree(cube_compatibility_message(oit.0, *post)),
-        );
+        ) {
+            error!("failed to replace cube compatibility panel tree: {error}");
+        }
     }
 }

@@ -15,7 +15,11 @@ mod lease;
 mod session;
 mod target;
 
+use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
+use bevy::window::Ime;
+use bevy::window::WindowClosed;
+use bevy::window::WindowFocused;
 pub use buffer::ImeBufferBoundary;
 pub use buffer::ImeBufferRange;
 pub use buffer::ImeBufferSnapshot;
@@ -23,9 +27,12 @@ pub use buffer::ImeCursorState;
 pub use buffer::ImePreedit;
 pub use buffer::ImePreeditBoundary;
 pub use buffer::ImeSelectionSnapshot;
-use editor::ImeBlurIntent;
-use editor::ImeEditorState;
+pub(crate) use editor::ImeBlurIntent;
+pub(crate) use editor::ImeEditorState;
 use editor::PendingImePanelAnchor;
+pub(crate) use editor::classify_widget_click;
+#[cfg(test)]
+pub(crate) use editor::handle_blur_intent;
 pub use events::ImeAcceptCommit;
 pub use events::ImeApplied;
 pub use events::ImeAppliedResult;
@@ -54,6 +61,7 @@ pub use input::ImeAppInputDisposition;
 pub use input::ImeAppInputDispositionHook;
 use input::ImeInputFrame;
 use input::ImeWindowState;
+use input::PendingImeTraversal;
 pub use lease::ImeInputBlocker;
 use session::ActiveImeSession;
 pub use session::ImeCommitAuthority;
@@ -88,7 +96,12 @@ pub enum ImeSystemSet {
 
 impl Plugin for ImePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActiveImeSession>()
+        app.add_message::<Ime>()
+            .add_message::<KeyboardInput>()
+            .add_message::<WindowClosed>()
+            .add_message::<WindowFocused>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ActiveImeSession>()
             .init_resource::<ImeCommitAuthority>()
             .init_resource::<ImeInputBlocker>()
             .init_resource::<ImeInputFrame>()
@@ -97,6 +110,7 @@ impl Plugin for ImePlugin {
             .init_resource::<PendingImePanelAnchor>()
             .init_resource::<ImeEditorState>()
             .init_resource::<ImeBlurIntent>()
+            .init_resource::<PendingImeTraversal>()
             .configure_sets(
                 Update,
                 (
@@ -110,13 +124,18 @@ impl Plugin for ImePlugin {
                     .chain(),
             )
             .add_observer(activation::observe_panel_clicks)
+            .add_observer(activation::open_from_semantic_activation)
             .add_observer(editor::observe_panel_clicks)
+            .add_observer(editor::classify_non_panel_click)
             .add_observer(session::open_session)
             .add_observer(session::request_commit)
             .add_observer(session::request_cancel)
             .add_observer(session::accept_commit)
             .add_observer(session::reject_commit)
             .add_observer(apply::apply_builtin_commit)
+            .add_observer(input::continue_widget_traversal_after_apply)
+            .add_observer(input::clear_widget_traversal_after_rejection)
+            .add_observer(input::clear_widget_traversal_after_cancel)
             .add_observer(editor::update_editor_from_text_changed)
             .add_observer(editor::update_editor_validation)
             .add_observer(editor::close_editor_on_cancel)

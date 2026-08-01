@@ -8,6 +8,7 @@
 //! provides a fluent API that converts into an `Element` via `into_element()`. Think of `El`
 //! as the ergonomic front door and `Element` as the canonical storage format.
 
+use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
@@ -20,10 +21,12 @@ use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
 use super::Border;
+use super::BoundingBox;
 use super::ChildDivider;
 use super::CornerRadius;
 use super::Dimension;
 use super::DrawZIndex;
+use super::LayoutResult;
 use super::Padding;
 use super::PanelDraw;
 use super::ShadowCasting;
@@ -31,13 +34,27 @@ use super::Sizing;
 use super::TextSizing;
 use super::TextStyle;
 use super::Unit;
+use super::builder::EditorPart;
 use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
+use super::engine;
 use crate::ImePanelField;
+use crate::PanelBuildError;
 use crate::PanelElementId;
 use crate::cascade::Cascade;
+use crate::panel::PanelFieldPresentation;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
+use crate::widgets::ComputedTooltipRecord;
+use crate::widgets::ComputedVisualSlot;
+use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::StateAppearance;
+use crate::widgets::Tooltip;
+use crate::widgets::VisualElementCapabilities;
+use crate::widgets::VisualSlotId;
+use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetKind;
+use crate::widgets::WidgetSpec;
 
 /// Result of replacing the display text for a panel field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,53 +106,86 @@ pub(crate) enum PrecomposeMode {
 #[derive(Clone, Debug)]
 pub(super) struct Element {
     /// Optional panel-local identity for this layout element.
-    pub(super) id:              Option<PanelElementId>,
+    pub(super) id:                Option<PanelElementId>,
     /// Width sizing rule.
-    pub(super) width:           Sizing,
+    pub(super) width:             Sizing,
     /// Height sizing rule.
-    pub(super) height:          Sizing,
+    pub(super) height:            Sizing,
     /// Interior padding.
-    pub(super) padding:         Padding,
+    pub(super) padding:           Padding,
     /// Child layout mode, spacing, and alignment.
-    pub(super) child_layout:    ChildLayout,
+    pub(super) child_layout:      ChildLayout,
     /// Optional background color.
-    pub(super) background:      Option<Color>,
+    pub(super) background:        Option<Color>,
     /// Optional border.
-    pub(super) border:          Option<Border>,
+    pub(super) border:            Option<Border>,
     /// Corner radius for rounded backgrounds and borders.
-    pub(super) corner_radius:   CornerRadius,
+    pub(super) corner_radius:     CornerRadius,
     /// How this element handles overflowing children (`Visible` or `Clipped`).
-    pub(super) overflow:        ChildOverflow,
+    pub(super) overflow:          ChildOverflow,
     /// Scroll offset (logical px) subtracted from child positions when this
     /// element clips. Clamped during positioning to `[0, content - viewport]`
     /// per axis. Interpreted relative to each axis' scroll anchor.
-    pub(super) scroll_offset:   Vec2,
+    pub(super) scroll_offset:     Vec2,
     /// Which horizontal edge `scroll_offset.x` measures from.
-    pub(super) scroll_anchor_x: ScrollAnchor,
+    pub(super) scroll_anchor_x:   ScrollAnchor,
     /// Which vertical edge `scroll_offset.y` measures from.
-    pub(super) scroll_anchor_y: ScrollAnchor,
+    pub(super) scroll_anchor_y:   ScrollAnchor,
     /// Authored PBR source-material handle for this element's surfaces.
     ///
     /// When overridden, render systems use this over the panel material handle
     /// and global material cascade defaults.
     /// `base_color` is overridden by layout or primitive color when both are set.
-    pub(super) material:        Cascade<Handle<StandardMaterial>>,
+    pub(super) material:          Cascade<Handle<StandardMaterial>>,
+    /// Authored widget interactivity for this layout scope.
+    pub(super) interactivity:     Cascade<WidgetInteractivity>,
     /// Optional editable field contract.
-    pub(super) editable:        Option<ImePanelField>,
+    pub(super) editable:          Option<ImePanelField>,
+    /// Optional authored widget contract.
+    pub(super) widget:            Option<WidgetSpec>,
+    /// Optional per-state appearance for this widget element's root visual
+    /// slot. Boxed so an ordinary element pays one pointer rather than four
+    /// appearance layers.
+    pub(super) appearance:        Option<Box<StateAppearance>>,
+    /// Whether the editor created this element at runtime rather than from the
+    /// panel's authored tree.
+    pub(super) editor_origin:     EditorElementOrigin,
+    /// Authored declaration for generated committed and preedit text runs.
+    pub(super) editor_text:       Option<Box<EditorPart>>,
+    /// Authored declaration for the generated selection highlight box.
+    pub(super) editor_selection:  Option<Box<EditorPart>>,
+    /// Authored declaration for the generated caret box.
+    pub(super) editor_caret:      Option<Box<EditorPart>>,
+    /// Authored declaration for the generated validation message run.
+    pub(super) editor_validation: Option<Box<EditorPart>>,
+    /// Optional tooltip declaration associated with this widget.
+    pub(super) tooltip:           Option<Tooltip>,
+    /// Optional stable visual-slot id for widget-owned retained records.
+    pub(super) visual_slot:       Option<VisualSlotId>,
     /// Optional paint-only draw data.
-    pub(super) draw:            Option<PanelDraw>,
+    pub(super) draw:              Option<PanelDraw>,
     /// `DrawZIndex` stamped onto this element's render commands.
-    pub(super) z_index:         DrawZIndex,
+    pub(super) z_index:           DrawZIndex,
     /// Authored anti-alias mode for this element's analytic line marks.
-    pub(super) anti_alias:      Cascade<AntiAlias>,
+    pub(super) anti_alias:        Cascade<AntiAlias>,
     /// Authored hairline fade policy for this element's analytic line marks.
-    pub(super) hairline_fade:   Cascade<HairlineFade>,
+    pub(super) hairline_fade:     Cascade<HairlineFade>,
     /// Authored shadow-casting policy for this element and its render commands.
-    pub(super) shadow_casting:  Cascade<ShadowCasting>,
+    pub(super) shadow_casting:    Cascade<ShadowCasting>,
     /// Optional subtree precomposition mode.
-    pub(super) precompose:      PrecomposeMode,
+    pub(super) precompose:        PrecomposeMode,
     /// Content of this element.
-    pub(super) content:         ElementContent,
+    pub(super) content:           ElementContent,
+}
+
+/// Distinguishes authored layout elements from editor-generated elements.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) enum EditorElementOrigin {
+    /// The panel author declared this element in the layout tree.
+    #[default]
+    Authored,
+    /// The inline editor created this element from its current buffer state.
+    Generated,
 }
 
 /// What an element contains.
@@ -182,27 +232,58 @@ impl LayoutTreeChange {
 impl Default for Element {
     fn default() -> Self {
         Self {
-            id:              None,
-            width:           Sizing::FIT,
-            height:          Sizing::FIT,
-            padding:         Padding::default(),
-            child_layout:    ChildLayout::default(),
-            background:      None,
-            border:          None,
-            corner_radius:   CornerRadius::ZERO,
-            overflow:        ChildOverflow::Visible,
-            scroll_offset:   Vec2::ZERO,
-            scroll_anchor_x: ScrollAnchor::Start,
-            scroll_anchor_y: ScrollAnchor::Start,
-            material:        Cascade::Inherit,
-            editable:        None,
-            draw:            None,
-            z_index:         DrawZIndex::default(),
-            anti_alias:      Cascade::Inherit,
-            hairline_fade:   Cascade::Inherit,
-            shadow_casting:  Cascade::Inherit,
-            precompose:      PrecomposeMode::Direct,
-            content:         ElementContent::Empty,
+            id:                None,
+            width:             Sizing::FIT,
+            height:            Sizing::FIT,
+            padding:           Padding::default(),
+            child_layout:      ChildLayout::default(),
+            background:        None,
+            border:            None,
+            corner_radius:     CornerRadius::ZERO,
+            overflow:          ChildOverflow::Visible,
+            scroll_offset:     Vec2::ZERO,
+            scroll_anchor_x:   ScrollAnchor::Start,
+            scroll_anchor_y:   ScrollAnchor::Start,
+            material:          Cascade::Inherit,
+            interactivity:     Cascade::Inherit,
+            editable:          None,
+            widget:            None,
+            appearance:        None,
+            editor_origin:     EditorElementOrigin::Authored,
+            editor_text:       None,
+            editor_selection:  None,
+            editor_caret:      None,
+            editor_validation: None,
+            tooltip:           None,
+            visual_slot:       None,
+            draw:              None,
+            z_index:           DrawZIndex::default(),
+            anti_alias:        Cascade::Inherit,
+            hairline_fade:     Cascade::Inherit,
+            shadow_casting:    Cascade::Inherit,
+            precompose:        PrecomposeMode::Direct,
+            content:           ElementContent::Empty,
+        }
+    }
+}
+
+impl Element {
+    pub(super) fn child_clip_bounds(&self, bounds: BoundingBox) -> BoundingBox {
+        let top = self.border.as_ref().map_or(0.0, |border| border.top.value);
+        let right = self
+            .border
+            .as_ref()
+            .map_or(0.0, |border| border.right.value);
+        let bottom = self
+            .border
+            .as_ref()
+            .map_or(0.0, |border| border.bottom.value);
+        let left = self.border.as_ref().map_or(0.0, |border| border.left.value);
+        BoundingBox {
+            x:      bounds.x + left,
+            y:      bounds.y + top,
+            width:  (bounds.width - left - right).max(0.0),
+            height: (bounds.height - top - bottom).max(0.0),
         }
     }
 }
@@ -403,6 +484,20 @@ impl LayoutTree {
     #[must_use]
     pub const fn len(&self) -> usize { self.elements.len() }
 
+    /// Replaces one element's state appearance for a layout test fixture.
+    #[cfg(test)]
+    pub(crate) fn set_element_state_appearance(
+        &mut self,
+        index: usize,
+        appearance: StateAppearance,
+    ) -> bool {
+        let Some(element) = self.elements.get_mut(index) else {
+            return false;
+        };
+        element.appearance = Some(Box::new(appearance));
+        true
+    }
+
     /// Returns `true` if the tree has no elements.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.elements.is_empty() }
@@ -467,6 +562,37 @@ impl LayoutTree {
             .map_or(CornerRadius::ZERO, |e| e.corner_radius)
     }
 
+    /// Returns the visual presentation authored on an editable field element.
+    pub(crate) fn editable_field_presentation(
+        &self,
+        index: usize,
+    ) -> Option<PanelFieldPresentation> {
+        let element = self.elements.get(index)?;
+        element.editable.as_ref()?;
+        let text_style = self
+            .first_text_descendant(index)
+            .and_then(|text_index| self.elements.get(text_index))
+            .and_then(|text_element| match &text_element.content {
+                ElementContent::Text { config, .. } => Some(config.clone()),
+                ElementContent::Children(_)
+                | ElementContent::Empty
+                | ElementContent::Image { .. } => None,
+            });
+        Some(PanelFieldPresentation {
+            background: element.background,
+            border: element.border,
+            corner_radius: element.corner_radius,
+            padding: element.padding,
+            align_x: element.child_layout.align_x(),
+            align_y: element.child_layout.align_y(),
+            text_style,
+            editor_text: element.editor_text.as_deref().cloned(),
+            editor_selection: element.editor_selection.as_deref().cloned(),
+            editor_caret: element.editor_caret.as_deref().cloned(),
+            editor_validation: element.editor_validation.as_deref().cloned(),
+        })
+    }
+
     /// Returns editable field metadata for the element at `index`, if any.
     #[must_use]
     pub(crate) fn editable_field(&self, index: usize) -> Option<&ImePanelField> {
@@ -525,7 +651,7 @@ impl LayoutTree {
     }
 
     /// Overwrites the cached run string at `index`, returning whether it
-    /// changed. `TextContent` on the materialized child is the single source;
+    /// changed. `TextContent` on the reified child is the single source;
     /// this keeps the `El.text` layout cache (which the engine measures and
     /// word-wraps) current after an out-of-flow edit. Returns `false` (no write)
     /// when `index` is not a text leaf or the string already matches, so the
@@ -561,7 +687,7 @@ impl LayoutTree {
 
     /// Overwrites the authored run style at `index`, returning whether it
     /// changed. The tree config is the single source the layout engine measures
-    /// and reconcile re-derives the run from; writing it here is how a font /
+    /// and reification re-derives the run from; writing it here is how a font /
     /// size restyle reaches both measurement and rendering. Returns `false` (no
     /// write) when `index` is not a text leaf or the style already matches, so
     /// the caller can skip dirtying the panel.
@@ -587,8 +713,38 @@ impl LayoutTree {
             .and_then(|element| element.id.as_ref())
     }
 
+    pub(crate) fn widget_interactivity(
+        &self,
+        id: &PanelElementId,
+    ) -> Option<Cascade<WidgetInteractivity>> {
+        self.widget_element_index(id)
+            .map(|index| self.elements[index].interactivity)
+    }
+
+    pub(crate) fn set_widget_interactivity(
+        &mut self,
+        id: &PanelElementId,
+        authored: Cascade<WidgetInteractivity>,
+    ) -> bool {
+        let Some(index) = self.widget_element_index(id) else {
+            return false;
+        };
+        self.elements[index].interactivity = authored;
+        true
+    }
+
+    fn widget_element_index(&self, id: &PanelElementId) -> Option<usize> {
+        self.elements.iter().position(|element| {
+            element.widget.is_some()
+                && element
+                    .id
+                    .as_ref()
+                    .is_some_and(|element_id| element_id == id)
+        })
+    }
+
     /// Returns the panel-local id of the text element at `index`, if that
-    /// element is a text leaf. Reconcile reads this to key a child by its id instead of
+    /// element is a text leaf. Reification reads this to key a child by its id instead of
     /// the former positional `(element_idx, command_index)` pair.
     #[must_use]
     pub(crate) fn text_element_id(&self, index: usize) -> Option<&PanelElementId> {
@@ -601,9 +757,9 @@ impl LayoutTree {
     /// Whether any text element in the tree carries `id`.
     ///
     /// The tree is the authoritative list of valid run ids at build time,
-    /// independent of reconcile timing, so a lookup that misses the panel's
+    /// independent of reification timing, so a lookup that misses the panel's
     /// `text_index` consults this to tell a genuine typo (`id` absent here) from a
-    /// run not yet materialized into an entity (`id` present here, index just not
+    /// run not yet reified into an entity (`id` present here, index just not
     /// rebuilt). See [`PanelText`](crate::PanelText).
     // The runtime caller is the `#[cfg(debug_assertions)]` typo-warn path in
     // `PanelTextReader::resolve`; test harnesses also compile this for coverage.
@@ -635,6 +791,174 @@ impl LayoutTree {
             }
         }
         None
+    }
+
+    pub(crate) fn validate_widgets(&self) -> Result<(), PanelBuildError> {
+        let Some(root) = self.root else {
+            return Ok(());
+        };
+        let mut sliders_with_thumb = HashSet::new();
+        let mut stack = vec![(
+            root,
+            Option::<(PanelElementId, WidgetKind)>::None,
+            PrecomposeMode::Direct,
+        )];
+        while let Some((index, owning_widget, inherited_precompose)) = stack.pop() {
+            let Some(element) = self.elements.get(index) else {
+                continue;
+            };
+            let precompose = match (inherited_precompose, element.precompose) {
+                (PrecomposeMode::Ldr, _) | (_, PrecomposeMode::Ldr) => PrecomposeMode::Ldr,
+                (PrecomposeMode::Direct, PrecomposeMode::Direct) => PrecomposeMode::Direct,
+            };
+
+            if element.visual_slot == Some(VisualSlotId::SLIDER_THUMB) {
+                if let Some((slider_id, WidgetKind::Slider)) = owning_widget.as_ref() {
+                    if !sliders_with_thumb.insert(slider_id.clone()) {
+                        return Err(PanelBuildError::SliderHasMultipleThumbs(slider_id.clone()));
+                    }
+                } else {
+                    let thumb_id = element
+                        .id
+                        .clone()
+                        .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
+                    return Err(PanelBuildError::SliderThumbOutsideSlider(thumb_id));
+                }
+            }
+
+            validate_part_state_colors(element, index, owning_widget.as_ref())?;
+
+            let next_owning_widget =
+                validated_element_widget_owner(element, index, owning_widget, precompose)?;
+
+            for &child in self.children_of(index).iter().rev() {
+                stack.push((child, next_owning_widget.clone(), precompose));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn computed_widget_records(
+        &self,
+        result: &LayoutResult,
+    ) -> Vec<ComputedWidgetRecord> {
+        let Some(root) = self.root else {
+            return Vec::new();
+        };
+        let Some(root_layout) = result.computed.get(root) else {
+            return Vec::new();
+        };
+        let mut ranked_records = Vec::new();
+        let mut stack = vec![(root, Cascade::Inherit, root_layout.bounds, None::<usize>)];
+        let mut preorder = 0;
+        while let Some((index, inherited_interactivity, inherited_clip, inherited_owner)) =
+            stack.pop()
+        {
+            let (Some(element), Some(computed)) =
+                (self.elements.get(index), result.computed.get(index))
+            else {
+                continue;
+            };
+            let interactivity = match element.interactivity {
+                Cascade::Inherit => inherited_interactivity,
+                Cascade::Override(value) => Cascade::Override(value),
+            };
+            let widget_declaration = element
+                .id
+                .as_ref()
+                .zip(element.widget.as_ref())
+                .map(|(id, widget)| (id.clone(), widget.clone()))
+                .or_else(|| {
+                    element.editable.as_ref().map(|field| {
+                        (
+                            field.field_id.clone(),
+                            WidgetSpec::EditableField(field.clone()),
+                        )
+                    })
+                });
+            let is_widget_root = widget_declaration.is_some();
+            let owning_record = if let Some((id, widget)) = widget_declaration {
+                ranked_records.push((
+                    element.z_index,
+                    ComputedWidgetRecord::new(
+                        id,
+                        preorder,
+                        widget,
+                        element.appearance.as_deref().cloned().unwrap_or_default(),
+                        interactivity,
+                        computed.bounds,
+                        computed.bounds.intersect(&inherited_clip),
+                    ),
+                ));
+                Some(ranked_records.len() - 1)
+            } else {
+                inherited_owner
+            };
+            if let Some(record_index) = owning_record {
+                record_owned_widget_element(
+                    &mut ranked_records[record_index].1,
+                    element,
+                    index,
+                    is_widget_root,
+                );
+            }
+            if let (Some(slot), Some(record_index)) = (element.visual_slot, owning_record) {
+                let border_box = computed.bounds;
+                let content_box = engine::content_box_bounds(element, border_box);
+                ranked_records[record_index]
+                    .1
+                    .push_visual_slot(ComputedVisualSlot {
+                        slot,
+                        element_index: index,
+                        border_box,
+                        content_box,
+                    });
+            }
+            preorder += 1;
+            let child_clip = if matches!(element.overflow, ChildOverflow::Clipped) {
+                inherited_clip
+                    .intersect(&element.child_clip_bounds(computed.bounds))
+                    .unwrap_or_default()
+            } else {
+                inherited_clip
+            };
+            for &child in self.children_of(index).iter().rev() {
+                stack.push((child, interactivity, child_clip, owning_record));
+            }
+        }
+
+        let mut rank_order: Vec<usize> = (0..ranked_records.len()).collect();
+        rank_order.sort_by_key(|&index| {
+            let (z_index, record) = &ranked_records[index];
+            (*z_index, record.preorder())
+        });
+        for (interaction_rank, record_index) in rank_order.into_iter().enumerate() {
+            ranked_records[record_index]
+                .1
+                .set_interaction_rank(interaction_rank);
+        }
+        ranked_records
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect()
+    }
+
+    pub(crate) fn computed_tooltip_records(&self) -> Vec<ComputedTooltipRecord> {
+        self.elements
+            .iter()
+            .filter_map(|element| {
+                let widget_id = element
+                    .id
+                    .as_ref()
+                    .filter(|_| element.widget.is_some())
+                    .or_else(|| element.editable.as_ref().map(|field| &field.field_id))?;
+                let tooltip = element.tooltip.as_ref()?;
+                Some(crate::widgets::ComputedTooltipRecord::new(
+                    widget_id.clone(),
+                    tooltip.clone(),
+                ))
+            })
+            .collect()
     }
 
     /// Returns the first text string owned by `index` or one of its descendants.
@@ -691,6 +1015,156 @@ impl LayoutTree {
         FieldDisplayTextUpdate::Updated
     }
 
+    /// Replaces one editable field's descendants with `replacement` while
+    /// preserving the editable field element itself.
+    ///
+    /// The result is rebuilt as a compact arena so descendants hidden by the
+    /// replacement cannot keep duplicate ids or participate in later scans.
+    /// Auto-generated text ids in `replacement` are reminted after the source
+    /// tree's ids because each tree was originally built with its own counter.
+    pub(crate) fn set_field_editing_content(
+        &mut self,
+        field_id: &PanelElementId,
+        replacement: &Self,
+    ) -> FieldDisplayTextUpdate {
+        let matches: Vec<usize> = self
+            .elements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, element)| {
+                element
+                    .editable
+                    .as_ref()
+                    .is_some_and(|field| field.field_id == *field_id)
+                    .then_some(index)
+            })
+            .collect();
+        let [field_index] = matches.as_slice() else {
+            return if matches.is_empty() {
+                FieldDisplayTextUpdate::MissingField
+            } else {
+                FieldDisplayTextUpdate::DuplicateField
+            };
+        };
+        let (Some(source_root), Some(replacement_root)) = (self.root, replacement.root) else {
+            return FieldDisplayTextUpdate::MissingText;
+        };
+
+        let mut next = Self::with_capacity(self.len() + replacement.len());
+        let mut next_auto_id = self.next_auto_element_id();
+        let Some(root) = self.clone_with_field_editing_content(
+            source_root,
+            *field_index,
+            replacement,
+            replacement_root,
+            &mut next,
+            &mut next_auto_id,
+        ) else {
+            return FieldDisplayTextUpdate::MissingText;
+        };
+        next.set_root(root);
+        *self = next;
+        FieldDisplayTextUpdate::Updated
+    }
+
+    fn clone_with_field_editing_content(
+        &self,
+        source_index: usize,
+        field_index: usize,
+        replacement: &Self,
+        replacement_root: usize,
+        target: &mut Self,
+        next_auto_id: &mut u32,
+    ) -> Option<usize> {
+        let source = self.elements.get(source_index)?;
+        let children = match &source.content {
+            ElementContent::Children(children) => children.clone(),
+            ElementContent::Empty | ElementContent::Text { .. } | ElementContent::Image { .. } => {
+                SmallVec::new()
+            },
+        };
+        let mut clone = source.clone();
+        if source_index == field_index || !children.is_empty() {
+            clone.content = ElementContent::Children(SmallVec::new());
+        }
+        let target_index = target.add(clone);
+
+        if source_index == field_index {
+            let replacement_index = replacement.clone_reminting_auto_ids_into(
+                replacement_root,
+                target,
+                next_auto_id,
+            )?;
+            if let ElementContent::Children(target_children) =
+                &mut target.elements.get_mut(target_index)?.content
+            {
+                target_children.push(replacement_index);
+            }
+            return Some(target_index);
+        }
+
+        for child in children {
+            let child_index = self.clone_with_field_editing_content(
+                child,
+                field_index,
+                replacement,
+                replacement_root,
+                target,
+                next_auto_id,
+            )?;
+            if let ElementContent::Children(target_children) =
+                &mut target.elements.get_mut(target_index)?.content
+            {
+                target_children.push(child_index);
+            }
+        }
+        Some(target_index)
+    }
+
+    fn clone_reminting_auto_ids_into(
+        &self,
+        source_index: usize,
+        target: &mut Self,
+        next_auto_id: &mut u32,
+    ) -> Option<usize> {
+        let source = self.elements.get(source_index)?;
+        let children = match &source.content {
+            ElementContent::Children(children) => children.clone(),
+            ElementContent::Empty | ElementContent::Text { .. } | ElementContent::Image { .. } => {
+                SmallVec::new()
+            },
+        };
+        let mut clone = source.clone();
+        if matches!(clone.id, Some(PanelElementId::Auto(_))) {
+            clone.id = Some(PanelElementId::auto(*next_auto_id));
+            *next_auto_id = next_auto_id.saturating_add(1);
+        }
+        if !children.is_empty() {
+            clone.content = ElementContent::Children(SmallVec::new());
+        }
+        let target_index = target.add(clone);
+        for child in children {
+            let child_index = self.clone_reminting_auto_ids_into(child, target, next_auto_id)?;
+            if let ElementContent::Children(target_children) =
+                &mut target.elements.get_mut(target_index)?.content
+            {
+                target_children.push(child_index);
+            }
+        }
+        Some(target_index)
+    }
+
+    fn next_auto_element_id(&self) -> u32 {
+        self.elements
+            .iter()
+            .filter_map(|element| match element.id.as_ref() {
+                Some(PanelElementId::Auto(id)) => Some(id.value()),
+                Some(PanelElementId::Named(_)) | None => None,
+            })
+            .max()
+            .map_or(0, |value| value.saturating_add(1))
+    }
+
     fn first_text_descendant(&self, index: usize) -> Option<usize> {
         let mut stack = vec![index];
         while let Some(current) = stack.pop() {
@@ -730,6 +1204,10 @@ impl LayoutTree {
                 *panel_draw = panel_draw.scaled(layout_scale);
             }
             element.scroll_offset *= layout_scale;
+            scale_editor_part(&mut element.editor_text, layout_scale);
+            scale_editor_part(&mut element.editor_selection, layout_scale);
+            scale_editor_part(&mut element.editor_caret, layout_scale);
+            scale_editor_part(&mut element.editor_validation, layout_scale);
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
                 // `TextStyle::new(Mm(6.0))`), convert from that unit to
@@ -768,6 +1246,10 @@ impl LayoutTree {
                 *panel_draw = panel_draw.scaled(points_to_pixels);
             }
             element.scroll_offset *= points_to_pixels;
+            scale_editor_part(&mut element.editor_text, points_to_pixels);
+            scale_editor_part(&mut element.editor_selection, points_to_pixels);
+            scale_editor_part(&mut element.editor_caret, points_to_pixels);
+            scale_editor_part(&mut element.editor_validation, points_to_pixels);
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 *config = config.scaled_as_unit(points_to_pixels, Unit::Pixels);
             }
@@ -776,51 +1258,204 @@ impl LayoutTree {
     }
 }
 
+fn scale_editor_part(part: &mut Option<Box<EditorPart>>, default_scale: f32) {
+    if let Some(part) = part {
+        let scaled = part.scaled(default_scale);
+        **part = scaled;
+    }
+}
+
+fn validated_widget_id(
+    id: PanelElementId,
+    precompose: PrecomposeMode,
+) -> Result<PanelElementId, PanelBuildError> {
+    if !id.is_named() {
+        return Err(PanelBuildError::WidgetRequiresNamedId(id));
+    }
+    if precompose == PrecomposeMode::Ldr {
+        return Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id));
+    }
+    Ok(id)
+}
+
+fn validated_element_widget_owner(
+    element: &Element,
+    index: usize,
+    owning_widget: Option<(PanelElementId, WidgetKind)>,
+    precompose: PrecomposeMode,
+) -> Result<Option<(PanelElementId, WidgetKind)>, PanelBuildError> {
+    if let Some(widget) = &element.widget {
+        let id = element
+            .id
+            .clone()
+            .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)));
+        let id = validated_widget_id(id, precompose)?;
+        if let WidgetSpec::Slider(slider) = widget {
+            slider
+                .validated()
+                .map_err(|error| PanelBuildError::SliderConfig(id.clone(), error))?;
+        }
+        return Ok(Some((id, widget.kind())));
+    }
+    if let Some(field) = &element.editable {
+        let id = validated_widget_id(field.field_id.clone(), precompose)?;
+        return Ok(Some((id, WidgetKind::EditableField)));
+    }
+    Ok(owning_widget)
+}
+
+fn element_visual_capabilities(element: &Element) -> VisualElementCapabilities {
+    let mut capabilities = VisualElementCapabilities::empty();
+    if element.background.is_some() {
+        capabilities |= VisualElementCapabilities::SDF_FILL;
+    }
+    if element.border.is_some() {
+        capabilities |= VisualElementCapabilities::SDF_BORDER;
+    }
+    let has_text = matches!(element.content, ElementContent::Text { .. });
+    let has_image = matches!(element.content, ElementContent::Image { .. });
+    let has_draw = element
+        .draw
+        .as_ref()
+        .is_some_and(|draw| !draw.shapes_ref().is_empty());
+    if has_text {
+        capabilities |= VisualElementCapabilities::TEXT;
+    }
+    if has_image {
+        capabilities |= VisualElementCapabilities::IMAGE;
+    }
+    if has_draw {
+        capabilities |= VisualElementCapabilities::DRAW;
+    }
+    if element.background.is_some() || element.border.is_some() || has_text || has_draw {
+        capabilities |= VisualElementCapabilities::SDF_MATERIAL;
+    }
+    capabilities
+}
+
+fn validate_part_state_colors(
+    element: &Element,
+    index: usize,
+    owning_widget: Option<&(PanelElementId, WidgetKind)>,
+) -> Result<(), PanelBuildError> {
+    if owning_widget.is_none() || element.widget.is_some() || element.editable.is_some() {
+        return Ok(());
+    }
+    let Some(appearance) = element.appearance.as_deref() else {
+        return Ok(());
+    };
+    let capabilities = element_visual_capabilities(element);
+    let element_id = || {
+        element
+            .id
+            .clone()
+            .unwrap_or_else(|| PanelElementId::auto(u32::try_from(index).unwrap_or(0)))
+    };
+    let cascades = appearance.cascades();
+    if cascades.any(|layer| layer.text_color.is_authored())
+        && !capabilities.contains(VisualElementCapabilities::TEXT)
+    {
+        return Err(PanelBuildError::StateTextColorRequiresText(element_id()));
+    }
+    if cascades.any(|layer| layer.path_color.is_authored())
+        && !capabilities.contains(VisualElementCapabilities::DRAW)
+    {
+        return Err(PanelBuildError::StatePathColorRequiresDraw(element_id()));
+    }
+    if cascades.any(|layer| layer.tint.is_authored())
+        && !capabilities.contains(VisualElementCapabilities::IMAGE)
+    {
+        return Err(PanelBuildError::StateTintRequiresImage(element_id()));
+    }
+    Ok(())
+}
+
+fn record_owned_widget_element(
+    record: &mut ComputedWidgetRecord,
+    element: &Element,
+    element_index: usize,
+    is_widget_root: bool,
+) {
+    if element.editor_origin == EditorElementOrigin::Generated {
+        record.push_generated_editor_element(element_index);
+    }
+    let visual_element_capabilities = element_visual_capabilities(element);
+    if !visual_element_capabilities.is_empty() {
+        record.push_visual_element(element_index, visual_element_capabilities);
+    }
+    if !is_widget_root
+        && let Some(appearance) = element.appearance.as_deref()
+        && appearance.cascades().any_overridden()
+    {
+        record.push_part_appearance(element_index, appearance.clone());
+    }
+}
+
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
     let Element {
-        id,
+        id: _,
         width,
         height,
         padding,
         child_layout,
-        background,
+        background: _,
         border,
-        corner_radius,
+        corner_radius: _,
         overflow,
         scroll_offset,
         scroll_anchor_x,
         scroll_anchor_y,
-        material,
+        material: _,
+        interactivity: _,
         editable,
-        draw,
-        z_index,
-        anti_alias,
-        hairline_fade,
-        shadow_casting,
-        precompose,
+        widget: _,
+        appearance: _,
+        editor_origin: _,
+        editor_text: _,
+        editor_selection: _,
+        editor_caret: _,
+        editor_validation: _,
+        tooltip: _,
+        visual_slot: _,
+        draw: _,
+        z_index: _,
+        anti_alias: _,
+        hairline_fade: _,
+        shadow_casting: _,
+        precompose: _,
         content,
     } = element;
     let Element {
-        id: n_id,
+        id: _,
         width: n_width,
         height: n_height,
         padding: n_padding,
         child_layout: n_child_layout,
-        background: n_background,
+        background: _,
         border: n_border,
-        corner_radius: n_corner_radius,
+        corner_radius: _,
         overflow: n_overflow,
         scroll_offset: n_scroll_offset,
         scroll_anchor_x: n_scroll_anchor_x,
         scroll_anchor_y: n_scroll_anchor_y,
-        material: n_material,
+        material: _,
+        interactivity: _,
         editable: n_editable,
-        draw: n_draw,
-        z_index: n_z_index,
-        anti_alias: n_anti_alias,
-        hairline_fade: n_hairline_fade,
-        shadow_casting: n_shadow_casting,
-        precompose: n_precompose,
+        widget: _,
+        appearance: _,
+        editor_origin: _,
+        editor_text: _,
+        editor_selection: _,
+        editor_caret: _,
+        editor_validation: _,
+        tooltip: _,
+        visual_slot: _,
+        draw: _,
+        z_index: _,
+        anti_alias: _,
+        hairline_fade: _,
+        shadow_casting: _,
+        precompose: _,
         content: n_content,
     } = next;
 
@@ -847,33 +1482,60 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     let mut change = border_change.combine(child_layout_change);
-    if id != n_id {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-    if background != n_background || corner_radius != n_corner_radius {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if draw != n_draw || z_index != n_z_index {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if anti_alias != n_anti_alias
-        || hairline_fade != n_hairline_fade
-        || shadow_casting != n_shadow_casting
-    {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if precompose != n_precompose {
-        change = change.combine(LayoutTreeChange::VisualOnly);
-    }
-
-    if material != n_material {
+    if visual_only_properties_changed(element, next) {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
     change.combine(classify_content_change(content, n_content))
+}
+
+fn visual_only_properties_changed(element: &Element, next: &Element) -> bool {
+    element.id != next.id
+        || element.widget != next.widget
+        || element.appearance != next.appearance
+        || editor_parts_changed(
+            (
+                element.editor_text.as_deref(),
+                element.editor_selection.as_deref(),
+                element.editor_caret.as_deref(),
+                element.editor_validation.as_deref(),
+            ),
+            (
+                next.editor_text.as_deref(),
+                next.editor_selection.as_deref(),
+                next.editor_caret.as_deref(),
+                next.editor_validation.as_deref(),
+            ),
+        )
+        || element.tooltip != next.tooltip
+        || element.visual_slot != next.visual_slot
+        || element.interactivity != next.interactivity
+        || element.background != next.background
+        || element.corner_radius != next.corner_radius
+        || element.draw != next.draw
+        || element.z_index != next.z_index
+        || element.anti_alias != next.anti_alias
+        || element.hairline_fade != next.hairline_fade
+        || element.shadow_casting != next.shadow_casting
+        || element.precompose != next.precompose
+        || element.material != next.material
+}
+
+fn editor_parts_changed(
+    editor_parts: (
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+    ),
+    next_editor_parts: (
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+        Option<&EditorPart>,
+    ),
+) -> bool {
+    editor_parts != next_editor_parts
 }
 
 fn classify_child_layout_change(old: &ChildLayout, next: &ChildLayout) -> LayoutTreeChange {
@@ -1031,7 +1693,14 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
     use bevy::asset::Assets;
     use bevy::asset::Handle;
     use bevy::color::Color;
@@ -1044,12 +1713,20 @@ mod tests {
     use super::LayoutTree;
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
+    use super::element_visual_capabilities;
+    use crate::Appearance;
     use crate::CalloutCap;
+    use crate::DiegeticPanel;
+    use crate::EditorStateColors;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
+    use crate::PanelBuildError;
     use crate::PanelElementId;
+    use crate::Slider;
+    use crate::WidgetHoveredAppearance;
+    use crate::WidgetInteractivity;
     use crate::cascade::Cascade;
     use crate::layout::AlignX;
     use crate::layout::AlignY;
@@ -1059,16 +1736,26 @@ mod tests {
     use crate::layout::Dimension;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutEngine;
+    use crate::layout::LayoutOnly;
     use crate::layout::Padding;
+    use crate::layout::PanelCircle;
     use crate::layout::PanelCoord;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
     use crate::layout::PanelShape;
     use crate::layout::Sizing;
     use crate::layout::Text;
+    use crate::layout::TextDimensions;
     use crate::layout::TextStyle;
     use crate::layout::Unit;
+    use crate::layout::WidgetElement;
     use crate::layout::child_layout::ChildLayout;
+    use crate::widgets::StateAppearance;
+    use crate::widgets::VisualElementCapabilities;
+    use crate::widgets::VisualSlotId;
+    use crate::widgets::VisualSlotOverride;
+    use crate::widgets::WidgetState;
 
     const LARGE_CHILD_GAP: f32 = 2.0;
     const SMALL_CHILD_GAP: f32 = 1.0;
@@ -1078,6 +1765,13 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text((text, style));
         builder.build()
+    }
+
+    fn build_world_panel(tree: LayoutTree) -> Result<DiegeticPanel, PanelBuildError> {
+        DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(tree)
+            .build()
     }
 
     #[test]
@@ -1127,10 +1821,27 @@ mod tests {
         assert_eq!(tree.text_element_id(1), Some(&id));
     }
 
-    fn root_tree<L: ChildLayoutState>(root: El<L>) -> LayoutTree {
+    fn root_tree<L: ChildLayoutState>(root: El<L, LayoutOnly>) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text(("child", TextStyle::new(10.0)));
         builder.build()
+    }
+
+    fn widget_root_tree<L: ChildLayoutState, W: crate::WidgetOwner>(
+        root: El<L, WidgetElement<W>>,
+    ) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_widget_root(root);
+        builder.text(("child", TextStyle::new(10.0)));
+        builder.build()
+    }
+
+    fn hovered_background(color: Color) -> StateAppearance {
+        StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(
+                Appearance::new().background(color),
+            )),
+            ..default()
+        }
     }
 
     #[test]
@@ -1249,6 +1960,47 @@ mod tests {
         assert_eq!(config.unit(), Cascade::Override(Unit::Pixels));
     }
 
+    #[test]
+    fn screen_source_scaled_preserves_editor_caret_state_colors() {
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.with(
+            El::new()
+                .editable_field("field", field_spec())
+                .editor_caret(EditorStateColors::new().hovered(Color::srgb(0.2, 0.4, 0.6))),
+            |_| {},
+        );
+        let tree = builder.build();
+        let millimeters_to_points = Unit::Millimeters.to_points();
+        let points_to_pixels = 2.0;
+        let scaled = tree.screen_source_scaled(
+            millimeters_to_points,
+            millimeters_to_points,
+            points_to_pixels,
+        );
+        let declaration = scaled.elements[1]
+            .editor_caret
+            .as_deref()
+            .cloned()
+            .expect("editor caret declaration should be retained");
+
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.text(declaration.into_text("caret", &TextStyle::new(3.0)));
+        let generated = builder.build();
+        let appearance = generated.elements[1]
+            .appearance
+            .as_deref()
+            .expect("editor caret state colors should be retained");
+        assert_eq!(
+            appearance
+                .cascades()
+                .resolve(&[Some(WidgetState::Hovered)], None),
+            VisualSlotOverride {
+                fill_color: Some(Color::srgb(0.2, 0.4, 0.6)),
+                ..VisualSlotOverride::default()
+            },
+        );
+    }
+
     fn assert_default_leaf_child_layout(child_layout: ChildLayout) {
         assert_eq!(child_layout, ChildLayout::default());
     }
@@ -1359,6 +2111,569 @@ mod tests {
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn button_record_add_remove_classifies_as_visual_only() {
+        let tree = root_tree(El::new());
+        let next = widget_root_tree(El::new().button("action"));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+        assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn slider_record_edit_classifies_as_visual_only() {
+        let slider = Slider::new(0.0..=10.0).value(2.0);
+        let next_slider = Slider::new(0.0..=10.0).value(8.0);
+        let tree = widget_root_tree(El::new().widget("level", slider));
+        let next = widget_root_tree(El::new().widget("level", next_slider));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn interactivity_only_classifies_as_visual_only() {
+        let tree = widget_root_tree(El::new().button("action"));
+        let next = widget_root_tree(
+            El::new()
+                .button("action")
+                .widget_interactivity(WidgetInteractivity::Disabled),
+        );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn visual_slot_add_remove_classifies_as_visual_only() {
+        let tree = widget_root_tree(El::new().button("action"));
+        let next = widget_root_tree(El::new().button("action").visual_slot(VisualSlotId::new(1)));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+        assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn button_state_value_change_classifies_as_visual_only() {
+        let tree = widget_root_tree(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered(Appearance::new().background(Color::srgb(0.2, 0.4, 0.8))),
+        );
+        let next = widget_root_tree(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered(Appearance::new().background(Color::srgb(0.8, 0.4, 0.2))),
+        );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn button_elements_carry_the_root_visual_slot() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("action"), |_| {});
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(records.len(), 1);
+        let slots = records[0].visual_slots();
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].slot, VisualSlotId::BUTTON_ROOT);
+    }
+
+    #[test]
+    fn computed_widgets_carry_subtree_visual_slot_references() {
+        const WIDGET_SLOT: VisualSlotId = VisualSlotId::new(1);
+        const CHILD_SLOT: VisualSlotId = VisualSlotId::new(2);
+        const ORPHAN_SLOT: VisualSlotId = VisualSlotId::new(3);
+
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new().button("styled").visual_slot(WIDGET_SLOT),
+            |builder| {
+                builder.with(El::new().visual_slot(CHILD_SLOT), |_| {});
+            },
+        );
+        builder.with(El::new().visual_slot(ORPHAN_SLOT), |_| {});
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(records.len(), 1);
+        let slots = records[0].visual_slots();
+        assert_eq!(slots.len(), 2);
+        let widget_slot = slots.iter().find(|slot| slot.slot == WIDGET_SLOT);
+        let child_slot = slots.iter().find(|slot| slot.slot == CHILD_SLOT);
+        assert!(widget_slot.is_some());
+        assert!(child_slot.is_some());
+        assert_ne!(
+            widget_slot.map(|slot| slot.element_index),
+            child_slot.map(|slot| slot.element_index),
+            "each slot references its own element's records",
+        );
+        assert!(
+            slots.iter().all(|slot| slot.slot != ORPHAN_SLOT),
+            "slots outside a widget subtree belong to no widget",
+        );
+    }
+
+    #[test]
+    fn computed_widget_part_appearances_are_sparse_sorted_and_exclude_the_root() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .background(Color::WHITE)
+                .button("action")
+                .hovered(Appearance::new().background(Color::BLACK)),
+            |builder| {
+                builder.with(El::new(), |_| {});
+                builder.with(El::new(), |_| {});
+                builder.with(El::new(), |_| {});
+                builder.with(El::new(), |_| {});
+            },
+        );
+        let mut tree = builder.build();
+        let Some(root_index) = tree.root else {
+            return;
+        };
+        let Some(&widget_index) = tree.children_of(root_index).first() else {
+            return;
+        };
+        let owned = tree.children_of(widget_index).to_vec();
+        let Some(&first_child) = owned.first() else {
+            return;
+        };
+        let Some(&second_child) = owned.get(1) else {
+            return;
+        };
+        let Some(&empty_child) = owned.get(2) else {
+            return;
+        };
+        let Some(&overridden_empty_child) = owned.get(3) else {
+            return;
+        };
+        tree.elements[first_child].appearance =
+            Some(Box::new(hovered_background(Color::srgb(1.0, 0.0, 0.0))));
+        tree.elements[second_child].appearance =
+            Some(Box::new(hovered_background(Color::srgb(0.0, 0.0, 1.0))));
+        tree.elements[empty_child].appearance = Some(Box::new(StateAppearance::default()));
+        tree.elements[overridden_empty_child].appearance = Some(Box::new(StateAppearance {
+            hovered: Cascade::Override(WidgetHoveredAppearance::new(Appearance::new())),
+            ..default()
+        }));
+
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let before_result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let before_records = tree.computed_widget_records(&before_result);
+        assert_eq!(before_records.len(), 1);
+        let before_parts = before_records[0].part_appearances().to_vec();
+        if let ElementContent::Children(children) = &mut tree.elements[widget_index].content {
+            children.swap(0, 1);
+        } else {
+            return;
+        }
+
+        let after_result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&after_result);
+
+        assert_eq!(records.len(), 1);
+        let mut expected = vec![first_child, second_child, overridden_empty_child];
+        expected.sort_unstable();
+        let parts = records[0].part_appearances();
+        assert_eq!(parts, before_parts.as_slice());
+        assert_eq!(
+            parts
+                .iter()
+                .map(|(element_index, _)| *element_index)
+                .collect::<Vec<_>>(),
+            expected,
+        );
+        assert!(
+            parts
+                .iter()
+                .all(|(element_index, _)| *element_index != widget_index),
+            "the widget root remains in ComputedWidgetRecord::appearance",
+        );
+        assert!(
+            parts
+                .iter()
+                .all(|(element_index, _)| *element_index != empty_child),
+            "an appearance with four inherited channels has no sparse-map entry",
+        );
+        assert!(
+            parts
+                .iter()
+                .find(|(element_index, _)| *element_index == overridden_empty_child)
+                .is_some_and(|(_, appearance)| appearance.hovered.as_override().is_some()),
+            "an overridden empty appearance keeps its hovered cascade channel",
+        );
+    }
+
+    #[test]
+    fn authored_slider_parts_reach_sorted_visual_recipients() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().slider("level", 0.0..=1.0), |builder| {
+            builder.with(
+                builder
+                    .child(El::new().background(Color::WHITE))
+                    .disabled(Appearance::new().background(Color::BLACK)),
+                |_| {},
+            );
+            builder.with(
+                builder
+                    .child(
+                        El::new()
+                            .background(Color::WHITE)
+                            .border(Border::all(1.0, Color::BLACK))
+                            .slider_thumb(),
+                    )
+                    .disabled(Appearance::new().background(Color::BLACK)),
+                |_| {},
+            );
+            builder.text(
+                Text::new("LEVEL", TextStyle::new(10.0)).layout(
+                    builder
+                        .child(El::new().background(Color::NONE))
+                        .disabled(Appearance::new().background(Color::BLACK)),
+                ),
+            );
+        });
+        let tree = builder.build();
+
+        assert!(tree.validate_widgets().is_ok());
+
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+        assert_eq!(records.len(), 1);
+
+        let record = &records[0];
+        let parts = record.part_appearances();
+        assert_eq!(parts.len(), 3);
+        assert!(parts.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(parts.iter().all(|(element_index, _)| {
+            record
+                .visual_elements()
+                .iter()
+                .any(|(visual_index, _)| visual_index == element_index)
+        }));
+    }
+
+    #[test]
+    fn computed_widget_recipients_exclude_example_slider_containers() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::column().widget("level", Slider::new(0.0..=1.0)),
+            |builder| {
+                builder.with(El::overlay(), |builder| {
+                    builder.text(("Level", TextStyle::new(10.0)));
+                });
+                builder.with(El::overlay(), |builder| {
+                    builder.with(El::overlay(), |builder| {
+                        builder.with(El::new().background(Color::WHITE), |_| {});
+                    });
+                    builder.with(El::overlay(), |builder| {
+                        builder.with(
+                            El::new()
+                                .background(Color::WHITE)
+                                .border(Border::all(1.0, Color::BLACK))
+                                .slider_thumb(),
+                            |_| {},
+                        );
+                    });
+                });
+            },
+        );
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(
+            tree.elements.len(),
+            9,
+            "one layout root plus eight slider nodes"
+        );
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].visual_elements().len(), 3);
+        assert_eq!(
+            records[0]
+                .visual_elements()
+                .iter()
+                .map(|(_, capabilities)| *capabilities)
+                .collect::<Vec<_>>(),
+            vec![
+                VisualElementCapabilities::TEXT | VisualElementCapabilities::SDF_MATERIAL,
+                VisualElementCapabilities::SDF_FILL | VisualElementCapabilities::SDF_MATERIAL,
+                VisualElementCapabilities::SDF_FILL
+                    | VisualElementCapabilities::SDF_BORDER
+                    | VisualElementCapabilities::SDF_MATERIAL,
+            ],
+        );
+    }
+
+    #[test]
+    fn part_state_text_color_requires_a_text_recipient() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                children
+                    .child(El::new().id("container"))
+                    .disabled(Appearance::new().text_color(Color::BLACK)),
+                |_| {},
+            );
+        });
+
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::StateTextColorRequiresText(id))
+                if id == PanelElementId::named("container")
+        ));
+    }
+
+    #[test]
+    fn part_state_path_color_requires_a_draw_recipient() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                children
+                    .child(El::new().id("container"))
+                    .disabled(Appearance::new().path_color(Color::BLACK)),
+                |_| {},
+            );
+        });
+
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::StatePathColorRequiresDraw(id))
+                if id == PanelElementId::named("container")
+        ));
+    }
+
+    #[test]
+    fn part_state_tint_requires_an_image_recipient() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                children
+                    .child(El::new().id("container"))
+                    .disabled(Appearance::new().tint(Color::BLACK)),
+                |_| {},
+            );
+        });
+
+        assert!(matches!(
+            build_world_panel(builder.build()),
+            Err(PanelBuildError::StateTintRequiresImage(id))
+                if id == PanelElementId::named("container")
+        ));
+    }
+
+    #[test]
+    fn panel_text_material_default_stays_dormant_on_textless_widget_part() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(El::new().id("container"), |_| {});
+        });
+
+        assert!(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .text_material(Handle::default())
+                .with_tree(builder.build())
+                .build()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn circle_part_state_material_and_path_color_need_no_default_fill() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button("button"), |children| {
+            children.with(
+                children
+                    .child(
+                        El::new()
+                            .id("circle")
+                            .draw(PanelDraw::shapes([PanelCircle::new((10.0, 10.0), 5.0)])),
+                    )
+                    .disabled(
+                        Appearance::new()
+                            .material(Handle::default())
+                            .path_color(Color::BLACK),
+                    ),
+                |_| {},
+            );
+        });
+        let tree = builder.build();
+
+        assert!(build_world_panel(tree.clone()).is_ok());
+        let circle = tree
+            .elements
+            .iter()
+            .find(|element| element.id.as_ref() == Some(&PanelElementId::named("circle")))
+            .expect("circle recipient should remain in the layout tree");
+        assert_eq!(circle.background, None);
+        assert_eq!(
+            element_visual_capabilities(circle),
+            VisualElementCapabilities::DRAW | VisualElementCapabilities::SDF_MATERIAL,
+        );
+    }
+
+    #[test]
+    fn editable_tree_replacement_rekeys_part_appearance_entries() {
+        let mut display_builder = LayoutBuilder::new(100.0, 50.0);
+        display_builder.with(El::new().editable_field("gain", field_spec()), |builder| {
+            builder.with(El::new(), |_| {});
+        });
+        let mut display = display_builder.build();
+        let Some(display_index) = display
+            .elements
+            .iter()
+            .position(|element| matches!(element.content, ElementContent::Empty))
+            .filter(|index| *index != 0)
+        else {
+            return;
+        };
+        display.elements[display_index].appearance =
+            Some(Box::new(hovered_background(Color::srgb(1.0, 0.0, 0.0))));
+
+        let mut editor_builder = LayoutBuilder::with_root(El::new());
+        editor_builder.with(El::new(), |_| {});
+        let mut editor_content = editor_builder.build();
+        let Some(editor_root) = editor_content.root else {
+            return;
+        };
+        let Some(&editor_child) = editor_content.children_of(editor_root).first() else {
+            return;
+        };
+        editor_content.elements[editor_child].appearance =
+            Some(Box::new(hovered_background(Color::srgb(0.0, 0.0, 1.0))));
+
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let display_result = engine.compute(&display, 100.0, 50.0, 1.0);
+        let display_parts = display.computed_widget_records(&display_result)[0]
+            .part_appearances()
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect::<Vec<_>>();
+
+        let mut editor = display.clone();
+        assert_eq!(
+            editor.set_field_editing_content(&PanelElementId::named("gain"), &editor_content),
+            FieldDisplayTextUpdate::Updated,
+        );
+        let editor_result = engine.compute(&editor, 100.0, 50.0, 1.0);
+        let editor_parts = editor.computed_widget_records(&editor_result)[0]
+            .part_appearances()
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect::<Vec<_>>();
+
+        let display_again_result = engine.compute(&display, 100.0, 50.0, 1.0);
+        let display_again_parts = display.computed_widget_records(&display_again_result)[0]
+            .part_appearances()
+            .iter()
+            .map(|(element_index, _)| *element_index)
+            .collect::<Vec<_>>();
+
+        assert_eq!(display_parts, vec![display_index]);
+        assert_eq!(editor_parts.len(), 1);
+        assert_ne!(editor_parts, display_parts);
+        assert_eq!(display_again_parts, display_parts);
+    }
+
+    #[test]
+    fn computed_widgets_fold_nearest_layout_interactivity() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::column().widget_interactivity(WidgetInteractivity::Disabled),
+            |builder| {
+                builder.with(El::new().button("disabled"), |_| {});
+                builder.with(
+                    El::row().widget_interactivity(WidgetInteractivity::Enabled),
+                    |builder| {
+                        builder.with(El::new().button("enabled"), |_| {});
+                    },
+                );
+            },
+        );
+        builder.with(El::new().button("inherited"), |_| {});
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0].interactivity(),
+            Cascade::Override(WidgetInteractivity::Disabled)
+        );
+        assert_eq!(
+            records[1].interactivity(),
+            Cascade::Override(WidgetInteractivity::Enabled)
+        );
+        assert_eq!(records[2].interactivity(), Cascade::Inherit);
+    }
+
+    #[test]
+    fn computed_widgets_store_clipped_rects_and_visual_interaction_rank() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::row().size(20.0, 20.0).clip(), |builder| {
+            builder.with(El::new().size(30.0, 10.0).button("partial"), |_| {});
+            builder.with(El::new().size(10.0, 10.0).button("clipped"), |_| {});
+        });
+        builder.with(El::overlay().size(20.0, 20.0), |builder| {
+            builder.with(
+                El::new().size(20.0, 20.0).button("back").z_index(-1),
+                |_| {},
+            );
+            builder.with(
+                El::new().size(20.0, 20.0).button("front-first").z_index(2),
+                |_| {},
+            );
+            builder.with(
+                El::new().size(20.0, 20.0).button("front-last").z_index(2),
+                |_| {},
+            );
+        });
+        let tree = builder.build();
+        let engine = LayoutEngine::new(Arc::new(|_, _| TextDimensions::default()));
+        let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+        let records = tree.computed_widget_records(&result);
+
+        let partial = records
+            .iter()
+            .find(|record| record.id() == &PanelElementId::named("partial"))
+            .expect("partially clipped widget should have a record");
+        assert!((partial.rect().width - 30.0).abs() < FLOAT_TOLERANCE);
+        assert!(
+            partial
+                .clipped_rect()
+                .is_some_and(|rect| (rect.width - 20.0).abs() < FLOAT_TOLERANCE)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| record.id() == &PanelElementId::named("clipped"))
+                .and_then(super::ComputedWidgetRecord::clipped_rect),
+            None
+        );
+
+        let rank = |id| {
+            records
+                .iter()
+                .find(|record| record.id() == &PanelElementId::named(id))
+                .map(super::ComputedWidgetRecord::interaction_rank)
+        };
+        assert!(rank("back") < rank("front-first"));
+        assert!(rank("front-first") < rank("front-last"));
     }
 
     #[test]
@@ -1666,6 +2981,57 @@ mod tests {
 
         assert_eq!(update, FieldDisplayTextUpdate::Updated);
         assert_eq!(tree.field_display_text(1), Some("11"));
+    }
+
+    #[test]
+    fn editing_content_replaces_only_field_descendants_and_remints_text_ids() {
+        let mut builder = LayoutBuilder::new(100.0, 40.0);
+        builder.text(("before", TextStyle::new(10.0)));
+        builder.with(
+            El::new()
+                .padding(Padding::all(3.0))
+                .background(Color::BLACK)
+                .editable_field("gain", field_spec()),
+            |builder| {
+                builder.text(("10", TextStyle::new(10.0)));
+            },
+        );
+        builder.text(("after", TextStyle::new(10.0)));
+        let mut tree = builder.build();
+
+        let mut replacement = LayoutBuilder::with_root(El::row());
+        replacement.text(("left", TextStyle::new(10.0)));
+        replacement.text(("right", TextStyle::new(10.0)));
+        let update = tree.set_field_editing_content(&"gain".into(), &replacement.build());
+
+        assert_eq!(update, FieldDisplayTextUpdate::Updated);
+        let field_index = tree
+            .elements
+            .iter()
+            .position(|element| element.editable.is_some())
+            .expect("the editable field remains in the derived tree");
+        assert_eq!(tree.field_display_text(field_index), Some("left"));
+        assert_eq!(tree.elements[field_index].padding, Padding::all(3.0));
+        assert_eq!(tree.elements[field_index].background, Some(Color::BLACK));
+        assert!(
+            tree.elements.iter().all(|element| {
+                !matches!(&element.content, ElementContent::Text { text, .. } if text == "10")
+            }),
+            "the authored display descendant must not remain in the compact derived arena",
+        );
+        let auto_ids = tree
+            .elements
+            .iter()
+            .filter_map(|element| match element.id.as_ref() {
+                Some(PanelElementId::Auto(id)) => Some(id.value()),
+                Some(PanelElementId::Named(_)) | None => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            auto_ids.iter().copied().collect::<HashSet<_>>().len(),
+            auto_ids.len(),
+            "replacement text ids must not collide with source-tree text ids",
+        );
     }
 
     #[test]

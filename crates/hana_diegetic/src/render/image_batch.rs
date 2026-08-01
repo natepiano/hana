@@ -17,6 +17,7 @@ use bevy::image::Image;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::Indices;
 use bevy::pbr::MaterialPlugin;
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_resource::ShaderSize;
@@ -44,7 +45,10 @@ use super::draw_order::DrawOrderIndex;
 use super::draw_order::DrawZIndexRank;
 use super::image_material;
 use super::image_material::ImageExtendedMaterial;
+use super::material_table;
+use super::material_table::BatchAssetWrites;
 use super::material_table::BatchResourcesReady;
+use super::material_table::RetainedBatchBufferUploads;
 use super::precompose;
 use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
@@ -57,6 +61,8 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::panel::PanelPrecomposeCache;
+use crate::widgets::VisualOverrideIndex;
+use crate::widgets::VisualSlotOverride;
 
 /// Per-command image record identity.
 ///
@@ -454,6 +460,7 @@ impl Plugin for ImageBatchPlugin {
         // explicitly.
         app.init_resource::<ImageBatchStore>()
             .init_resource::<DiegeticPerfStats>()
+            .init_resource::<VisualOverrideIndex>()
             .add_plugins(MaterialPlugin::<ImageExtendedMaterial>::default())
             .add_systems(
                 PostUpdate,
@@ -477,6 +484,7 @@ impl Plugin for ImageBatchPlugin {
                 PostUpdate,
                 reconcile_image_batch_entities
                     .after(batch_store::update_batch_world_transforms::<ImageMemberFamily>)
+                    .in_set(BatchAssetWrites)
                     .before(VisibilitySystems::CalculateBounds)
                     .in_set(BatchResourcesReady),
             )
@@ -491,8 +499,8 @@ impl Plugin for ImageBatchPlugin {
             .add_systems(
                 PostUpdate,
                 commit_image_batch_buffers
-                    .after(batch_store::update_batch_bounds::<ImageMemberFamily>)
-                    .after(VisibilitySystems::CheckVisibility)
+                    .after(reconcile_image_batch_entities)
+                    .before(batch_store::update_batch_bounds::<ImageMemberFamily>)
                     .in_set(BatchResourcesReady),
             );
     }
@@ -508,6 +516,7 @@ fn route_image_batch_records(
         Option<&Visibility>,
         Option<&Resolved<ShadowCasting>>,
     )>,
+    visual_overrides: Res<VisualOverrideIndex>,
     mut store: ResMut<ImageBatchStore>,
 ) {
     let mut active_records = HashSet::new();
@@ -537,6 +546,7 @@ fn route_image_batch_records(
             precompose_cache,
             layers.clone(),
             shadow_casting,
+            &visual_overrides,
         ) {
             active_records.insert(record.record_key);
             store.upsert_record(batch_key, record);
@@ -553,6 +563,7 @@ fn collect_panel_image_records(
     precompose_cache: &PanelPrecomposeCache,
     layers: RenderLayers,
     shadow_casting: ShadowCasting,
+    visual_overrides: &VisualOverrideIndex,
 ) -> Vec<(ImageBatchKey, ResolvedImageRecord)> {
     let clip_rects = clip::compute_clip_rects(commands);
     let viewport = clip::panel_viewport(panel);
@@ -565,6 +576,13 @@ fn collect_panel_image_records(
             clip::effective_clip(command.bounds, clip_rects[command_index], viewport)?;
             let draw_depth = computed.draw_order().depth_for(command_index)?;
             let (texture, tint) = image_record_source(command, precompose_cache)?;
+            let slot_override = visual_overrides.get(panel_entity, command.element_idx);
+            let (texture, tint, local_transform) = apply_image_visual_override(
+                slot_override,
+                texture,
+                tint,
+                local_transform_from_bounds(command.bounds, points_to_world, anchor_x, anchor_y),
+            );
             let batch_key = ImageBatchKey {
                 texture,
                 layers: BatchRenderLayers(layers.clone()),
@@ -580,12 +598,7 @@ fn collect_panel_image_records(
                 batch_key,
                 ResolvedImageRecord::new(
                     record_key,
-                    local_transform_from_bounds(
-                        command.bounds,
-                        points_to_world,
-                        anchor_x,
-                        anchor_y,
-                    ),
+                    local_transform,
                     image_size_from_bounds(command.bounds, points_to_world),
                     tint,
                     ImageUvRect::default(),
@@ -594,6 +607,30 @@ fn collect_panel_image_records(
             ))
         })
         .collect()
+}
+
+/// Applies one widget visual-slot override to a routed image record.
+///
+/// Runs inside `collect_panel_image_records`, so a replacement `texture`
+/// changes the selected `ImageBatchKey` and `ImageBatchStore::upsert_record`
+/// moves the record to the destination batch, while a `color` or `offset`
+/// patches only the record's `tint`/`local_transform` in its current batch.
+fn apply_image_visual_override(
+    slot_override: Option<&VisualSlotOverride>,
+    texture: Handle<Image>,
+    tint: Vec4,
+    local_transform: Transform,
+) -> (Handle<Image>, Vec4, Transform) {
+    let Some(slot_override) = slot_override else {
+        return (texture, tint, local_transform);
+    };
+    let texture = slot_override.texture.clone().unwrap_or(texture);
+    let tint = slot_override.tint.map_or(tint, linear_tint);
+    let mut local_transform = local_transform;
+    if let Some(offset) = slot_override.offset {
+        local_transform.translation += offset.extend(0.0);
+    }
+    (texture, tint, local_transform)
 }
 
 fn image_record_source(
@@ -672,14 +709,14 @@ fn reconcile_image_batch_entities(
 
 fn commit_image_batch_buffers(
     mut store: ResMut<ImageBatchStore>,
-    mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut staged_uploads: ResMut<RetainedBatchBufferUploads>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     perf.image_breakdown.clear();
     for (key, batch) in store.batches_mut() {
         perf.image_breakdown
             .push(image_batch_summary(key, batch.record_count()));
-        let _ = commit_image_batch_records(batch, &mut storage_buffers);
+        let _ = commit_image_batch_records(batch, &mut staged_uploads);
     }
 }
 
@@ -715,6 +752,7 @@ fn spawn_image_batch_entity(
         DiegeticImageBatch,
         Mesh3d(gpu.mesh.clone()),
         MeshMaterial3d(gpu.material.clone()),
+        Pickable::IGNORE,
         Visibility::Inherited,
         NoAutoAabb,
         Aabb::default(),
@@ -802,7 +840,7 @@ pub(crate) fn grow_image_batch_resources(
 /// Uploads a dirty image record buffer with a fixed-capacity payload.
 pub(crate) fn commit_image_batch_records(
     batch: &mut ImageBatch,
-    storage_buffers: &mut Assets<ShaderBuffer>,
+    staged_uploads: &mut RetainedBatchBufferUploads,
 ) -> Option<usize> {
     if !batch.record_upload.is_set() {
         return None;
@@ -816,9 +854,11 @@ pub(crate) fn commit_image_batch_records(
     let byte_len = image_record_payload_bytes(gpu.capacity);
     let records = gpu.records.clone();
     batch.record_upload.clear();
-    storage_buffers
-        .get_mut(&records)
-        .map(|mut buffer| buffer.set_data(payload))?;
+    material_table::stage_retained_batch_buffer_upload(
+        staged_uploads,
+        &records,
+        ShaderBuffer::from(payload),
+    );
     Some(byte_len)
 }
 
@@ -1023,6 +1063,7 @@ mod tests {
         let mut meshes = Assets::<Mesh>::default();
         let mut materials = Assets::<ImageExtendedMaterial>::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let mut staged_uploads = RetainedBatchBufferUploads::default();
         store.upsert_record(key.clone(), test_record(0, Vec4::ONE));
 
         let entity = Entity::from_bits(TEST_BATCH_ENTITY_BITS);
@@ -1056,9 +1097,10 @@ mod tests {
             initial_records
         );
         assert_eq!(
-            commit_image_batch_records(batch, &mut storage_buffers),
+            commit_image_batch_records(batch, &mut staged_uploads),
             Some(image_record_payload_bytes(INITIAL_CAPACITY))
         );
+        assert!(staged_uploads.contains(&initial_records));
         assert_eq!(
             batch.gpu.as_ref().expect("commit keeps resources").records,
             initial_records
@@ -1341,6 +1383,24 @@ mod tests {
     }
 
     #[test]
+    fn image_batch_entities_ignore_stock_mesh_picking() {
+        let mut app = image_batch_app();
+        let mut images = Assets::<Image>::default();
+        let texture = images.add(Image::default());
+        spawn_panel(&mut app, vec![image_command(texture, Color::WHITE, 0)]);
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(Entity, &Pickable), With<DiegeticImageBatch>>();
+        let batches = query.iter(app.world()).collect::<Vec<_>>();
+        assert_eq!(batches.len(), 1);
+        assert!(!batches[0].1.is_hoverable);
+        assert!(!batches[0].1.should_block_lower);
+    }
+
+    #[test]
     fn cross_panel_same_texture_records_use_each_panel_transform() {
         let mut app = image_batch_app();
         let mut images = Assets::<Image>::default();
@@ -1471,6 +1531,9 @@ mod tests {
             .add_plugins(AssetPlugin::default())
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
+            // `commit_image_batch_buffers` stages into the buffer-upload queue
+            // `MaterialTablePlugin` owns, which this app does not add.
+            .init_resource::<RetainedBatchBufferUploads>()
             .add_plugins(ImageBatchPlugin);
         app
     }

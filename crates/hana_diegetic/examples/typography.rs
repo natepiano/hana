@@ -11,7 +11,6 @@ use std::time::Duration;
 
 use bevy::light::NotShadowReceiver;
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
@@ -42,6 +41,7 @@ use hana_diegetic::ShadowCasting;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 use hana_diegetic::TypographyOverlay;
+use hana_lagrange::OrbitCamPreset;
 
 const DISPLAY_SIZE: f32 = 0.48;
 const DISPLAY_Y: f32 = 0.5;
@@ -685,7 +685,11 @@ fn on_font_registered(
     );
     for entity in &panels {
         info!("Rebuilding fonts panel");
-        commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
+        if let Err(error) =
+            commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0))
+        {
+            error!("failed to replace typography panel tree: {error}");
+        }
     }
 }
 
@@ -937,6 +941,10 @@ fn switch_font(
         .0;
     display_text.for_each_style_mut(|style| style.set_font_id(font_id));
     for entity in &panels {
-        commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
+        if let Err(error) =
+            commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0))
+        {
+            error!("failed to replace typography panel tree: {error}");
+        }
     }
 }

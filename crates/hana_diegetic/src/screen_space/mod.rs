@@ -3,8 +3,13 @@
 mod anchoring;
 mod constants;
 
-use anchoring::AnchorResolveDiagnostics;
+pub(crate) use anchoring::AnchorResolveDiagnostics;
+pub use anchoring::ScreenAnchorTarget;
+pub(crate) use anchoring::ScreenPanelRect;
+pub(crate) use anchoring::attachment_is_ready as screen_attachment_is_ready;
+pub(crate) use anchoring::resolve_screen_space_panel_attachments;
 pub(crate) use anchoring::screen_in_plane_angle;
+pub(crate) use anchoring::screen_panel_rect;
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;
 use bevy::camera::ClearColorConfig;
@@ -13,6 +18,7 @@ use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::ApplyDeferred;
+use bevy::ecs::system::SystemParam;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
@@ -23,6 +29,7 @@ use constants::SCREEN_SPACE_CAMERA_FAR;
 use constants::SCREEN_SPACE_CAMERA_Z;
 use constants::SCREEN_SPACE_LIGHT_ILLUMINANCE;
 use constants::SCREEN_SPACE_PANEL_RESIZE_EPSILON;
+use hana_valence::ResolvedAnchorGeometry;
 
 use crate::layout::Sizing;
 use crate::panel;
@@ -30,10 +37,18 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::LastPanelDimensions;
+use crate::panel::PanelRenderLayersOwnership;
 use crate::panel::PanelSystems;
 use crate::panel::ResolvedScreenPanelPosition;
 use crate::panel::ScreenPosition;
 use crate::render::PanelChildSystems;
+use crate::widgets;
+use crate::widgets::PanelWidget;
+use crate::widgets::ScreenWidgetAnchorProxy;
+use crate::widgets::ScreenWidgetAnchoredHere;
+use crate::widgets::WidgetAnchorRect;
+use crate::widgets::WidgetOf;
+use crate::widgets::WidgetSystems;
 
 /// Marker on overlay cameras spawned by the screen-space system.
 ///
@@ -94,10 +109,58 @@ impl ScreenSpaceViewLayers {
 }
 
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum ScreenSpaceSystems {
+pub(crate) enum ScreenSpaceSystems {
     ResolveDimensions,
     FlushDimensionObservers,
     FlushObserverCommands,
+    WidgetDemandCommandsApplied,
+}
+
+#[derive(SystemParam)]
+pub(crate) struct CandidateQueries<'w, 's> {
+    panels: Query<'w, 's, (Entity, &'static DiegeticPanel), With<ResolvedScreenPanelPosition>>,
+    widgets: Query<
+        'w,
+        's,
+        (
+            Option<&'static WidgetOf>,
+            Option<&'static WidgetAnchorRect>,
+            Option<&'static ScreenWidgetAnchoredHere>,
+            Option<&'static ScreenWidgetAnchorProxy>,
+        ),
+        With<PanelWidget>,
+    >,
+    proxy_candidates: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static WidgetOf,
+            &'static WidgetAnchorRect,
+            &'static ScreenWidgetAnchoredHere,
+        ),
+        (
+            With<PanelWidget>,
+            With<ScreenWidgetAnchorProxy>,
+            With<ResolvedAnchorGeometry>,
+        ),
+    >,
+    proxy_placements: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static WidgetOf,
+            &'static WidgetAnchorRect,
+            &'static ScreenWidgetAnchoredHere,
+        ),
+        (With<PanelWidget>, With<ScreenWidgetAnchorProxy>),
+    >,
+    geometry:         Query<'w, 's, (), With<ResolvedAnchorGeometry>>,
+    screen_targets:   Query<'w, 's, (Entity, &'static ScreenAnchorTarget)>,
+    transforms:       Query<'w, 's, &'static Transform>,
+    entities:         Query<'w, 's, ()>,
+    primary:          Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
 pub(crate) struct ScreenSpacePlugin;
@@ -105,8 +168,9 @@ pub(crate) struct ScreenSpacePlugin;
 impl Plugin for ScreenSpacePlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(setup_screen_space_view)
-            .add_observer(cleanup_screen_space_view)
             .add_observer(cleanup_screen_space_on_window_close)
+            .add_observer(widgets::on_screen_widget_demand_added)
+            .add_observer(widgets::on_screen_widget_demand_removed)
             .init_resource::<AnchorResolveDiagnostics>()
             .init_resource::<ScreenSpaceViewLayers>()
             .configure_sets(
@@ -117,8 +181,11 @@ impl Plugin for ScreenSpacePlugin {
                         .after(ScreenSpaceSystems::ResolveDimensions),
                     ScreenSpaceSystems::FlushObserverCommands
                         .after(ScreenSpaceSystems::FlushDimensionObservers),
-                    PanelSystems::ResolvePanelAttachments
+                    ScreenSpaceSystems::WidgetDemandCommandsApplied
                         .after(ScreenSpaceSystems::FlushObserverCommands)
+                        .after(WidgetSystems::ReifyCommandsApplied),
+                    PanelSystems::ResolvePanelAttachments
+                        .after(ScreenSpaceSystems::WidgetDemandCommandsApplied)
                         .before(PanelSystems::PositionScreenSpace),
                     PanelSystems::PositionScreenSpace.after(PanelSystems::ResolvePanelAttachments),
                 ),
@@ -133,6 +200,11 @@ impl Plugin for ScreenSpacePlugin {
                         .in_set(ScreenSpaceSystems::ResolveDimensions),
                     ApplyDeferred.in_set(ScreenSpaceSystems::FlushDimensionObservers),
                     ApplyDeferred.in_set(ScreenSpaceSystems::FlushObserverCommands),
+                    ApplyDeferred.in_set(ScreenSpaceSystems::WidgetDemandCommandsApplied),
+                    (widgets::update_screen_anchor_geometry, ApplyDeferred)
+                        .chain()
+                        .after(ScreenSpaceSystems::WidgetDemandCommandsApplied)
+                        .before(PanelSystems::ResolvePanelAttachments),
                     anchoring::resolve_screen_space_panel_attachments
                         .in_set(PanelSystems::ResolvePanelAttachments),
                     position_screen_space_panels.in_set(PanelSystems::PositionScreenSpace),
@@ -283,18 +355,19 @@ fn position_screen_space_panels(
             .anchor_position
             .unwrap_or(configured_anchor_position);
 
-        transform.translation.x = anchor_position.x - half_width;
-        transform.translation.y = half_height - anchor_position.y;
+        let mut next_transform = *transform;
+        next_transform.translation.x = anchor_position.x - half_width;
+        next_transform.translation.y = half_height - anchor_position.y;
         match resolved_position.depth {
             Some(depth) => {
                 if resolved_position.authored_depth.is_none() {
-                    resolved_position.authored_depth = Some(transform.translation.z);
+                    resolved_position.authored_depth = Some(next_transform.translation.z);
                 }
-                transform.translation.z = depth;
+                next_transform.translation.z = depth;
             },
             None => {
                 if let Some(authored_depth) = resolved_position.authored_depth {
-                    transform.translation.z = authored_depth;
+                    next_transform.translation.z = authored_depth;
                     resolved_position.authored_depth = None;
                 }
             },
@@ -303,17 +376,18 @@ fn position_screen_space_panels(
             Some(angle) => {
                 if resolved_position.authored_rotation.is_none() {
                     resolved_position.authored_rotation =
-                        Some(anchoring::screen_in_plane_angle(transform.rotation));
+                        Some(anchoring::screen_in_plane_angle(next_transform.rotation));
                 }
-                transform.rotation = Quat::from_rotation_z(angle);
+                next_transform.rotation = Quat::from_rotation_z(angle);
             },
             None => {
                 if let Some(authored_rotation) = resolved_position.authored_rotation {
-                    transform.rotation = Quat::from_rotation_z(authored_rotation);
+                    next_transform.rotation = Quat::from_rotation_z(authored_rotation);
                     resolved_position.authored_rotation = None;
                 }
             },
         }
+        transform.set_if_neq(next_transform);
     }
 }
 
@@ -461,7 +535,7 @@ fn setup_screen_space_view_for_panel(
         };
         (false, assigned_layers)
     };
-    commands.entity(entity).insert(assigned_layers.clone());
+    panel::write_owned_render_layers(commands, entity, entity, Some(assigned_layers.clone()));
 
     if !camera_exists {
         commands.spawn((
@@ -525,16 +599,19 @@ fn setup_screen_space_view_for_panel(
 /// children that are missing the component.
 ///
 /// Ordered `.after(PanelChildSystems::Build)` so it runs once the panel-child
-/// reconcile/build phase has applied its spawns and despawns. Without that
+/// reification/build phase has applied its spawns and despawns. Without that
 /// ordering it would read a panel's `Children` mid-phase and queue an insert
-/// against a child that a reconcile system is despawning the same frame —
+/// against a child that a reification system is despawning the same frame —
 /// inserting on a despawned entity panics. The ordering also means children
 /// spawned this frame are present, so they pick up the layer without a frame
 /// of delay.
 fn propagate_screen_space_render_layers(
     panels_with_layers: Query<(Entity, &RenderLayers, &DiegeticPanel)>,
     children_query: Query<&Children>,
-    existing_layers: Query<&RenderLayers>,
+    layer_state: Query<(
+        Option<Ref<RenderLayers>>,
+        Option<&PanelRenderLayersOwnership>,
+    )>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel_layers, panel) in &panels_with_layers {
@@ -546,8 +623,9 @@ fn propagate_screen_space_render_layers(
         };
         propagate_layers_recursive(
             &children_query,
-            &existing_layers,
+            &layer_state,
             &mut commands,
+            panel_entity,
             children,
             panel_layers,
         );
@@ -556,20 +634,35 @@ fn propagate_screen_space_render_layers(
 
 fn propagate_layers_recursive(
     children_query: &Query<&Children>,
-    existing_layers: &Query<&RenderLayers>,
+    layer_state: &Query<(
+        Option<Ref<RenderLayers>>,
+        Option<&PanelRenderLayersOwnership>,
+    )>,
     commands: &mut Commands,
+    panel_entity: Entity,
     children: &Children,
     layers: &RenderLayers,
 ) {
     for child in children.iter() {
-        if existing_layers.get(child).is_err() {
-            commands.entity(child).insert(layers.clone());
+        let should_write = layer_state.get(child).map_or(true, |(current, ownership)| {
+            ownership.map_or_else(
+                || current.is_none(),
+                |ownership| {
+                    ownership.is_owned_by(panel_entity)
+                        && (!ownership.matches_current(panel_entity, current.as_ref())
+                            || current.as_deref() != Some(layers))
+                },
+            )
+        });
+        if should_write {
+            panel::write_owned_render_layers(commands, panel_entity, child, Some(layers.clone()));
         }
         if let Ok(grandchildren) = children_query.get(child) {
             propagate_layers_recursive(
                 children_query,
-                existing_layers,
+                layer_state,
                 commands,
+                panel_entity,
                 grandchildren,
                 layers,
             );
@@ -589,17 +682,15 @@ fn propagate_layers_recursive(
 /// `cleanup_screen_space_on_window_close` observer despawns panels only;
 /// teardown of their cameras/lights cascades through this observer,
 /// keeping single-owner cleanup.
-fn cleanup_screen_space_view(
-    trigger: On<Remove, DiegeticPanel>,
-    panels: Query<(Entity, &DiegeticPanel)>,
-    cameras: Query<(Entity, &ScreenSpaceCamera)>,
-    lights: Query<(Entity, &ScreenSpaceLight)>,
-    primary: Query<Entity, With<PrimaryWindow>>,
-    mut commands: Commands,
+pub(crate) fn cleanup_screen_space_view(
+    removed_entity: Entity,
+    removed_panel: &DiegeticPanel,
+    panels: &Query<(Entity, &DiegeticPanel)>,
+    cameras: &Query<(Entity, &ScreenSpaceCamera)>,
+    lights: &Query<(Entity, &ScreenSpaceLight)>,
+    primary: &Query<Entity, With<PrimaryWindow>>,
+    commands: &mut Commands,
 ) {
-    let Ok((_, removed_panel)) = panels.get(trigger.entity) else {
-        return;
-    };
     let CoordinateSpace::Screen {
         camera_order,
         ref render_layers,
@@ -614,12 +705,12 @@ fn cleanup_screen_space_view(
     // Iterating cameras (not windows) is what lets us clean up orphans
     // whose `WindowRef::Primary` panels can no longer be resolved because
     // the primary window itself was despawned.
-    for (cam_entity, cam) in &cameras {
+    for (cam_entity, cam) in cameras {
         if cam.order != camera_order || cam.authored_layers != *render_layers {
             continue;
         }
         let still_used = panels.iter().any(|(entity, panel)| {
-            if entity == trigger.entity {
+            if entity == removed_entity {
                 return false;
             }
             let CoordinateSpace::Screen {
@@ -633,11 +724,11 @@ fn cleanup_screen_space_view(
             };
             *other_order == camera_order
                 && other_layers == render_layers
-                && resolve_window_ref(*other_window_ref, &primary) == Some(cam.window)
+                && resolve_window_ref(*other_window_ref, primary) == Some(cam.window)
         });
         if !still_used {
             commands.entity(cam_entity).despawn();
-            for (light_entity, light) in &lights {
+            for (light_entity, light) in lights {
                 if light.view_layers == cam.view_layers {
                     commands.entity(light_entity).despawn();
                 }
@@ -797,6 +888,122 @@ mod tests {
 
         let log = app.world().resource::<DimensionEventLog>();
         assert_eq!(log.0.len(), 1);
+    }
+
+    #[test]
+    fn stable_screen_position_does_not_rewrite_transform() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(monospace_measurer())
+            .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800_u32, 600_u32).into(),
+                ..Default::default()
+            },
+            PrimaryWindow,
+        ));
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .screen_position(200.0, 150.0)
+            .layout(|_| {})
+            .build()
+            .expect("screen panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+        let positioned_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<Transform>()
+            .expect("screen panel should have a transform")
+            .last_changed();
+
+        app.update();
+        let quiet_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<Transform>()
+            .expect("screen panel should retain its transform")
+            .last_changed();
+        assert_eq!(quiet_tick, positioned_tick);
+
+        let moved = app
+            .world_mut()
+            .get_mut::<DiegeticPanel>(panel)
+            .is_some_and(|mut panel| panel.set_screen_position(Vec2::new(240.0, 175.0)));
+        assert!(moved);
+        app.update();
+
+        let moved_tick = app
+            .world()
+            .entity(panel)
+            .get_ref::<Transform>()
+            .expect("screen panel should retain its transform")
+            .last_changed();
+        assert_ne!(moved_tick, quiet_tick);
+    }
+
+    #[test]
+    fn propagated_layers_change_only_when_the_panel_layer_changes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .render_layers(RenderLayers::layer(3))
+            .layout(|_| {})
+            .build()
+            .expect("screen panel should build");
+        let panel = app.world_mut().spawn(panel).id();
+        let child = app.world_mut().spawn(ChildOf(panel)).id();
+        app.update();
+
+        let initial_tick = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should seed the child layer")
+            .last_changed();
+        app.update();
+        let unchanged_tick = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should retain the child layer")
+            .last_changed();
+        assert_eq!(unchanged_tick, initial_tick);
+
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(RenderLayers::layer(4));
+        app.update();
+        let updated = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should update the child layer");
+        assert_eq!(&*updated, &RenderLayers::layer(4));
+        let updated_tick = updated.last_changed();
+        assert_ne!(updated_tick, unchanged_tick);
+
+        app.update();
+        let final_tick = app
+            .world()
+            .get_entity(child)
+            .expect("application child should remain live")
+            .get_ref::<RenderLayers>()
+            .expect("screen propagation should retain the updated child layer")
+            .last_changed();
+        assert_eq!(final_tick, updated_tick);
     }
 
     #[derive(Component)]
@@ -1086,11 +1293,13 @@ mod tests {
     }
 
     /// Helper for the multi-window cleanup tests: builds an app with two
-    /// windows and one bottom-right `Fit` panel pinned to each, then runs
+    /// windows and one bottom-right panel pinned to each, then runs
     /// one update to let the setup observers spawn cameras and lights.
     fn build_two_window_app() -> (App, Entity, Entity, Entity, Entity) {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(monospace_measurer())
+            .add_plugins(HeadlessLayoutPlugin);
         let primary = app
             .world_mut()
             .spawn((
@@ -1108,18 +1317,10 @@ mod tests {
                 ..Default::default()
             })
             .id();
-        app.configure_sets(
-            Update,
-            PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
-        );
-        app.add_systems(
-            Update,
-            write_known_content_size.in_set(PanelSystems::ComputeLayout),
-        );
         app.add_plugins(ScreenSpacePlugin);
 
         let primary_panel = DiegeticPanel::screen()
-            .size(Fit, Fit)
+            .size(Px(100.0), Px(50.0))
             .anchor(Anchor::BottomRight)
             .window(WindowRef::Primary)
             .layout(|_| {})
@@ -1128,7 +1329,7 @@ mod tests {
         let primary_panel = app.world_mut().spawn(primary_panel).id();
 
         let secondary_panel = DiegeticPanel::screen()
-            .size(Fit, Fit)
+            .size(Px(100.0), Px(50.0))
             .anchor(Anchor::BottomRight)
             .window_entity(secondary)
             .layout(|_| {})

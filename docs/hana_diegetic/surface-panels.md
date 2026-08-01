@@ -2,8 +2,8 @@
 
 > **Status: DESIGN — not started.** Combined plan for mapping diegetic panels
 > (and the headless widgets that live on them) onto curved parametric surfaces
-> `S(u,v)`. Coordinates with — but does not replace — the headless widget plan in
-> [`widgets.md`](./widgets.md) and the material plan in
+> `S(u,v)`. Coordinates with — but does not replace — the shipped widget system in
+> [`as-built/widgets.md`](./as-built/widgets.md) and the material plan in
 > [`tangent-bitangent-normal.md`](./tangent-bitangent-normal.md). This plan
 > **generalizes the frame derivation** in that TBN doc: its "Design" section
 > synthesizes a *planar* T/B/N; on a curved panel the T/B/N come from `S` per
@@ -76,7 +76,7 @@ in flat panel-local layout space and never learns the surface exists:
 - `ComputedDiegeticPanel::field_at_local_position` (`diegetic_panel.rs:1591`) →
   `PanelFieldRecord::contains` (`panel/field.rs:29`) — an axis-aligned 2D test.
 - The planned widget picking, hover, focus, and the slider's panel-local →
-  normalized-value mapping (widgets.md concepts 3, 14) — all panel-local.
+  normalized-value mapping — all panel-local.
 
 Symmetrically on output: widgets emit ordinary `El` / `PanelDraw` layout, and the
 surface remap happens universally inside the render subsystems, so widget visuals
@@ -85,7 +85,7 @@ curve without widget code participating.
 **Consequence for the widget plan:** the headless widget behavior and layout
 layers need no curvature awareness. Widget picking geometry can stay in
 panel-local space; the single per-panel `project()` feeds it curved-correct
-coordinates. See "Coordination with widgets.md" below.
+coordinates. See "Coordination with the widget system" below.
 
 ## Current Code State
 
@@ -217,31 +217,30 @@ surface-sampled frame keyed by `Anchor::offset_fraction()`; update
 to sample the frame at the anchor's `(u,v)` instead of reading whole-panel
 constants. Curved hit-testing and curved-surface tooltips.
 
-**Phase 6 — Widget interop + sphere slider.** Coordinate with widgets.md (below);
+**Phase 6 — Widget interop + sphere slider.** Coordinate with the widget system (below);
 demonstrate a headless slider on a sphere. Capstone.
 
-## Coordination with widgets.md
+## Coordination with the widget system
 
-The widget plan stays a separate doc. Curvature reaches widgets through the panel
-boundary, so only two touchpoints need coordination, both to avoid re-churning
-the same code twice:
+The widget system is already built ([`as-built/widgets.md`](./as-built/widgets.md)).
+Curvature reaches widgets through the panel boundary, so only three touchpoints
+need coordination:
 
-1. **Anchoring generalization (widgets.md Phase 0).** That phase renames
-   `PanelAnchorGeometryParam -> AnchorGeometryParam` and generalizes anchor
-   geometry to resolve from a panel or a materialized widget. Make the generalized
-   `AnchorGeometryParam` return an **oriented frame** matching `SurfaceSample`
-   (point + tangent frame), not the concrete `PanelPlane`, so this Surface plan's
-   Phase 5 does not rewrite it. The frame subsumes screen bounds (2D), the flat
-   plane (constant frame), and the curved sampler.
+1. **Anchor geometry.** Widget anchor geometry resolves from a panel or a
+   demanded widget and today returns the concrete `PanelPlane`. This plan's
+   Phase 5 needs an **oriented frame** matching `SurfaceSample` (point + tangent
+   frame) instead, which subsumes screen bounds (2D), the flat plane (constant
+   frame), and the curved sampler.
 
-2. **Widget picking geometry (widgets.md concept 3 / Phase 1).** Keep widget
-   picking geometry in **panel-local space**. The per-panel `surface.project()`
-   already delivers curved-correct panel-local coordinates before any widget
-   bounds test, so widget picking needs no curvature logic. Do not place widget
-   picking meshes independently in world space.
+2. **Widget picking geometry.** It is already panel-local, which is what makes
+   this work: the shipped backend raycasts one interaction mesh, converts the hit
+   through a single shared flat projection helper, then rectangle-tests widget
+   records. Phase 5 replaces that one helper with `surface.project()` and the
+   curved interaction mesh; the widget rectangle tests do not change. Do not place
+   widget picking meshes independently in world space.
 
-3. **Demonstration (widgets.md Phase 5).** Add the sphere slider as a
-   demonstration target proving headless widget + surface compose.
+3. **Demonstration.** Add the sphere slider as a demonstration target proving
+   headless widget + surface compose.
 
 ## Open questions
 

@@ -17,7 +17,7 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// `in.position.z`, so we apply this offset manually.
 /// Reverse-Z: positive = closer to camera = composited in front.
 ///
-/// Calibration: `bevy_lagrange` syncs the perspective near plane to
+/// Calibration: `hana_lagrange` syncs the perspective near plane to
 /// `radius × 0.001`, so a fragment at the camera's focus distance has
 /// `position.z = near / d ≈ 0.001`. At `1e-6`, one step spans ~17 quanta of the
 /// 24-bit OIT depth packing, so adjacent draw-order indices stay distinct while

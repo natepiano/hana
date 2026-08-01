@@ -5,11 +5,11 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
-use bevy_lagrange::AnimationBegin;
-use bevy_lagrange::AnimationEnd;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamPreset;
+use hana_lagrange::AnimationBegin;
+use hana_lagrange::AnimationEnd;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamBindings;
+use hana_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;

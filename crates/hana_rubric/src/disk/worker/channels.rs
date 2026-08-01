@@ -54,7 +54,7 @@ pub(crate) struct DiskWorkerChannels {
 
 impl DiskWorkerChannels {
     /// Takes the newest worker message, dropping no newer state.
-    pub(crate) fn take_message(&self) -> Option<DiskWorkerMessage> { self.slot.take() }
+    pub(super) fn take_message(&self) -> Option<DiskWorkerMessage> { self.slot.take() }
 
     #[cfg(test)]
     pub(super) fn is_watching(&self) -> bool { self.status.watching.load(Ordering::Acquire) }

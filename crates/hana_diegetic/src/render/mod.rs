@@ -88,9 +88,16 @@ use image_batch::ImageBatchPlugin;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::material_asset_for_frame;
+pub(crate) use material_table::MaterialTableAppendReady;
 use material_table::MaterialTablePlugin;
-use panel_geometry::PanelGeometryPlugin;
+pub(crate) use panel_geometry::CapturedCameraRay;
+pub(crate) use panel_geometry::PanelGeometryPlugin;
+pub(crate) use panel_geometry::PanelInteractionMesh;
+pub(crate) use panel_geometry::ResolvedSdfSurfaceRegistry;
+pub(crate) use panel_geometry::project_flat_panel_hit;
+pub(crate) use panel_geometry::project_flat_panel_ray_hit;
 use panel_shapes::PanelShapePlugin;
+pub(crate) use panel_shapes::remove_panel_relationship as remove_panel_shape_relationship;
 pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
 pub use panel_text::PanelText;
@@ -120,13 +127,13 @@ use crate::cascade::TextMaterial;
 /// on the child set — notably screen-space
 /// [`RenderLayers`](bevy::camera::visibility::RenderLayers) propagation — must
 /// be ordered `.after` this set. Reading the hierarchy mid-phase observes a
-/// child that a reconcile system is despawning the same frame, which then
+/// child that a reification system is despawning the same frame, which then
 /// queues a command against an already-despawned entity and panics. Ordering
 /// after the set inserts the sync point that applies those despawns (and the
 /// `ChildOf` hooks that prune `Children`) first.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum PanelChildSystems {
-    /// Reconcile and mesh-build of every panel child entity.
+    /// Reification and mesh-build of every panel child entity.
     Build,
 }
 

@@ -17,6 +17,7 @@ use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 use crate::render::HairlineWidth;
+use crate::widgets::WidgetInteractivity;
 
 /// Implements [`bevy_kana::CascadeRootResource`] for a `Copy` attribute type
 /// that is its own root resource. The type must derive `Resource`.
@@ -245,10 +246,111 @@ cascade_attribute!(existing AntiAlias, default = AntiAlias::Both);
 // the one resource carries both the fade policy and the `logical_px` stroke
 // floor that `sync_hairline_width` sends to `PathUniform::hairline_min_px`.
 cascade_attribute!(existing HairlineFade, root = HairlineWidth, default = HairlineFade::Full);
+// Widget interactivity defaults to enabled when no ECS or layout scope authors
+// an override.
+cascade_attribute!(
+    existing WidgetInteractivity,
+    default = WidgetInteractivity::Enabled
+);
 
 pub(crate) trait CascadeRoot: bevy_kana::CascadeAttribute {
     /// Resource holding this attribute's app-wide root value.
     type Root: bevy_kana::CascadeRootResource<Self>;
 
     fn root_default() -> Self;
+
+    /// Combines a value authored lower in the chain with one authored above it.
+    ///
+    /// The default replaces the higher value outright.
+    fn combine(lower: Self, _: &Self) -> Self { lower }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::fmt::Debug;
+
+    use super::*;
+    use crate::cascade;
+    use crate::cascade::Cascade;
+    use crate::cascade::CascadeFrom;
+    use crate::cascade::Resolved;
+
+    fn assert_replace_cascade<A>(panel_value: A, widget_value: A)
+    where
+        A: CascadeRoot + Debug,
+    {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(cascade::cascade_plugin::<A>());
+
+        let default_value = bevy_kana::CascadeRootResource::root(app.world().resource::<A::Root>());
+        let root = app.world_mut().spawn(Cascade::<A>::Inherit).id();
+        let panel = app
+            .world_mut()
+            .spawn((Cascade::Override(panel_value), CascadeFrom::new(root)))
+            .id();
+        let widget = app
+            .world_mut()
+            .spawn((
+                Cascade::Override(widget_value.clone()),
+                CascadeFrom::new(panel),
+            ))
+            .id();
+
+        let inheriting_root = app.world_mut().spawn(Cascade::<A>::Inherit).id();
+        let inheriting_panel = app
+            .world_mut()
+            .spawn((Cascade::<A>::Inherit, CascadeFrom::new(inheriting_root)))
+            .id();
+        let inheriting_widget = app
+            .world_mut()
+            .spawn((Cascade::<A>::Inherit, CascadeFrom::new(inheriting_panel)))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<Resolved<A>>(widget)
+                .map(|resolved| resolved.0.clone()),
+            Some(widget_value),
+        );
+        assert_eq!(
+            app.world()
+                .get::<Resolved<A>>(inheriting_widget)
+                .map(|resolved| resolved.0.clone()),
+            Some(default_value),
+        );
+    }
+
+    #[test]
+    fn replace_attributes_keep_first_override_and_fall_back_to_root_default() {
+        assert_replace_cascade(TextAlpha(AlphaMode::Opaque), TextAlpha(AlphaMode::Blend));
+        assert_replace_cascade(FontUnit(Unit::Points), FontUnit(Unit::Pixels));
+        assert_replace_cascade(HdrTextCoverageBias(1.0), HdrTextCoverageBias(2.0));
+
+        let mut materials = Assets::<StandardMaterial>::default();
+        let panel_material = materials.add(StandardMaterial::from(Color::WHITE));
+        let widget_material = materials.add(StandardMaterial::from(Color::BLACK));
+        assert_replace_cascade(
+            SdfMaterial(panel_material.clone()),
+            SdfMaterial(widget_material.clone()),
+        );
+        assert_replace_cascade(
+            TextMaterial(panel_material.clone()),
+            TextMaterial(widget_material.clone()),
+        );
+        assert_replace_cascade(
+            ShapeMaterial(panel_material),
+            ShapeMaterial(widget_material),
+        );
+
+        assert_replace_cascade(Lighting::Lit, Lighting::Unlit);
+        assert_replace_cascade(ShadowCasting::On, ShadowCasting::Off);
+        assert_replace_cascade(GlyphShadowMode::Cast, GlyphShadowMode::None);
+        assert_replace_cascade(Sidedness::BothSides, Sidedness::FrontOnly);
+        assert_replace_cascade(AntiAlias::Both, AntiAlias::Off);
+        assert_replace_cascade(HairlineFade::Full, HairlineFade::Fade { exponent: 2.0 });
+        assert_replace_cascade(WidgetInteractivity::Enabled, WidgetInteractivity::Disabled);
+    }
 }

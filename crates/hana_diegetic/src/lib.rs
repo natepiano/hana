@@ -57,6 +57,7 @@ mod panel;
 mod render;
 mod screen_space;
 mod text;
+mod widgets;
 
 #[cfg(feature = "bench_support")]
 #[doc(hidden)]
@@ -72,7 +73,10 @@ pub mod bench_support {
 }
 
 use bevy::asset::embedded_asset;
-use bevy::prelude::*;
+use bevy::prelude::App;
+use bevy::prelude::IntoScheduleConfigs;
+use bevy::prelude::Plugin;
+use bevy::prelude::Update;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
 pub use cascade::CascadeEntityCommandsExt;
@@ -149,6 +153,7 @@ pub use ime::ImeTextChanged;
 pub use ime::ImeValidationRejected;
 pub use ime::ImeValueRevision;
 pub use ime::PanelElementId;
+pub use layout::AcceptsElement;
 pub use layout::AlignX;
 pub use layout::AlignY;
 pub use layout::Anchor;
@@ -163,7 +168,10 @@ pub use layout::DimensionMatch;
 pub use layout::Direction;
 pub use layout::DrawOverflow;
 pub use layout::DrawZIndex;
+pub use layout::EditableField;
+pub use layout::EditorStateColors;
 pub use layout::El;
+pub use layout::ElementRole;
 pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
 pub use layout::FontSlant;
@@ -175,6 +183,8 @@ pub use layout::In;
 pub use layout::InvalidPanelScalar;
 pub use layout::InvalidSize;
 pub use layout::LayoutBuilder;
+pub use layout::LayoutContentBuilder;
+pub use layout::LayoutOnly;
 pub use layout::LayoutTree;
 pub use layout::Lighting;
 pub use layout::LineStyle;
@@ -198,6 +208,9 @@ pub use layout::PanelShapePrimitiveKind;
 pub use layout::PanelShapeSourceKey;
 pub use layout::PanelSize;
 pub use layout::PaperSize;
+pub use layout::Pressable;
+pub use layout::PressedEditorStateColors;
+pub use layout::PressedPart;
 pub use layout::Pt;
 pub use layout::Px;
 pub use layout::ResolvedPanelShape;
@@ -219,7 +232,14 @@ pub use layout::TextSizing;
 pub use layout::TextStyle;
 pub use layout::TextWrap;
 pub use layout::Unit;
-pub use panel::AnchoredToPanel;
+pub use layout::Widget;
+pub use layout::WidgetBuilder;
+pub use layout::WidgetChild;
+pub use layout::WidgetDeclaration;
+pub use layout::WidgetElement;
+pub use layout::WidgetOwner;
+pub use layout::WidgetPart;
+pub use layout::WidgetRootSlot;
 pub use panel::AnyUnit;
 pub use panel::ArrangedPanel;
 pub use panel::BatchPerfStats;
@@ -249,11 +269,14 @@ pub use panel::PanelAnchorGeometryParam;
 pub use panel::PanelAnchorOffset;
 pub use panel::PanelAnchorPoint;
 pub use panel::PanelAnchorPoints;
+pub use panel::PanelAttachment;
 pub use panel::PanelBuildError;
 pub use panel::PanelChangeKind;
 pub use panel::PanelChanged;
 pub use panel::PanelDimensions;
 pub use panel::PanelDimensionsChanged;
+pub use panel::PanelEntity;
+pub use panel::PanelEntityReader;
 pub use panel::PanelFieldRecord;
 pub use panel::PanelGeometryPerfStats;
 pub use panel::PanelPlane;
@@ -262,7 +285,6 @@ pub use panel::PanelProjectionError;
 pub use panel::PanelProjectionParam;
 pub use panel::PanelScreenBounds;
 pub use panel::PanelScreenConversion;
-pub use panel::PanelScreenConversionParam;
 pub use panel::PanelScreenHandoff;
 pub use panel::PanelScreenProjection;
 pub use panel::PanelScreenTarget;
@@ -272,7 +294,6 @@ pub use panel::PanelSpace;
 pub use panel::PanelSystems;
 pub use panel::PanelTextPerfStats;
 pub use panel::PanelWorldConversion;
-pub use panel::PanelWorldConversionParam;
 pub use panel::PanelWorldProjection;
 pub use panel::PanelWorldTarget;
 pub use panel::Percent;
@@ -282,9 +303,12 @@ pub use panel::PrecomposeHelper;
 pub use panel::ResolvedPanelAnchorGeometry;
 pub use panel::SavedPanelScreenState;
 pub use panel::SavedPanelWorldState;
+pub use panel::Screen;
 pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
+pub use panel::WidgetEntity;
+pub use panel::World;
 #[doc(hidden)]
 pub use render::AnalyticLine;
 #[doc(hidden)]
@@ -307,6 +331,7 @@ pub use render::TextEdit;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
+pub use screen_space::ScreenAnchorTarget;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;
 use screen_space::ScreenSpacePlugin;
@@ -322,12 +347,112 @@ pub use text::FontSource;
 pub use text::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
+pub use text::IntegralAdvanceSizeError;
 use text::TextPlugin;
+pub use widgets::Appearance;
+pub use widgets::BackgroundColor;
+pub use widgets::BorderColor;
+pub use widgets::Button;
+pub use widgets::ButtonCancelCause;
+pub use widgets::ButtonCanceled;
+pub use widgets::ButtonClicked;
+pub use widgets::ButtonPressed;
+pub use widgets::ButtonReleased;
+pub use widgets::ClearWidgetFocus;
+pub use widgets::FacePicking;
+pub use widgets::IntoAppearance;
+pub use widgets::MeshAnchorCommandsExt;
+pub use widgets::MeshFace;
+pub use widgets::PanelPicking;
+pub use widgets::PanelWidget;
+pub use widgets::PanelWidgetReader;
+pub use widgets::PanelWidgetWriter;
+pub use widgets::PanelWidgets;
+pub use widgets::PathColor;
+pub use widgets::RequestPanelFocus;
+pub use widgets::RequestSliderAdjustment;
+pub use widgets::RequestWidgetFocus;
+pub use widgets::ScreenAnchorCommandsExt;
+pub use widgets::Slider;
+pub use widgets::SliderAdjustment;
+pub use widgets::SliderCancelCause;
+pub use widgets::SliderCanceled;
+pub use widgets::SliderChangeRequested;
+pub use widgets::SliderConfigError;
+pub use widgets::SliderDirection;
+pub use widgets::SliderGrabbed;
+pub use widgets::SliderRange;
+pub use widgets::SliderReleased;
+pub use widgets::SliderResetBehavior;
+pub use widgets::SliderState;
+pub use widgets::SliderStep;
+pub use widgets::TextColor;
+pub use widgets::Tint;
+pub use widgets::Tooltip;
+pub use widgets::TooltipCommandsExt;
+pub use widgets::TooltipDisabledPolicy;
+pub use widgets::TooltipFor;
+pub use widgets::TooltipHidden;
+pub use widgets::TooltipPlacementPolicy;
+pub use widgets::TooltipShown;
+pub use widgets::TooltipTarget;
+pub use widgets::TooltipTargetEntity;
+pub use widgets::TooltipTargetSpace;
+pub use widgets::Tooltips;
+pub use widgets::WidgetControlSummary;
+pub use widgets::WidgetDisabled;
+pub use widgets::WidgetDisabledAppearance;
+pub use widgets::WidgetFocusChangeCause;
+pub use widgets::WidgetFocusChanged;
+pub use widgets::WidgetFocusable;
+pub use widgets::WidgetFocused;
+pub use widgets::WidgetFocusedAppearance;
+pub use widgets::WidgetHoveredAppearance;
+pub use widgets::WidgetInput;
+pub use widgets::WidgetInputBindings;
+pub use widgets::WidgetInputBindingsBuilder;
+pub use widgets::WidgetInputBindingsError;
+pub use widgets::WidgetInputDisabled;
+pub use widgets::WidgetInputMode;
+pub use widgets::WidgetInputPlugin;
+pub use widgets::WidgetInteractivity;
+pub use widgets::WidgetOf;
+pub use widgets::WidgetPressedAppearance;
+use widgets::WidgetsPlugin;
+pub use widgets::slider_self_update;
+
+/// Bevy plugin that adds diegetic layout, widgets, and IME behavior without
+/// renderer initialization.
+///
+/// Use this plugin in client tests that need the same panel and widget
+/// behavior as [`DiegeticUiPlugin`] without shaders, render assets, gizmos, or
+/// a render sub-app. Insert a [`DiegeticTextMeasurer`] before adding this
+/// plugin; deterministic tests may use `DiegeticTextMeasurer::default()`.
+/// [`WidgetInputPlugin`] is not required for widget behavior. Add it when
+/// `hana_diegetic` should translate Bevy input bindings into widget focus,
+/// activation, and cancellation requests. Without it, an application or test
+/// can send [`WidgetInput`] requests directly.
+///
+/// # Example
+///
+/// ```ignore
+/// App::new()
+///     .add_plugins(MinimalPlugins)
+///     .insert_resource(DiegeticTextMeasurer::default())
+///     .add_plugins(HeadlessDiegeticUiPlugin);
+/// ```
+pub struct HeadlessDiegeticUiPlugin;
+
+impl Plugin for HeadlessDiegeticUiPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((HeadlessLayoutPlugin, WidgetsPlugin, ImePlugin));
+    }
+}
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///
-/// Composes layout, rendering, text, and screen-space overlay
-/// support into a single plugin. Insert [`PanelDefaults`] before adding this
+/// Composes [`HeadlessDiegeticUiPlugin`] with rendering, text, gizmo, and
+/// screen-space overlay support. Insert [`PanelDefaults`] before adding this
 /// plugin; it takes effect through the child plugins at build time. A cascade
 /// root resource such as [`TextAlpha`] can go on either side: inserted first it
 /// is left alone, inserted afterwards it replaces the plugin's default and
@@ -364,8 +489,8 @@ impl Plugin for DiegeticUiPlugin {
         );
         app.add_plugins((
             TextPlugin,
+            HeadlessDiegeticUiPlugin,
             PanelPlugin,
-            ImePlugin,
             ScreenSpacePlugin,
             RenderPlugin,
             DiegeticTextPlugin,

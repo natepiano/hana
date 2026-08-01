@@ -21,7 +21,7 @@
 //! A left screen overlay, anchored above the bottom-left GPU pipeline
 //! visualization, reports the frame as additive main/render blocks, each row
 //! with a 5-second peak column.
-//! Main thread: `ms/frame` is the sum of `layout`, `reconcile`, `shaping`,
+//! Main thread: `ms/frame` is the sum of `layout`, `reify`, `shaping`,
 //! `mesh`, `other`, `wait for render`, `extract`, and `frame slack`. Render
 //! thread: `render cycle` is the end-to-end frame N cycle from one render
 //! schedule start to the next: `assets`, `prep`, `wait for GPU`, `render graph`,
@@ -50,8 +50,6 @@ use bevy::render::renderer::RenderGraph;
 use bevy::render::renderer::RenderGraphSystems;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
 use diagnostics::DrawCounts;
 use diagnostics::MainThreadMs;
 use diagnostics::RenderThreadSpans;
@@ -66,31 +64,35 @@ use fairy_dust::StatsPanelRow;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
-use fairy_dust::diegetic_stats_panel;
-use fairy_dust::diegetic_stats_tree;
+use fairy_dust::diegetic_stats_panel_with_integral_advance;
+use fairy_dust::diegetic_stats_tree_with_integral_advance;
 use fairy_dust::fps_stats_panel;
 use fairy_dust::gpu_meter_panel;
 use fairy_dust::screen_panel_frame;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
-use hana_diegetic::AnchoredToPanel;
 use hana_diegetic::AntiAlias;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticPerfStats;
 use hana_diegetic::DiegeticText;
 use hana_diegetic::DiegeticTextMut;
 use hana_diegetic::El;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelAnchorOffset;
+use hana_diegetic::PanelAttachment;
+use hana_diegetic::PanelEntityReader;
 use hana_diegetic::Px;
 use hana_diegetic::Sizing;
 use hana_diegetic::StableTransparency;
 use hana_diegetic::TextAlign;
 use hana_diegetic::TextStyle;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
 
 // ── App — plugin wiring, resources, startup/update systems, shortcuts ────────
 
@@ -1024,7 +1026,7 @@ impl MetricRow {
 
 /// Diagnostic table rows, in display order — two additive CPU blocks.
 ///
-/// Main thread: `ms` (frame wall time) = `layout` + `reconcile` + `shaping` +
+/// Main thread: `ms` (frame wall time) = `layout` + `reify` + `shaping` +
 /// `mesh` (the measured diegetic spans) + `other` (the rest of the main
 /// schedules: cascade, transform propagation, every other system) +
 /// `wait for render` (blocked in `renderer_extract` waiting for the render
@@ -1049,7 +1051,7 @@ const METRIC_ROWS: [MetricRow; 21] = [
     MetricRow::new("fps", RowIndent::None),
     MetricRow::new("ms/frame", RowIndent::None),
     MetricRow::accented("layout", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
-    MetricRow::accented("reconcile", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("reify", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
     MetricRow::accented("shaping", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
     MetricRow::accented("mesh", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
     MetricRow::accented("other", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
@@ -1105,7 +1107,7 @@ struct PerfSnapshot {
     fps:                f32,
     frame_ms:           f32,
     layout_ms:          f32,
-    reconcile_ms:       f32,
+    reify_ms:           f32,
     shaping_ms:         f32,
     mesh_ms:            f32,
     other_ms:           f32,
@@ -1131,7 +1133,7 @@ impl PerfSnapshot {
         fps:                0.0,
         frame_ms:           0.0,
         layout_ms:          0.0,
-        reconcile_ms:       0.0,
+        reify_ms:           0.0,
         shaping_ms:         0.0,
         mesh_ms:            0.0,
         other_ms:           0.0,
@@ -1184,10 +1186,12 @@ fn spawn_status_overlay(mut commands: Commands, mut materials: ResMut<Assets<Sta
 
 fn spawn_batch_stats_overlay(
     mut commands: Commands,
+    fonts: Res<FontRegistry>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let built = diegetic_stats_panel(
+    let built = diegetic_stats_panel_with_integral_advance(
         &batch_stats_rows(&BatchStatsValues::default()),
+        &fonts,
         &mut materials,
     );
     match built {
@@ -1198,34 +1202,44 @@ fn spawn_batch_stats_overlay(
     }
 }
 
-fn status_panel_pipeline_anchor(gpu_pipeline_panel: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(gpu_pipeline_panel, Anchor::BottomLeft, Anchor::TopLeft)
+fn status_panel_pipeline_attachment() -> PanelAttachment {
+    PanelAttachment::new(Anchor::BottomLeft, Anchor::TopLeft)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(-5.0)))
 }
 
 fn anchor_status_panel_when_gpu_pipeline_added(
     trigger: On<Add, GpuPipelinePanel>,
     status_panels: Query<Entity, With<StatusPanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
+    let Some(target) = panel_entities.screen(trigger.entity) else {
+        return;
+    };
     for status_panel in &status_panels {
-        commands
-            .entity(status_panel)
-            .insert(status_panel_pipeline_anchor(trigger.entity));
+        let Some(source) = panel_entities.screen(status_panel) else {
+            continue;
+        };
+        attachments.attach_to_panel(source, target, status_panel_pipeline_attachment());
     }
 }
 
 fn anchor_status_panel_when_status_panel_added(
     trigger: On<Add, StatusPanel>,
     gpu_pipeline_panels: Query<Entity, With<GpuPipelinePanel>>,
-    mut commands: Commands,
+    panel_entities: PanelEntityReader,
+    mut attachments: Commands,
 ) {
     let Ok(gpu_pipeline_panel) = gpu_pipeline_panels.single() else {
         return;
     };
-    commands
-        .entity(trigger.entity)
-        .insert(status_panel_pipeline_anchor(gpu_pipeline_panel));
+    let (Some(source), Some(target)) = (
+        panel_entities.screen(trigger.entity),
+        panel_entities.screen(gpu_pipeline_panel),
+    ) else {
+        return;
+    };
+    attachments.attach_to_panel(source, target, status_panel_pipeline_attachment());
 }
 
 fn status_label_style() -> TextStyle {
@@ -1498,7 +1512,7 @@ fn update_status_panel(
     // are per-frame exact; the displayed `now` column is window-meaned anyway.
     let frame_ms = time.delta_secs() * MILLISECONDS_PER_SECOND;
     let layout_ms = diegetic_perf.compute_ms;
-    let reconcile_ms = diegetic_perf.reconcile_ms;
+    let reify_ms = diegetic_perf.reify_ms;
     let shaping_ms = diegetic_perf.panel_text.shape_ms;
     let mesh_ms = diegetic_perf.panel_text.mesh_build_ms;
     // other = main-schedule wall time minus the four measured diegetic spans:
@@ -1509,7 +1523,7 @@ fn update_status_panel(
     // spans are sampled one frame apart, so a hitch can momentarily invert
     // them.
     let main_span_ms = main_thread.ms();
-    let other_ms = (main_span_ms - layout_ms - reconcile_ms - shaping_ms - mesh_ms).max(0.0);
+    let other_ms = (main_span_ms - layout_ms - reify_ms - shaping_ms - mesh_ms).max(0.0);
     let outside_main_ms = (frame_ms - main_span_ms).max(0.0);
     let wait_for_render_ms = render_spans.recv_ms().clamp(0.0, outside_main_ms);
     let return_ms = render_spans.return_gap_ms();
@@ -1531,7 +1545,7 @@ fn update_status_panel(
         fps: frames_per_second.unwrap_or(0.0).to_f32(),
         frame_ms,
         layout_ms,
-        reconcile_ms,
+        reify_ms,
         shaping_ms,
         mesh_ms,
         other_ms,
@@ -1579,7 +1593,9 @@ fn update_status_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(entity, build_overlay_tree(&now, &max));
+            if let Err(error) = commands.set_tree(entity, build_overlay_tree(&now, &max)) {
+                error!("failed to replace text stress overlay tree: {error}");
+            }
         }
     }
 }
@@ -1589,7 +1605,7 @@ fn format_perf_snapshot(snapshot: PerfSnapshot) -> [String; METRIC_COUNT] {
         format!("{:.0}", snapshot.fps),
         format!("{:.1}", snapshot.frame_ms),
         format!("{:.2}", snapshot.layout_ms),
-        format!("{:.2}", snapshot.reconcile_ms),
+        format!("{:.2}", snapshot.reify_ms),
         format!("{:.2}", snapshot.shaping_ms),
         format!("{:.2}", snapshot.mesh_ms),
         format!("{:.2}", snapshot.other_ms),
@@ -1734,6 +1750,7 @@ fn update_batch_stats_panel(
     mut commands: Commands,
     mut timer: Local<Option<Timer>>,
     time: Res<Time>,
+    fonts: Res<FontRegistry>,
 ) {
     let timer =
         timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
@@ -1779,7 +1796,12 @@ fn update_batch_stats_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(entity, diegetic_stats_tree(&rows));
+            if let Err(error) = commands.set_tree(
+                entity,
+                diegetic_stats_tree_with_integral_advance(&rows, &fonts),
+            ) {
+                error!("failed to replace diegetic stats tree: {error}");
+            }
         }
     }
 }
@@ -1796,7 +1818,7 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         sum.fps += sample.fps;
         sum.frame_ms += sample.frame_ms;
         sum.layout_ms += sample.layout_ms;
-        sum.reconcile_ms += sample.reconcile_ms;
+        sum.reify_ms += sample.reify_ms;
         sum.shaping_ms += sample.shaping_ms;
         sum.mesh_ms += sample.mesh_ms;
         sum.other_ms += sample.other_ms;
@@ -1820,7 +1842,7 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         fps:                sum.fps / count,
         frame_ms:           sum.frame_ms / count,
         layout_ms:          sum.layout_ms / count,
-        reconcile_ms:       sum.reconcile_ms / count,
+        reify_ms:           sum.reify_ms / count,
         shaping_ms:         sum.shaping_ms / count,
         mesh_ms:            sum.mesh_ms / count,
         other_ms:           sum.other_ms / count,
@@ -1848,7 +1870,7 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         peak.fps = peak.fps.max(sample.fps);
         peak.frame_ms = peak.frame_ms.max(sample.frame_ms);
         peak.layout_ms = peak.layout_ms.max(sample.layout_ms);
-        peak.reconcile_ms = peak.reconcile_ms.max(sample.reconcile_ms);
+        peak.reify_ms = peak.reify_ms.max(sample.reify_ms);
         peak.shaping_ms = peak.shaping_ms.max(sample.shaping_ms);
         peak.mesh_ms = peak.mesh_ms.max(sample.mesh_ms);
         peak.other_ms = peak.other_ms.max(sample.other_ms);
@@ -2601,7 +2623,9 @@ fn update_gpu_pipeline_panel(
     }
     let displayed = anim.displayed;
     for entity in &panels {
-        commands.set_tree(entity, build_gpu_pipeline_tree(&displayed));
+        if let Err(error) = commands.set_tree(entity, build_gpu_pipeline_tree(&displayed)) {
+            error!("failed to replace GPU pipeline panel tree: {error}");
+        }
     }
 }
 

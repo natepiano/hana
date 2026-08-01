@@ -1,20 +1,20 @@
 //! Public guidance configuration types: `CameraGuidance`, `CameraGuidanceRow`.
 
 use bevy::prelude::*;
-use bevy_lagrange::CameraControlAction;
-use bevy_lagrange::CameraControlBinding;
-use bevy_lagrange::CameraControlBindingKind;
-use bevy_lagrange::CameraControlSummary;
-use bevy_lagrange::ControlSpeed;
-use bevy_lagrange::FreeCamControlDirection;
-use bevy_lagrange::FreeCamInteractionKind;
-use bevy_lagrange::InteractionSources;
-use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamInteractionKind;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::ZoomDirection;
-use bevy_lagrange::describe_controls;
 use hana_diegetic::Anchor;
+use hana_lagrange::CameraControlAction;
+use hana_lagrange::CameraControlBinding;
+use hana_lagrange::CameraControlBindingKind;
+use hana_lagrange::CameraControlSummary;
+use hana_lagrange::ControlSpeed;
+use hana_lagrange::FreeCamControlDirection;
+use hana_lagrange::FreeCamInteractionKind;
+use hana_lagrange::InteractionSources;
+use hana_lagrange::OrbitCamInputMode;
+use hana_lagrange::OrbitCamInteractionKind;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::ZoomDirection;
+use hana_lagrange::describe_controls;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum CameraGuidanceContent {

@@ -27,9 +27,9 @@ bevy = { workspace = true, features = [
   "bevy_state",
   "png",
 ] }
-bevy_lagrange.workspace = true
 fairy_dust.workspace = true
 hana_diegetic.workspace = true
+hana_lagrange.workspace = true
 
 [[example]]
 name = "catastrophic_failure"

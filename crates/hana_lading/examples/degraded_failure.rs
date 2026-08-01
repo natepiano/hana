@@ -17,7 +17,6 @@ use std::any::type_name;
 use std::path::Path;
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::Face;
@@ -29,6 +28,7 @@ use hana_lading::DiskAssetLoader;
 use hana_lading::DiskAssets;
 use hana_lading::DiskAssetsPlugin;
 use hana_lading::Loaded;
+use hana_lagrange::OrbitCamPreset;
 use loading_evidence::ExampleState;
 use loading_evidence::FailureRecord;
 use loading_evidence::LoadingEvidencePlugin;

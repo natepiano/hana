@@ -82,7 +82,7 @@ a command conflict policy, not component mutual exclusion.
 
 Native mutually exclusive component support would not simplify the confirmed
 V1 model because V1 has no mutually exclusive recipe components. This research
-therefore provides no reason to pin `bevy_hana`, `bevy_lagrange`, or the Hana
+therefore provides no reason to pin `bevy_hana`, `hana_lagrange`, or the Hana
 binary to a development Bevy revision.
 
 If a future feature introduces genuinely exclusive persistent ECS states, use

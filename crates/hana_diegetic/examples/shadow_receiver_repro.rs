@@ -19,11 +19,11 @@
 //!   and shadowed glyphs on the other.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::TitleBar;
 use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticText;
+use hana_lagrange::OrbitCamPreset;
 
 // Camera home pose: near top-down so the flat text and the shadow band read
 // clearly.

@@ -12,7 +12,7 @@
 //! automatically unless the home builder opts out.
 //!
 //! Add [`CameraHomeTarget`] to any entity to frame that entity (and its
-//! descendants). [`bevy_lagrange::AnimateToFit`] extracts every descendant
+//! descendants). [`hana_lagrange::AnimateToFit`] extracts every descendant
 //! mesh's vertices, so tagging a `WorldText` parent frames all its glyph
 //! children without the caller measuring anything. Startup waits for the
 //! target's meshes to exist, then snaps to it. If nothing carries the marker,
@@ -24,25 +24,25 @@ use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
 use bevy_enhanced_input::prelude::*;
-use bevy_lagrange::AnimateToFit;
-use bevy_lagrange::AnimationBegin;
-use bevy_lagrange::AnimationEnd;
-use bevy_lagrange::AnimationReason;
-use bevy_lagrange::AnimationSource;
-use bevy_lagrange::CameraHomePending;
-use bevy_lagrange::CameraHomed;
-use bevy_lagrange::CameraInputPhase;
-use bevy_lagrange::FitAnchor;
-use bevy_lagrange::FreeCam;
-use bevy_lagrange::FreeCamInputMode;
-use bevy_lagrange::FreeCamInteractionStarted;
-use bevy_lagrange::FreeCamPreset;
-use bevy_lagrange::FreeCamPresetKind;
-use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamInteractionStarted;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::OrbitCamPresetKind;
 use hana_diegetic::Anchor;
+use hana_lagrange::AnimateToFit;
+use hana_lagrange::AnimationBegin;
+use hana_lagrange::AnimationEnd;
+use hana_lagrange::AnimationReason;
+use hana_lagrange::AnimationSource;
+use hana_lagrange::CameraHomePending;
+use hana_lagrange::CameraHomed;
+use hana_lagrange::CameraInputPhase;
+use hana_lagrange::FitAnchor;
+use hana_lagrange::FreeCam;
+use hana_lagrange::FreeCamInputMode;
+use hana_lagrange::FreeCamInteractionStarted;
+use hana_lagrange::FreeCamPreset;
+use hana_lagrange::FreeCamPresetKind;
+use hana_lagrange::OrbitCamInputMode;
+use hana_lagrange::OrbitCamInteractionStarted;
+use hana_lagrange::OrbitCamPreset;
+use hana_lagrange::OrbitCamPresetKind;
 use hana_rubric::action;
 use hana_rubric::bind_action_system;
 use hana_rubric::event;
@@ -578,16 +578,16 @@ mod tests {
     use bevy::prelude::Messages;
     use bevy::window::WindowRef;
     use bevy_enhanced_input::prelude::Binding;
-    use bevy_lagrange::CameraBasis;
-    use bevy_lagrange::CameraInputRoutingConfig;
-    use bevy_lagrange::FreeCamHomePose;
-    use bevy_lagrange::InteractionSources;
-    use bevy_lagrange::LagrangePlugin;
-    use bevy_lagrange::LookAngles;
-    use bevy_lagrange::OrbitCam;
-    use bevy_lagrange::OrbitCamInteractionKind;
-    use bevy_lagrange::Position;
-    use bevy_lagrange::Roll;
+    use hana_lagrange::CameraBasis;
+    use hana_lagrange::CameraInputRoutingConfig;
+    use hana_lagrange::FreeCamHomePose;
+    use hana_lagrange::InteractionSources;
+    use hana_lagrange::LagrangePlugin;
+    use hana_lagrange::LookAngles;
+    use hana_lagrange::OrbitCam;
+    use hana_lagrange::OrbitCamInteractionKind;
+    use hana_lagrange::Position;
+    use hana_lagrange::Roll;
 
     use super::*;
 

@@ -16,7 +16,6 @@
 //! `OitDepthOffset` path.
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -42,6 +41,7 @@ use hana_diegetic::LayoutTree;
 use hana_diegetic::PanelBuildError;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::OrbitCamPreset;
 
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, PANEL_CENTER_Y, 0.0);
 const HOME_MARGIN: f32 = 0.20;
@@ -312,11 +312,15 @@ fn refresh_scene(
         return;
     }
 
-    commands.set_tree(*rear_panel, rear_tree(state.filler_count()));
+    if let Err(error) = commands.set_tree(*rear_panel, rear_tree(state.filler_count())) {
+        error!("failed to replace rear panel tree: {error}");
+    }
     commands
         .entity(*front_panel)
         .insert(Transform::from_translation(front_panel_translation(*state)));
-    commands.set_tree(*status_panel, status_tree(*state));
+    if let Err(error) = commands.set_tree(*status_panel, status_tree(*state)) {
+        error!("failed to replace status panel tree: {error}");
+    }
     log_state("updated", *state);
 }
 

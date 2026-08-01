@@ -30,14 +30,15 @@ bevy = { workspace = true, features = [
   "ktx2",
   "mesh_picking",
   "multi_threaded",
+  "smaa_luts",
   "tonemapping_luts",
   "zstd_rust",
 ] }
 bevy_brp_extras = { workspace = true }
-bevy_clerestory = { workspace = true }
 bevy_enhanced_input = { workspace = true }
-bevy_lagrange = { workspace = true }
+hana_clerestory = { workspace = true }
 hana_diegetic = { path = "../hana_diegetic" }
+hana_lagrange = { workspace = true }
 hana_rubric = { workspace = true }
 hana_valence = { workspace = true }
 

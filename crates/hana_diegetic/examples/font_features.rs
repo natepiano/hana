@@ -9,12 +9,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
-use bevy_lagrange::Focus;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitAngles;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Radius;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::AlignX;
 use hana_diegetic::AlignY;
 use hana_diegetic::Anchor;
@@ -31,6 +26,11 @@ use hana_diegetic::Padding;
 use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::Focus;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitAngles;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::Radius;
 
 /// World-space panel height. Width follows the window aspect ratio.
 const PANEL_WORLD_HEIGHT: f32 = 3.1;

@@ -129,10 +129,10 @@ orbit_entity() {
         "id": 3,
         "method": "world.query",
         "params": {
-            "filter": { "with": ["bevy_lagrange::orbit_cam::OrbitCam"] },
+            "filter": { "with": ["hana_lagrange::orbit_cam::OrbitCam"] },
             "data": {
                 "components": [
-                    "bevy_lagrange::orbit_cam::OrbitCam",
+                    "hana_lagrange::orbit_cam::OrbitCam",
                     "bevy_transform::components::transform::Transform"
                 ]
             }
@@ -153,7 +153,7 @@ mutate_orbit_cam() {
         \"method\": \"world.mutate_components\",
         \"params\": {
             \"entity\": ${entity},
-            \"component\": \"bevy_lagrange::orbit_cam::OrbitCam\",
+            \"component\": \"hana_lagrange::orbit_cam::OrbitCam\",
             \"path\": \"\",
             \"value\": {
                 \"focus\": [-0.07180324, 0.38033515, 2.0064423],

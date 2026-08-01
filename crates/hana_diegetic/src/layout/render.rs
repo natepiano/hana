@@ -36,7 +36,10 @@ pub enum RectangleSource {
     /// `Element` background fill.
     Background,
     /// Separator from a row or column [`ChildDivider`](super::ChildDivider).
-    ChildDivider,
+    ChildDivider {
+        /// Zero-based adjacent-child pair ordinal inside the parent element.
+        ordinal: usize,
+    },
 }
 
 /// Fixed coarse sort tier derived from a [`RenderCommandKind`].

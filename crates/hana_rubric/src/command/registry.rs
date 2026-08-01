@@ -20,7 +20,8 @@ use super::ReflectKeymapCommand;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
-use crate::keymap::runtime::KeymapRuntime;
+use crate::keymap;
+use crate::keymap::KeymapRuntime;
 
 /// A read-only table that resolves declared command IDs to their runtime registrations.
 #[derive(Resource)]
@@ -182,7 +183,8 @@ pub(crate) fn register_held_observer<T: KeymapCommand>(
             };
 
             if let Some(mut keymap_runtime) = keymap_runtime {
-                keymap_runtime.set_event_source(
+                keymap::set_event_source(
+                    &mut keymap_runtime,
                     custom_input,
                     matches!(hold_phase, HoldPhase::Begin),
                     &mut custom_inputs,

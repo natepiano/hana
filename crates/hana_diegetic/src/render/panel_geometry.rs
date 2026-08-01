@@ -9,8 +9,11 @@
 use std::collections::HashMap;
 
 use bevy::asset::load_internal_asset;
+use bevy::camera::NormalizedRenderTarget;
+use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
+use bevy::picking::Pickable;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
 
@@ -32,22 +35,32 @@ use crate::layout::RenderCommandKind;
 use crate::layout::ShadowCasting;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
+use crate::panel::PanelOwned;
 
 /// The invisible full-panel interaction quad (Geometry mode only), tagged with
-/// its world size and center so a rebuild can leave it untouched when the panel
-/// has not resized. Its material is a local picking-only invisible asset, not a
-/// source material resolved from `SdfMaterial`. Both pairs are stored as `f32`
-/// bit patterns for exact equality.
+/// its panel-local size and center so a rebuild can leave it untouched when the
+/// panel has not resized. Its material is a local picking-only invisible asset,
+/// not a source material resolved from `SdfMaterial`. Both pairs are stored as
+/// `f32` bit patterns for exact equality.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
-struct PanelInteractionMesh {
-    /// World size (width, height).
+pub(crate) struct PanelInteractionMesh {
+    /// Panel-local size (width, height).
     size:   [u32; 2],
-    /// World-space transform center (x, y).
+    /// Panel-local transform center (x, y).
     center: [u32; 2],
 }
 
+impl PanelInteractionMesh {
+    pub(crate) const fn new(size: Vec2, center: Vec2) -> Self {
+        Self {
+            size:   vec2_bits(size),
+            center: vec2_bits(center),
+        }
+    }
+}
+
 /// Plugin that adds panel geometry rendering (backgrounds and borders).
-pub(super) struct PanelGeometryPlugin;
+pub(crate) struct PanelGeometryPlugin;
 
 impl Plugin for PanelGeometryPlugin {
     fn build(&self, app: &mut App) {
@@ -60,18 +73,65 @@ impl Plugin for PanelGeometryPlugin {
         app.init_resource::<ResolvedSdfSurfaceRegistry>();
         app.add_systems(
             PostUpdate,
-            build_panel_geometry
-                .in_set(PanelChildSystems::Build)
-                .before(MaterialTableAppendReady),
+            (
+                build_panel_geometry.before(MaterialTableAppendReady),
+                sync_interaction_mesh_render_layers.after(build_panel_geometry),
+            )
+                .in_set(PanelChildSystems::Build),
         );
+    }
+}
+
+/// Copies panel-facing `RenderLayers` changes and removals to the private
+/// interaction mesh without waiting for a geometry rebuild.
+fn sync_interaction_mesh_render_layers(
+    changed_panels: Query<
+        (Entity, &RenderLayers),
+        (
+            With<DiegeticPanel>,
+            Without<PanelInteractionMesh>,
+            Changed<RenderLayers>,
+        ),
+    >,
+    panels_without_layers: Query<(), (With<DiegeticPanel>, Without<RenderLayers>)>,
+    mut removed_layers: RemovedComponents<RenderLayers>,
+    mut interaction_meshes: Query<
+        (&PanelOwned, &mut RenderLayers),
+        (With<PanelInteractionMesh>, Without<DiegeticPanel>),
+    >,
+) {
+    for (panel, layers) in &changed_panels {
+        sync_panel_interaction_layers(panel, layers, &mut interaction_meshes);
+    }
+    for panel in removed_layers.read() {
+        if panels_without_layers.contains(panel) {
+            sync_panel_interaction_layers(panel, &RenderLayers::layer(0), &mut interaction_meshes);
+        }
+    }
+}
+
+fn sync_panel_interaction_layers(
+    panel: Entity,
+    layers: &RenderLayers,
+    interaction_meshes: &mut Query<
+        (&PanelOwned, &mut RenderLayers),
+        (With<PanelInteractionMesh>, Without<DiegeticPanel>),
+    >,
+) {
+    for (ownership, mut current) in interaction_meshes {
+        if ownership.owner() == panel && *current != *layers {
+            current.clone_from(layers);
+        }
     }
 }
 
 /// Gathered fill + border data for a single element.
 #[derive(Clone, Copy)]
 pub(crate) struct ElementSurface {
-    /// `Element` index in the layout tree.
+    /// Layout-tree identity for this surface, or the parent identity for a child divider.
     index:                  ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
+    divider_ordinal:        Option<usize>,
     /// Bounding box from the render command.
     bounds:                 BoundingBox,
     /// Fill command state, if the element has an authored fill command.
@@ -132,6 +192,17 @@ struct ElementBorder {
 }
 
 impl ElementSurface {
+    /// Returns the element whose visual properties apply to this surface.
+    ///
+    /// Child dividers retain their parent `ElementIndex` for material-table
+    /// identity, but resolve their material and corner radius from the panel.
+    const fn visual_source_element(self) -> Option<ElementIndex> {
+        match self.divider_ordinal {
+            Some(_) => None,
+            None => Some(self.index),
+        }
+    }
+
     const fn fill_only(self) -> Self {
         let Some(fill) = self.fill else {
             return self;
@@ -186,7 +257,7 @@ fn build_panel_geometry(
             Changed<Resolved<ShadowCasting>>,
         )>,
     >,
-    old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
+    old_interaction: Query<(Entity, &PanelOwned, &PanelInteractionMesh)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     sdf_material_default: Res<SdfMaterial>,
@@ -266,33 +337,30 @@ pub(crate) struct PanelReconcileContext<'a> {
 }
 
 /// Reconciles the invisible full-panel interaction quad: it is respawned only
-/// when the panel's world size or center changed, and left untouched otherwise.
+/// when the panel-local size or center changed, and left untouched otherwise.
 fn reconcile_interaction_mesh(
     context: &PanelReconcileContext<'_>,
-    old_interaction: &Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
+    old_interaction: &Query<(Entity, &PanelOwned, &PanelInteractionMesh)>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     commands: &mut Commands,
 ) {
-    let world_size = Vec2::new(context.panel.world_width(), context.panel.world_height());
+    let panel_size = interaction_mesh_size(context.panel);
     let center = Vec2::new(
-        world_size.x.mul_add(0.5, -context.anchor_x),
-        world_size.y.mul_add(-0.5, context.anchor_y),
+        panel_size.x.mul_add(0.5, -context.anchor_x),
+        panel_size.y.mul_add(-0.5, context.anchor_y),
     );
-    let interaction = PanelInteractionMesh {
-        size:   vec2_bits(world_size),
-        center: vec2_bits(center),
-    };
+    let interaction = PanelInteractionMesh::new(panel_size, center);
     let existing = old_interaction
         .iter()
-        .find(|(_, child_of, _)| child_of.parent() == context.panel_entity);
+        .find(|(_, ownership, _)| ownership.owner() == context.panel_entity);
     match existing {
         Some((_, _, current)) if *current == interaction => {},
         Some((entity, ..)) => {
             commands.entity(entity).despawn();
             spawn_interaction_mesh(
                 interaction,
-                world_size,
+                panel_size,
                 center,
                 context,
                 meshes,
@@ -303,7 +371,7 @@ fn reconcile_interaction_mesh(
         None => {
             spawn_interaction_mesh(
                 interaction,
-                world_size,
+                panel_size,
                 center,
                 context,
                 meshes,
@@ -312,6 +380,13 @@ fn reconcile_interaction_mesh(
             );
         },
     }
+}
+
+fn interaction_mesh_size(panel: &DiegeticPanel) -> Vec2 {
+    if panel.coordinate_space().is_screen() {
+        return Vec2::new(panel.width(), panel.height());
+    }
+    Vec2::new(panel.world_width(), panel.world_height())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -346,9 +421,11 @@ fn gather_surfaces(
                     continue;
                 };
                 let command_index = CommandIndex::from(cmd_index);
-                if *source == RectangleSource::ChildDivider {
+                let element_index = ElementIndex::from(cmd.element_idx);
+                if let RectangleSource::ChildDivider { ordinal } = source {
                     dividers.push(ElementSurface {
-                        index: ElementIndex::CHILD_DIVIDER,
+                        index: element_index,
+                        divider_ordinal: Some(*ordinal),
                         bounds: cmd.bounds,
                         fill: Some(ElementFill {
                             color: *color,
@@ -363,11 +440,11 @@ fn gather_surfaces(
                         fill_material_override: FillMaterialOverride::Included,
                     });
                 } else {
-                    let element_index = ElementIndex::from(cmd.element_idx);
                     let surface = surfaces
                         .entry(element_index)
                         .or_insert_with(|| ElementSurface {
                             index: element_index,
+                            divider_ordinal: None,
                             bounds: cmd.bounds,
                             fill: None,
                             border: None,
@@ -397,6 +474,7 @@ fn gather_surfaces(
                     .entry(element_index)
                     .or_insert_with(|| ElementSurface {
                         index: element_index,
+                        divider_ordinal: None,
                         bounds: cmd.bounds,
                         fill: None,
                         border: None,
@@ -426,7 +504,7 @@ fn gather_surfaces(
 }
 
 /// Flattens the gathered surfaces and dividers into one list of surfaces to
-/// render, each keyed by its `command_index`.
+/// render, each keyed by its source element and divider ordinal.
 fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
     let mut desired: Vec<ElementSurface> = gathered.surfaces.into_values().collect();
     desired.extend(gathered.dividers);
@@ -452,6 +530,13 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     pub(crate) command_index:   CommandIndex,
+    /// Layout-tree identity used by the material-table source key; child
+    /// dividers retain their parent element identity here.
+    pub(crate) element_index:   ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
+    pub(crate) divider_ordinal: Option<usize>,
+    /// Retained-record role when clipping separates the fill and border.
+    pub(crate) record_role:     SdfRecordRole,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     pub(crate) draw_depth:      DrawCommandDepth,
     /// Fill material input consumed by the SDF material table.
@@ -477,6 +562,17 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) render_layers:   RenderLayers,
     /// Shadow-casting policy copied to SDF fill batch records.
     pub(crate) shadow_casting:  ShadowCasting,
+}
+
+/// Retained-record role for one resolved SDF surface.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum SdfRecordRole {
+    /// The surface keeps its fill and border in one retained record.
+    Whole,
+    /// The clipped surface retains only its fill.
+    Fill,
+    /// The clipped surface retains only its border.
+    Border,
 }
 
 impl ResolvedSdfSurface<'_> {
@@ -550,6 +646,12 @@ pub(crate) struct StoredResolvedSdfSurface {
     panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     command_index:   CommandIndex,
+    /// Index of the source element in the panel's `LayoutTree`.
+    element_index:   ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
+    divider_ordinal: Option<usize>,
+    /// Retained-record role when clipping separates the fill and border.
+    record_role:     SdfRecordRole,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     draw_depth:      DrawCommandDepth,
     /// Fill material source for the SDF material table.
@@ -577,6 +679,9 @@ impl StoredResolvedSdfSurface {
         Self {
             panel_entity:    surface.panel_entity,
             command_index:   surface.command_index,
+            element_index:   surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            record_role:     surface.record_role,
             draw_depth:      surface.draw_depth,
             fill_material:   StoredResolvedSdfMaterial::from_resolved(&surface.fill_material),
             border_material: StoredResolvedSdfMaterial::from_resolved(&surface.border_material),
@@ -593,6 +698,18 @@ impl StoredResolvedSdfSurface {
     /// Returns the owning `DiegeticPanel` entity.
     pub(crate) const fn panel_entity(&self) -> Entity { self.panel_entity }
 
+    /// Returns the element whose widget visual-slot override applies.
+    ///
+    /// A child divider uses its parent `ElementIndex` for retained-table
+    /// identity only, so it has no visual-slot source element.
+    #[must_use]
+    pub(crate) const fn visual_source_element(&self) -> Option<ElementIndex> {
+        match self.divider_ordinal {
+            Some(_) => None,
+            None => Some(self.element_index),
+        }
+    }
+
     /// Borrows the stored surface with current panel render state.
     pub(crate) const fn as_resolved(
         &self,
@@ -602,6 +719,9 @@ impl StoredResolvedSdfSurface {
         ResolvedSdfSurface {
             panel_entity: self.panel_entity,
             command_index: self.command_index,
+            element_index: self.element_index,
+            divider_ordinal: self.divider_ordinal,
+            record_role: self.record_role,
             draw_depth: self.draw_depth,
             fill_material: self.fill_material.as_resolved(),
             border_material: self.border_material.as_resolved(),
@@ -666,13 +786,16 @@ fn push_resolved_sdf_surfaces<'a>(
     }
 
     let border_surface = surface.border_only();
-    let border_resolved = resolve_sdf_surface(&border_surface, context);
+    let mut border_resolved = resolve_sdf_surface(&border_surface, context);
     if !should_split_clipped_border(surface, &resolved, &border_resolved) {
         output.push(resolved);
         return;
     }
 
-    output.push(resolve_sdf_surface(&surface.fill_only(), context));
+    let mut fill_resolved = resolve_sdf_surface(&surface.fill_only(), context);
+    fill_resolved.record_role = SdfRecordRole::Fill;
+    border_resolved.record_role = SdfRecordRole::Border;
+    output.push(fill_resolved);
     output.push(border_resolved);
 }
 
@@ -692,12 +815,10 @@ pub(crate) fn resolve_sdf_surface<'a>(
     surface: &ElementSurface,
     context: &'a PanelReconcileContext<'a>,
 ) -> ResolvedSdfSurface<'a> {
-    let element_mat = context.panel.tree().element_material(surface.index.get());
-    let base_material = element_mat.map_or(&context.sdf_material, core::convert::identity);
+    let (visual_source_element, base_material, material_override_authors_fill) =
+        resolve_surface_material(surface, context);
     let fill_color = surface.fill.map(|fill| fill.color);
     let border_color = surface.border.map(|border| border.color);
-    let material_override_authors_fill =
-        element_mat.is_override() && surface.fill_material_override.is_included();
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = fill_color.or({
@@ -710,8 +831,9 @@ pub(crate) fn resolve_sdf_surface<'a>(
 
     let local_width = surface.bounds.width * context.points_to_world;
     let local_height = surface.bounds.height * context.points_to_world;
-    let corner_radii =
-        panel_local_corner_radii(context.panel, surface.index, context.points_to_world);
+    let corner_radii = visual_source_element.map_or([0.0; 4], |element_index| {
+        panel_local_corner_radii(context.panel, element_index, context.points_to_world)
+    });
     let border_widths = surface
         .border
         .map_or([0.0; 4], |border| border.widths)
@@ -785,6 +907,9 @@ pub(crate) fn resolve_sdf_surface<'a>(
     ResolvedSdfSurface {
         panel_entity: context.panel_entity,
         command_index: surface.command_index,
+        element_index: surface.index,
+        divider_ordinal: surface.divider_ordinal,
+        record_role: SdfRecordRole::Whole,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
             authorship:    if fill_color.is_some() || material_override_authors_fill {
@@ -814,6 +939,31 @@ pub(crate) fn resolve_sdf_surface<'a>(
         render_layers: context.layer.clone(),
         shadow_casting: context.shadow_casting,
     }
+}
+
+/// Resolves the panel or element material that applies to an `ElementSurface`.
+fn resolve_surface_material<'a>(
+    surface: &ElementSurface,
+    context: &'a PanelReconcileContext<'a>,
+) -> (Option<ElementIndex>, &'a Handle<StandardMaterial>, bool) {
+    let visual_source_element = surface.visual_source_element();
+    let (base_material, element_material_is_override) = match visual_source_element {
+        Some(element_index) => {
+            let element_material = context.panel.tree().element_material(element_index.get());
+            (
+                element_material.map_or(&context.sdf_material, core::convert::identity),
+                element_material.is_override(),
+            )
+        },
+        None => (&context.sdf_material, false),
+    };
+    let material_override_authors_fill =
+        element_material_is_override && surface.fill_material_override.is_included();
+    (
+        visual_source_element,
+        base_material,
+        material_override_authors_fill,
+    )
 }
 
 fn panel_local_corner_radii(
@@ -851,12 +1001,129 @@ fn spawn_interaction_mesh(
     commands.entity(context.panel_entity).with_child((
         interaction,
         RayCastBackfaces,
+        Pickable::IGNORE,
         NotShadowCaster,
         Mesh3d(meshes.add(Rectangle::new(size.x, size.y))),
         MeshMaterial3d(material),
         Transform::from_xyz(center.x, center.y, 0.0),
         context.layer.clone(),
+        PanelOwned::from(context.panel_entity),
     ));
+}
+
+/// Projects a world-space hit on the current flat panel surface into layout coordinates.
+pub(crate) fn project_flat_panel_hit(
+    position: Vec3,
+    panel: &DiegeticPanel,
+    transform: &GlobalTransform,
+) -> Option<Vec2> {
+    let points_to_world = panel.points_to_world();
+    if !points_to_world.is_finite() || points_to_world <= 0.0 {
+        return None;
+    }
+    let local = transform.affine().inverse().transform_point3(position);
+    let (anchor_x, anchor_y) = panel.anchor_offsets();
+    let layout = Vec2::new(
+        (local.x + anchor_x) / points_to_world,
+        (anchor_y - local.y) / points_to_world,
+    );
+    layout.is_finite().then_some(layout)
+}
+
+/// Live captured-camera state that re-derives the captured pointer's world
+/// ray.
+///
+/// Slider capture records the pointer's `NormalizedRenderTarget` when a press
+/// is accepted; each later projection re-reads the live `Camera`,
+/// `GlobalTransform`, and `RenderTarget` components and rejects the ray when
+/// the camera's current normalized target no longer equals that capture.
+pub(crate) struct CapturedCameraRay<'a> {
+    /// Live `Camera` of the captured camera entity.
+    pub(crate) camera:            &'a Camera,
+    /// Live global transform of the captured camera entity.
+    pub(crate) camera_transform:  &'a GlobalTransform,
+    /// Live `RenderTarget` of the captured camera entity, when it still has
+    /// one.
+    pub(crate) render_target:     Option<&'a RenderTarget>,
+    /// Resolved primary-window entity, when one exists.
+    pub(crate) primary_window:    Option<Entity>,
+    /// Normalized render target captured when the pointer press was accepted.
+    pub(crate) captured_target:   &'a NormalizedRenderTarget,
+    /// Current pointer position in viewport coordinates.
+    pub(crate) viewport_position: Vec2,
+}
+
+/// Why [`project_flat_panel_ray_hit`] produced no panel-layout coordinates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FlatPanelRayError {
+    /// The captured camera no longer has a `RenderTarget` component.
+    TargetMissing,
+    /// The live `RenderTarget` does not normalize against the resolved
+    /// primary window.
+    TargetUnresolvable,
+    /// The live normalized render target no longer equals the captured
+    /// target.
+    TargetMismatched,
+    /// `Camera::viewport_to_world` produced no ray for the pointer position.
+    CameraUnavailable,
+    /// The panel's global transform is non-finite or not invertible.
+    TransformNonInvertible,
+    /// The pointer ray never crosses the panel plane.
+    RayParallel,
+    /// The panel-plane crossing lies behind the camera.
+    HitBehindCamera,
+    /// [`project_flat_panel_hit`] rejected the panel's layout scale or its
+    /// computed coordinates.
+    ScaleInvalid,
+}
+
+/// Projects the captured pointer's current viewport position through the live
+/// captured camera onto `panel`'s layout coordinates.
+///
+/// The live `RenderTarget` is normalized against the resolved primary window
+/// and must still equal [`CapturedCameraRay::captured_target`]. The pointer
+/// ray from [`Camera::viewport_to_world`] intersects the panel's two-sided
+/// local z = 0 plane, so front and back hits both project, and the world hit
+/// converts through [`project_flat_panel_hit`].
+pub(crate) fn project_flat_panel_ray_hit(
+    captured_camera_ray: &CapturedCameraRay<'_>,
+    panel: &DiegeticPanel,
+    panel_transform: &GlobalTransform,
+) -> Result<Vec2, FlatPanelRayError> {
+    let live_target = captured_camera_ray
+        .render_target
+        .ok_or(FlatPanelRayError::TargetMissing)?;
+    let live_normalized = live_target
+        .normalize(captured_camera_ray.primary_window)
+        .ok_or(FlatPanelRayError::TargetUnresolvable)?;
+    if live_normalized != *captured_camera_ray.captured_target {
+        return Err(FlatPanelRayError::TargetMismatched);
+    }
+    let ray = captured_camera_ray
+        .camera
+        .viewport_to_world(
+            captured_camera_ray.camera_transform,
+            captured_camera_ray.viewport_position,
+        )
+        .map_err(|_| FlatPanelRayError::CameraUnavailable)?;
+
+    let world_from_panel = panel_transform.affine();
+    let determinant = world_from_panel.matrix3.determinant();
+    if !world_from_panel.is_finite() || !determinant.is_finite() || determinant == 0.0 {
+        return Err(FlatPanelRayError::TransformNonInvertible);
+    }
+    let panel_from_world = world_from_panel.inverse();
+    let local_origin = panel_from_world.transform_point3(ray.origin);
+    let local_direction = panel_from_world.transform_vector3(*ray.direction);
+    let distance = -local_origin.z / local_direction.z;
+    if !distance.is_finite() {
+        return Err(FlatPanelRayError::RayParallel);
+    }
+    if distance < 0.0 {
+        return Err(FlatPanelRayError::HitBehindCamera);
+    }
+    project_flat_panel_hit(ray.get_point(distance), panel, panel_transform)
+        .ok_or(FlatPanelRayError::ScaleInvalid)
 }
 
 const fn vec2_bits(value: Vec2) -> [u32; 2] { [value.x.to_bits(), value.y.to_bits()] }
@@ -885,6 +1152,11 @@ mod tests {
 
     use bevy::asset::AssetId;
     use bevy::asset::AssetPlugin;
+    use bevy::camera::OrthographicProjection;
+    use bevy::camera::PerspectiveProjection;
+    use bevy::camera::Projection;
+    use bevy::camera::RenderTargetInfo;
+    use bevy::window::WindowRef;
 
     use super::*;
     use crate::Mm;
@@ -904,6 +1176,9 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render;
     use crate::text::DiegeticTextMeasurer;
+
+    /// Logical viewport size seeded into every captured test camera.
+    const RAY_VIEWPORT_SIZE: Vec2 = Vec2::new(800.0, 600.0);
 
     /// Minimal measurer for geometry tests that include text commands.
     fn zero_measurer() -> DiegeticTextMeasurer {
@@ -1123,9 +1398,12 @@ mod tests {
             (-constants::OIT_DEPTH_STEP).to_bits(),
         );
 
-        app.world_mut()
-            .commands()
-            .set_tree(panel, text_toggle_tree(TextContentState::Removed));
+        assert!(
+            app.world_mut()
+                .commands()
+                .set_tree(panel, text_toggle_tree(TextContentState::Removed))
+                .is_ok()
+        );
         app.update();
         app.update();
 
@@ -1290,5 +1568,332 @@ mod tests {
         let surface = single_surface_snapshot(&app);
         assert_eq!(surface.fill_material, Some(element_material.id()));
         assert_eq!(surface.border_material, Some(element_material.id()));
+    }
+
+    #[test]
+    fn same_frame_panel_layer_reinsertion_wins_over_removal_event() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(PostUpdate, sync_interaction_mesh_render_layers);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .layout(|_| {})
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(RenderLayers::layer(1));
+        let interaction = app
+            .world_mut()
+            .spawn((
+                PanelInteractionMesh::new(Vec2::ONE, Vec2::ZERO),
+                PanelOwned::from(panel),
+                RenderLayers::layer(1),
+            ))
+            .id();
+        app.update();
+
+        app.world_mut()
+            .entity_mut(panel)
+            .remove::<RenderLayers>()
+            .insert(RenderLayers::layer(4));
+        app.update();
+
+        assert_eq!(
+            app.world().get::<RenderLayers>(interaction),
+            Some(&RenderLayers::layer(4)),
+        );
+
+        app.world_mut().entity_mut(panel).remove::<RenderLayers>();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<RenderLayers>(interaction),
+            Some(&RenderLayers::layer(0)),
+        );
+    }
+
+    /// Camera whose computed viewport and projection are seeded directly,
+    /// matching what `camera_system` would compute for `RAY_VIEWPORT_SIZE`.
+    fn seeded_camera(mut projection: Projection) -> Camera {
+        let mut camera = Camera::default();
+        camera.computed.target_info = Some(RenderTargetInfo {
+            physical_size: RAY_VIEWPORT_SIZE.as_uvec2(),
+            scale_factor:  1.0,
+        });
+        projection.update(RAY_VIEWPORT_SIZE.x, RAY_VIEWPORT_SIZE.y);
+        camera.computed.clip_from_view = projection.get_clip_from_view();
+        camera
+    }
+
+    fn perspective_camera() -> Camera {
+        seeded_camera(Projection::Perspective(PerspectiveProjection::default()))
+    }
+
+    fn orthographic_camera() -> Camera {
+        seeded_camera(Projection::Orthographic(
+            OrthographicProjection::default_3d(),
+        ))
+    }
+
+    fn window_pair() -> (Entity, Entity) {
+        let mut world = World::new();
+        (world.spawn_empty().id(), world.spawn_empty().id())
+    }
+
+    /// Owned inputs for one captured-camera ray projection.
+    struct RayScene {
+        camera:            Camera,
+        camera_transform:  GlobalTransform,
+        render_target:     RenderTarget,
+        primary_window:    Option<Entity>,
+        captured_target:   NormalizedRenderTarget,
+        panel:             DiegeticPanel,
+        panel_transform:   GlobalTransform,
+        viewport_position: Vec2,
+    }
+
+    impl RayScene {
+        /// A camera on a secondary window at `(0, 0, 5)` facing a world panel
+        /// at the origin, with the pointer at the viewport center.
+        fn secondary_window(camera: Camera) -> Self {
+            let (window, _) = window_pair();
+            let render_target = RenderTarget::Window(WindowRef::Entity(window));
+            let captured_target = render_target
+                .normalize(None)
+                .expect("entity window targets normalize without a primary window");
+            Self {
+                camera,
+                camera_transform: GlobalTransform::from(
+                    Transform::from_xyz(0.0, 0.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+                ),
+                render_target,
+                primary_window: None,
+                captured_target,
+                panel: DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .world_height(0.5)
+                    .build()
+                    .expect("panel should build"),
+                panel_transform: GlobalTransform::IDENTITY,
+                viewport_position: RAY_VIEWPORT_SIZE * 0.5,
+            }
+        }
+
+        fn project_with_live_target(
+            &self,
+            render_target: Option<&RenderTarget>,
+        ) -> Result<Vec2, FlatPanelRayError> {
+            let captured_camera_ray = CapturedCameraRay {
+                camera: &self.camera,
+                camera_transform: &self.camera_transform,
+                render_target,
+                primary_window: self.primary_window,
+                captured_target: &self.captured_target,
+                viewport_position: self.viewport_position,
+            };
+            project_flat_panel_ray_hit(&captured_camera_ray, &self.panel, &self.panel_transform)
+        }
+
+        fn project(&self) -> Result<Vec2, FlatPanelRayError> {
+            self.project_with_live_target(Some(&self.render_target))
+        }
+    }
+
+    #[track_caller]
+    fn assert_layout_close(actual: Vec2, expected: Vec2) {
+        assert!(
+            (actual - expected).length() < 0.05,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn perspective_and_orthographic_center_rays_map_through_project_flat_panel_hit() {
+        for camera in [perspective_camera(), orthographic_camera()] {
+            let scene = RayScene::secondary_window(camera);
+            let projected = scene.project().expect("center ray should hit the panel");
+            // The viewport-center ray meets the panel plane at the world
+            // origin, so the ray path must agree with the world-hit converter.
+            let expected = project_flat_panel_hit(Vec3::ZERO, &scene.panel, &scene.panel_transform)
+                .expect("panel scale should convert the plane origin");
+            assert_layout_close(projected, expected);
+        }
+    }
+
+    #[test]
+    fn off_center_orthographic_ray_projects_the_offset_world_hit() {
+        let mut scene = RayScene::secondary_window(orthographic_camera());
+        // `OrthographicProjection::default_3d` window-size scaling maps one
+        // viewport pixel to one world unit; viewport y grows downward while
+        // world y grows upward.
+        scene.viewport_position = RAY_VIEWPORT_SIZE.mul_add(Vec2::splat(0.5), Vec2::new(10.0, 5.0));
+        let projected = scene.project().expect("offset ray should hit the panel");
+        let expected = project_flat_panel_hit(
+            Vec3::new(10.0, -5.0, 0.0),
+            &scene.panel,
+            &scene.panel_transform,
+        )
+        .expect("panel scale should convert the offset hit");
+        assert_layout_close(projected, expected);
+    }
+
+    #[test]
+    fn front_and_back_rays_project_the_same_layout_coordinates() {
+        let front = RayScene::secondary_window(perspective_camera());
+        let mut back = RayScene::secondary_window(perspective_camera());
+        back.camera_transform = GlobalTransform::from(
+            Transform::from_xyz(0.0, 0.0, -5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        );
+
+        let front_hit = front.project().expect("front ray should hit the panel");
+        let back_hit = back
+            .project()
+            .expect("back ray should hit the two-sided panel plane");
+        assert_layout_close(front_hit, back_hit);
+    }
+
+    #[test]
+    fn primary_window_target_normalizes_and_matches_capture() {
+        let (window, _) = window_pair();
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.render_target = RenderTarget::Window(WindowRef::Primary);
+        scene.primary_window = Some(window);
+        scene.captured_target = scene
+            .render_target
+            .normalize(scene.primary_window)
+            .expect("primary window targets normalize with a primary window");
+        assert!(scene.project().is_ok());
+
+        // Normalization equates the two spellings of the same window: a live
+        // entity reference still matches the captured primary reference.
+        let live_entity_target = RenderTarget::Window(WindowRef::Entity(window));
+        assert!(
+            scene
+                .project_with_live_target(Some(&live_entity_target))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn missing_unresolvable_and_mismatched_targets_reject_projection() {
+        let (live_window, captured_window) = window_pair();
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        assert_eq!(
+            scene.project_with_live_target(None),
+            Err(FlatPanelRayError::TargetMissing),
+        );
+
+        let primary_target = RenderTarget::Window(WindowRef::Primary);
+        assert_eq!(
+            scene.project_with_live_target(Some(&primary_target)),
+            Err(FlatPanelRayError::TargetUnresolvable),
+        );
+
+        scene.captured_target = RenderTarget::Window(WindowRef::Entity(captured_window))
+            .normalize(None)
+            .expect("entity window targets normalize without a primary window");
+        let moved_target = RenderTarget::Window(WindowRef::Entity(live_window));
+        assert_eq!(
+            scene.project_with_live_target(Some(&moved_target)),
+            Err(FlatPanelRayError::TargetMismatched),
+        );
+    }
+
+    #[test]
+    fn camera_without_computed_viewport_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.camera = Camera::default();
+        assert_eq!(scene.project(), Err(FlatPanelRayError::CameraUnavailable));
+    }
+
+    #[test]
+    fn non_invertible_panel_transform_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.panel_transform =
+            GlobalTransform::from(Transform::from_scale(Vec3::new(1.0, 0.0, 1.0)));
+        assert_eq!(
+            scene.project(),
+            Err(FlatPanelRayError::TransformNonInvertible),
+        );
+    }
+
+    #[test]
+    fn non_finite_panel_transform_rejects_projection() {
+        // A non-finite translation keeps the linear part invertible
+        // (determinant 1), so only the affine finiteness guard rejects it; a
+        // non-finite scale is also caught by the determinant guard.
+        for transform in [
+            Transform::from_translation(Vec3::new(f32::NAN, 0.0, 0.0)),
+            Transform::from_scale(Vec3::new(f32::INFINITY, 1.0, 1.0)),
+        ] {
+            let mut scene = RayScene::secondary_window(perspective_camera());
+            scene.panel_transform = GlobalTransform::from(transform);
+            assert_eq!(
+                scene.project(),
+                Err(FlatPanelRayError::TransformNonInvertible),
+            );
+        }
+    }
+
+    #[test]
+    fn ray_parallel_to_the_panel_plane_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        // An exact 90-degree rotation about Y turns the panel plane parallel
+        // to the camera's -Z center ray; a trigonometric rotation would leave
+        // a residual normal component and a finite plane crossing.
+        scene.panel_transform = GlobalTransform::from(Mat4::from_mat3(Mat3::from_cols(
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::Y,
+            Vec3::X,
+        )));
+        scene.camera_transform = GlobalTransform::from(Transform::from_xyz(3.0, 0.0, 5.0));
+        assert_eq!(scene.project(), Err(FlatPanelRayError::RayParallel));
+    }
+
+    #[test]
+    fn plane_crossing_behind_the_camera_rejects_projection() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        // The camera sits at z = -5 facing -Z, so the panel plane at z = 0
+        // lies behind it.
+        scene.camera_transform = GlobalTransform::from(Transform::from_xyz(0.0, 0.0, -5.0));
+        assert_eq!(scene.project(), Err(FlatPanelRayError::HitBehindCamera));
+    }
+
+    #[test]
+    fn invalid_panel_scale_rejects_the_world_hit_conversion() {
+        let mut scene = RayScene::secondary_window(perspective_camera());
+        scene.panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .world_height(0.0)
+            .build()
+            .expect("panel should build");
+        assert_eq!(
+            project_flat_panel_hit(Vec3::ZERO, &scene.panel, &scene.panel_transform),
+            None,
+        );
+        assert_eq!(scene.project(), Err(FlatPanelRayError::ScaleInvalid));
+    }
+
+    #[test]
+    fn non_finite_panel_scale_rejects_the_world_hit_conversion() {
+        for world_height in [f32::NAN, f32::INFINITY] {
+            let mut scene = RayScene::secondary_window(perspective_camera());
+            scene.panel = DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .world_height(world_height)
+                .build()
+                .expect("panel should build");
+            assert_eq!(
+                project_flat_panel_hit(Vec3::ZERO, &scene.panel, &scene.panel_transform),
+                None,
+            );
+            assert_eq!(scene.project(), Err(FlatPanelRayError::ScaleInvalid));
+        }
     }
 }

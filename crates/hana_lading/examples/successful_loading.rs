@@ -12,7 +12,6 @@
 use std::any::type_name;
 
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::Face;
@@ -34,6 +33,7 @@ use hana_lading::DiskAssets;
 use hana_lading::DiskAssetsPlugin;
 use hana_lading::LoadProgress;
 use hana_lading::Loaded;
+use hana_lagrange::OrbitCamPreset;
 
 const CUBE_CLEARANCE: f32 = 0.1;
 const CUBE_FACE_LABEL: &str = "Loaded PNG";

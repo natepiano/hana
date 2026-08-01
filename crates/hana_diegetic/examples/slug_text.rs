@@ -9,8 +9,6 @@
 
 use bevy::anti_alias::smaa::Smaa;
 use bevy::prelude::*;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
@@ -20,6 +18,8 @@ use hana_diegetic::Font;
 use hana_diegetic::FontRegistered;
 use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphRenderMode;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::OrbitCamPreset;
 
 const HEADLINE_TEXT: &str = "Typography";
 const HEADLINE_SIZE: f32 = 0.48;

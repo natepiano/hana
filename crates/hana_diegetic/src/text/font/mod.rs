@@ -14,6 +14,7 @@ use std::sync::Arc;
 use bevy::asset::Asset;
 use bevy::reflect::TypePath;
 pub(crate) use constants::DEFAULT_FAMILY;
+use constants::MONOSPACE_ADVANCE_SAMPLE;
 pub(super) use loader::FontLoader;
 pub use measurer::DiegeticTextMeasurer;
 pub use measurer::create_parley_measurer;
@@ -24,6 +25,9 @@ pub use registry::FontRegistry;
 pub use registry::FontSource;
 use ttf_parser::Face;
 use ttf_parser::GlyphId;
+
+use crate::layout::Pt;
+use crate::layout::Unit;
 
 /// Pre-parsed font with design-unit metrics.
 ///
@@ -44,6 +48,7 @@ use ttf_parser::GlyphId;
 pub struct Font {
     name:                    String,
     units_per_em:            u16,
+    monospace_advance:       MonospaceAdvance,
     raw_ascent:              i16,
     raw_descent:             i16,
     raw_line_gap:            i16,
@@ -56,6 +61,40 @@ pub struct Font {
     raw_strikeout_thickness: Option<i16>,
     /// Raw font bytes, retained for slug curve extraction and per-glyph queries.
     data:                    Arc<[u8]>,
+}
+
+/// Why [`Font::nearest_integral_advance_size`] could not resolve a point size.
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
+pub enum IntegralAdvanceSizeError {
+    /// The font is not fixed-pitch, so it has no single glyph advance to align.
+    #[error("integral advance sizing requires a monospaced font")]
+    ProportionalFont,
+    /// The font is marked fixed-pitch but provides no positive horizontal advance.
+    #[error("monospaced font has no positive horizontal advance")]
+    MissingAdvance,
+    /// The requested point size is NaN or infinite.
+    #[error("requested point size must be finite, got {requested}")]
+    NonFiniteRequest {
+        /// The rejected point size.
+        requested: f32,
+    },
+    /// The requested point size is zero or negative.
+    #[error("requested point size must be positive, got {requested}")]
+    NonPositiveRequest {
+        /// The rejected point size.
+        requested: f32,
+    },
+}
+
+/// Fixed-pitch state parsed from a font face.
+#[derive(Clone, Copy, Debug)]
+enum MonospaceAdvance {
+    /// The face declares proportional spacing.
+    Proportional,
+    /// The face declares fixed spacing but has no positive sampled advance.
+    Missing,
+    /// Shared horizontal advance in font design units.
+    DesignUnits(u16),
 }
 
 /// Font-level typographic metrics, scaled to a specific font size.
@@ -155,6 +194,7 @@ impl Font {
     pub fn from_bytes(name: &str, data: &[u8]) -> Option<Self> {
         let face = Face::parse(data, 0).ok()?;
         let units_per_em = face.units_per_em();
+        let monospace_advance = monospace_advance(&face);
 
         let raw_ascent = face.ascender();
         // ttf-parser returns descender as negative; we store the absolute value
@@ -186,6 +226,7 @@ impl Font {
         Some(Self {
             name: (*name).to_string(),
             units_per_em,
+            monospace_advance,
             raw_ascent,
             raw_descent,
             raw_line_gap,
@@ -235,6 +276,68 @@ impl Font {
             font_size: size,
             units_per_em: self.units_per_em,
         }
+    }
+
+    /// Returns the nearest point size whose fixed-pitch glyph advance is an
+    /// integer number of logical screen pixels.
+    ///
+    /// Repeated glyphs then retain the same horizontal pixel phase instead of
+    /// moving through different fractional positions. The first glyph's origin
+    /// remains under the caller's control.
+    /// Using the returned size improves the on-screen appearance of monospace
+    /// text by keeping glyph-edge coverage consistent across a run.
+    ///
+    /// The calculation uses the standard screen conversion of 96 logical
+    /// pixels per inch and 72 typographic points per inch. It assumes no extra
+    /// letter spacing; integral-pixel letter spacing preserves the guarantee.
+    /// Ties resolve to the larger point size.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IntegralAdvanceSizeError::ProportionalFont`] when the font is
+    /// not marked as monospaced, [`IntegralAdvanceSizeError::MissingAdvance`]
+    /// when it has no positive fixed advance, or the corresponding request
+    /// error when `requested` is non-finite or non-positive.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let font = registry.font(FontId::MONOSPACE)?;
+    /// let size = font.nearest_integral_advance_size(Pt(11.0))?;
+    /// let style = TextStyle::new(size);
+    /// ```
+    pub fn nearest_integral_advance_size(
+        &self,
+        requested: Pt,
+    ) -> Result<Pt, IntegralAdvanceSizeError> {
+        if !requested.0.is_finite() {
+            return Err(IntegralAdvanceSizeError::NonFiniteRequest {
+                requested: requested.0,
+            });
+        }
+        if requested.0 <= 0.0 {
+            return Err(IntegralAdvanceSizeError::NonPositiveRequest {
+                requested: requested.0,
+            });
+        }
+
+        let raw_advance = match self.monospace_advance {
+            MonospaceAdvance::Proportional => {
+                return Err(IntegralAdvanceSizeError::ProportionalFont);
+            },
+            MonospaceAdvance::Missing => {
+                return Err(IntegralAdvanceSizeError::MissingAdvance);
+            },
+            MonospaceAdvance::DesignUnits(advance) => f32::from(advance),
+        };
+
+        let units_per_em = f32::from(self.units_per_em);
+        let points_per_pixel = Unit::Pixels.to_points();
+        let requested_advance_pixels = requested.0 * raw_advance / units_per_em / points_per_pixel;
+        let integral_advance_pixels = requested_advance_pixels.round().max(1.0);
+        let point_size = integral_advance_pixels * points_per_pixel * units_per_em / raw_advance;
+
+        Ok(Pt(point_size))
     }
 
     /// Returns per-glyph typographic metrics for `ch` at `size`.
@@ -343,4 +446,72 @@ pub(crate) fn glyph_ink_extents(face: &Face<'_>, glyph_id: u16) -> Option<GlyphI
 fn glyph_top(face: &Face<'_>, ch: char) -> Option<i16> {
     let glyph_id = face.glyph_index(ch)?;
     face.glyph_bounding_box(glyph_id).map(|r| r.y_max)
+}
+
+/// Returns the shared fixed-pitch advance in design units.
+fn monospace_advance(face: &Face<'_>) -> MonospaceAdvance {
+    if !face.is_monospaced() {
+        return MonospaceAdvance::Proportional;
+    }
+
+    face.glyph_index(MONOSPACE_ADVANCE_SAMPLE)
+        .and_then(|glyph_id| face.glyph_hor_advance(glyph_id))
+        .filter(|advance| *advance > 0)
+        .map_or(MonospaceAdvance::Missing, MonospaceAdvance::DesignUnits)
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "tests use unwrap for clearer failure messages"
+)]
+mod tests {
+    use super::Font;
+    use super::IntegralAdvanceSizeError;
+    use crate::Pt;
+
+    const JETBRAINS_MONO_DATA: &[u8] =
+        include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
+    const NOTO_SANS_DATA: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf");
+
+    #[test]
+    fn nearest_integral_advance_selects_eleven_and_one_quarter_points() {
+        let font = Font::from_bytes("JetBrains Mono", JETBRAINS_MONO_DATA).unwrap();
+        let resolved = font.nearest_integral_advance_size(Pt(11.0)).unwrap();
+
+        assert!((resolved.0 - 11.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn nearest_integral_advance_preserves_an_integral_size() {
+        let font = Font::from_bytes("JetBrains Mono", JETBRAINS_MONO_DATA).unwrap();
+        let resolved = font.nearest_integral_advance_size(Pt(10.0)).unwrap();
+
+        assert!((resolved.0 - 10.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn nearest_integral_advance_rejects_proportional_fonts() {
+        let font = Font::from_bytes("Noto Sans", NOTO_SANS_DATA).unwrap();
+
+        assert!(matches!(
+            font.nearest_integral_advance_size(Pt(11.0)),
+            Err(IntegralAdvanceSizeError::ProportionalFont)
+        ));
+    }
+
+    #[test]
+    fn nearest_integral_advance_rejects_invalid_sizes() {
+        let font = Font::from_bytes("JetBrains Mono", JETBRAINS_MONO_DATA).unwrap();
+
+        assert!(matches!(
+            font.nearest_integral_advance_size(Pt(0.0)),
+            Err(IntegralAdvanceSizeError::NonPositiveRequest { requested: 0.0 })
+        ));
+        assert!(matches!(
+            font.nearest_integral_advance_size(Pt(f32::NAN)),
+            Err(IntegralAdvanceSizeError::NonFiniteRequest { requested })
+                if requested.is_nan()
+        ));
+    }
 }

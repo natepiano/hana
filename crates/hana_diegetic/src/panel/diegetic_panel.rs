@@ -7,17 +7,23 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 
+use super::PanelProjectionError;
 use super::PanelScreenConversion;
 use super::PanelScreenHandoff;
 use super::PanelWorldConversion;
 use super::ResolvedScreenPanelPosition;
 use super::SavedPanelWorldState;
+use super::anchoring;
+use super::anchoring::PanelAttachment;
 use super::apply_screen_conversion;
 use super::apply_screen_root_sizing;
 use super::apply_world_conversion;
 use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
+use super::builder::PanelBuildError;
+use super::builder::PanelEntity;
 use super::builder::Screen;
+use super::builder::WidgetEntity;
 use super::builder::World;
 use super::constants::PANEL_RESIZE_EPSILON;
 use super::conversion;
@@ -25,7 +31,9 @@ use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::PanelSpace;
 use super::coordinate_space::ScreenPosition;
 use super::events::LastPanelDimensions;
+use super::field;
 use super::field::PanelFieldRecord;
+use super::lifecycle;
 use super::precompose::PanelPrecomposeCache;
 use super::validate_screen_conversion;
 use super::validate_world_conversion;
@@ -56,6 +64,19 @@ use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::DrawOrder;
 use crate::render::HairlineFade;
+use crate::widgets;
+use crate::widgets::ComputedTooltipRecord;
+use crate::widgets::ComputedWidgetRecord;
+use crate::widgets::PanelPicking;
+use crate::widgets::PanelWidget;
+use crate::widgets::PanelWidgetIndex;
+use crate::widgets::TooltipControllerIndex;
+use crate::widgets::WidgetDisabledAppearance;
+use crate::widgets::WidgetFocusedAppearance;
+use crate::widgets::WidgetHoveredAppearance;
+use crate::widgets::WidgetInteractivity;
+use crate::widgets::WidgetOf;
+use crate::widgets::WidgetPressedAppearance;
 
 /// Source tree plus the revision token used by derived tree caches.
 #[derive(Clone, Default)]
@@ -87,6 +108,22 @@ impl PanelTree {
 
     fn set_element_style(&mut self, index: usize, style: TextStyle) -> bool {
         if self.tree.set_element_style(index, style) {
+            self.revision.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn set_widget_interactivity(
+        &mut self,
+        id: &crate::PanelElementId,
+        authored: Cascade<WidgetInteractivity>,
+    ) -> bool {
+        if self.tree.widget_interactivity(id) == Some(authored) {
+            return false;
+        }
+        if self.tree.set_widget_interactivity(id, authored) {
             self.revision.bump();
             true
         } else {
@@ -154,6 +191,9 @@ impl From<TreeRevision> for u64 {
     DiegeticPanelChangeClassification,
     LastPanelDimensions,
     PanelPrecomposeCache,
+    PanelSpace,
+    PanelWidgetIndex,
+    TooltipControllerIndex,
     ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
     Transform,
@@ -162,88 +202,115 @@ impl From<TreeRevision> for u64 {
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    tree:                              PanelTree,
+    tree:                                  PanelTree,
     /// Panel width in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) width:                  f32,
+    pub(super) width:                      f32,
     /// Panel height in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
-    pub(super) height:                 f32,
+    pub(super) height:                     f32,
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
-    pub(super) layout_unit:            Unit,
+    pub(super) layout_unit:                Unit,
     /// Construction seed for the panel's font-unit cascade.
     #[reflect(ignore)]
-    pub(super) font_unit:              Cascade<Unit>,
+    pub(super) font_unit:                  Cascade<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
-    pub(super) anchor:                 Anchor,
+    pub(super) anchor:                     Anchor,
     /// Target world width in meters. When set, the panel is uniformly scaled
     /// so its width matches this value (height follows aspect ratio).
     /// If both `world_width` and `world_height` are set, non-uniform scaling
     /// is applied.
-    pub(super) world_width:            Option<f32>,
+    pub(super) world_width:                Option<f32>,
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
-    pub(super) world_height:           Option<f32>,
+    pub(super) world_height:               Option<f32>,
     /// Construction seed for the panel's shadow-casting cascade.
     #[reflect(ignore)]
-    pub(super) shadow_casting:         Cascade<ShadowCasting>,
+    pub(super) shadow_casting:             Cascade<ShadowCasting>,
+    /// Construction seed for the panel's hovered widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_hovered_appearance:  Cascade<WidgetHoveredAppearance>,
+    /// Construction seed for the panel's pressed widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_pressed_appearance:  Cascade<WidgetPressedAppearance>,
+    /// Construction seed for the panel's focused widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_focused_appearance:  Cascade<WidgetFocusedAppearance>,
+    /// Construction seed for the panel's disabled widget-appearance cascade.
+    #[reflect(ignore)]
+    pub(super) widget_disabled_appearance: Cascade<WidgetDisabledAppearance>,
     /// Construction seed for the panel's SDF source-material cascade.
     ///
     /// Individual elements can override via `El::material`; `base_color` is
     /// overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub(super) material:               Cascade<Handle<StandardMaterial>>,
+    pub(super) material:                   Cascade<Handle<StandardMaterial>>,
     /// Construction seed for the panel's text source-material cascade.
     ///
     /// `base_color` is overridden by `TextStyle::color` when set.
     #[reflect(ignore)]
-    pub(super) text_material:          Cascade<Handle<StandardMaterial>>,
+    pub(super) text_material:              Cascade<Handle<StandardMaterial>>,
     /// Construction seed for the panel primitive source-material cascade.
     ///
     /// Shape-local colors override `base_color` before projection.
     #[reflect(ignore)]
-    pub(super) shape_material:         Cascade<Handle<StandardMaterial>>,
+    pub(super) shape_material:             Cascade<Handle<StandardMaterial>>,
     /// Construction seed for the panel's text [`AlphaMode`] cascade.
     #[reflect(ignore)]
-    pub(super) text_alpha_mode:        Cascade<AlphaMode>,
+    pub(super) text_alpha_mode:            Cascade<AlphaMode>,
     /// Construction seed for the panel's HDR text coverage-bias cascade.
     #[reflect(ignore)]
-    pub(super) hdr_text_coverage_bias: Cascade<f32>,
+    pub(super) hdr_text_coverage_bias:     Cascade<f32>,
+    /// Builder-provided initial value for the sibling [`PanelPicking`]
+    /// component. Applied by
+    /// [`sync_panel_picking_on_insert`] only when the entity has no live
+    /// `PanelPicking`, so an existing component of any value — including an
+    /// explicit [`PanelPicking::INTERACTIVE`] — stays authoritative. An
+    /// installed value is recorded in `PanelComponentOwnership<PanelPicking>`
+    /// and is removed with the panel role unless application code has
+    /// replaced or mutated it.
+    #[reflect(ignore)]
+    pub(super) picking:                    PanelPicking,
     /// Whether the panel is world-space or screen-space.
-    pub(super) coordinate_space:       CoordinateSpace,
+    pub(super) coordinate_space:           CoordinateSpace,
     /// Maps each text run's [`PanelElementId`](crate::PanelElementId) to the entity
-    /// reconcile materialized for it, so
+    /// reification created for it, so
     /// [`text_child`](Self::text_child) resolves a named run in O(1).
     ///
-    /// `reconcile_panel_text_children` rebuilds this from scratch every pass and
-    /// writes it without tripping change detection, so it never re-triggers
-    /// layout; [`set_tree`](DiegeticPanelCommands::set_tree) clears it so a stale
-    /// id stops resolving immediately.
+    /// `reify_text_entities` rebuilds this from scratch every pass and writes it
+    /// without tripping change detection, so it never re-triggers layout. A
+    /// non-identical [`set_tree`](DiegeticPanelCommands::set_tree) replacement
+    /// clears it so a stale id stops resolving when the replacement applies.
     #[reflect(ignore)]
-    pub(crate) text_index:             HashMap<crate::PanelElementId, Entity>,
+    pub(crate) text_index:                 HashMap<crate::PanelElementId, Entity>,
 }
 
 impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
-            tree:                   PanelTree::default(),
-            width:                  0.0,
-            height:                 0.0,
-            layout_unit:            Unit::Meters,
-            font_unit:              Cascade::Inherit,
-            anchor:                 Anchor::TopLeft,
-            world_width:            None,
-            world_height:           None,
-            shadow_casting:         Cascade::Inherit,
-            material:               Cascade::Inherit,
-            text_material:          Cascade::Inherit,
-            shape_material:         Cascade::Inherit,
-            text_alpha_mode:        Cascade::Inherit,
-            hdr_text_coverage_bias: Cascade::Inherit,
-            coordinate_space:       CoordinateSpace::default(),
-            text_index:             HashMap::new(),
+            tree:                       PanelTree::default(),
+            width:                      0.0,
+            height:                     0.0,
+            layout_unit:                Unit::Meters,
+            font_unit:                  Cascade::Inherit,
+            anchor:                     Anchor::TopLeft,
+            world_width:                None,
+            world_height:               None,
+            shadow_casting:             Cascade::Inherit,
+            widget_hovered_appearance:  Cascade::Inherit,
+            widget_pressed_appearance:  Cascade::Inherit,
+            widget_focused_appearance:  Cascade::Inherit,
+            widget_disabled_appearance: Cascade::Inherit,
+            material:                   Cascade::Inherit,
+            text_material:              Cascade::Inherit,
+            shape_material:             Cascade::Inherit,
+            text_alpha_mode:            Cascade::Inherit,
+            hdr_text_coverage_bias:     Cascade::Inherit,
+            picking:                    PanelPicking::default(),
+            coordinate_space:           CoordinateSpace::default(),
+            text_index:                 HashMap::new(),
         }
     }
 }
@@ -255,6 +322,43 @@ impl DiegeticPanel {
             ..Self::default()
         }
     }
+}
+
+/// Installs the builder's initial [`PanelPicking`] on panel insert or replacement
+/// when the entity has no live `PanelPicking` component. The deferred write
+/// goes through `lifecycle::seed_owned_component`, which records the install
+/// in `PanelComponentOwnership<PanelPicking>` so panel role teardown can tell
+/// the seed apart from application state.
+///
+/// A live `PanelPicking` is authoritative regardless of its value: one supplied
+/// explicitly in the spawn bundle — including [`PanelPicking::INTERACTIVE`],
+/// which equals the default — installed by a screen-overlay opt-out, or written
+/// at runtime is never overwritten, mutated, or recorded as Hana-owned, so
+/// replacing the `DiegeticPanel` preserves the live policy and no equal-value
+/// rewrite bumps the component's change tick. Absence is re-checked when the
+/// deferred insert applies, so any component already installed by then wins.
+///
+/// `teardown_owned_shared_state` removes an unchanged initial value together with its
+/// ownership record when the `DiegeticPanel` role is removed, so a later
+/// re-add installs the new builder value. An application write afterward
+/// moves the component's change tick off the recorded write; teardown then
+/// keeps the component and drops only the stale ownership record.
+pub(super) fn sync_panel_picking_on_insert(
+    inserted: On<Insert, DiegeticPanel>,
+    panels: Query<(&DiegeticPanel, Has<PanelPicking>)>,
+    mut commands: Commands,
+) {
+    let entity = inserted.entity;
+    let Ok((panel, has_live_picking)) = panels.get(entity) else {
+        return;
+    };
+    if has_live_picking {
+        return;
+    }
+    let seed = panel.picking;
+    commands.queue(move |world: &mut bevy::ecs::world::World| {
+        lifecycle::seed_owned_component(world, entity, entity, seed);
+    });
 }
 
 // ── Public read-only accessors ──────────────────────────────────────────────
@@ -302,18 +406,20 @@ impl DiegeticPanel {
     pub(crate) const fn authored_world_height(&self) -> Option<f32> { self.world_height }
 
     /// Resolves a text run's [`PanelElementId`](crate::PanelElementId) to the entity
-    /// reconcile materialized for it (its `line_index == 0` child), or `None` if
+    /// reification created for it (its `line_index == 0` child), or `None` if
     /// no run carries that id.
     ///
     /// This is an **unchecked** index read: it returns the stored `Entity` as-is.
     /// The method takes `&self` with no `World`/`Entities` access, so it cannot
     /// confirm the entity is still alive — an out-of-flow `despawn` would leave a
-    /// stale mapping until the next reconcile rebuilds the index. Liveness is
+    /// stale mapping until the next reification rebuilds the index. Liveness is
     /// validated one layer up by the [`PanelText`](crate::PanelText) `SystemParam`,
     /// whose `Query::get` on the returned entity yields `None` for a dead child.
     ///
-    /// A `set_tree` in the same frame clears the index immediately, so a lookup
-    /// before the next reconcile pass returns `None`.
+    /// A non-identical `set_tree` clears the index when its deferred replacement
+    /// applies, so a lookup before the next reification pass returns `None`.
+    /// Identical replacements retain the index because they schedule no
+    /// reification pass.
     #[must_use]
     pub fn text_child(&self, id: &crate::PanelElementId) -> Option<Entity> {
         self.text_index.get(id).copied()
@@ -355,6 +461,14 @@ impl DiegeticPanel {
         self.text_index.clear();
     }
 
+    fn replace_classified_tree(&mut self, tree: LayoutTree, change: LayoutTreeChange) {
+        if change == LayoutTreeChange::Identical {
+            self.tree.replace(tree);
+        } else {
+            self.replace_tree_full_rebuild(tree);
+        }
+    }
+
     fn replace_from_precompose_helper(&mut self, panel: Self) {
         let mut panel = panel;
         panel.tree.use_next_revision_after_replacement(&self.tree);
@@ -363,11 +477,24 @@ impl DiegeticPanel {
         // the assignments below retain the existing entity's cascade seeds.
         panel.font_unit = self.font_unit;
         panel.shadow_casting = self.shadow_casting;
+        panel
+            .widget_hovered_appearance
+            .clone_from(&self.widget_hovered_appearance);
+        panel
+            .widget_pressed_appearance
+            .clone_from(&self.widget_pressed_appearance);
+        panel
+            .widget_focused_appearance
+            .clone_from(&self.widget_focused_appearance);
+        panel
+            .widget_disabled_appearance
+            .clone_from(&self.widget_disabled_appearance);
         panel.material.clone_from(&self.material);
         panel.text_material.clone_from(&self.text_material);
         panel.shape_material.clone_from(&self.shape_material);
         panel.text_alpha_mode = self.text_alpha_mode;
         panel.hdr_text_coverage_bias = self.hdr_text_coverage_bias;
+        panel.picking = self.picking;
         *self = panel;
     }
 
@@ -382,7 +509,7 @@ impl DiegeticPanel {
     /// edit-session revision. Returns whether the cache changed.
     ///
     /// `El.text` is the single source for run text; the child
-    /// [`TextContent`](crate::TextContent) is derived output — reconcile overwrites
+    /// [`TextContent`](crate::TextContent) is derived output — reification overwrites
     /// it from the tree each frame. The public edit path (`PanelText` / `DiegeticTextMut`
     /// via `TextEdit`) calls this to change a run's string. Skips the revision bump
     /// when the string is unchanged, avoiding a layout pass and a cache lookup.
@@ -395,13 +522,21 @@ impl DiegeticPanel {
     ///
     /// Like run text (see [`sync_run_text_cache`](Self::sync_run_text_cache)),
     /// the tree is the single authoritative source: `El.config` for style,
-    /// `El.text` for the string, while the run child is derived output reconcile
+    /// `El.text` for the string, while the run child is derived output reification
     /// rewrites. A label restyle (font, size) mutates `El.config` through this
     /// method; the relayout it triggers flows the new config to the run via
-    /// reconcile, so measurement and rendering stay on the same source. Skips the
+    /// reification, so measurement and rendering stay on the same source. Skips the
     /// revision bump (and so the layout) when the style already matches.
     pub(crate) fn restyle_run(&mut self, index: usize, style: TextStyle) -> bool {
         self.tree.set_element_style(index, style)
+    }
+
+    pub(crate) fn set_widget_interactivity(
+        &mut self,
+        id: &crate::PanelElementId,
+        authored: Cascade<WidgetInteractivity>,
+    ) -> bool {
+        self.tree.set_widget_interactivity(id, authored)
     }
 
     /// Sets the panel width directly (in layout units).
@@ -560,70 +695,200 @@ impl DiegeticPanel {
 
 /// Extension methods for mutating diegetic panels through [`Commands`].
 ///
-/// This trait is an ergonomic wrapper around panel mutations that need more
-/// schedule coordination than a plain `&mut DiegeticPanel` method can provide.
-/// Tree replacement records a pending layout-change classification, and
-/// coordinate-space conversions are applied by the panel pipeline before layout
-/// and screen placement run. Keeping the wrapper here lets callers use a focused
-/// panel API without learning those internal components or schedule fences.
+/// Attachment and conversion operations queued on one `Commands` value apply in
+/// call order. Every operation validates the live panel and attachment graph at
+/// execution; a conflict emits a warning and leaves that operation's state
+/// unchanged.
+///
+/// `PanelEntity<World>` accepts only world panel or widget targets, and
+/// `PanelEntity<Screen>` accepts only screen targets.
+///
+/// ```compile_fail
+/// use bevy::prelude::Commands;
+/// use hana_diegetic::{Anchor, DiegeticPanelCommands, PanelAttachment};
+/// use hana_diegetic::{PanelEntity, Screen, World};
+///
+/// fn cross_space_panel(
+///     mut commands: Commands<'_, '_>,
+///     source: PanelEntity<World>,
+///     target: PanelEntity<Screen>,
+/// ) {
+///     let authored = PanelAttachment::new(Anchor::Center, Anchor::Center);
+///     commands.attach_to_panel(source, target, authored);
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use bevy::prelude::Commands;
+/// use hana_diegetic::{DiegeticPanelCommands, PanelEntity, Screen, WidgetEntity, World};
+///
+/// fn cross_space_widget_retarget(
+///     mut commands: Commands<'_, '_>,
+///     source: PanelEntity<Screen>,
+///     target: WidgetEntity<World>,
+/// ) {
+///     commands.retarget_to_widget(source, target);
+/// }
+/// ```
 pub trait DiegeticPanelCommands {
     /// Queues a layout-tree replacement that records whether the change is
     /// visual-only or layout-affecting.
     ///
     /// The queued setter is deferred. Schedule systems that call this before
     /// panel layout systems when the update must be visible in the same frame.
-    fn set_tree(&mut self, entity: Entity, tree: LayoutTree);
-
-    /// Starts an animated conversion of an existing world panel to screen space.
     ///
-    /// The panel remains world-space, but its visual source is normalized to the
-    /// screen conversion's pixel sizing so the final handoff can switch cameras
-    /// without rebuilding the visual tree. The final handoff should use
-    /// [`Self::finish_panel_to_screen`].
-    fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    /// `Ok(())` means the tree passed synchronous validation and its replacement
+    /// was queued. Because [`Commands`] is deferred, it does not guarantee that
+    /// `entity` still exists when the queued replacement applies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PanelBuildError`] when the tree contains a duplicate id or an
+    /// invalid widget declaration. A rejected tree queues no replacement.
+    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) -> Result<(), PanelBuildError>;
+
+    /// Attaches `source` to a panel in the same coordinate space.
+    fn attach_to_panel<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: PanelEntity<Space>,
+        authored: PanelAttachment,
+    );
+
+    /// Attaches `source` to a widget in the same coordinate space.
+    fn attach_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+        authored: PanelAttachment,
+    );
+
+    /// Retargets an existing attachment to a panel in the same coordinate space.
+    fn retarget_to_panel<Space>(&mut self, source: PanelEntity<Space>, target: PanelEntity<Space>);
+
+    /// Retargets an existing attachment to a widget in the same coordinate space.
+    fn retarget_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+    );
+
+    /// Detaches `source` and removes its authored offset.
+    fn detach<Space>(&mut self, source: PanelEntity<Space>);
+
+    /// Prepares a world panel for an animated screen handoff without claiming a
+    /// screen-space identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn begin_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>;
 
-    /// Queues a resolved conversion of an existing panel to screen space.
+    /// Finishes an animated world-to-screen handoff.
     ///
-    /// `conversion` can be a [`PanelScreenConversion`] or any type that converts
-    /// into one, including [`PanelScreenProjection`](super::PanelScreenProjection).
-    /// This is the advanced resolved-data path; higher-level callers should
-    /// prefer [`PanelScreenConversionParam::to_screen_at`](super::PanelScreenConversionParam::to_screen_at).
-    fn finish_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn finish_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>;
 
-    /// Queues a resolved conversion of an existing panel to screen space without
-    /// saving a screen handoff camera.
+    /// Queues a resolved world-to-screen conversion without saving a handoff
+    /// camera.
     ///
-    /// This is primarily for advanced callers applying their own saved-state
-    /// policy.
-    fn apply_panel_screen_conversion<C>(&mut self, entity: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn apply_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>;
 
-    /// Queues a resolved conversion of an existing panel to world space.
+    /// Queues a resolved screen-to-world conversion.
     ///
-    /// This is the advanced resolved-data path; higher-level callers should
-    /// prefer [`PanelWorldConversionParam::to_world`](super::PanelWorldConversionParam::to_world)
-    /// or [`PanelWorldConversionParam::to_world_at`](super::PanelWorldConversionParam::to_world_at).
-    fn apply_panel_world_conversion<C>(&mut self, entity: Entity, conversion: C)
+    /// # Errors
+    ///
+    /// Returns [`PanelProjectionError`] when `conversion` is invalid. Live panel
+    /// and attachment state is checked when Bevy applies the operation.
+    fn apply_to_world<C>(
+        &mut self,
+        panel: PanelEntity<Screen>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelWorldConversion>;
 }
 
-#[derive(Component, Clone)]
-pub(super) enum PendingPanelConversion {
+#[derive(Clone)]
+pub(super) enum PanelConversionOperation {
     BeginScreen {
+        panel:      Entity,
         camera:     Entity,
         conversion: PanelScreenConversion,
     },
     Screen {
+        panel:      Entity,
         camera:     Option<Entity>,
         conversion: PanelScreenConversion,
     },
-    World(PanelWorldConversion),
+    World {
+        panel:      Entity,
+        conversion: PanelWorldConversion,
+    },
+}
+
+impl PanelConversionOperation {
+    const fn panel(&self) -> Entity {
+        match self {
+            Self::BeginScreen { panel, .. }
+            | Self::Screen { panel, .. }
+            | Self::World { panel, .. } => *panel,
+        }
+    }
+
+    const fn expected_space(&self) -> PanelSpace {
+        match self {
+            Self::BeginScreen { .. } | Self::Screen { .. } => PanelSpace::World,
+            Self::World { .. } => PanelSpace::Screen,
+        }
+    }
+
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::BeginScreen { .. } => "begin world-to-screen conversion",
+            Self::Screen {
+                camera: Some(_), ..
+            } => "finish world-to-screen conversion",
+            Self::Screen { camera: None, .. } => "world-to-screen conversion",
+            Self::World { .. } => "screen-to-world conversion",
+        }
+    }
+
+    const fn camera(&self) -> Option<Entity> {
+        match self {
+            Self::BeginScreen { camera, .. } => Some(*camera),
+            Self::Screen { camera, .. } => *camera,
+            Self::World { .. } => None,
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -672,83 +937,179 @@ impl ScreenConversionSource<'_> {
 }
 
 impl DiegeticPanelCommands for Commands<'_, '_> {
-    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) {
+    fn set_tree(&mut self, entity: Entity, tree: LayoutTree) -> Result<(), PanelBuildError> {
+        widgets::validate_tree(&tree)?;
         self.run_system_cached_with(set_tree_command, (entity, tree));
+        Ok(())
     }
 
-    fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    fn attach_to_panel<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: PanelEntity<Space>,
+        authored: PanelAttachment,
+    ) {
+        anchoring::queue_attach_to_panel(self, source, target, authored);
+    }
+
+    fn attach_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+        authored: PanelAttachment,
+    ) {
+        anchoring::queue_attach_to_widget(self, source, target, authored);
+    }
+
+    fn retarget_to_panel<Space>(&mut self, source: PanelEntity<Space>, target: PanelEntity<Space>) {
+        anchoring::queue_retarget_to_panel(self, source, target);
+    }
+
+    fn retarget_to_widget<Space>(
+        &mut self,
+        source: PanelEntity<Space>,
+        target: WidgetEntity<Space>,
+    ) {
+        anchoring::queue_retarget_to_widget(self, source, target);
+    }
+
+    fn detach<Space>(&mut self, source: PanelEntity<Space>) {
+        anchoring::queue_detach(self, source);
+    }
+
+    fn begin_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>,
     {
-        self.entity(entity)
-            .insert(PendingPanelConversion::BeginScreen {
+        let conversion = conversion.into();
+        validate_screen_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::BeginScreen {
+                panel: panel.entity(),
                 camera,
-                conversion: conversion.into(),
-            });
+                conversion,
+            },
+        );
+        Ok(())
     }
 
-    fn finish_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    fn finish_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        camera: Entity,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>,
     {
-        self.entity(entity).insert(PendingPanelConversion::Screen {
-            camera:     Some(camera),
-            conversion: conversion.into(),
-        });
+        let conversion = conversion.into();
+        validate_screen_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::Screen {
+                panel: panel.entity(),
+                camera: Some(camera),
+                conversion,
+            },
+        );
+        Ok(())
     }
 
-    fn apply_panel_screen_conversion<C>(&mut self, entity: Entity, conversion: C)
+    fn apply_to_screen<C>(
+        &mut self,
+        panel: PanelEntity<World>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelScreenConversion>,
     {
-        self.entity(entity).insert(PendingPanelConversion::Screen {
-            camera:     None,
-            conversion: conversion.into(),
-        });
+        let conversion = conversion.into();
+        validate_screen_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::Screen {
+                panel: panel.entity(),
+                camera: None,
+                conversion,
+            },
+        );
+        Ok(())
     }
 
-    fn apply_panel_world_conversion<C>(&mut self, entity: Entity, conversion: C)
+    fn apply_to_world<C>(
+        &mut self,
+        panel: PanelEntity<Screen>,
+        conversion: C,
+    ) -> Result<(), PanelProjectionError>
     where
         C: Into<PanelWorldConversion>,
     {
-        self.entity(entity)
-            .insert(PendingPanelConversion::World(conversion.into()));
+        let conversion = conversion.into();
+        validate_world_conversion(&conversion)?;
+        self.run_system_cached_with(
+            apply_panel_conversion_operation,
+            PanelConversionOperation::World {
+                panel: panel.entity(),
+                conversion,
+            },
+        );
+        Ok(())
     }
 }
 
 fn set_tree_command(
     In((entity, next_tree)): In<(Entity, LayoutTree)>,
-    mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
+    mut panels: Query<(
+        &mut DiegeticPanel,
+        &mut DiegeticPanelChangeClassification,
+        &mut PanelWidgetIndex,
+    )>,
 ) {
-    let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
+    let Ok((mut panel, mut classification, mut widget_index)) = panels.get_mut(entity) else {
         return;
     };
     let change = panel.tree().classify_change(&next_tree);
     classification.record_tree_change(change);
-    panel.replace_tree_full_rebuild(next_tree);
+    panel.replace_classified_tree(next_tree, change);
+    if change != LayoutTreeChange::Identical {
+        widget_index.clear();
+    }
 }
 
 pub(crate) fn apply_precompose_helper_panel(
     In((entity, next_panel)): In<(Entity, DiegeticPanel)>,
-    mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
+    mut panels: Query<(
+        &mut DiegeticPanel,
+        &mut DiegeticPanelChangeClassification,
+        &mut PanelWidgetIndex,
+    )>,
 ) {
-    let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
+    let Ok((mut panel, mut classification, mut widget_index)) = panels.get_mut(entity) else {
         return;
     };
     classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
     panel.replace_from_precompose_helper(next_panel);
+    widget_index.clear();
 }
 
-pub(super) fn apply_pending_panel_conversions(
+pub(super) fn apply_panel_conversion_operation(
+    In(operation): In<PanelConversionOperation>,
     defaults: Res<PanelDefaults>,
     mut commands: Commands,
     primary: Query<Entity, With<PrimaryWindow>>,
     windows: Query<&Window>,
     cameras: Query<&GlobalTransform, With<Camera>>,
+    attachments: Query<(Entity, &super::PanelAttachmentAuthored)>,
+    widgets: Query<&WidgetOf, With<PanelWidget>>,
     mut panels: Query<(
-        Entity,
-        &PendingPanelConversion,
         &mut DiegeticPanel,
+        &mut PanelWidgetIndex,
         &mut Transform,
         &mut DiegeticPanelChangeClassification,
         &mut ResolvedScreenPanelPosition,
@@ -760,10 +1121,10 @@ pub(super) fn apply_pending_panel_conversions(
         Option<&RenderLayers>,
     )>,
 ) {
-    for (
-        entity,
-        pending,
+    let entity = operation.panel();
+    let Ok((
         mut panel,
+        mut widget_index,
         mut transform,
         mut classification,
         mut resolved_position,
@@ -773,58 +1134,154 @@ pub(super) fn apply_pending_panel_conversions(
         saved,
         prepared_screen,
         source_render_layers,
-    ) in &mut panels
-    {
-        let source = ScreenConversionSource {
-            defaults: &defaults,
-            font_resolved,
-            lighting_resolved,
-            sidedness_resolved,
-            render_layers: source_render_layers,
-        };
-        match pending.clone() {
-            PendingPanelConversion::BeginScreen { camera, conversion } => {
-                begin_panel_to_screen_now(
-                    entity,
-                    camera,
-                    conversion,
-                    &mut commands,
-                    &cameras,
-                    &mut panel,
-                    &transform,
-                    &mut classification,
-                    saved,
-                    source,
-                );
-            },
-            PendingPanelConversion::Screen { camera, conversion } => {
-                apply_panel_screen_conversion_now(
-                    entity,
-                    camera,
-                    conversion,
-                    &mut commands,
-                    &primary,
-                    &windows,
-                    &cameras,
-                    &mut panel,
-                    &mut transform,
-                    &mut resolved_position,
-                    source,
-                    prepared_screen,
-                );
-            },
-            PendingPanelConversion::World(conversion) => apply_panel_world_conversion_now(
+    )) = panels.get_mut(entity)
+    else {
+        warn_rejected_conversion(
+            &operation,
+            "panel is missing or conversion state is incomplete",
+        );
+        return;
+    };
+    if PanelSpace::from(panel.coordinate_space()) != operation.expected_space() {
+        warn_rejected_conversion(&operation, "panel coordinate space changed");
+        return;
+    }
+    if let Some(rejection) = conversion_attachment_rejection(entity, &attachments, &widgets) {
+        warn_rejected_conversion_conflict(&operation, rejection);
+        return;
+    }
+
+    let source = ScreenConversionSource {
+        defaults: &defaults,
+        font_resolved,
+        lighting_resolved,
+        sidedness_resolved,
+        render_layers: source_render_layers,
+    };
+    match operation {
+        PanelConversionOperation::BeginScreen {
+            camera, conversion, ..
+        } => {
+            begin_panel_to_screen_now(
+                entity,
+                camera,
+                conversion,
+                &mut commands,
+                &cameras,
+                &mut panel,
+                &mut widget_index,
+                &transform,
+                &mut classification,
+                saved,
+                source,
+            );
+        },
+        PanelConversionOperation::Screen {
+            camera, conversion, ..
+        } => {
+            apply_panel_screen_conversion_now(
+                entity,
+                camera,
+                conversion,
+                &mut commands,
+                &primary,
+                &windows,
+                &cameras,
+                &mut panel,
+                &mut widget_index,
+                &mut transform,
+                &mut resolved_position,
+                source,
+                prepared_screen,
+            );
+        },
+        PanelConversionOperation::World { conversion, .. } => {
+            apply_panel_world_conversion_now(
                 entity,
                 conversion,
                 &mut commands,
                 &mut panel,
+                &mut widget_index,
                 &mut transform,
                 &mut classification,
                 saved,
                 &mut resolved_position,
-            ),
+            );
+        },
+    }
+}
+
+fn conversion_attachment_rejection(
+    panel: Entity,
+    attachments: &Query<(Entity, &super::PanelAttachmentAuthored)>,
+    widgets: &Query<&WidgetOf, With<PanelWidget>>,
+) -> Option<PanelConversionAttachmentConflict> {
+    if let Ok((_, authored)) = attachments.get(panel) {
+        return Some(PanelConversionAttachmentConflict::Outgoing {
+            target: authored.target(),
+        });
+    }
+    for (source, authored) in attachments {
+        let target = authored.target();
+        if target == panel {
+            return Some(PanelConversionAttachmentConflict::IncomingPanel { source });
         }
-        commands.entity(entity).remove::<PendingPanelConversion>();
+        if widgets
+            .get(target)
+            .is_ok_and(|widget_of| widget_of.panel() == panel)
+        {
+            return Some(PanelConversionAttachmentConflict::IncomingWidget {
+                source,
+                widget: target,
+            });
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+enum PanelConversionAttachmentConflict {
+    Outgoing { target: Entity },
+    IncomingPanel { source: Entity },
+    IncomingWidget { source: Entity, widget: Entity },
+}
+
+fn warn_rejected_conversion(operation: &PanelConversionOperation, reason: &str) {
+    let panel = operation.panel();
+    if let Some(camera) = operation.camera() {
+        warn!(
+            "panel operation `{}` rejected for panel {panel:?} and camera {camera:?}: {reason}",
+            operation.name(),
+        );
+    } else {
+        warn!(
+            "panel operation `{}` rejected for panel {panel:?}: {reason}",
+            operation.name(),
+        );
+    }
+}
+
+fn warn_rejected_conversion_conflict(
+    operation: &PanelConversionOperation,
+    conflict: PanelConversionAttachmentConflict,
+) {
+    let panel = operation.panel();
+    match conflict {
+        PanelConversionAttachmentConflict::Outgoing { target } => warn!(
+            "panel operation `{}` rejected for panel {panel:?}: outgoing attachment targets \
+             {target:?}",
+            operation.name(),
+        ),
+        PanelConversionAttachmentConflict::IncomingPanel { source } => warn!(
+            "panel operation `{}` rejected for panel {panel:?}: attachment source {source:?} \
+             targets the panel",
+            operation.name(),
+        ),
+        PanelConversionAttachmentConflict::IncomingWidget { source, widget } => warn!(
+            "panel operation `{}` rejected for panel {panel:?}: attachment source {source:?} \
+             targets owned widget {widget:?}",
+            operation.name(),
+        ),
     }
 }
 
@@ -841,6 +1298,7 @@ fn apply_panel_screen_conversion_now(
     windows: &Query<&Window>,
     cameras: &Query<&GlobalTransform, With<Camera>>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &mut Transform,
     resolved_position: &mut ResolvedScreenPanelPosition,
     source: ScreenConversionSource<'_>,
@@ -864,6 +1322,7 @@ fn apply_panel_screen_conversion_now(
             &conversion,
             commands,
             panel,
+            widget_index,
             transform,
             None,
             source,
@@ -894,13 +1353,15 @@ fn apply_panel_screen_conversion_now(
     transform.rotation = Quat::from_rotation_z(rotation);
     transform.scale = Vec3::ONE;
     *resolved_position = ResolvedScreenPanelPosition::default();
-    let mut entity_commands = commands.entity(entity);
-    entity_commands.insert((render_layers, PanelSpace::Screen));
+    commands.entity(entity).insert(PanelSpace::Screen);
+    lifecycle::write_owned_render_layers(commands, entity, entity, Some(render_layers));
     if let Some(handoff) = handoff.filter(|_| was_world_panel) {
-        entity_commands.insert(handoff);
+        commands.entity(entity).insert(handoff);
     }
     if was_world_panel {
-        entity_commands.remove::<PreparedPanelScreenConversion>();
+        commands
+            .entity(entity)
+            .remove::<PreparedPanelScreenConversion>();
     }
 }
 
@@ -911,6 +1372,7 @@ fn begin_panel_to_screen_now(
     commands: &mut Commands<'_, '_>,
     cameras: &Query<&GlobalTransform, With<Camera>>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &Transform,
     classification: &mut DiegeticPanelChangeClassification,
     saved: Option<&SavedPanelWorldState>,
@@ -928,6 +1390,7 @@ fn begin_panel_to_screen_now(
         &conversion,
         commands,
         panel,
+        widget_index,
         transform,
         saved,
         source,
@@ -946,6 +1409,7 @@ fn prepare_world_panel_for_screen_conversion(
     conversion: &PanelScreenConversion,
     commands: &mut Commands<'_, '_>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &Transform,
     saved: Option<&SavedPanelWorldState>,
     source: ScreenConversionSource<'_>,
@@ -972,6 +1436,7 @@ fn prepare_world_panel_for_screen_conversion(
     );
     apply_screen_root_sizing(&mut tree, conversion.width, conversion.height);
     panel.replace_tree_full_rebuild(tree);
+    widget_index.clear();
     panel.width = conversion.size.x;
     panel.height = conversion.size.y;
     panel.layout_unit = Unit::Pixels;
@@ -981,14 +1446,24 @@ fn prepare_world_panel_for_screen_conversion(
         width:  fixed_pixel_sizing(conversion.size.x),
         height: fixed_pixel_sizing(conversion.size.y),
     };
-    commands.entity(entity).insert((
-        PreparedPanelScreenConversion {
+    commands
+        .entity(entity)
+        .insert(PreparedPanelScreenConversion {
             size: conversion.size,
-        },
+        });
+    lifecycle::write_owned_cascade(
+        commands,
+        entity,
+        entity,
         Cascade::Override(FontUnit(Unit::Pixels)),
-        Cascade::Override(Lighting::Unlit),
+    );
+    lifecycle::write_owned_cascade(commands, entity, entity, Cascade::Override(Lighting::Unlit));
+    lifecycle::write_owned_cascade(
+        commands,
+        entity,
+        entity,
         Cascade::Override(Sidedness::FrontOnly),
-    ));
+    );
     true
 }
 
@@ -1035,6 +1510,7 @@ fn apply_panel_world_conversion_now(
     conversion: PanelWorldConversion,
     commands: &mut Commands<'_, '_>,
     panel: &mut DiegeticPanel,
+    widget_index: &mut PanelWidgetIndex,
     transform: &mut Transform,
     classification: &mut DiegeticPanelChangeClassification,
     saved: Option<&SavedPanelWorldState>,
@@ -1062,6 +1538,7 @@ fn apply_panel_world_conversion_now(
             warn!("failed to convert panel {entity:?} to saved world space: {error}");
             return;
         }
+        widget_index.clear();
         classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
     } else if let Err(error) = apply_world_conversion(panel, conversion) {
         warn!("failed to convert panel {entity:?} to world space: {error}");
@@ -1069,23 +1546,33 @@ fn apply_panel_world_conversion_now(
     }
     *transform = next_transform;
     *resolved_position = ResolvedScreenPanelPosition::default();
-    let mut entity_commands = commands.entity(entity);
-    entity_commands.insert(PanelSpace::World);
+    commands.entity(entity).insert(PanelSpace::World);
     if let Some(saved) = saved {
-        entity_commands.insert((
+        lifecycle::write_owned_cascade(
+            commands,
+            entity,
+            entity,
             Cascade::Override(FontUnit(saved.resolved_font_unit)),
+        );
+        lifecycle::write_owned_cascade(
+            commands,
+            entity,
+            entity,
             Cascade::Override(saved.resolved_lighting),
+        );
+        lifecycle::write_owned_cascade(
+            commands,
+            entity,
+            entity,
             Cascade::Override(saved.resolved_sidedness),
-        ));
-        if let Some(render_layers) = saved.render_layers {
-            entity_commands.insert(render_layers);
-        } else {
-            entity_commands.remove::<RenderLayers>();
-        }
+        );
+        lifecycle::write_owned_render_layers(commands, entity, entity, saved.render_layers);
     } else {
-        entity_commands.remove::<RenderLayers>();
+        lifecycle::write_owned_render_layers(commands, entity, entity, None);
     }
-    entity_commands.remove::<PreparedPanelScreenConversion>();
+    commands
+        .entity(entity)
+        .remove::<PreparedPanelScreenConversion>();
 }
 
 /// Spawn-time authoring bridge for panel cascade overrides.
@@ -1126,6 +1613,10 @@ pub(super) fn seed_panel_overrides(
     let text_alpha = panel.text_alpha_mode.map(TextAlpha);
     let hdr_text_coverage_bias = panel.hdr_text_coverage_bias.map(HdrTextCoverageBias);
     let shadow_casting = panel.shadow_casting;
+    let widget_hovered_appearance = panel.widget_hovered_appearance.clone();
+    let widget_pressed_appearance = panel.widget_pressed_appearance.clone();
+    let widget_focused_appearance = panel.widget_focused_appearance.clone();
+    let widget_disabled_appearance = panel.widget_disabled_appearance.clone();
     let (lighting, sidedness) = if panel.coordinate_space().is_screen() {
         (
             Cascade::Override(Lighting::Unlit),
@@ -1143,6 +1634,10 @@ pub(super) fn seed_panel_overrides(
         seed_panel_value(world, entity, text_alpha);
         seed_panel_value(world, entity, hdr_text_coverage_bias);
         seed_panel_value(world, entity, shadow_casting);
+        seed_panel_value(world, entity, widget_hovered_appearance);
+        seed_panel_value(world, entity, widget_pressed_appearance);
+        seed_panel_value(world, entity, widget_focused_appearance);
+        seed_panel_value(world, entity, widget_disabled_appearance);
         seed_panel_value(world, entity, Cascade::<AntiAlias>::Inherit);
         seed_panel_value(world, entity, Cascade::<HairlineFade>::Inherit);
         seed_panel_value(world, entity, lighting);
@@ -1155,12 +1650,7 @@ fn seed_panel_value<A: CascadeAttribute>(
     entity: Entity,
     authored: Cascade<A>,
 ) {
-    let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
-        return;
-    };
-    if !entity_mut.contains::<Cascade<A>>() {
-        entity_mut.insert(authored);
-    }
+    lifecycle::seed_owned_cascade(world, entity, entity, authored);
 }
 
 /// Per-frame tree-change classification consumed by the panel layout system.
@@ -1204,6 +1694,10 @@ impl DiegeticPanelChangeClassification {
     pub(crate) fn note_text_edit(&mut self) {
         self.record(LayoutTreeChange::VisualOnly);
         self.tree_visual_geometry_stable = false;
+    }
+
+    pub(crate) fn note_widget_interactivity_edit(&mut self) {
+        self.record_tree_change(LayoutTreeChange::VisualOnly);
     }
 
     pub(super) fn take_with_tree_visual_geometry_stable(
@@ -1307,8 +1801,15 @@ pub struct ComputedDiegeticPanel {
     field_records:      Vec<PanelFieldRecord>,
     #[reflect(ignore)]
     field_id_conflicts: Vec<crate::PanelElementId>,
+    #[reflect(ignore)]
+    widget_records:     Vec<ComputedWidgetRecord>,
+    #[reflect(ignore)]
+    tooltip_records:    Vec<ComputedTooltipRecord>,
     content_width:      f32,
     content_height:     f32,
+    #[cfg(test)]
+    #[reflect(ignore)]
+    layout_solves:      usize,
 }
 
 impl ComputedDiegeticPanel {
@@ -1359,6 +1860,13 @@ impl ComputedDiegeticPanel {
     #[must_use]
     pub(crate) const fn draw_order(&self) -> &DrawOrder { &self.draw_order }
 
+    pub(crate) fn widget_records(&self) -> &[ComputedWidgetRecord] { &self.widget_records }
+
+    pub(crate) fn tooltip_records(&self) -> &[ComputedTooltipRecord] { &self.tooltip_records }
+
+    #[cfg(test)]
+    pub(crate) const fn layout_solves(&self) -> usize { self.layout_solves }
+
     /// Regenerates `LayoutResult::commands` and keeps `DrawOrder` synchronized.
     ///
     /// Returns `false` when the panel has no computed `LayoutResult` yet.
@@ -1369,6 +1877,11 @@ impl ComputedDiegeticPanel {
 
         result.regenerate_commands(tree);
         self.draw_order = DrawOrder::from_commands(&result.commands);
+        let (field_records, field_id_conflicts) = field::collect_panel_field_records(tree, result);
+        self.field_records = field_records;
+        self.field_id_conflicts = field_id_conflicts;
+        self.widget_records = tree.computed_widget_records(result);
+        self.tooltip_records = tree.computed_tooltip_records();
         true
     }
 
@@ -1378,6 +1891,8 @@ impl ComputedDiegeticPanel {
         self.result = Some(result);
         self.field_records.clear();
         self.field_id_conflicts.clear();
+        self.widget_records.clear();
+        self.tooltip_records.clear();
     }
 
     pub(super) fn set_result_with_fields(
@@ -1385,11 +1900,19 @@ impl ComputedDiegeticPanel {
         result: LayoutResult,
         field_records: Vec<PanelFieldRecord>,
         field_id_conflicts: Vec<crate::PanelElementId>,
+        widget_records: Vec<ComputedWidgetRecord>,
+        tooltip_records: Vec<ComputedTooltipRecord>,
     ) {
         self.draw_order = DrawOrder::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;
+        self.widget_records = widget_records;
+        self.tooltip_records = tooltip_records;
+        #[cfg(test)]
+        {
+            self.layout_solves += 1;
+        }
     }
 
     /// Sets the content dimensions in world units.
@@ -1425,26 +1948,37 @@ impl DiegeticPanel {
     reason = "tests should panic if fixture panel construction fails"
 )]
 mod tests {
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
     use bevy::window::WindowRef;
 
+    use super::ComputedDiegeticPanel;
     use super::CoordinateSpace;
     use super::DiegeticPanel;
     use super::DiegeticPanelChangeClassification;
     use super::DiegeticPanelCommands;
     use super::PanelScreenHandoff;
+    use super::PanelSpace;
     use super::PanelTree;
-    use super::PendingPanelConversion;
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
+    use crate::Appearance;
     use crate::CascadeEntityCommandsExt as _;
     use crate::DiegeticTextMeasurer;
+    use crate::EditorStateColors;
+    use crate::El;
     use crate::HeadlessLayoutPlugin;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
+    use crate::ImeEditableFieldSpec;
     use crate::LayoutBuilder;
     use crate::Mm;
+    use crate::PanelBuildError;
+    use crate::PanelElementId;
+    use crate::PanelEntity;
     use crate::PanelScreenConversion;
     use crate::TextStyle;
     use crate::Unit;
@@ -1457,6 +1991,35 @@ mod tests {
     fn test_tree(text: &str) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text((text, TextStyle::new(10.0)));
+        builder.build()
+    }
+
+    fn auto_widget_tree() -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::new().button(PanelElementId::auto(7)), |_| {});
+        builder.build()
+    }
+
+    fn precomposed_widget_tree() -> crate::LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::column().precompose_ldr(), |builder| {
+            builder.with(El::new().button("action"), |_| {});
+        });
+        builder.build()
+    }
+
+    fn editable_tree_with_editor_text(fill: Color) -> crate::LayoutTree {
+        let field =
+            ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text));
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(
+            El::new()
+                .editable_field("field", field)
+                .editor_text(EditorStateColors::new().focused(fill)),
+            |builder| {
+                builder.text(("display", TextStyle::new(10.0)));
+            },
+        );
         builder.build()
     }
 
@@ -1505,14 +2068,84 @@ mod tests {
     }
 
     #[test]
+    fn visual_only_editor_declaration_refreshes_field_presentation() {
+        let initial_tree = editable_tree_with_editor_text(Color::srgb(0.2, 0.3, 0.4));
+        let replacement_tree = editable_tree_with_editor_text(Color::srgb(0.7, 0.6, 0.5));
+        assert_eq!(
+            initial_tree.classify_change(&replacement_tree),
+            LayoutTreeChange::VisualOnly,
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(DiegeticTextMeasurer::default());
+        app.add_plugins(HeadlessLayoutPlugin);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(initial_tree)
+                    .build()
+                    .expect("editable panel should build"),
+            )
+            .id();
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(panel)
+            .expect("editable panel should compute");
+        let layout_solves = computed.layout_solves();
+        let initial_declaration = computed
+            .field_records()
+            .first()
+            .expect("editable panel should have one field")
+            .presentation()
+            .editor_text
+            .clone();
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, replacement_tree)
+            .expect("visual-only editable tree should be accepted");
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(panel)
+            .expect("editable panel should remain computed");
+        assert_eq!(computed.layout_solves(), layout_solves);
+        assert_ne!(
+            computed
+                .field_records()
+                .first()
+                .expect("editable panel should retain its field")
+                .presentation()
+                .editor_text,
+            initial_declaration,
+        );
+    }
+
+    #[test]
     fn precompose_helper_replace_invalidates_scaled_tree_cache() {
         let mut helper = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .font_unit(Unit::Millimeters)
+            .widget_hovered_appearance(Appearance::new().background(Color::srgb(0.1, 0.2, 0.3)))
+            .widget_pressed_appearance(Appearance::new().background(Color::srgb(0.3, 0.2, 0.1)))
+            .widget_focused_appearance(Appearance::new().background(Color::srgb(0.2, 0.3, 0.1)))
+            .widget_disabled_appearance(Appearance::new().background(Color::srgb(0.1, 0.3, 0.2)))
             .world_height(0.5)
             .with_tree(test_tree("Blend"))
             .build()
             .expect("helper panel should build");
+        let appearance_seeds = (
+            helper.widget_hovered_appearance.clone(),
+            helper.widget_pressed_appearance.clone(),
+            helper.widget_focused_appearance.clone(),
+            helper.widget_disabled_appearance.clone(),
+        );
         let mut cache = ScaledLayoutTreeCache::default();
 
         let scaled = cache.get_or_update(helper.tree_source(), 1.0, 1.0);
@@ -1522,6 +2155,10 @@ mod tests {
         let next = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .font_unit(Unit::Millimeters)
+            .widget_hovered_appearance(Appearance::new().background(Color::srgb(0.8, 0.7, 0.6)))
+            .widget_pressed_appearance(Appearance::new().background(Color::srgb(0.6, 0.7, 0.8)))
+            .widget_focused_appearance(Appearance::new().background(Color::srgb(0.7, 0.8, 0.6)))
+            .widget_disabled_appearance(Appearance::new().background(Color::srgb(0.6, 0.8, 0.7)))
             .world_height(0.5)
             .with_tree(test_tree("Add"))
             .build()
@@ -1533,6 +2170,15 @@ mod tests {
         assert_eq!(scaled.element_text(1), Some("Add"));
         assert_eq!(cache.hits(), 0);
         assert_eq!(cache.misses(), 2);
+        assert_eq!(
+            (
+                helper.widget_hovered_appearance,
+                helper.widget_pressed_appearance,
+                helper.widget_focused_appearance,
+                helper.widget_disabled_appearance,
+            ),
+            appearance_seeds,
+        );
     }
 
     #[test]
@@ -1663,7 +2309,7 @@ mod tests {
             commands
                 .entity(panel)
                 .override_shadow_casting(ShadowCasting::On);
-            commands.set_tree(panel, test_tree("replacement"));
+            assert!(commands.set_tree(panel, test_tree("replacement")).is_ok());
         }
         app.update();
 
@@ -1679,6 +2325,68 @@ mod tests {
                 .expect("panel should retain resolved shadow casting")
                 .0,
             ShadowCasting::On
+        );
+    }
+
+    #[test]
+    fn set_tree_rejects_invalid_widgets_without_queueing_replacement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(DiegeticTextMeasurer::default());
+        app.add_plugins(HeadlessLayoutPlugin);
+        let result = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .with_tree(test_tree("seed"))
+            .build();
+        assert!(result.is_ok());
+        let Ok(panel_component) = result else {
+            return;
+        };
+        let panel = app.world_mut().spawn(panel_component).id();
+        app.update();
+        let revision = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .map(DiegeticPanel::tree_revision);
+
+        let auto_error = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, auto_widget_tree());
+        assert!(matches!(
+            auto_error,
+            Err(PanelBuildError::WidgetRequiresNamedId(id))
+                if id == PanelElementId::auto(7)
+        ));
+        let precompose_error = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, precomposed_widget_tree());
+        assert!(matches!(
+            precompose_error,
+            Err(PanelBuildError::WidgetInsidePrecomposedSubtree(id))
+                if id == PanelElementId::named("action")
+        ));
+        app.update();
+
+        let unchanged = app.world().get::<DiegeticPanel>(panel);
+        assert_eq!(unchanged.map(DiegeticPanel::tree_revision), revision);
+        assert_eq!(
+            unchanged.and_then(|panel| panel.tree().element_text(1)),
+            Some("seed")
+        );
+
+        let valid = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, test_tree("replacement"));
+        assert!(valid.is_ok());
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<DiegeticPanel>(panel)
+                .and_then(|panel| panel.tree().element_text(1)),
+            Some("replacement")
         );
     }
 
@@ -1709,9 +2417,16 @@ mod tests {
         let conversion =
             PanelScreenConversion::at_pixels(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0));
 
+        let owner = PanelEntity::from_validated(entity, PanelSpace::World);
         app.world_mut()
-            .commands()
-            .begin_panel_to_screen(entity, camera, conversion.clone());
+            .run_system_once({
+                let conversion = conversion.clone();
+                move |mut conversions: Commands| {
+                    conversions.begin_to_screen(owner, camera, conversion.clone())
+                }
+            })
+            .expect("screen preparation system runs")
+            .expect("screen preparation is valid");
         app.update();
 
         let panel = app
@@ -1743,8 +2458,11 @@ mod tests {
         );
 
         app.world_mut()
-            .commands()
-            .finish_panel_to_screen(entity, camera, conversion);
+            .run_system_once(move |mut conversions: Commands| {
+                conversions.finish_to_screen(owner, camera, conversion.clone())
+            })
+            .expect("screen conversion system runs")
+            .expect("screen conversion is valid");
         app.update();
 
         let panel = app
@@ -1791,9 +2509,13 @@ mod tests {
             PanelScreenConversion::at_pixels(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0))
                 .window(WindowRef::Entity(window));
 
+        let owner = PanelEntity::from_validated(entity, PanelSpace::World);
         app.world_mut()
-            .commands()
-            .apply_panel_screen_conversion(entity, conversion);
+            .run_system_once(move |mut conversions: Commands| {
+                conversions.apply_to_screen(owner, conversion.clone())
+            })
+            .expect("screen conversion system runs")
+            .expect("screen conversion is valid");
         app.update();
 
         let panel = app
@@ -1801,7 +2523,6 @@ mod tests {
             .get::<DiegeticPanel>(entity)
             .expect("panel should still exist");
         assert!(panel.coordinate_space().is_screen());
-        assert!(app.world().get::<PendingPanelConversion>(entity).is_none());
         let transform = app
             .world()
             .get::<Transform>(entity)

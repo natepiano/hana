@@ -13,14 +13,8 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
 use bevy_kana::ToF32;
-use bevy_lagrange::Focus;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitAngles;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Radius;
-use bevy_lagrange::ZoomToFit;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::Border;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
@@ -37,6 +31,12 @@ use hana_diegetic::Padding;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Unit;
+use hana_lagrange::Focus;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitAngles;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::Radius;
+use hana_lagrange::ZoomToFit;
 
 const ZOOM_MARGIN_TEXT: f32 = 0.3;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
@@ -236,7 +236,9 @@ fn on_font_registered(
     // Update status panel.
     let status = format!("Fonts registered: {}", font_count.0);
     for entity in &panels {
-        commands.set_tree(entity, build_status_panel(&status));
+        if let Err(error) = commands.set_tree(entity, build_status_panel(&status)) {
+            error!("failed to replace font status panel tree: {error}");
+        }
     }
 
     info!(
@@ -255,7 +257,9 @@ fn on_font_load_failed(
 
     let status = format!("FAILED: {}", trigger.path);
     for entity in &panels {
-        commands.set_tree(entity, build_status_panel(&status));
+        if let Err(error) = commands.set_tree(entity, build_status_panel(&status)) {
+            error!("failed to replace font failure panel tree: {error}");
+        }
     }
 }
 

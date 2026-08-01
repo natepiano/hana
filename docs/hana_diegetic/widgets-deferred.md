@@ -1,0 +1,37 @@
+# Widgets V2: Presets and Themes
+
+> **Status: DEFERRED.** Design this only after applications have used global, panel, widget, and part appearance authoring together with the button, slider, and tooltip APIs. What is built today is recorded in [`as-built/widgets.md`](as-built/widgets.md).
+
+## Why this is deferred
+
+The first widget API should expose the behavior and state-specific visual inputs each widget actually needs. A preset or theme system designed before several widgets are in use would guess too early about shared structure, naming, inheritance, and customization.
+
+Widgets v1 therefore provides:
+
+- headless widget behavior and events;
+- ordinary `El`/`LayoutTree` authoring for normal appearance and rich content;
+- global, panel, widget, and part appearance authoring for state-specific retained presentation;
+- private retained visual slots that update appearance without relayout.
+
+No `ButtonPreset`, `ButtonStyle`, `SliderPreset`, `SliderStyle`, `TooltipPreset`, or `TooltipStyle` type is part of widgets v1. Those names are historical placeholders, not approved future API names.
+
+## Questions for widgets v2
+
+Design the preset/theme layer from real button, slider, tooltip, and later widget usage. Revisit:
+
+- whether the public abstraction should be a preset, a theme, a scene/template helper, or some combination;
+- whether applications choose small variants such as `Normal`, `Primary`, and `Plain`, theme keys, complete per-instance values, or layered overrides;
+- how focus, hover, press, disabled, selected, drag, and validation states compose;
+- whether materials stay limited to `Handle<StandardMaterial>` or gain a public custom/extended-material contract;
+- whether a slider preset includes a variable-length fill and, if so, what retained geometry operation resizes it;
+- whether tooltips need any reusable default presentation beyond their application-authored `Tooltip` tree; Hana-specific title/shortcut/body content and live keymap resolution remain an application-owned manager unless repeated use proves a crate-level abstraction.
+
+## Constraints inherited from widgets v1
+
+Any later convenience layer should build on the direct widget APIs rather than replace them:
+
+- behavior must remain usable without a preset or theme;
+- normal structure and content remain ordinary layout authoring;
+- runtime state presentation must reuse retained visual slots and avoid relayout when geometry is unchanged;
+- preset/theme code must not become a second authority for click, drag, focus, disabled, tooltip, or application-owned value state;
+- applications must remain free to build custom widget layout and presentation from the same state and events.

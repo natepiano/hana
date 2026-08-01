@@ -7,11 +7,13 @@ use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::El;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::PanelBuildError;
 use hana_diegetic::Percent;
+use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 
@@ -117,6 +119,25 @@ pub fn diegetic_stats_panel(
     )
 }
 
+/// Creates the standard top-right diegetic stats panel with screen text
+/// resolved to whole-pixel monospace advances.
+///
+/// # Errors
+///
+/// Returns [`PanelBuildError`] if the generated screen-space
+/// [`DiegeticPanel`] fails layout validation.
+pub fn diegetic_stats_panel_with_integral_advance(
+    rows: &[StatsPanelRow],
+    fonts: &FontRegistry,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    diegetic_stats_sections_panel_with_integral_advance(
+        &[StatsPanelSection::untitled(rows.iter().cloned())],
+        fonts,
+        materials,
+    )
+}
+
 /// Creates the standard top-right diegetic stats panel from named sections.
 ///
 /// The caller owns the counters and update cadence; this helper owns only the
@@ -137,6 +158,30 @@ pub fn diegetic_stats_sections_panel(
         .material(unlit.clone())
         .text_material(unlit)
         .with_tree(diegetic_stats_sections_tree(sections))
+        .build()
+}
+
+/// Creates the standard sectioned stats panel with screen text resolved to
+/// whole-pixel monospace advances.
+///
+/// # Errors
+///
+/// Returns [`PanelBuildError`] if the generated screen-space
+/// [`DiegeticPanel`] fails layout validation.
+pub fn diegetic_stats_sections_panel_with_integral_advance(
+    sections: &[StatsPanelSection],
+    fonts: &FontRegistry,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let unlit = super::screen_panel_material_handle(materials);
+    DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::TopRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(diegetic_stats_sections_tree_with_integral_advance(
+            sections, fonts,
+        ))
         .build()
 }
 
@@ -193,10 +238,63 @@ pub fn diegetic_stats_tree(rows: &[StatsPanelRow]) -> LayoutTree {
     diegetic_stats_sections_tree(&[StatsPanelSection::untitled(rows.iter().cloned())])
 }
 
+/// Builds the reusable row-group tree with screen text resolved to
+/// whole-pixel monospace advances.
+#[must_use]
+pub fn diegetic_stats_tree_with_integral_advance(
+    rows: &[StatsPanelRow],
+    fonts: &FontRegistry,
+) -> LayoutTree {
+    diegetic_stats_sections_tree_with_integral_advance(
+        &[StatsPanelSection::untitled(rows.iter().cloned())],
+        fonts,
+    )
+}
+
 /// Builds the reusable sectioned row tree used by
 /// [`diegetic_stats_sections_panel`].
 #[must_use]
 pub fn diegetic_stats_sections_tree(sections: &[StatsPanelSection]) -> LayoutTree {
+    build_stats_sections_tree(sections, StatsTextSizes::EXACT)
+}
+
+/// Builds the reusable sectioned row tree with screen text resolved to
+/// whole-pixel monospace advances.
+#[must_use]
+pub fn diegetic_stats_sections_tree_with_integral_advance(
+    sections: &[StatsPanelSection],
+    fonts: &FontRegistry,
+) -> LayoutTree {
+    build_stats_sections_tree(sections, StatsTextSizes::from_fonts(fonts))
+}
+
+#[derive(Clone, Copy)]
+struct StatsTextSizes {
+    header:  Pt,
+    detail:  Pt,
+    section: Pt,
+}
+
+impl StatsTextSizes {
+    const EXACT: Self = Self {
+        header:  Pt(STATS_HEADER_FONT_SIZE),
+        detail:  Pt(STATS_DESC_FONT_SIZE),
+        section: Pt(STATS_SECTION_FONT_SIZE),
+    };
+
+    fn from_fonts(fonts: &FontRegistry) -> Self {
+        Self {
+            header:  super::integral_advance_size(fonts, Self::EXACT.header),
+            detail:  super::integral_advance_size(fonts, Self::EXACT.detail),
+            section: super::integral_advance_size(fonts, Self::EXACT.section),
+        }
+    }
+}
+
+fn build_stats_sections_tree(
+    sections: &[StatsPanelSection],
+    text_sizes: StatsTextSizes,
+) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -212,7 +310,7 @@ pub fn diegetic_stats_sections_tree(sections: &[StatsPanelSection]) -> LayoutTre
                 |builder| {
                     let last = sections.len().saturating_sub(1);
                     for (index, section) in sections.iter().enumerate() {
-                        stats_section(builder, section, index == last);
+                        stats_section(builder, section, index == last, text_sizes);
                     }
                 },
             );
@@ -221,32 +319,37 @@ pub fn diegetic_stats_sections_tree(sections: &[StatsPanelSection]) -> LayoutTre
     builder.build()
 }
 
-fn stats_header_label_style() -> TextStyle {
-    TextStyle::new(STATS_HEADER_FONT_SIZE)
+fn stats_header_label_style(text_sizes: StatsTextSizes) -> TextStyle {
+    TextStyle::new(text_sizes.header)
         .with_color(STATUS_LABEL_COLOR)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-fn stats_header_value_style() -> TextStyle {
-    TextStyle::new(STATS_HEADER_FONT_SIZE)
+fn stats_header_value_style(text_sizes: StatsTextSizes) -> TextStyle {
+    TextStyle::new(text_sizes.header)
         .with_color(STATUS_TEXT_COLOR)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-fn stats_desc_style() -> TextStyle {
-    TextStyle::new(STATS_DESC_FONT_SIZE)
+fn stats_desc_style(text_sizes: StatsTextSizes) -> TextStyle {
+    TextStyle::new(text_sizes.detail)
         .with_color(STATS_DESC_COLOR)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-fn stats_section_label_style() -> TextStyle {
-    TextStyle::new(STATS_SECTION_FONT_SIZE)
+fn stats_section_label_style(text_sizes: StatsTextSizes) -> TextStyle {
+    TextStyle::new(text_sizes.section)
         .bold()
         .with_color(STATUS_LABEL_COLOR)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-fn stats_section(builder: &mut LayoutBuilder, section: &StatsPanelSection, last: bool) {
+fn stats_section(
+    builder: &mut LayoutBuilder,
+    section: &StatsPanelSection,
+    last: bool,
+    text_sizes: StatsTextSizes,
+) {
     builder.with(
         El::column()
             .width(Sizing::fixed(STATS_ROW_WIDTH))
@@ -260,12 +363,12 @@ fn stats_section(builder: &mut LayoutBuilder, section: &StatsPanelSection, last:
                         .height(Sizing::FIT)
                         .alignment(AlignX::Left, AlignY::Center),
                     |builder| {
-                        builder.text((&section.title, stats_section_label_style()));
+                        builder.text((&section.title, stats_section_label_style(text_sizes)));
                     },
                 );
             }
             for row in &section.rows {
-                stats_group(builder, row);
+                stats_group(builder, row, text_sizes);
             }
             if !last {
                 stats_separator(builder);
@@ -274,7 +377,7 @@ fn stats_section(builder: &mut LayoutBuilder, section: &StatsPanelSection, last:
     );
 }
 
-fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
+fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow, text_sizes: StatsTextSizes) {
     builder.with(
         El::column()
             .width(Sizing::fixed(STATS_ROW_WIDTH))
@@ -293,7 +396,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                             .height(Sizing::FIT)
                             .alignment(AlignX::Left, AlignY::Center),
                         |builder| {
-                            builder.text((&row.label, stats_header_label_style()));
+                            builder.text((&row.label, stats_header_label_style(text_sizes)));
                         },
                     );
                     builder.with(
@@ -302,7 +405,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                             .height(Sizing::FIT)
                             .alignment(AlignX::Right, AlignY::Center),
                         |builder| {
-                            builder.text((&row.value, stats_header_value_style()));
+                            builder.text((&row.value, stats_header_value_style(text_sizes)));
                         },
                     );
                 },
@@ -320,7 +423,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                         ))
                         .alignment(AlignX::Left, AlignY::Top),
                     |builder| {
-                        builder.text((detail, stats_desc_style()));
+                        builder.text((detail, stats_desc_style(text_sizes)));
                     },
                 );
             }

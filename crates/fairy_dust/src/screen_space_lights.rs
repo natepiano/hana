@@ -1,6 +1,6 @@
 //! Capability: Ctrl+Shift+L toggles screen-space panel visibility.
 //!
-//! Wired through `bevy_enhanced_input` using the `bevy_kana` macros, modeled on
+//! Wired through `bevy_enhanced_input` using the `hana_rubric` macros, modeled on
 //! [`crate::restart`].
 
 use bevy::prelude::*;

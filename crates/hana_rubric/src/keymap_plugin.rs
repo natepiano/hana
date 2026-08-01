@@ -25,11 +25,14 @@ use crate::condition::ConditionRegistry;
 use crate::condition::ResourceContextPlugin;
 use crate::condition::StateContextPlugin;
 use crate::derived_context::DerivedContextPlugin;
+use crate::disk;
 use crate::disk::DiskWorkerChannels;
 use crate::disk::DiskWorkerMessage;
 use crate::disk::KeymapPaths;
-use crate::disk::start_disk_worker;
 use crate::keymap;
+use crate::keymap::KeymapRuntime;
+use crate::keymap::PendingReload;
+use crate::keymap::ReloadRequest;
 
 const EMBEDDED_DEFAULTS_SOURCE: &str = "embedded defaults";
 
@@ -122,8 +125,8 @@ impl KeymapPlugin {
             .init_resource::<ConditionRegistry>()
             .init_resource::<ActiveCondition>()
             .init_resource::<KeymapLoadFailures>()
-            .init_resource::<keymap::PendingReload>()
-            .init_resource::<keymap::runtime::KeymapRuntime>()
+            .init_resource::<PendingReload>()
+            .init_resource::<KeymapRuntime>()
             .configure_sets(
                 PreUpdate,
                 (KeymapSystems::UpdateActiveCondition, KeymapSystems::Route).chain(),
@@ -244,7 +247,7 @@ impl KeymapPlugin {
             },
         };
         app.world_mut().insert_resource(KeymapDiskWorker {
-            disk_worker_channels: start_disk_worker(
+            disk_worker_channels: disk::start_disk_worker(
                 &paths,
                 published_defaults.into_bytes(),
                 schema,
@@ -300,7 +303,7 @@ struct KeymapRuntimeInstalled;
 
 fn collect_disk_reload(
     keymap_disk_worker: Option<ResMut<KeymapDiskWorker>>,
-    mut pending_reload: ResMut<keymap::PendingReload>,
+    mut pending_reload: ResMut<PendingReload>,
 ) {
     let Some(keymap_disk_worker) = keymap_disk_worker else {
         return;
@@ -309,14 +312,14 @@ fn collect_disk_reload(
         snapshot,
         diagnostics,
         ..
-    }) = keymap_disk_worker.disk_worker_channels.take_message()
+    }) = disk::take_worker_message(&keymap_disk_worker.disk_worker_channels)
     else {
         return;
     };
 
     let request = match snapshot {
-        None => keymap::ReloadRequest::DiskDiagnostics(diagnostics),
-        Some(snapshot) => keymap::ReloadRequest::UserSnapshot {
+        None => ReloadRequest::DiskDiagnostics(diagnostics),
+        Some(snapshot) => ReloadRequest::UserSnapshot {
             source_path: snapshot.source_path.display().to_string(),
             contents: snapshot.contents.map(|contents| contents.as_ref().to_vec()),
             diagnostics,
@@ -432,6 +435,9 @@ mod tests {
     use crate::disk::XdgConfigHome;
     use crate::keymap;
     use crate::keymap::CompiledKeymap;
+    use crate::keymap::PendingReload;
+    use crate::keymap::ReloadConfiguration;
+    use crate::keymap::ReloadRequest;
 
     const DEFAULTS: &str = r#"{ "bindings": [] }"#;
     const TEST_APP_NAME: &str = "hana-rubric-plugin-test";
@@ -632,8 +638,8 @@ mod tests {
 
         let generation = app.world().resource::<CompiledKeymap>().generation().0;
         app.world_mut()
-            .resource_mut::<keymap::PendingReload>()
-            .replace(keymap::ReloadRequest::UserSnapshot {
+            .resource_mut::<PendingReload>()
+            .replace(ReloadRequest::UserSnapshot {
                 source_path: String::from("user-keymap.jsonc"),
                 contents:    Some(
                     br#"{ "bindings": [{ "bindings": { "g": "plugin::dispatch" } }] }"#.to_vec(),
@@ -729,8 +735,8 @@ mod tests {
         assert_isolated_paths(&temporary_directory);
         app.finish();
         app.world_mut()
-            .resource_mut::<keymap::PendingReload>()
-            .replace(keymap::ReloadRequest::UserSnapshot {
+            .resource_mut::<PendingReload>()
+            .replace(ReloadRequest::UserSnapshot {
                 source_path: String::from("user-keymap.jsonc"),
                 contents:    Some(
                     br#"{
@@ -1057,7 +1063,7 @@ mod tests {
             .expect("unresolvable shipped default is diagnosed");
         let published_defaults = app
             .world()
-            .resource::<keymap::ReloadConfiguration>()
+            .resource::<ReloadConfiguration>()
             .published_defaults();
         let reported_line = published_defaults
             .lines()

@@ -37,9 +37,12 @@ pub(crate) use bevy_kana::CascadeFrom;
 pub(crate) use bevy_kana::CascadePlugin;
 pub(crate) use bevy_kana::Resolved;
 pub use cascade_set::CascadeSet;
+pub(crate) use constants::CASCADE_ATTRIBUTE_BYTES;
 pub use defaults::PanelDefaults;
 pub(crate) use resolved::CascadeRoot;
 
 pub(crate) fn cascade_plugin<A: CascadeRoot>() -> CascadePlugin<A, A::Root> {
-    CascadePlugin::new(A::root_default()).with_root_resource()
+    CascadePlugin::new(A::root_default())
+        .with_combine(A::combine)
+        .with_root_resource()
 }

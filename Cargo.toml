@@ -70,13 +70,13 @@ winit = { version = "0.30.13", default-features = false, features = [
 
 # dev-dependencies
 bevy_brp_extras = "0.22.2"
-bevy_clerestory = { path = "crates/bevy_clerestory" }
-bevy_lagrange   = { path = "crates/bevy_lagrange" }
 clay-layout     = { path = "vendor/clay-layout" }
 criterion       = { version = "0.8.2", features = ["html_reports"] }
 fairy_dust      = { path = "crates/fairy_dust" }
 float-cmp       = "0.10.0"
+hana_clerestory = { path = "crates/hana_clerestory" }
 hana_diegetic   = { path = "crates/hana_diegetic" }
+hana_lagrange   = { path = "crates/hana_lagrange" }
 hana_rubric     = { path = "crates/hana_rubric" }
 hana_valence    = { path = "crates/hana_valence", default-features = false }
 jsonschema      = { version = "0.49.1", default-features = false }

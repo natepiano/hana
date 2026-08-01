@@ -13,14 +13,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
-use bevy_clerestory::WindowManagerPlugin;
-use bevy_lagrange::Focus;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitAngles;
-use bevy_lagrange::OrbitCam;
-use bevy_lagrange::Radius;
-use bevy_lagrange::ScalarLimit;
-use bevy_lagrange::ZoomToFit;
+use hana_clerestory::WindowManagerPlugin;
 use hana_diegetic::Anchor;
 use hana_diegetic::Border;
 use hana_diegetic::DiegeticPanel;
@@ -33,6 +26,13 @@ use hana_diegetic::PaperSize;
 use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_lagrange::Focus;
+use hana_lagrange::LagrangePlugin;
+use hana_lagrange::OrbitAngles;
+use hana_lagrange::OrbitCam;
+use hana_lagrange::Radius;
+use hana_lagrange::ScalarLimit;
+use hana_lagrange::ZoomToFit;
 
 // ── Panel layout (all in points) ─────────────────────────────────────
 // The panel is designed in points like a document, then world_width
