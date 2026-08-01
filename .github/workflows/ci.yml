@@ -195,12 +195,22 @@ jobs:
           RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
   trybuild:
-    name: Compile-Time API
+    name: ${{ matrix.name }}
     needs: changes
     if: >-
       needs.changes.outputs.trybuild == 'true' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Hana Compile-Time API
+            package: hana_diegetic
+            cache_key: hana-trybuild
+          - name: Fairy Dust Compile-Time API
+            package: fairy_dust
+            cache_key: fairy-dust-trybuild
     steps:
       - uses: actions/checkout@v6
 
@@ -224,18 +234,11 @@ jobs:
       - name: Cache compile-time API dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: trybuild
+          shared-key: ${{ matrix.cache_key }}
 
-      - name: Run Hana compile-time API tests
+      - name: Run compile-time API tests
         run: >-
-          cargo nextest run --all-features -p hana_diegetic --test trybuild
-          --run-ignored only
-        env:
-          RUSTFLAGS: -C link-arg=-fuse-ld=mold
-
-      - name: Run Fairy Dust compile-time API tests
-        run: >-
-          cargo nextest run --all-features -p fairy_dust --test trybuild
+          cargo nextest run --all-features -p ${{ matrix.package }} --test trybuild
           --run-ignored only
         env:
           RUSTFLAGS: -C link-arg=-fuse-ld=mold
