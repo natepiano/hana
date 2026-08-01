@@ -26,12 +26,12 @@ use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
 use super::constants::TITLE_BAR_DEFAULT_TITLE;
+use super::constants::TITLE_BAR_LABEL_SIZE;
 use super::constants::TITLE_BAR_SEGMENT_GAP;
 use super::screen_panel_frame;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
-use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
@@ -353,7 +353,7 @@ struct ControlStyles {
 impl ControlStyles {
     fn new() -> Self {
         let control_style = |color| {
-            TextStyle::new(LABEL_SIZE)
+            TextStyle::new(TITLE_BAR_LABEL_SIZE)
                 .with_color(color)
                 .with_shadow_mode(GlyphShadowMode::None)
         };
