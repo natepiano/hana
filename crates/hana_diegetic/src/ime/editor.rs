@@ -49,6 +49,7 @@ use crate::Px;
 use crate::Sizing;
 use crate::Text;
 use crate::TextStyle;
+use crate::layout::EditorPart;
 use crate::layout::FieldDisplayTextUpdate;
 use crate::panel::PanelFieldPresentation;
 use crate::render;
@@ -275,10 +276,10 @@ struct ImeEditorPresentation {
     align_x:           AlignX,
     align_y:           AlignY,
     text_style:        TextStyle,
-    editor_text:       Option<crate::layout::EditorPart>,
-    editor_selection:  Option<crate::layout::EditorPart>,
-    editor_caret:      Option<crate::layout::EditorPart>,
-    editor_validation: Option<crate::layout::EditorPart>,
+    editor_text:       Option<EditorPart>,
+    editor_selection:  Option<EditorPart>,
+    editor_caret:      Option<EditorPart>,
+    editor_validation: Option<EditorPart>,
 }
 
 /// Last picked entity classified as outside the active editor.
@@ -1304,7 +1305,7 @@ fn add_text(
     builder: &mut LayoutBuilder,
     text: &str,
     style: &TextStyle,
-    declaration: Option<&crate::layout::EditorPart>,
+    declaration: Option<&EditorPart>,
 ) {
     if text.is_empty() {
         return;

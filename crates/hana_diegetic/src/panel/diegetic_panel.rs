@@ -31,6 +31,7 @@ use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::PanelSpace;
 use super::coordinate_space::ScreenPosition;
 use super::events::LastPanelDimensions;
+use super::field;
 use super::field::PanelFieldRecord;
 use super::lifecycle;
 use super::precompose::PanelPrecomposeCache;
@@ -1876,8 +1877,7 @@ impl ComputedDiegeticPanel {
 
         result.regenerate_commands(tree);
         self.draw_order = DrawOrder::from_commands(&result.commands);
-        let (field_records, field_id_conflicts) =
-            super::field::collect_panel_field_records(tree, result);
+        let (field_records, field_id_conflicts) = field::collect_panel_field_records(tree, result);
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;
         self.widget_records = tree.computed_widget_records(result);

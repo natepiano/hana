@@ -470,7 +470,10 @@ pub(super) fn refresh_window_panels(
             let mut builder =
                 LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
             build_panel_layout(&mut builder, &metadata);
-            commands.set_tree(panel_entity, builder.build());
+            if let Err(error) = commands.set_tree(panel_entity, builder.build()) {
+                warn!("restore_after_reconnect: failed to refresh diagnostics panel: {error}");
+                continue;
+            }
             commands.entity(panel_entity).insert(metadata);
         }
     }
