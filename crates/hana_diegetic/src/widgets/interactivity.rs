@@ -9,7 +9,11 @@ use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPanelChangeClassification;
 
 /// Effective enabled or disabled state of a panel widget.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
+///
+/// Insert this as a resource to set the value every widget inherits unless
+/// something between it and the cascade root overrides it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect, Resource)]
+#[reflect(Resource)]
 pub enum WidgetInteractivity {
     /// The widget can receive interaction.
     Enabled,
@@ -110,7 +114,6 @@ mod tests {
     use super::PanelWidgetWriter;
     use super::WidgetDisabled;
     use super::WidgetInteractivity;
-    use crate::CascadeDefault;
     use crate::CascadeEntityCommandsExt as _;
     use crate::ComputedDiegeticPanel;
     use crate::DiegeticPanel;
@@ -277,9 +280,7 @@ mod tests {
         let widget = resolve_widget(&mut app, panel, "action");
         assert!(app.world().get::<WidgetDisabled>(widget).is_none());
 
-        app.world_mut()
-            .resource_mut::<CascadeDefault<WidgetInteractivity>>()
-            .0 = WidgetInteractivity::Disabled;
+        *app.world_mut().resource_mut::<WidgetInteractivity>() = WidgetInteractivity::Disabled;
         app.update();
         assert!(app.world().get::<WidgetDisabled>(widget).is_some());
 

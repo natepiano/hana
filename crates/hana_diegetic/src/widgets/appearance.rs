@@ -783,7 +783,6 @@ mod tests {
     use super::WidgetHoveredAppearance;
     use super::WidgetPressedAppearance;
     use super::WidgetState;
-    use crate::CascadeDefault;
     use crate::DiegeticPanel;
     use crate::DiegeticTextMeasurer;
     use crate::El;

@@ -315,7 +315,6 @@ mod tests {
     use crate::Px;
     use crate::Sizing;
     use crate::TextStyle;
-    use crate::cascade::CascadeDefault;
     use crate::cascade::FontUnit;
     use crate::cascade::Resolved;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
@@ -1309,7 +1308,7 @@ mod tests {
     #[test]
     fn global_font_unit_change_recomputes_inherited_text_geometry_in_same_update() {
         let mut app = make_app();
-        app.world_mut().resource_mut::<CascadeDefault<FontUnit>>().0 = FontUnit(Unit::Points);
+        *app.world_mut().resource_mut::<FontUnit>() = FontUnit(Unit::Points);
         let panel = app
             .world_mut()
             .spawn(
@@ -1344,7 +1343,7 @@ mod tests {
             Unit::Points
         );
 
-        app.world_mut().resource_mut::<CascadeDefault<FontUnit>>().0 = FontUnit(Unit::Millimeters);
+        *app.world_mut().resource_mut::<FontUnit>() = FontUnit(Unit::Millimeters);
         app.update();
 
         let updated_bounds = first_text_bounds(

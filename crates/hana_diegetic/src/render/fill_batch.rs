@@ -2432,9 +2432,18 @@ mod tests {
             app.world().get::<Visibility>(controller),
             Some(&Visibility::Inherited),
         );
+        let panel_layers = app
+            .world()
+            .get::<RenderLayers>(panel)
+            .cloned()
+            .expect("screen panel should carry the overlay camera's view layer");
+        assert_ne!(
+            panel_layers, render_layers,
+            "the screen panel renders on its camera's allocated view layer, not the authored one",
+        );
         assert_eq!(
             app.world().get::<RenderLayers>(controller),
-            Some(&render_layers),
+            Some(&panel_layers),
             "the tooltip should inherit the secondary-window panel's layers",
         );
         let record = sdf_records(&app)

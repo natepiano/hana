@@ -32,7 +32,7 @@ use super::diegetic_panel::PreparedPanelScreenConversion;
 use super::diegetic_panel::ScaledLayoutTreeCache;
 use crate::cascade::Cascade;
 use crate::cascade::CascadeAttribute;
-use crate::cascade::CascadeDefault;
+use crate::cascade::CascadeRoot;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Resolved;
@@ -514,7 +514,7 @@ pub(super) fn seed_owned_component<T: Component>(
 
 /// Records each derived cache write while the authored cascade remains owned
 /// by the panel role.
-pub(super) fn record_resolved_ownership<A: CascadeAttribute>(
+pub(super) fn record_resolved_ownership<A: CascadeRoot>(
     trigger: On<Insert, Resolved<A>>,
     mut world: DeferredWorld,
 ) {
@@ -535,7 +535,7 @@ pub(super) fn record_resolved_ownership<A: CascadeAttribute>(
         .ok()
         .and_then(|entity_ref| entity_ref.get_ref::<Resolved<A>>())
         .map(|resolved| (resolved.0.clone(), resolved.last_changed()));
-    let cascade_value = resolve_entity_cascade::<A>(&world, entity);
+    let cascade_value = resolve_entity_cascade::<A, A::Root>(&world, entity);
     let Some(mut cascade_ownership) = world.get_mut::<PanelCascadeOwnership<A>>(entity) else {
         return;
     };
@@ -801,7 +801,7 @@ fn teardown_owned_shared_state(world: &mut World, panel: Entity) {
     remove_owned_component_now::<PanelPicking>(world, panel, panel);
 }
 
-fn remove_seeded_cascade<A: CascadeAttribute>(world: &mut World, panel: Entity) {
+fn remove_seeded_cascade<A: CascadeRoot>(world: &mut World, panel: Entity) {
     let Some(ledger) = world.get::<PanelCascadeOwnership<A>>(panel).cloned() else {
         return;
     };
@@ -819,7 +819,7 @@ fn remove_seeded_cascade<A: CascadeAttribute>(world: &mut World, panel: Entity) 
     } else {
         current.map(|(resolved, _)| resolved)
     };
-    let cascade_engine_installed = world.contains_resource::<CascadeDefault<A>>();
+    let cascade_engine_installed = world.contains_resource::<A::Root>();
     let ownership_disposition = remove_owned_component_now::<Cascade<A>>(world, panel, panel);
     let Ok(mut entity_mut) = world.get_entity_mut(panel) else {
         return;
@@ -922,7 +922,6 @@ mod tests {
     use crate::WidgetOf;
     use crate::WidgetPressedAppearance;
     use crate::cascade::Cascade;
-    use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeFrom;
     use crate::cascade::FontUnit;
     use crate::cascade::Resolved;
@@ -1273,39 +1272,45 @@ mod tests {
 
         app.update();
 
-        assert_eq!(
-            app.world().get::<RenderLayers>(panel),
-            Some(&RenderLayers::layer(3)),
-        );
+        // The panel renders on the view layer its overlay camera was allocated,
+        // not on the authored `layer(3)`, so the propagated value has to be read
+        // back rather than written as a literal — `same_value_child` and
+        // `aba_child` only exercise their cases when they write this exact value.
+        let propagated = app
+            .world()
+            .get::<RenderLayers>(panel)
+            .cloned()
+            .expect("screen panel should carry the overlay camera's view layer");
+        assert_ne!(propagated, RenderLayers::layer(3));
         assert_eq!(
             app.world().get::<RenderLayers>(introduced_child),
-            Some(&RenderLayers::layer(3)),
+            Some(&propagated),
         );
         assert_eq!(
             app.world().get::<RenderLayers>(replaced_child),
-            Some(&RenderLayers::layer(3)),
+            Some(&propagated),
         );
         assert_eq!(
             app.world().get::<RenderLayers>(same_value_child),
-            Some(&RenderLayers::layer(3)),
+            Some(&propagated),
         );
         assert_eq!(
             app.world().get::<RenderLayers>(aba_child),
-            Some(&RenderLayers::layer(3)),
+            Some(&propagated),
         );
         app.world_mut()
             .entity_mut(replaced_child)
             .insert(RenderLayers::layer(9));
         app.world_mut()
             .entity_mut(same_value_child)
-            .insert(RenderLayers::layer(3));
+            .insert(propagated.clone());
         app.world_mut()
             .entity_mut(aba_child)
             .insert(RenderLayers::layer(9));
         app.update();
         app.world_mut()
             .entity_mut(aba_child)
-            .insert(RenderLayers::layer(3));
+            .insert(propagated.clone());
         app.update();
 
         app.world_mut().entity_mut(panel).remove::<DiegeticPanel>();
@@ -1322,11 +1327,11 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<RenderLayers>(same_value_child),
-            Some(&RenderLayers::layer(3)),
+            Some(&propagated),
         );
         assert_eq!(
             app.world().get::<RenderLayers>(aba_child),
-            Some(&RenderLayers::layer(3)),
+            Some(&propagated),
         );
     }
 
@@ -1517,7 +1522,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(DiegeticTextMeasurer::default())
             .add_plugins(HeadlessLayoutPlugin);
-        assert!(!app.world().contains_resource::<CascadeDefault<TextAlpha>>(),);
+        assert!(!app.world().contains_resource::<TextAlpha>(),);
         let panel_bundle = DiegeticPanel::world()
             .size(Mm(100.0), Mm(50.0))
             .layout(|_| {})

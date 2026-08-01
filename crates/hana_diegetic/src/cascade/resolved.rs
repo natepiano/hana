@@ -272,7 +272,6 @@ mod tests {
     use super::*;
     use crate::cascade;
     use crate::cascade::Cascade;
-    use crate::cascade::CascadeDefault;
     use crate::cascade::CascadeFrom;
     use crate::cascade::Resolved;
 
@@ -284,7 +283,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(cascade::cascade_plugin::<A>());
 
-        let default_value = app.world().resource::<CascadeDefault<A>>().0.clone();
+        let default_value = bevy_kana::CascadeRootResource::root(app.world().resource::<A::Root>());
         let root = app.world_mut().spawn(Cascade::<A>::Inherit).id();
         let panel = app
             .world_mut()

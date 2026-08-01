@@ -34,7 +34,6 @@ use bevy_kana::Keybindings;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
-use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DescriptionPanel;
@@ -121,6 +120,7 @@ use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
 use hana_diegetic::WidgetPressedAppearance;
+use hana_lagrange::OrbitCamPreset;
 
 // widget lab
 const BUTTON_BORDER: Color = Color::srgba(0.30, 0.62, 1.0, 0.90);
