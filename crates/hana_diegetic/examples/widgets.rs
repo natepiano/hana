@@ -101,6 +101,7 @@ use hana_diegetic::SliderResetBehavior;
 use hana_diegetic::SliderState;
 use hana_diegetic::Text;
 use hana_diegetic::TextAlign;
+use hana_diegetic::TextColor;
 use hana_diegetic::TextStyle;
 use hana_diegetic::Tooltip;
 use hana_diegetic::TooltipCommandsExt;
@@ -109,13 +110,17 @@ use hana_diegetic::TooltipHidden;
 use hana_diegetic::TooltipPlacementPolicy;
 use hana_diegetic::TooltipShown;
 use hana_diegetic::WidgetDisabled;
+use hana_diegetic::WidgetDisabledAppearance;
 use hana_diegetic::WidgetElement;
 use hana_diegetic::WidgetFocusChanged;
 use hana_diegetic::WidgetFocused;
+use hana_diegetic::WidgetFocusedAppearance;
+use hana_diegetic::WidgetHoveredAppearance;
 use hana_diegetic::WidgetInput;
 use hana_diegetic::WidgetInputPlugin;
 use hana_diegetic::WidgetInteractivity;
 use hana_diegetic::WidgetOf;
+use hana_diegetic::WidgetPressedAppearance;
 
 // widget lab
 const BUTTON_BORDER: Color = Color::srgba(0.30, 0.62, 1.0, 0.90);
@@ -134,6 +139,9 @@ const CONTROL_RADIUS: Px = Px(7.0);
 const CONTROL_TEXT: Color = Color::srgb(0.92, 0.96, 1.0);
 const CONTROL_WIDTH: Px = Px(280.0);
 const CUBE_CLEARANCE: f32 = 0.1;
+const CASCADE_FACE_LIGHT_ILLUMINANCE: f32 = 5_000.0;
+const CASCADE_FACE_LIGHT_POS: Vec3 = Vec3::new(5.0, 2.5, 1.5);
+const CASCADE_PANEL_TITLE: &str = "Cascade Lab";
 const CUBE_EDGE_INSET: f32 = 0.06;
 const CUBE_HALF_USABLE_WIDTH: f32 = (fairy_dust::EXAMPLE_CUBE_SIZE - CUBE_EDGE_INSET * 2.0) * 0.5;
 const DESCRIPTION_LINES: [&str; 6] = [
@@ -181,6 +189,13 @@ const SCREEN_ATTACHMENT_MAX_HEIGHT: Px = Px(64.0);
 const SCREEN_ATTACHMENT_MAX_WIDTH: Px = Px(260.0);
 const SCREEN_ATTACHMENT_STATUS_ID: &str = "screen-attachment-status";
 const SCREEN_CONTROL_WIDTH: Px = Px(218.0);
+// Attribute-resource defaults. Deliberately unlike the front panel's authored
+// colors so a widget showing these is visibly resolving from the resource.
+const ROOT_BORDER_DISABLED: Color = Color::srgba(0.30, 0.26, 0.34, 0.60);
+const ROOT_BORDER_FOCUSED: Color = Color::srgba(0.42, 0.95, 0.68, 0.94);
+const ROOT_FILL_DISABLED: Color = Color::srgba(0.12, 0.10, 0.14, 0.78);
+const ROOT_FILL_HOVERED: Color = Color::srgba(0.36, 0.14, 0.44, 0.95);
+const ROOT_FILL_PRESSED: Color = Color::srgba(0.62, 0.20, 0.44, 0.98);
 const SCREEN_PANEL_MAX_HEIGHT: Px = Px(120.0);
 const SCREEN_PANEL_MAX_WIDTH: Px = Px(250.0);
 const SCREEN_TARGET_ID: &str = "screen-target-button";
@@ -239,7 +254,10 @@ const TOOLTIP_OFFSET: Px = Px(16.0);
 const TOOLTIP_PADDING: Px = Px(30.0);
 const TOOLTIP_RADIUS: Px = Px(35.0);
 const TOOLTIP_TEXT_SIZE: Pt = Pt(fairy_dust::LABEL_SIZE.0 * 5.0);
-const WORLD_READOUT_WORLD_HEIGHT: f32 = 0.25;
+/// Width shared by both cube-face readouts. Sizing them by width rather than
+/// height keeps their text at one scale: the two trees differ in row count but
+/// share their widest row, so an equal world width gives an equal pixel scale.
+const WORLD_READOUT_WORLD_WIDTH: f32 = 0.76;
 
 #[derive(Clone, Copy, Default, Resource)]
 enum ToggleMode {
@@ -373,6 +391,14 @@ struct WidgetLabFocusInitialized;
 #[derive(Component)]
 struct WidgetInteractionReadout;
 
+/// The right-face panel whose widgets author no state appearance of their own,
+/// so every state look they show resolves from the four attribute resources.
+#[derive(Component)]
+struct CascadeWidgetLabPanel;
+
+#[derive(Component)]
+struct CascadeInteractionReadout;
+
 #[derive(Component)]
 struct ScreenWidgetLabPanel;
 
@@ -471,7 +497,7 @@ fn main() {
         )
         .with_stable_transparency()
         .with_camera_home()
-        .margin(0.5)
+        .margin(0.375)
         .with_title_bar(
             TitleBar::new()
                 .with_title("Widgets")
@@ -490,6 +516,22 @@ fn main() {
         .init_resource::<PrimaryClicks>()
         .init_resource::<PrimaryTooltipTiming>()
         .insert_resource(SliderTooltipBlueprint(slider_tooltip()))
+        .insert_resource(WidgetHoveredAppearance::new(BackgroundColor(
+            ROOT_FILL_HOVERED,
+        )))
+        .insert_resource(WidgetPressedAppearance::new(BackgroundColor(
+            ROOT_FILL_PRESSED,
+        )))
+        .insert_resource(WidgetFocusedAppearance::new(
+            Appearance::new()
+                .border_color(ROOT_BORDER_FOCUSED)
+                .border_width(CONTROL_BORDER_WIDTH_FOCUSED),
+        ))
+        .insert_resource(WidgetDisabledAppearance::new(
+            Appearance::new()
+                .background(ROOT_FILL_DISABLED)
+                .border_color(ROOT_BORDER_DISABLED),
+        ))
         .add_plugins((WidgetInputPlugin, AppOwnedWidgetInputPlugin))
         .add_observer(report_button_pressed)
         .add_observer(report_button_released)
@@ -503,6 +545,7 @@ fn main() {
         .add_observer(report_slider_canceled)
         .add_observer(report_tooltip_shown)
         .add_observer(report_tooltip_hidden)
+        .add_systems(Startup, spawn_cascade_face_light)
         .add_systems(PostStartup, spawn_widget_lab)
         .add_systems(
             Update,
@@ -1009,6 +1052,18 @@ fn spawn_widget_lab(
         .shadow_casting(ShadowCasting::Off)
         .material(material.clone())
         .text_material(material.clone())
+        .widget_hovered_appearance(BackgroundColor(BUTTON_FILL_HOVERED))
+        .widget_pressed_appearance(BackgroundColor(BUTTON_FILL_PRESSED))
+        .widget_focused_appearance(
+            Appearance::new()
+                .border_color(BUTTON_BORDER_FOCUSED)
+                .border_width(CONTROL_BORDER_WIDTH_FOCUSED),
+        )
+        .widget_disabled_appearance(
+            Appearance::new()
+                .background(BUTTON_FILL_DISABLED)
+                .border_color(BUTTON_BORDER_DISABLED),
+        )
         .with_tree(widget_tree(
             slider,
             primary_tooltip_timing.tooltip(),
@@ -1017,7 +1072,7 @@ fn spawn_widget_lab(
         .build();
     let readout = DiegeticPanel::world()
         .size(Fit, Fit)
-        .world_height(WORLD_READOUT_WORLD_HEIGHT)
+        .world_width(WORLD_READOUT_WORLD_WIDTH)
         .anchor(Anchor::BottomLeft)
         .shadow_casting(ShadowCasting::Off)
         .material(material.clone())
@@ -1060,7 +1115,109 @@ fn spawn_widget_lab(
         Err(error) => error!("widgets: failed to build widget panel: {error}"),
     }
 
+    spawn_cascade_widget_lab(
+        &mut commands,
+        *cube,
+        material.clone(),
+        primary_tooltip_timing.tooltip(),
+        slider_tooltip.0.clone(),
+    );
     spawn_screen_widget_lab(&mut commands, material);
+}
+
+/// Lights the cube's right face, which the studio rig's key light leaves in
+/// shadow. Shadow casting is off so this light only raises the face's exposure.
+fn spawn_cascade_face_light(mut commands: Commands) {
+    commands.spawn((
+        Name::new("Cascade face light"),
+        DirectionalLight {
+            illuminance: CASCADE_FACE_LIGHT_ILLUMINANCE,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::from_translation(CASCADE_FACE_LIGHT_POS)
+            .looking_at(fairy_dust::example_cube_on_ground(CUBE_CLEARANCE), Vec3::Y),
+    ));
+}
+
+/// Spawns the right face's widget lab. It declares the same tree as the front
+/// face and authors no state appearance at any level, so its hover, press,
+/// focus, and disabled looks all resolve from the four attribute resources
+/// inserted in `main`. The front face overrides those same resources on its
+/// panel, which is what makes the two faces differ on screen.
+fn spawn_cascade_widget_lab(
+    commands: &mut Commands,
+    cube: Entity,
+    material: Handle<StandardMaterial>,
+    primary_tooltip: Tooltip,
+    slider_tooltip: Tooltip,
+) {
+    let panel = DiegeticPanel::world()
+        .size(
+            FitMax(PANEL_MAX_WIDTH.into()),
+            FitMax(PANEL_MAX_HEIGHT.into()),
+        )
+        .world_width(CUBE_HALF_USABLE_WIDTH)
+        .anchor(Anchor::TopLeft)
+        .picking(PanelPicking {
+            front: FacePicking::Interactive,
+            back:  FacePicking::PanelOnly,
+        })
+        .shadow_casting(ShadowCasting::Off)
+        .material(material.clone())
+        .text_material(material.clone())
+        .with_tree(widget_tree(
+            slider_declaration(),
+            primary_tooltip,
+            slider_tooltip,
+        ))
+        .build();
+    let readout = DiegeticPanel::world()
+        .size(Fit, Fit)
+        .world_width(WORLD_READOUT_WORLD_WIDTH)
+        .anchor(Anchor::BottomLeft)
+        .shadow_casting(ShadowCasting::Off)
+        .material(material.clone())
+        .text_material(material)
+        .with_tree(cascade_status_tree())
+        .build();
+    match panel {
+        Ok(panel) => {
+            commands.entity(cube).with_children(|cube| {
+                cube.spawn((
+                    Name::new("Cascade lab title"),
+                    DiegeticText::world(CASCADE_PANEL_TITLE)
+                        .size(fairy_dust::TITLE_SIZE)
+                        .color(fairy_dust::TITLE_COLOR)
+                        .shadow_mode(GlyphShadowMode::None)
+                        .anchor(Anchor::BottomLeft)
+                        .world_height(PANEL_TITLE_WORLD_HEIGHT)
+                        .transform(cascade_title_transform())
+                        .build(),
+                ));
+                cube.spawn((
+                    Name::new("Cascade lab panel"),
+                    CascadeWidgetLabPanel,
+                    panel,
+                    cascade_panel_transform(),
+                ));
+                match readout {
+                    Ok(readout) => {
+                        cube.spawn((
+                            Name::new("Cascade interaction readout"),
+                            CascadeInteractionReadout,
+                            readout,
+                            cascade_status_transform(),
+                        ));
+                    },
+                    Err(error) => {
+                        error!("widgets: failed to build cascade readout: {error}");
+                    },
+                }
+            });
+        },
+        Err(error) => error!("widgets: failed to build cascade panel: {error}"),
+    }
 }
 
 fn spawn_screen_widget_lab(commands: &mut Commands, material: Handle<StandardMaterial>) {
@@ -1073,6 +1230,18 @@ fn spawn_screen_widget_lab(commands: &mut Commands, material: Handle<StandardMat
         .shadow_casting(ShadowCasting::Off)
         .material(material.clone())
         .text_material(material.clone())
+        .widget_hovered_appearance(BackgroundColor(BUTTON_FILL_HOVERED))
+        .widget_pressed_appearance(BackgroundColor(BUTTON_FILL_PRESSED))
+        .widget_focused_appearance(
+            Appearance::new()
+                .border_color(BUTTON_BORDER_FOCUSED)
+                .border_width(CONTROL_BORDER_WIDTH_FOCUSED),
+        )
+        .widget_disabled_appearance(
+            Appearance::new()
+                .background(BUTTON_FILL_DISABLED)
+                .border_color(BUTTON_BORDER_DISABLED),
+        )
         .with_tree(screen_widget_tree())
         .build();
     let attachment_card = DiegeticPanel::screen()
@@ -1190,13 +1359,7 @@ fn widget_tree(slider: Slider, primary_tooltip: Tooltip, slider_tooltip: Tooltip
             "Secondary button",
             "Press D to toggle this control and the slider",
         )),
-        |element| {
-            element.disabled(
-                Appearance::new()
-                    .background(BUTTON_FILL_DISABLED)
-                    .border_color(BUTTON_BORDER_DISABLED),
-            )
-        },
+        |element| element,
     );
     add_slider(&mut builder, slider, slider_tooltip);
     builder.build()
@@ -1210,11 +1373,7 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
             .gap(SLIDER_LABEL_GAP)
             .alignment(AlignX::Center, AlignY::Center)
             .widget(SLIDER_ID, slider)
-            .disabled(
-                Appearance::new()
-                    .background(SLIDER_DISABLED_COLOR)
-                    .text_color(SLIDER_DISABLED_COLOR),
-            )
+            .disabled(TextColor(SLIDER_DISABLED_COLOR))
             .tooltip(slider_tooltip),
         |builder| {
             builder.with(
@@ -1255,6 +1414,7 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                                     .height(Sizing::fixed(SLIDER_TRACK_HEIGHT))
                                     .background(SLIDER_TRACK_FILL)
                                     .hovered(BackgroundColor(SLIDER_TRACK_HOVERED))
+                                    .disabled(BackgroundColor(SLIDER_DISABLED_COLOR))
                                     .corner_radius(CornerRadius::all(SLIDER_TRACK_RADIUS)),
                                 |_| {},
                             );
@@ -1275,7 +1435,13 @@ fn add_slider(builder: &mut LayoutBuilder, slider: Slider, slider_tooltip: Toolt
                                     .corner_radius(CornerRadius::all(SLIDER_THUMB_RADIUS))
                                     .id(SLIDER_THUMB_ID)
                                     .slider_thumb()
-                                    .focused(BorderColor(SLIDER_THUMB_FOCUSED_BORDER)),
+                                    .hovered(BackgroundColor(SLIDER_THUMB_FILL))
+                                    .focused(BorderColor(SLIDER_THUMB_FOCUSED_BORDER))
+                                    .disabled(
+                                        Appearance::new()
+                                            .background(SLIDER_DISABLED_COLOR)
+                                            .border_color(SLIDER_THUMB_BORDER),
+                                    ),
                                 |_| {},
                             );
                         },
@@ -1309,6 +1475,31 @@ fn add_editable_text(builder: &mut LayoutBuilder) {
             ));
         },
     );
+}
+
+/// The right face's readout. It carries only the `State:` row, which is the
+/// row that names which state each widget is in — the states whose look the
+/// right face resolves entirely from the attribute resources.
+fn cascade_status_tree() -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::column()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::all(STATUS_PADDING))
+            .gap(STATUS_LINE_GAP)
+            .alignment(AlignX::Left, AlignY::Center)
+            .background(STATUS_BACKGROUND)
+            .border(Border::all(STATUS_BORDER_WIDTH, STATUS_BORDER))
+            .corner_radius(CornerRadius::all(STATUS_RADIUS)),
+    );
+    interaction_status_row(
+        &mut builder,
+        "State",
+        STATE_STATUS_ID,
+        STATE_STATUS_IDLE,
+        STATE_STATUS_MEASURE,
+    );
+    builder.build()
 }
 
 fn interaction_status_tree() -> LayoutTree {
@@ -1433,6 +1624,36 @@ fn cube_front_transform(local_position: Vec2) -> Transform {
     transform
 }
 
+fn cube_right_transform(local_position: Vec2) -> Transform {
+    let mut transform = cube_face_transform(Face::Right, fairy_dust::EXAMPLE_CUBE_SIZE);
+    transform.translation += transform.rotation * local_position.extend(PANEL_FACE_OFFSET);
+    transform
+}
+
+fn cascade_title_transform() -> Transform {
+    let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
+    cube_right_transform(Vec2::new(
+        -half_extent + CUBE_EDGE_INSET,
+        half_extent + PANEL_TITLE_GAP,
+    ))
+}
+
+fn cascade_panel_transform() -> Transform {
+    let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
+    cube_right_transform(Vec2::new(
+        -half_extent + CUBE_EDGE_INSET,
+        half_extent - CUBE_EDGE_INSET,
+    ))
+}
+
+fn cascade_status_transform() -> Transform {
+    let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
+    cube_right_transform(Vec2::new(
+        -half_extent + CUBE_EDGE_INSET,
+        -half_extent + CUBE_EDGE_INSET,
+    ))
+}
+
 fn widget_title_transform() -> Transform {
     let half_extent = fairy_dust::EXAMPLE_CUBE_SIZE * 0.5;
     cube_front_transform(Vec2::new(
@@ -1460,22 +1681,6 @@ fn interaction_status_transform() -> Transform {
 /// A button element in the widget lab's row layout.
 type ButtonElement = El<Row, WidgetElement<Button>>;
 
-/// Direct state presentation shared by the world-panel buttons: hover and
-/// press replace the fill while focus replaces only the border, so the two
-/// properties visibly layer independently. Focus thickens the border as well
-/// as recoloring it, which is what makes keyboard traversal readable at the
-/// distance the cube panel sits from the camera.
-fn apply_state_appearance(element: ButtonElement) -> ButtonElement {
-    element
-        .hovered(BackgroundColor(BUTTON_FILL_HOVERED))
-        .pressed(BackgroundColor(BUTTON_FILL_PRESSED))
-        .focused(
-            Appearance::new()
-                .border_color(BUTTON_BORDER_FOCUSED)
-                .border_width(CONTROL_BORDER_WIDTH_FOCUSED),
-        )
-}
-
 fn add_button(
     builder: &mut LayoutBuilder,
     id: &'static str,
@@ -1484,7 +1689,7 @@ fn add_button(
     tooltip: Option<Tooltip>,
     configure: impl FnOnce(ButtonElement) -> ButtonElement,
 ) {
-    let element = configure(apply_state_appearance(
+    let element = configure(
         El::new()
             .size(width, BUTTON_HEIGHT)
             .padding(Padding::all(CONTROL_PADDING))
@@ -1493,7 +1698,7 @@ fn add_button(
             .border(Border::all(CONTROL_BORDER_WIDTH, BUTTON_BORDER))
             .corner_radius(CornerRadius::all(CONTROL_RADIUS))
             .button(id),
-    ));
+    );
     let element = match tooltip {
         Some(tooltip) => element.tooltip(tooltip),
         None => element,
@@ -1603,6 +1808,8 @@ fn report_interaction_changes(
 fn report_presentation_states(
     panel: Single<Entity, With<WidgetLabPanel>>,
     readout: Single<Entity, With<WidgetInteractionReadout>>,
+    cascade_panel: Single<Entity, With<CascadeWidgetLabPanel>>,
+    cascade_readout: Single<Entity, With<CascadeInteractionReadout>>,
     widgets: Query<(
         &PanelWidget,
         &WidgetOf,
@@ -1612,11 +1819,11 @@ fn report_presentation_states(
     drag: Res<LevelSliderDrag>,
     mut panel_text: PanelText,
 ) {
-    let flags = |id: &str, pressed_source: PressedSource| {
+    let flags = |panel: Entity, id: &str, pressed_source: PressedSource| {
         widgets
             .iter()
             .find(|(widget, widget_of, ..)| {
-                widget_of.panel() == *panel && *widget.id() == PanelElementId::named(id)
+                widget_of.panel() == panel && *widget.id() == PanelElementId::named(id)
             })
             .map_or_else(
                 || "?".to_owned(),
@@ -1651,36 +1858,63 @@ fn report_presentation_states(
                 },
             )
     };
-    let status = format!(
-        "pri={} sec={} lvl={}",
-        flags(PRIMARY_BUTTON_ID, PressedSource::PointerAggregate),
-        flags(SECONDARY_BUTTON_ID, PressedSource::PointerAggregate),
-        flags(SLIDER_ID, PressedSource::DragRecord)
-    );
+    let status = |panel: Entity| {
+        format!(
+            "pri={} sec={} lvl={}",
+            flags(panel, PRIMARY_BUTTON_ID, PressedSource::PointerAggregate),
+            flags(panel, SECONDARY_BUTTON_ID, PressedSource::PointerAggregate),
+            flags(panel, SLIDER_ID, PressedSource::DragRecord)
+        )
+    };
     // `PanelText` skips the layout revision bump for an unchanged string, so
     // writing every frame stays free of relayout work.
-    panel_text.set_text(*readout, &PanelElementId::named(STATE_STATUS_ID), status);
+    panel_text.set_text(
+        *readout,
+        &PanelElementId::named(STATE_STATUS_ID),
+        status(*panel),
+    );
+    panel_text.set_text(
+        *cascade_readout,
+        &PanelElementId::named(STATE_STATUS_ID),
+        status(*cascade_panel),
+    );
+}
+
+/// Applies `interactivity` to one panel's secondary button and level slider,
+/// reporting whether both were reified and updated.
+fn set_toggled_interactivity(
+    panel: Entity,
+    reader: &PanelWidgetReader,
+    writer: &mut PanelWidgetWriter,
+    interactivity: WidgetInteractivity,
+) -> bool {
+    let secondary = reader.entity(panel, &PanelElementId::named(SECONDARY_BUTTON_ID));
+    let slider = reader.entity(panel, &PanelElementId::named(SLIDER_ID));
+    let (Some(secondary), Some(slider)) = (secondary, slider) else {
+        warn!("widgets: secondary button or level slider has not been reified");
+        return false;
+    };
+    let secondary_toggled = writer.override_interactivity(secondary, interactivity);
+    let slider_toggled = writer.override_interactivity(slider, interactivity);
+    secondary_toggled && slider_toggled
 }
 
 fn toggle_disabled_widgets(
     panel: Single<Entity, With<WidgetLabPanel>>,
+    cascade_panel: Single<Entity, With<CascadeWidgetLabPanel>>,
     reader: PanelWidgetReader,
     mut writer: PanelWidgetWriter,
     mut mode: ResMut<ToggleMode>,
 ) {
-    let secondary = reader.entity(*panel, &PanelElementId::named(SECONDARY_BUTTON_ID));
-    let slider = reader.entity(*panel, &PanelElementId::named(SLIDER_ID));
-    let (Some(secondary), Some(slider)) = (secondary, slider) else {
-        warn!("widgets: secondary button or level slider has not been reified");
-        return;
-    };
     let next = mode.toggled();
-    let secondary_toggled = writer.override_interactivity(secondary, next.interactivity());
-    let slider_toggled = writer.override_interactivity(slider, next.interactivity());
-    if secondary_toggled && slider_toggled {
+    let front_toggled =
+        set_toggled_interactivity(*panel, &reader, &mut writer, next.interactivity());
+    let cascade_toggled =
+        set_toggled_interactivity(*cascade_panel, &reader, &mut writer, next.interactivity());
+    if front_toggled && cascade_toggled {
         *mode = next;
         info!(
-            "widgets: secondary button and level slider are now {:?}",
+            "widgets: both faces' secondary buttons and level sliders are now {:?}",
             next.interactivity()
         );
     } else {
