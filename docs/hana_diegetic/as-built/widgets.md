@@ -28,20 +28,49 @@ supplies an optional semantic-action adapter.
 ## Authoring
 
 `El<L = Row, Role = LayoutOnly>` carries a zero-sized role marker. Ordinary
-elements are `LayoutOnly`. Four methods on `El<L, LayoutOnly>` flip the role:
+elements are `LayoutOnly`. Four methods on `El<L, LayoutOnly>` flip the role to a
+widget root:
 
 ```rust
 el.button(id)                       // -> El<L, WidgetElement<Button>>
 el.slider(id, range)                // -> El<L, WidgetElement<Slider>>
 el.widget(id, widget)               // -> El<L, WidgetElement<W>>  (pre-built Button or Slider)
-el.editable_field(id, spec)         // -> El<L, WidgetElement<ImeEditableFieldSpec>>
+el.editable_field(id, spec)         // -> El<L, WidgetElement<EditableField>>
 ```
 
 The role marker is generic over the widget type, so the type system knows which
 widget an element became. `.widget` is the adoption path for a `Button` or
 `Slider` built away from the layout chain; the sealed `Widget` trait implements
-it for both. Id and declaration are assigned together — a widget cannot be
-authored without its identity.
+it for both. `EditableField` is a marker-only owner with no `Widget` impl,
+reachable only through `.editable_field`. Id and declaration are assigned
+together — a widget cannot be authored without its identity.
+
+### Widget scope and the child roles
+
+Five roles exist: `LayoutOnly`, `WidgetElement<W>` for a widget root,
+`WidgetChild` for an ordinary element inside a widget, `WidgetPart` for a child
+that authored a state look, and `PressedPart` for one that authored a pressed
+look.
+
+`LayoutBuilder::with_widget_root(el)` opens a `WidgetBuilder<'static, W>` for a
+widget-rooted tree; inside a panel tree the same scope arrives through
+`.with(widget_el, |widget| { … })`. That scope is what makes a descendant
+addressable — `WidgetBuilder::child(el)` is the only way to mint a `WidgetChild`:
+
+```rust
+builder.with(El::new().button("apply"), |button| {
+    button.with(button.child(El::new()).hovered(BackgroundColor(BLUE)), |_| {});
+});
+```
+
+The four state verbs consume a `WidgetChild` and return `WidgetPart` (or
+`PressedPart` for `pressed`); further verbs chain on those roles.
+
+`AcceptsElement` enforces the scope. A widget builder accepts `LayoutOnly`,
+`WidgetChild`, `WidgetPart`, and — only when `W: Pressable` — `PressedPart`. It
+accepts no `WidgetElement<_>`, so **a widget nested inside another widget is a
+compile error**, as is a state part authored outside any widget closure or a
+pressed part inside a non-pressable widget.
 
 Widget ids **are** `PanelElementId`; there is no widget-id newtype. Event-emitting
 widgets require `Named` ids, because auto ids reposition on structural edits and
@@ -50,15 +79,21 @@ would fire spurious cancels. Duplicates reuse the existing
 
 `Button` and `Slider` are private-field authoring builders, not ECS components.
 `Button` is `Clone + Debug + PartialEq + Default` with `new()` and `on_click(...)`.
-`Slider` has no `Default` because range and initial value are required.
+`Slider` has no `Default` because its range is required; `Slider::new(range)`
+defaults the value to the range start, and `.value`, `.step`, `.direction`, and
+`.reset_behavior` override the rest. **`Slider` carries no color property** — it
+is behavior only. Every slider color, focus ring included, is authored on the
+element that shows it.
+
 `SliderRange::new` and `SliderStep::new` reject non-finite, unordered, or
 non-positive input with `SliderConfigError`; `Slider::new(range)` itself is
 infallible and its authored numbers are validated when the panel builds, so the
 declaration chain never returns a `Result`.
 
-The first API rejects **interactive descendants inside a widget** and **widgets
-inside precomposed subtrees**. Arbitrary non-interactive child layout is fine.
-Nested interaction needs an ownership and hit-order design that does not exist.
+**Widgets inside precomposed subtrees** are rejected at panel build with
+`WidgetInsidePrecomposedSubtree`; a widget inside another widget is a compile
+error, as above. Arbitrary non-interactive child layout is fine. Nested
+interaction needs an ownership and hit-order design that does not exist.
 
 ### Runtime tree replacement
 
@@ -72,21 +107,29 @@ command later found a live panel entity. There is no `try_set_tree`.
 ## State appearance
 
 Every state look is one `Appearance` bundle. `Appearance` is a public fluent
-builder over four properties:
+builder over seven properties:
 
 ```rust
 Appearance::new()
     .background(color)      // patches the root SDF fill record
     .border_color(color)    // patches the root SDF border color
     .border_width(width)    // all four sides; grows inward
-    .material(handle)       // Handle<StandardMaterial> for fill and border
+    .text_color(color)      // patches this element's text glyphs
+    .path_color(color)      // patches this element's panel-draw primitives
+    .tint(color)            // patches this element's image tint
+    .material(handle)       // Handle<StandardMaterial> for SDF, text, and draw records
 ```
 
-Four verbs on `El<L, WidgetElement<W>>` take one bundle each:
+The state verbs take `impl IntoAppearance`, which is implemented for `Appearance`
+and for five single-property color wrappers — `BackgroundColor`, `BorderColor`,
+`TextColor`, `PathColor`, and `Tint`, each a public tuple struct over one `Color`
+with a `From<Color>` impl. A bare `Color` is deliberately **not** convertible: a
+color alone does not say which of five properties it sets, and the
+`on_unimplemented` diagnostic names the five wrappers at the error site.
 
 ```rust
 el.button("apply")
-    .hovered(Appearance::new().background(BLUE))
+    .hovered(BackgroundColor(BLUE))                                   // one property
     .focused(Appearance::new().border_color(WHITE).border_width(Px(2.0)))
     .pressed(Appearance::new().background(DARK))
     .disabled(Appearance::new().background(GRAY).border_color(DIM))
@@ -95,11 +138,16 @@ el.button("apply")
 **A later call replaces the bundle an earlier call authored for that state** — it
 does not merge into it.
 
+The same four verbs exist at three places: on a widget root
+(`El<L, WidgetElement<W>>`), on a `WidgetChild`, and on the `WidgetPart` /
+`PressedPart` a child becomes after authoring one. A root authors its own look; a
+part authors the look of one descendant record.
+
 `pressed` is accepted only for `Button` and `Slider`. At a widget root,
-`El::pressed` is gated by `Pressable`; on a widget part, it can be authored but
-`WidgetBuilder::with` rejects it for an editable field. An editable field has no
-pressed state (it takes a caret and keystrokes; it is not held), so this is a
-compile error rather than a silently ignored layer. Hovered, focused, and
+`El::pressed` is gated by `Pressable`; on a part it produces `PressedPart`, which
+a widget builder accepts only when `W: Pressable`. An editable field has no
+pressed state (it takes a caret and keystrokes; it is not held), so authoring one
+is a compile error rather than a silently ignored layer. Hovered, focused, and
 disabled reach every widget kind.
 
 `focused` means **the keyboard focus indicator is visible**, not merely that the
@@ -112,8 +160,9 @@ A state layer replaces values on records layout already emitted; it never author
 a missing one. `.background(X).disabled(Appearance::new().background(Y))` is not
 redundant — the ordinary call is what the element shows at rest.
 
-Naming a state property the element does not declare is neither a build error nor
-a silent no-op: layout emits a transparent stand-in for the state to replace.
+Naming a **root SDF** property the element does not declare is neither a build
+error nor a silent no-op: layout emits a transparent stand-in for the state to
+replace.
 
 | Authored state property | Defaulted record when the element declares none |
 | --- | --- |
@@ -124,15 +173,47 @@ a silent no-op: layout emits a transparent stand-in for the state to replace.
 
 A state material carries its own color — the fill reads
 `StandardMaterial::base_color` — so a defaulted transparent fill is enough for
-it to render. A state border width with no declared border color widens a
-transparent border, the same outcome as declaring
-`El::border(Border::all(Px(2.0), Color::NONE))` directly.
+it to render. Text and panel-draw recipients need no additional fill record. A
+state border width with no declared border color widens a transparent border, the
+same outcome as declaring `El::border(Border::all(Px(2.0), Color::NONE))`
+directly.
 
-A state layer affects **only the element that authored it**. A child inherits
-nothing: it stays as authored unless it carries its own state layer. A state
-border width applies to
-all four sides and grows inward from the authored outer bounds, so no state
-change alters solved layout.
+**The three content properties cannot be synthesized and so are hard errors.**
+Layout can manufacture an empty fill or a zero-width border, but it cannot invent
+a text run, a draw primitive, or an image. A part naming one of them must emit
+that record itself:
+
+| Authored state property | Panel build error when the element emits no such record |
+| --- | --- |
+| text color | `StateTextColorRequiresText` |
+| path color | `StatePathColorRequiresDraw` |
+| tint | `StateTintRequiresImage` |
+
+A state border width applies to all four sides and grows inward from the authored
+outer bounds, so no state change alters solved layout.
+
+### State appearance is a cascade
+
+A state look is not element-local. Each of the four states is a cascade attribute
+— `WidgetHoveredAppearance`, `WidgetPressedAppearance`, `WidgetFocusedAppearance`,
+`WidgetDisabledAppearance` — each wrapping one `Arc<Appearance>`, each combining
+by the same per-property merge `Appearance` itself uses.
+
+Precedence runs root-to-leaf: the attribute's **resource** default (an empty
+bundle unless the application inserts one) → ECS ancestors and the owning panel →
+layout ancestors → the widget or part that authored it. A lower level's named
+property replaces the higher level's; an unnamed one passes through. So an
+application can set one hovered look for every widget in the app by inserting the
+resource, override it for one panel, and override that again on one part.
+
+ECS-side authoring mirrors interactivity:
+`override_widget_hovered_appearance(appearance)` and
+`inherit_widget_hovered_appearance()`, and the same pair for pressed, focused, and
+disabled. The four states inherit **independently** — overriding hovered does not
+disturb an inherited focused bundle.
+
+The four states then layer per property in `[Focused, Hovered, Pressed, Disabled]`
+order over the ordinary declaration, exactly as below.
 
 ### Composition
 
@@ -144,6 +225,32 @@ change only the border while hover changes only the fill.
 Presentation reads `PickingInteraction`, `Has<WidgetDisabled>`, the private
 focus-visible marker, and the private press/drag marker. It never reads or
 mutates the private capture resources, which remain lifecycle authority.
+
+### Editable-field generated parts
+
+An editable field's text, selection box, caret, and validation message are
+generated by the editor, not authored — there is no element to hang a
+`WidgetChild` on. Four verbs on `El<L, WidgetElement<EditableField>>` color them
+instead:
+
+```rust
+el.editable_field("name", spec)
+    .editor_text(EditorStateColors::new().focused(WHITE).disabled(DIM))
+    .editor_selection(EditorStateColors::new().focused(BLUE))
+    .editor_caret(EditorStateColors::new().focused(WHITE))
+    .editor_validation(EditorStateColors::new().hovered(RED))
+```
+
+`EditorStateColors` is a narrowed authoring surface: one plain `Color` per state,
+never a full bundle, because each generated part has exactly one colorable
+property. Text and validation map to `text_color`; selection and caret map to
+`background`. Content and `TextStyle` stay editor-controlled.
+
+`EditorStateColors::pressed(color)` returns a **different type**,
+`PressedEditorStateColors`, which none of the four verbs accept. An editable field
+has no pressed state, so authoring one fails at compile time on the type rather
+than being silently discarded — the same outcome `Pressable` produces for widget
+roots, reached by a different mechanism because there is no widget kind to gate.
 
 ## Interactivity
 
@@ -459,11 +566,16 @@ the opt-in uncontrolled convenience — the plugin never installs it.
 without applying it, where `SliderAdjustment` is `Absolute(f32) | Relative(f32) |
 RelativeSteps(f32)`; `RelativeSteps` emits nothing when the state has no step.
 
-`Slider::initial_value` applies only on first spawn, normalized through the same
-snap-then-clamp order. Same-id reuse preserves the live applied value; an
-authored range/step/direction change updates configuration and revalidates the
-preserved value. Presentation reads only the accepted value, never an unaccepted
-proposal.
+`Slider::value` sets the authored default, which applies only on first spawn,
+normalized through the same snap-then-clamp order. Same-id reuse preserves the
+live applied value; an authored range/step/direction change updates configuration
+and revalidates the preserved value. Presentation reads only the accepted value,
+never an unaccepted proposal.
+
+`SliderResetBehavior` is `Disabled` by default. `DoubleClick` makes a
+primary-button double-click on the marked thumb propose the authored default
+value without moving on the first click — a proposal like any other, which the
+application still has to accept.
 
 ### Anatomy and travel
 

@@ -2,6 +2,10 @@
 
 > **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Extends per-state widget appearance from the widget's own root box to every element a widget owns, replaces the sixteen flat state builders with four bundle builders, adds a content-color property so text and lines can change with state, and cascades the bundles from a global default through panel, widget, and part with per-property merge at every hop. Removes `Slider::disabled_color`, the one blunt "paint everything one color" switch that exists because children were unreachable.
 
+As-built disposition: amend `docs/hana_diegetic/as-built/widgets.md`. That doc is the
+single as-built record for this surface; close-out updates it in place and never forks
+a second one.
+
 ## Delegation Context
 
 <!-- Shared across all phases. /plan:delegate prepends this to every dispatch. -->
@@ -2416,25 +2420,9 @@ The architect reviewed Phase 19 — the only remaining phase — against Phase 1
 - **Ref corrections:** `sdf_record_batch_snapshot` `:5024` → `:5026`; `sdf_material_assignments_except` `:2770-2787` → `:2768-2787`; the upsert loop `:1360-1362` → `:1357-1362`; `StoredResolvedSdfSurface` `:637` → `:631`. Also corrected the claim that `refresh_first_draw_order_index` reads sorted order — it computes a `.min()` and is order-independent, which is what makes the hoist safe.
 - **Delegation Context:** the `examples/widgets.rs` entry still claimed a live `.disabled_color` use at `:1165`; Phase 14 deleted it and the file is 1712 lines, not 1703.
 
-Deferred to Phase 19 as a `**Pending decision:**`: the as-built widget doc is eleven phases stale and the plan carries no `As-built disposition:` stamp, so closing out would fork the widget documentation. Whether the content refresh belongs in this plan is a scope call.
+- **Resolved by the owner before Phase 19 dispatched:** the as-built widget doc was eleven phases stale and the plan carried no `As-built disposition:` stamp, so closing out would have forked the widget documentation. Both fixed in place rather than deferred — the plan header now stamps `As-built disposition: amend`, and `docs/hana_diegetic/as-built/widgets.md` was refreshed to the current surface (seven `Appearance` properties, `IntoAppearance` plus the five color wrappers, the five element roles and `WidgetBuilder::child`, the three content properties as hard build errors, state appearance as a four-channel cascade, the editable-field editor-part verbs, and `Slider` as behavior-only). Phase 19 was not widened; it stays a render-layer change.
 
-### Phase 19 — Separate record identity from draw order · status: todo
-
-**Pending decision:** the as-built widget documentation is eleven phases stale, and this is the last phase that can carry a fix.
-
-*Actual problem:* `docs/hana_diegetic/as-built/widgets.md:72-104` describes a version of this crate that stopped existing around Phase 6, while the plan's `## Outstanding items` still marks that doc "done". Separately, the plan carries no `As-built disposition:` stamp anywhere (`rg 'As-built disposition' docs/hana_diegetic/` returns nothing), so closing it out will **fork** the widget documentation instead of updating it.
-
-*What exists now:*
-- The as-built doc calls `Appearance` "a public fluent builder over **four** properties" — Phase 7 added `text_color`/`path_color` and Phase 13 added `tint`, so it is six-plus now.
-- It says "**Four verbs on `El<L, WidgetElement<W>>`**" — Phase 17 moved those to `WidgetChild`, minted only by `WidgetBuilder::child`.
-- It never mentions `IntoAppearance`, the `BackgroundColor`/`BorderColor`/`TextColor`/`PathColor`/`Tint` wrappers, or that Phase 12 deleted `impl From<Color> for Appearance`.
-- Without an `As-built disposition: amend` stamp, `/plan:to_as_built` writes a *new* doc, leaving two overlapping descriptions of one surface — one of them the stale one above.
-
-*What should change:* stamp the plan `As-built disposition: amend` (a one-line edit that makes the close-out update `as-built/widgets.md` in place rather than fork it), and decide whether refreshing that doc's content is work this plan does or work that follows it.
-
-*Recommendation:* add the `amend` stamp now — it is one line and prevents the fork regardless of what else is decided — and give the content refresh its own phase rather than widening Phase 19, which is a render-layer change sharing no surface with the widget docs. Bundling them would put an unrelated doc rewrite inside a batching commit.
-
-*This is a scope and sequencing call, so it is yours:* approve the stamp plus a separate doc phase, take the stamp only and leave the refresh out of this plan, or widen Phase 19 to carry both.
+### Phase 19 — Separate record identity from draw order · status: done
 
 > **Added at review, 2026-07-31.** Phase 16 makes material rows identity-keyed;
 > `SdfRecordKey` keeps the positional `command_index` it has today. That asymmetry is
@@ -2517,12 +2505,34 @@ Two surfaces at the same draw depth paint in command order. That tiebreak is loa
 - **`sort_records` no longer reads `record_key`.** The tiebreak reads the record's own draw-order field. **Prove it mechanically** — `awk 'NR>=650 && NR<=661' crates/hana_diegetic/src/render/fill_batch.rs | rg record_key` returns nothing (restamp the range if the function moves). It returns **2** lines today (`:656`, `:658`), so a revert genuinely fails it — verified at the Phase 18 review. **Pair it with a drift-proof companion**, because `sort_records` is guaranteed to shrink and move under this phase and a range restamped to just the shortened comparator would pass trivially: `rg -n 'pub command_index' crates/hana_diegetic/src/render/fill_batch.rs` must return **nothing**. It returns exactly `:220` today, and that spelling is unique in the file — `ImageRecordKey` lives in `image_batch.rs`, so the companion cannot be satisfied by accident. An earlier revision phrased this as "the field existing and the sort compiling without a `record_key` reference", which anything that compiles satisfies — a gate that cannot fail, which the Delegation Context forbids (*A test must be able to fail*) and which is exactly the trap Phase 17's retrospective recorded.
 - **One sort per dirty batch per frame, and zero for a clean batch.** A frame that upserts *n* changed records into one batch sorts that batch once, not *n* times — assert by counting sort invocations across a frame that changes several records. A frame in which nothing is upserted must sort **zero** times; an idle panel does no sorting today and must not start. `sort_records` is private, so the counter belongs on `SdfBatch` behind `#[cfg(test)]` rather than on a public surface. Phrase the gate per-batch, not per-frame: a multi-batch panel legitimately sorts once per dirty batch, and a flat "one sort per frame" cannot be satisfied or measured.
 
+### Retrospective
+
+**What worked:**
+- The Work Order's `Whole | Fill | Border` warning was load-bearing and correct: the split-border tests named in the gate would have failed without the third discriminant, exactly as predicted.
+- The two Phase 16 insertion tests re-pointed cleanly and now assert the phase's actual goal — `record_key` byte-identical across an insertion while `draw_order` moves 1 → 2.
+
+**What deviated from the plan:**
+- The gate's "strengthen `in_batch_upload_order_follows_draw_depth_then_command_index` rather than build a new one" instruction was read as *replace*: the delegate repurposed it into a hand-built comparator test and dropped its OIT-offset assertion. Fix pass 1 split it into two tests — the production-route test with its original assertions restored, plus `equal_draw_depths_are_broken_by_draw_order` for the same-depth tiebreak. Both were needed; the fixture genuinely cannot produce a same-depth pair through routing.
+- Test count 1191 → 1193 (two added, none deleted).
+
+**Surprises:**
+- `ElementIndex` is a slot in the panel's `LayoutTree` vector, so the new identity is stable against *command* insertion (a border appearing on hover) but not against *element* insertion (a new child in the tree). The phase's target case is the former, and it is fixed; the latter is inherited from Phase 16's material key, which has the same property. See Outstanding items.
+
+**Implications for remaining phases:** none — Phase 19 is the last phase.
+
+### Phase 19 Review
+
+- No remaining phases to re-scope; the plan is exhausted after this phase.
+- Blind review returned two findings. The test-coverage finding was fixed in fix pass 1 (above). The identity-stability finding is factually correct but is not a Phase 19 defect — the implementation matches the approved Spec, and the limitation is inherited from Phase 16's shipped key. Recorded under Outstanding items rather than expanding the final phase.
+- Blind review confirmed clean: split halves get distinct roles with no other collision source, the deferred sweep runs before every reader with the dirty flag marked and cleared correctly, no `#[test]` was removed, and no lint suppression or phase-narrating comment was added.
+
 ## Outstanding items
 
 <!-- Project state outside the phase spine. Not dispatched by /plan:delegate. -->
 
 - **Uncommitted work.** Three rounds sat uncommitted on `feature/widgets` at `2f12a56d` — the `apply_state_appearance` / `_with` renames, the editable-field state fix (hover and disabled present on fields; `pressed_*` gated behind `HasPressedState`) with four new tests and a trybuild case, and the `HasPressedState` doc comment. These landed as `64f8bdc0`, which is current `HEAD`.
-- **`docs/hana_diegetic/widgets.md`** — done. Rewritten as `docs/hana_diegetic/as-built/widgets.md`, current-state only (state appearance described as the four `Appearance` verbs, not the removed flat builders), and the old phased plan deleted. Inbound links in `surface-panels.md` and `widgets-deferred.md` repointed.
+- **`docs/hana_diegetic/as-built/widgets.md`** — the single as-built record for this surface; the plan header stamps `As-built disposition: amend`, so close-out updates it in place. Refreshed against the tree on 2026-07-31 after Phase 18: seven `Appearance` properties, `IntoAppearance` plus the five single-property color wrappers with bare `Color` rejected, the five element roles and `WidgetBuilder::child`, text/path/tint as unsynthesizable hard build errors, state appearance as a four-channel cascade from resource root through ECS ancestors to part, the editable-field editor-part verbs, and `Slider` as behavior-only. Inbound links in `surface-panels.md` and `widgets-deferred.md` already repointed.
+- **Retained identity is stable against command insertion, not element insertion.** Phase 19 keyed `SdfRecordKey` on `(panel, ElementIndex, divider_ordinal, Whole|Fill|Border)` — the shape Phase 16 established for `SdfMaterialSourceKey`. `ElementIndex` is a slot in the panel's `LayoutTree` vector, so inserting a *tree element* still renumbers later siblings and churns their retained records once; inserting a *render command* (a border appearing on hover — the frequent case this plan produces) no longer does. Both keys share the property, so closing it means giving tree elements an insertion-stable identity and re-keying the material rows too. Not opened here: it is new machinery, it would reopen a shipped phase, and the churn it leaves is one-shot rather than per-frame. Decide separately whether it earns follow-up work.
 - **Widget demonstration checkpoint.** The retired widget plan ended with an undelivered discussion phase: decide with the owner how to demonstrate the whole widget system working together — buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and IME/text input coexisting on one panel — and name both the live demonstration and the deterministic integration gate, including the tooltip's final retained transform after first reveal and after a replacement creates a fresh controller. `examples/widgets.rs` is the cumulative baseline; do not reopen which example owns that path, remove either input-integration proof, replace the diagnostic rows, or change the established picking policies.
 - **`WidgetElement<ImeEditableFieldSpec>`** — settled by Phase 4's `EditableField` marker.
 - **`HasPressedState`** — renamed to `Pressable` in Phase 4. Resolved; no longer outstanding.

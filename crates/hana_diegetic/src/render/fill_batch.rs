@@ -77,6 +77,7 @@ use super::material_table::SdfDriverRunOrder;
 use super::material_table::SdfPaintMaterial;
 use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
+use super::panel_geometry::SdfRecordRole;
 use crate::DrawZIndex;
 use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
@@ -211,13 +212,17 @@ impl MaterialSlotInput for SdfMaterialSlotInput<'_> {
     }
 }
 
-/// Per-command SDF record identity without a fill/border role.
+/// Identity for one retained SDF surface record.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfRecordKey {
-    /// Panel entity whose command stream produced this record.
-    pub panel:         Entity,
-    /// Command index of the resolved SDF surface.
-    pub command_index: CommandIndex,
+    /// Panel entity that owns this record.
+    pub panel:           Entity,
+    /// Source element in the panel's layout tree.
+    pub element:         ElementIndex,
+    /// Adjacent-child pair ordinal for a child divider; `None` for an element surface.
+    pub divider_ordinal: Option<usize>,
+    /// Role produced when clipping separates a fill from its border.
+    pub role:            SdfRecordRole,
 }
 
 /// Panel-local rounded-rectangle SDF half-size in world units.
@@ -342,8 +347,10 @@ pub(crate) struct SdfRecordMaterialSlots {
 /// CPU-side SDF record retained by `SdfBatchStore`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ResolvedSdfBatchRecord {
-    /// Per-command SDF record identity.
+    /// Retained-record identity.
     pub record_key:       SdfRecordKey,
+    /// Original command order used to break equal-depth draw ties.
+    pub draw_order:       CommandIndex,
     /// Fill material source identity.
     pub fill_source:      SdfMaterialSourceKey,
     /// Border material source identity.
@@ -414,9 +421,12 @@ impl ResolvedSdfBatchRecord {
         let paint_mask = SdfPaintMask::from_materials(materials.fill, materials.border);
         Self {
             record_key: SdfRecordKey {
-                panel:         surface.panel_entity,
-                command_index: surface.command_index,
+                panel:           surface.panel_entity,
+                element:         surface.element_index,
+                divider_ordinal: surface.divider_ordinal,
+                role:            surface.record_role,
             },
+            draw_order: surface.command_index,
             fill_source,
             border_source,
             draw_depth: surface.draw_depth,
@@ -601,6 +611,10 @@ pub(crate) struct SdfBatch {
     pub record_upload:      Dirty,
     /// Bounds recomputation state for this batch.
     pub bounds_update:      Dirty,
+    /// Deferred sort state for retained records changed in the append pass.
+    sort_pending:           Dirty,
+    #[cfg(test)]
+    sort_count:             usize,
     /// Lowest `DrawOrderIndex` in this batch.
     ///
     /// `SdfRenderRecord::clip_depth_nudge` is uploaded relative to this value;
@@ -648,16 +662,26 @@ impl SdfBatch {
     }
 
     fn sort_records(&mut self) {
+        #[cfg(test)]
+        {
+            self.sort_count += 1;
+        }
         self.records.sort_by(|left, right| {
             left.draw_depth
                 .draw_order_index()
                 .cmp(&right.draw_depth.draw_order_index())
-                .then(
-                    left.record_key
-                        .command_index
-                        .cmp(&right.record_key.command_index),
-                )
+                .then(left.draw_order.cmp(&right.draw_order))
         });
+    }
+
+    /// Sorts changed records once after the route finishes appending them.
+    fn sort_pending_records(&mut self) {
+        if !self.sort_pending.is_set() {
+            return;
+        }
+        self.sort_records();
+        self.refresh_first_draw_order_index();
+        self.sort_pending.clear();
     }
 
     fn upsert_record(&mut self, mut record: ResolvedSdfBatchRecord) {
@@ -676,8 +700,7 @@ impl SdfBatch {
         } else {
             self.records.push(record);
         }
-        self.sort_records();
-        self.refresh_first_draw_order_index();
+        self.sort_pending.mark();
         self.record_upload.mark();
         self.bounds_update.mark();
     }
@@ -1332,8 +1355,10 @@ fn route_sdf_batch_records(
     let builder = build.builder_mut();
     for (surface, panel_lighting, panel_sidedness, panel_visibility) in &resolved_surfaces {
         let record_key = SdfRecordKey {
-            panel:         surface.panel_entity,
-            command_index: surface.command_index,
+            panel:           surface.panel_entity,
+            element:         surface.element_index,
+            divider_ordinal: surface.divider_ordinal,
+            role:            surface.record_role,
         };
         let materials = append_sdf_record_materials(
             builder,
@@ -1361,6 +1386,9 @@ fn route_sdf_batch_records(
         store.upsert_record(record);
     }
     store.retain_records(&active_records);
+    for (_, batch) in store.batches_mut() {
+        batch.sort_pending_records();
+    }
     drop(resolved_surfaces);
     for panel_entity in stale_panels {
         surfaces.remove_panel(panel_entity);
@@ -2465,6 +2493,30 @@ mod tests {
         builder.build()
     }
 
+    fn side_by_side_surface_tree(first: Color, second: Color) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::row().width(Sizing::GROW).height(Sizing::GROW),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(first),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(second),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
     // Drives each fill's base color through the production `.background()` path
     // (the layout color override), while the material supplies the animated
     // scalar PBR fields the background does not touch.
@@ -2630,11 +2682,7 @@ mod tests {
             .batches()
             .flat_map(|(_, batch)| batch.records().iter().cloned())
             .collect();
-        records.sort_by(|left, right| {
-            left.record_key
-                .command_index
-                .cmp(&right.record_key.command_index)
-        });
+        records.sort_by_key(|record| record.draw_order);
         records
     }
 
@@ -2658,6 +2706,32 @@ mod tests {
         let batches: Vec<&SdfBatch> = store.batches().map(|(_, batch)| batch).collect();
         assert_eq!(batches.len(), 1, "expected exactly one SDF batch");
         batches[0].records().to_vec()
+    }
+
+    fn authored_fill_draw_orders(app: &App) -> Vec<CommandIndex> {
+        single_sdf_batch_records(app)
+            .into_iter()
+            .filter(|record| matches!(record.fill_material, SdfPaintMaterial::Authored(_)))
+            .map(|record| record.draw_order)
+            .collect()
+    }
+
+    fn reset_sdf_batch_sort_counts(app: &mut App) {
+        for (_, batch) in app
+            .world_mut()
+            .resource_mut::<SdfBatchStore>()
+            .batches_mut()
+        {
+            batch.sort_count = 0;
+        }
+    }
+
+    fn sdf_batch_sort_counts(app: &App) -> Vec<usize> {
+        app.world()
+            .resource::<SdfBatchStore>()
+            .batches()
+            .map(|(_, batch)| batch.sort_count)
+            .collect()
     }
 
     fn live_sdf_batch_count(app: &mut App) -> usize {
@@ -2759,20 +2833,26 @@ mod tests {
     fn sdf_material_assignments_except(
         app: &App,
         excluded_panel: Entity,
-    ) -> Vec<(SdfRecordKey, SdfPaintMaterial, SdfPaintMaterial)> {
+    ) -> Vec<(
+        CommandIndex,
+        SdfRecordKey,
+        SdfPaintMaterial,
+        SdfPaintMaterial,
+    )> {
         let mut assignments: Vec<_> = sdf_records(app)
             .into_iter()
             .filter(|record| record.record_key.panel != excluded_panel)
             .map(|record| {
                 (
+                    record.draw_order,
                     record.record_key,
                     record.fill_material,
                     record.border_material,
                 )
             })
             .collect();
-        assignments.sort_by_key(|(record_key, _, _)| {
-            (record_key.panel.to_bits(), record_key.command_index.get())
+        assignments.sort_by_key(|(draw_order, record_key, _, _)| {
+            (record_key.panel.to_bits(), draw_order.get())
         });
         assignments
     }
@@ -3497,9 +3577,12 @@ mod tests {
         let mut batch = SdfBatch::default();
         let record = ResolvedSdfBatchRecord {
             record_key:       SdfRecordKey {
-                panel:         Entity::from_bits(1),
-                command_index: CommandIndex::from(0),
+                panel:           Entity::from_bits(1),
+                element:         ElementIndex::from(0),
+                divider_ordinal: None,
+                role:            SdfRecordRole::Whole,
             },
+            draw_order:       CommandIndex::from(0),
             fill_source:      SdfMaterialSourceKey {
                 panel:           Entity::from_bits(1),
                 element:         ElementIndex::from(0),
@@ -3794,7 +3877,7 @@ mod tests {
             record.border_material,
             SdfPaintMaterial::Authored(_)
         ));
-        assert_eq!(record.record_key.command_index.get(), 0);
+        assert_eq!(record.draw_order.get(), 0);
         assert_eq!(
             record.batch_key.pipeline_compatibility.alpha,
             BatchAlphaMode::Opaque
@@ -3834,7 +3917,7 @@ mod tests {
             border_record.border_material,
             SdfPaintMaterial::Authored(_)
         ));
-        assert!(image_record.record_key.command_index < border_record.record_key.command_index);
+        assert!(image_record.record_key.command_index < border_record.draw_order);
         assert_eq!(
             border_record.batch_key.pipeline_compatibility.alpha,
             BatchAlphaMode::Blend
@@ -3911,6 +3994,10 @@ mod tests {
         }) else {
             panic!("expected one border-only SDF record");
         };
+
+        assert_eq!(fill_record.record_key.role, SdfRecordRole::Fill);
+        assert_eq!(border_record.record_key.role, SdfRecordRole::Border);
+        assert_ne!(fill_record.record_key, border_record.record_key);
 
         assert_eq!(
             fill_record.batch_key.pipeline_compatibility.alpha,
@@ -3995,6 +4082,10 @@ mod tests {
         }) else {
             panic!("expected one border-only SDF record");
         };
+
+        assert_eq!(fill_record.record_key.role, SdfRecordRole::Fill);
+        assert_eq!(border_record.record_key.role, SdfRecordRole::Border);
+        assert_ne!(fill_record.record_key, border_record.record_key);
 
         assert_eq!(
             fill_record.batch_key.pipeline_compatibility.alpha,
@@ -4402,8 +4493,8 @@ mod tests {
 
         let initial = sdf_records(&app);
         assert_eq!(initial.len(), 2);
-        assert_eq!(initial[0].record_key.command_index, CommandIndex::from(0));
-        assert_eq!(initial[1].record_key.command_index, CommandIndex::from(1));
+        assert_eq!(initial[0].draw_order, CommandIndex::from(0));
+        assert_eq!(initial[1].draw_order, CommandIndex::from(1));
 
         assert!(
             app.world_mut()
@@ -4415,8 +4506,8 @@ mod tests {
 
         let churned = sdf_records(&app);
         assert_eq!(churned.len(), 2);
-        assert_eq!(churned[0].record_key.command_index, CommandIndex::from(0));
-        assert_eq!(churned[1].record_key.command_index, CommandIndex::from(1));
+        assert_eq!(churned[0].draw_order, CommandIndex::from(0));
+        assert_eq!(churned[1].draw_order, CommandIndex::from(1));
         assert_eq!(fill_row_color(&app, &churned[0]), linear_color(survivor));
         assert_eq!(fill_row_color(&app, &churned[1]), linear_color(added));
         assert_eq!(app.world().resource::<SdfBatchStore>().batches().count(), 1);
@@ -4441,12 +4532,90 @@ mod tests {
         let records = single_sdf_batch_records(&app);
 
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0].record_key.command_index, CommandIndex::from(0));
-        assert_eq!(records[1].record_key.command_index, CommandIndex::from(1));
+        assert_eq!(records[0].draw_order, CommandIndex::from(0));
+        assert_eq!(records[1].draw_order, CommandIndex::from(1));
         assert!(
             records[0].draw_depth.draw_order_index() <= records[1].draw_depth.draw_order_index()
         );
         assert!(records[0].oit_depth_offset < records[1].oit_depth_offset);
+    }
+
+    #[test]
+    fn equal_draw_depths_are_broken_by_draw_order() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            stacked_surface_tree(
+                Color::srgba(0.9, 0.1, 0.1, 0.5),
+                Color::srgba(0.1, 0.1, 0.9, 0.5),
+            ),
+            StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        settle_sdf_pipeline(&mut app);
+
+        {
+            let mut store = app.world_mut().resource_mut::<SdfBatchStore>();
+            let (_, batch) = store
+                .batches_mut()
+                .next()
+                .expect("the two surfaces should share one SDF batch");
+            assert_eq!(batch.records.len(), 2);
+            batch.records[1].draw_depth = batch.records[0].draw_depth;
+            batch.records.swap(0, 1);
+            batch.sort_records();
+        }
+
+        let records = single_sdf_batch_records(&app);
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].draw_order, CommandIndex::from(0));
+        assert_eq!(records[1].draw_order, CommandIndex::from(1));
+        assert_eq!(
+            records[0].draw_depth.draw_order_index(),
+            records[1].draw_depth.draw_order_index()
+        );
+    }
+
+    #[test]
+    fn deferred_sdf_record_sort_runs_once_per_dirty_batch() {
+        let first = Color::srgb(0.9, 0.1, 0.1);
+        let second = Color::srgb(0.1, 0.1, 0.9);
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            stacked_surface_tree(first, second),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+        reset_sdf_batch_sort_counts(&mut app);
+
+        let updated = app
+            .world_mut()
+            .commands()
+            .set_tree(panel, side_by_side_surface_tree(first, second));
+        assert!(
+            updated.is_ok(),
+            "changing both SDF surface bounds should succeed"
+        );
+        app.update();
+
+        assert_eq!(
+            sdf_batch_sort_counts(&app),
+            vec![1],
+            "one dirty SDF batch sorts once after both changed records append",
+        );
+
+        reset_sdf_batch_sort_counts(&mut app);
+        app.update();
+
+        assert_eq!(
+            sdf_batch_sort_counts(&app),
+            vec![0],
+            "a clean SDF batch performs no deferred sort",
+        );
     }
 
     #[test]
@@ -4657,6 +4826,7 @@ mod tests {
             command_index:   CommandIndex::from(command_index),
             element_index:   draw_order::ElementIndex::from(command_index),
             divider_ordinal: None,
+            record_role:     SdfRecordRole::Whole,
             draw_depth:      draw_depth_for_test(command_index),
             fill_material:   ResolvedSdfMaterial {
                 authorship:    fill_authorship,
@@ -5252,6 +5422,12 @@ mod tests {
             divider_ordinal: None,
             role: SdfMaterialRole::Fill,
         };
+        let expected_record_key = SdfRecordKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfRecordRole::Whole,
+        };
         let records = sdf_records(&app);
         let initial_peer_slot = records
             .iter()
@@ -5271,8 +5447,19 @@ mod tests {
             records
                 .iter()
                 .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
-                .map(|record| record.record_key.command_index),
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
             Some(CommandIndex::from(1))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(1)]
         );
         assert!(initial_peer_slot.is_some());
 
@@ -5305,8 +5492,19 @@ mod tests {
             records
                 .iter()
                 .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
-                .map(|record| record.record_key.command_index),
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
             Some(CommandIndex::from(2))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(2)]
         );
         assert_eq!(updated_peer_slot, initial_peer_slot);
     }
@@ -5327,6 +5525,12 @@ mod tests {
             divider_ordinal: None,
             role: SdfMaterialRole::Fill,
         };
+        let expected_record_key = SdfRecordKey {
+            panel,
+            element: ElementIndex::from(3),
+            divider_ordinal: None,
+            role: SdfRecordRole::Whole,
+        };
         let records = sdf_records(&app);
         let initial_peer_slot = records
             .iter()
@@ -5346,8 +5550,19 @@ mod tests {
             records
                 .iter()
                 .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
-                .map(|record| record.record_key.command_index),
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
             Some(CommandIndex::from(1))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(1)]
         );
         assert!(initial_peer_slot.is_some());
 
@@ -5377,8 +5592,19 @@ mod tests {
             records
                 .iter()
                 .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
-                .map(|record| record.record_key.command_index),
+                .map(|record| record.record_key),
+            Some(expected_record_key)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .find(|record| fill_row_color(&app, record) == linear_color(PEER_FILL_COLOR))
+                .map(|record| record.draw_order),
             Some(CommandIndex::from(2))
+        );
+        assert_eq!(
+            authored_fill_draw_orders(&app),
+            vec![CommandIndex::from(0), CommandIndex::from(2)]
         );
         assert_eq!(updated_peer_slot, initial_peer_slot);
     }
@@ -5435,7 +5661,7 @@ mod tests {
         });
         let initial_divider_command_indices: HashMap<_, _> = records
             .iter()
-            .map(|record| (record.fill_source, record.record_key.command_index))
+            .map(|record| (record.fill_source, record.draw_order))
             .filter(|(source, _)| source.divider_ordinal.is_some())
             .collect();
         assert_eq!(divider_keys, expected);
@@ -5462,7 +5688,7 @@ mod tests {
         assert_eq!(divider_keys, expected);
         let updated_divider_command_indices: HashMap<_, _> = sdf_records(&app)
             .iter()
-            .map(|record| (record.fill_source, record.record_key.command_index))
+            .map(|record| (record.fill_source, record.draw_order))
             .filter(|(source, _)| source.divider_ordinal.is_some())
             .collect();
         assert!(

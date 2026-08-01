@@ -535,6 +535,8 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) element_index:   ElementIndex,
     /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
     pub(crate) divider_ordinal: Option<usize>,
+    /// Retained-record role when clipping separates the fill and border.
+    pub(crate) record_role:     SdfRecordRole,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     pub(crate) draw_depth:      DrawCommandDepth,
     /// Fill material input consumed by the SDF material table.
@@ -560,6 +562,17 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) render_layers:   RenderLayers,
     /// Shadow-casting policy copied to SDF fill batch records.
     pub(crate) shadow_casting:  ShadowCasting,
+}
+
+/// Retained-record role for one resolved SDF surface.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum SdfRecordRole {
+    /// The surface keeps its fill and border in one retained record.
+    Whole,
+    /// The clipped surface retains only its fill.
+    Fill,
+    /// The clipped surface retains only its border.
+    Border,
 }
 
 impl ResolvedSdfSurface<'_> {
@@ -637,6 +650,8 @@ pub(crate) struct StoredResolvedSdfSurface {
     element_index:   ElementIndex,
     /// Adjacent-child pair ordinal for a child divider; `None` for element surfaces.
     divider_ordinal: Option<usize>,
+    /// Retained-record role when clipping separates the fill and border.
+    record_role:     SdfRecordRole,
     /// `DrawCommandDepth` for sorted and OIT ordering.
     draw_depth:      DrawCommandDepth,
     /// Fill material source for the SDF material table.
@@ -666,6 +681,7 @@ impl StoredResolvedSdfSurface {
             command_index:   surface.command_index,
             element_index:   surface.element_index,
             divider_ordinal: surface.divider_ordinal,
+            record_role:     surface.record_role,
             draw_depth:      surface.draw_depth,
             fill_material:   StoredResolvedSdfMaterial::from_resolved(&surface.fill_material),
             border_material: StoredResolvedSdfMaterial::from_resolved(&surface.border_material),
@@ -705,6 +721,7 @@ impl StoredResolvedSdfSurface {
             command_index: self.command_index,
             element_index: self.element_index,
             divider_ordinal: self.divider_ordinal,
+            record_role: self.record_role,
             draw_depth: self.draw_depth,
             fill_material: self.fill_material.as_resolved(),
             border_material: self.border_material.as_resolved(),
@@ -769,13 +786,16 @@ fn push_resolved_sdf_surfaces<'a>(
     }
 
     let border_surface = surface.border_only();
-    let border_resolved = resolve_sdf_surface(&border_surface, context);
+    let mut border_resolved = resolve_sdf_surface(&border_surface, context);
     if !should_split_clipped_border(surface, &resolved, &border_resolved) {
         output.push(resolved);
         return;
     }
 
-    output.push(resolve_sdf_surface(&surface.fill_only(), context));
+    let mut fill_resolved = resolve_sdf_surface(&surface.fill_only(), context);
+    fill_resolved.record_role = SdfRecordRole::Fill;
+    border_resolved.record_role = SdfRecordRole::Border;
+    output.push(fill_resolved);
     output.push(border_resolved);
 }
 
@@ -889,6 +909,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
         command_index: surface.command_index,
         element_index: surface.index,
         divider_ordinal: surface.divider_ordinal,
+        record_role: SdfRecordRole::Whole,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
             authorship:    if fill_color.is_some() || material_override_authors_fill {
