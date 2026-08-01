@@ -30,6 +30,7 @@ pub use font::FontSource;
 pub use font::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use font::GlyphTypographyMetrics;
+pub use font::IntegralAdvanceSizeError;
 pub use font::create_parley_measurer;
 pub(crate) use font::glyph_ink_extents;
 pub(crate) use slug::GlyphCache;

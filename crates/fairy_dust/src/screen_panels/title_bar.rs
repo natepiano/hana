@@ -10,6 +10,7 @@ use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::El;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
@@ -26,12 +27,12 @@ use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
 use super::constants::TITLE_BAR_DEFAULT_TITLE;
-use super::constants::TITLE_BAR_LABEL_SIZE;
 use super::constants::TITLE_BAR_SEGMENT_GAP;
 use super::screen_panel_frame;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
+use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 
@@ -351,9 +352,10 @@ struct ControlStyles {
 }
 
 impl ControlStyles {
-    fn new() -> Self {
+    fn new(fonts: &FontRegistry) -> Self {
+        let size = super::integral_advance_size(fonts, LABEL_SIZE);
         let control_style = |color| {
-            TextStyle::new(TITLE_BAR_LABEL_SIZE)
+            TextStyle::new(size)
                 .with_color(color)
                 .with_shadow_mode(GlyphShadowMode::None)
         };
@@ -394,6 +396,7 @@ pub(super) fn spawn_title_bar_with_home_chip(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
     title_bar: &TitleBar,
+    fonts: &FontRegistry,
     home: Option<&CameraHomeConfig>,
     registry: Option<&TitleBarControlRegistry>,
 ) {
@@ -419,13 +422,14 @@ pub(super) fn spawn_title_bar_with_home_chip(
             }
         }
     }
-    spawn_title_bar(commands, materials, &title_bar);
+    spawn_title_bar(commands, materials, &title_bar, fonts);
 }
 
 fn spawn_title_bar(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
     title_bar: &TitleBar,
+    fonts: &FontRegistry,
 ) {
     let state = TitleBarControlState::from_title_bar(title_bar);
     let unlit = super::screen_panel_material_handle(materials);
@@ -434,7 +438,7 @@ fn spawn_title_bar(
         .anchor(title_bar.anchor)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_title_bar_tree(title_bar, &state))
+        .with_tree(build_title_bar_tree(title_bar, &state, fonts))
         .build();
 
     match panel {
@@ -459,17 +463,24 @@ pub(crate) fn refresh_changed_title_bar(
         (Entity, &TitleBar, &TitleBarControlState),
         Or<(Changed<TitleBar>, Changed<TitleBarControlState>)>,
     >,
+    fonts: Res<FontRegistry>,
 ) {
     for (entity, title_bar, state) in &title_bars {
-        if let Err(error) = commands.set_tree(entity, build_title_bar_tree(title_bar, state)) {
+        if let Err(error) =
+            commands.set_tree(entity, build_title_bar_tree(title_bar, state, &fonts))
+        {
             warn!("failed to replace title-bar panel {entity:?} tree: {error}");
         }
     }
 }
 
-fn build_title_bar_tree(title_bar: &TitleBar, state: &TitleBarControlState) -> LayoutTree {
+fn build_title_bar_tree(
+    title_bar: &TitleBar,
+    state: &TitleBarControlState,
+    fonts: &FontRegistry,
+) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    build_title_bar_layout(&mut builder, title_bar, state);
+    build_title_bar_layout(&mut builder, title_bar, state, fonts);
     builder.build()
 }
 
@@ -477,11 +488,12 @@ fn build_title_bar_layout(
     builder: &mut LayoutBuilder,
     title_bar: &TitleBar,
     state: &TitleBarControlState,
+    fonts: &FontRegistry,
 ) {
-    let title = TextStyle::new(TITLE_SIZE)
+    let title = TextStyle::new(super::integral_advance_size(fonts, TITLE_SIZE))
         .with_color(TITLE_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
-    let controls = ControlStyles::new();
+    let controls = ControlStyles::new(fonts);
 
     let background = title_bar
         .background_color

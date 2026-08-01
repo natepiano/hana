@@ -28,6 +28,7 @@ use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticUiPlugin;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::PanelChanged;
 use hana_lagrange::CameraHomed;
 use hana_lagrange::CameraSlowModeState;
@@ -113,6 +114,7 @@ fn ensure_panel_plugins(app: &mut App) {
 fn spawn_panel(
     mut commands: Commands,
     background: Res<CameraControlPanelBackground>,
+    fonts: Res<FontRegistry>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let snapshot = default_snapshot();
@@ -123,7 +125,12 @@ fn spawn_panel(
         .anchor(Anchor::BottomRight)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_guidance_tree(&snapshot, display, background.0))
+        .with_tree(build_guidance_tree(
+            &snapshot,
+            display,
+            background.0,
+            &fonts,
+        ))
         .build();
 
     match panel {
@@ -184,6 +191,7 @@ fn rebind_panel_on_route_change(
         &mut CameraGuidanceDisplayState,
     )>,
     background: Res<CameraControlPanelBackground>,
+    fonts: Res<FontRegistry>,
 ) {
     // Before routing selects a camera, follow the first panel-capable camera so
     // the panel shows a real preset instead of the fabricated default.
@@ -232,7 +240,7 @@ fn rebind_panel_on_route_change(
     commands.entity(panel_entity).insert(snapshot.clone());
     if let Err(error) = commands.set_tree(
         panel_entity,
-        build_guidance_tree(&snapshot, display_state.display(), background.0),
+        build_guidance_tree(&snapshot, display_state.display(), background.0, &fonts),
     ) {
         warn!("failed to replace camera control panel tree: {error}");
     }
@@ -419,6 +427,7 @@ fn repaint_panel_display(
         &mut CameraGuidanceDisplayState,
     )>,
     background: Res<CameraControlPanelBackground>,
+    fonts: Res<FontRegistry>,
 ) {
     let (panel_entity, snapshot, mut display) = panel.into_inner();
     if display.render_state == RenderState::Idle {
@@ -426,7 +435,7 @@ fn repaint_panel_display(
     }
     if let Err(error) = commands.set_tree(
         panel_entity,
-        build_guidance_tree(snapshot, display.display(), background.0),
+        build_guidance_tree(snapshot, display.display(), background.0, &fonts),
     ) {
         warn!("failed to replace camera control panel tree: {error}");
     }

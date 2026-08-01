@@ -347,6 +347,7 @@ pub use text::FontSource;
 pub use text::GlyphBounds;
 #[cfg(feature = "typography_overlay")]
 pub use text::GlyphTypographyMetrics;
+pub use text::IntegralAdvanceSizeError;
 use text::TextPlugin;
 pub use widgets::Appearance;
 pub use widgets::BackgroundColor;

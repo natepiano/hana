@@ -31,8 +31,8 @@ use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
-use fairy_dust::diegetic_stats_sections_panel;
-use fairy_dust::diegetic_stats_sections_tree;
+use fairy_dust::diegetic_stats_sections_panel_with_integral_advance;
+use fairy_dust::diegetic_stats_sections_tree_with_integral_advance;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 use hana_diegetic::AlignX;
@@ -47,6 +47,7 @@ use hana_diegetic::DiegeticPanelCommands;
 use hana_diegetic::DiegeticPerfStats;
 use hana_diegetic::El;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::HdrTextCoverageBias;
 use hana_diegetic::LayoutBuilder;
@@ -1165,9 +1166,13 @@ fn validation_panel(
     }
 }
 
-fn spawn_stats_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+fn spawn_stats_panel(
+    mut commands: Commands,
+    fonts: Res<FontRegistry>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let sections = runtime_stats_sections(None, 0.0, 0.0);
-    match diegetic_stats_sections_panel(&sections, &mut materials) {
+    match diegetic_stats_sections_panel_with_integral_advance(&sections, &fonts, &mut materials) {
         Ok(panel) => {
             commands.spawn((BatchValidationStatsPanel, panel, Transform::default()));
         },
@@ -1467,6 +1472,7 @@ fn update_diagnostic_panels(
     mut last: ResMut<LastDisplayedDiagnostics>,
     mut commands: Commands,
     mut timer: Local<Option<Timer>>,
+    fonts: Res<FontRegistry>,
 ) {
     let timer = timer.get_or_insert_with(|| {
         Timer::from_seconds(DIAGNOSTIC_UPDATE_INTERVAL, TimerMode::Repeating)
@@ -1491,8 +1497,10 @@ fn update_diagnostic_panels(
     }
     last.key = key;
     for panel in &stats_panels {
-        if let Err(error) = commands.set_tree(panel, diegetic_stats_sections_tree(&stats_sections))
-        {
+        if let Err(error) = commands.set_tree(
+            panel,
+            diegetic_stats_sections_tree_with_integral_advance(&stats_sections, &fonts),
+        ) {
             error!("failed to replace stats panel tree: {error}");
         }
     }

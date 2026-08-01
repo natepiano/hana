@@ -64,8 +64,8 @@ use fairy_dust::StatsPanelRow;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
-use fairy_dust::diegetic_stats_panel;
-use fairy_dust::diegetic_stats_tree;
+use fairy_dust::diegetic_stats_panel_with_integral_advance;
+use fairy_dust::diegetic_stats_tree_with_integral_advance;
 use fairy_dust::fps_stats_panel;
 use fairy_dust::gpu_meter_panel;
 use fairy_dust::screen_panel_frame;
@@ -78,6 +78,7 @@ use hana_diegetic::DiegeticPerfStats;
 use hana_diegetic::DiegeticText;
 use hana_diegetic::DiegeticTextMut;
 use hana_diegetic::El;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
@@ -1185,10 +1186,12 @@ fn spawn_status_overlay(mut commands: Commands, mut materials: ResMut<Assets<Sta
 
 fn spawn_batch_stats_overlay(
     mut commands: Commands,
+    fonts: Res<FontRegistry>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let built = diegetic_stats_panel(
+    let built = diegetic_stats_panel_with_integral_advance(
         &batch_stats_rows(&BatchStatsValues::default()),
+        &fonts,
         &mut materials,
     );
     match built {
@@ -1747,6 +1750,7 @@ fn update_batch_stats_panel(
     mut commands: Commands,
     mut timer: Local<Option<Timer>>,
     time: Res<Time>,
+    fonts: Res<FontRegistry>,
 ) {
     let timer =
         timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
@@ -1792,7 +1796,10 @@ fn update_batch_stats_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            if let Err(error) = commands.set_tree(entity, diegetic_stats_tree(&rows)) {
+            if let Err(error) = commands.set_tree(
+                entity,
+                diegetic_stats_tree_with_integral_advance(&rows, &fonts),
+            ) {
                 error!("failed to replace diegetic stats tree: {error}");
             }
         }

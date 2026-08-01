@@ -502,8 +502,7 @@ fn main() {
             TitleBar::new()
                 .with_title("Widgets")
                 .with_anchor(Anchor::TopLeft)
-                .control(TOGGLE_CONTROL)
-                .control("HHHHHH"),
+                .control(TOGGLE_CONTROL),
         )
         .wire_chip_to_state::<ToggleMode, _>(TOGGLE_CONTROL, |mode| mode.control_activation())
         .with_description_panel(

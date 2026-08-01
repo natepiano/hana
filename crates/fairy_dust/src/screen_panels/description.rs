@@ -5,7 +5,9 @@ use hana_diegetic::Anchor;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::El;
 use hana_diegetic::Fit;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::LayoutBuilder;
+use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
 
@@ -92,6 +94,7 @@ struct DescriptionPanelMarker;
 pub(super) fn spawn_description_panel(
     commands: &mut Commands,
     panel: &DescriptionPanel,
+    fonts: &FontRegistry,
     materials: &mut Assets<StandardMaterial>,
 ) {
     let unlit = super::screen_panel_material_handle(materials);
@@ -100,7 +103,7 @@ pub(super) fn spawn_description_panel(
         .anchor(panel.anchor)
         .material(unlit.clone())
         .text_material(unlit)
-        .layout(|builder| build_description_layout(builder, panel))
+        .layout(|builder| build_description_layout(builder, panel, fonts))
         .build();
 
     match built {
@@ -113,9 +116,15 @@ pub(super) fn spawn_description_panel(
     }
 }
 
-fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPanel) {
-    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let body = TextStyle::new(panel.body_size).with_color(BODY_COLOR);
+fn build_description_layout(
+    builder: &mut LayoutBuilder,
+    panel: &DescriptionPanel,
+    fonts: &FontRegistry,
+) {
+    let title =
+        TextStyle::new(super::integral_advance_size(fonts, TITLE_SIZE)).with_color(TITLE_COLOR);
+    let body = TextStyle::new(super::integral_advance_size(fonts, Pt(panel.body_size)))
+        .with_color(BODY_COLOR);
 
     let background = panel
         .background_color

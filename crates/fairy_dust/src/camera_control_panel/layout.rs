@@ -5,6 +5,7 @@ use hana_diegetic::AlignY;
 use hana_diegetic::ChildDivider;
 use hana_diegetic::Column;
 use hana_diegetic::El;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::GlyphShadowMode;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
@@ -72,9 +73,10 @@ pub(super) fn build_guidance_tree(
     snapshot: &CameraGuidanceSnapshot,
     display: CameraGuidanceDisplay,
     background: Color,
+    fonts: &FontRegistry,
 ) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    build_guidance_layout(&mut builder, snapshot, display, background);
+    build_guidance_layout(&mut builder, snapshot, display, background, fonts);
     builder.build()
 }
 
@@ -83,17 +85,19 @@ fn build_guidance_layout(
     snapshot: &CameraGuidanceSnapshot,
     display: CameraGuidanceDisplay,
     background: Color,
+    fonts: &FontRegistry,
 ) {
-    let title = TextStyle::new(TITLE_SIZE)
+    let title = TextStyle::new(screen_panels::integral_advance_size(fonts, TITLE_SIZE))
         .with_color(TITLE_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
-    let header = TextStyle::new(LABEL_SIZE)
+    let label_size = screen_panels::integral_advance_size(fonts, LABEL_SIZE);
+    let header = TextStyle::new(label_size)
         .with_color(HEADER_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
-    let label = TextStyle::new(LABEL_SIZE)
+    let label = TextStyle::new(label_size)
         .with_color(LABEL_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
-    let active = TextStyle::new(LABEL_SIZE)
+    let active = TextStyle::new(label_size)
         .with_color(ACTIVE_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
 

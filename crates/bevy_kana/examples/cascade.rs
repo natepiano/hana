@@ -33,9 +33,10 @@ use fairy_dust::StatsPanelRow;
 use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_label;
-use fairy_dust::diegetic_stats_sections_panel;
-use fairy_dust::diegetic_stats_sections_tree;
+use fairy_dust::diegetic_stats_sections_panel_with_integral_advance;
+use fairy_dust::diegetic_stats_sections_tree_with_integral_advance;
 use hana_diegetic::DiegeticPanelCommands;
+use hana_diegetic::FontRegistry;
 use hana_lagrange::OrbitCamPreset;
 
 // camera
@@ -250,6 +251,7 @@ fn description_panel() -> DescriptionPanel {
 
 fn setup(
     mut commands: Commands,
+    fonts: Res<FontRegistry>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -287,7 +289,11 @@ fn setup(
     };
     commands.insert_resource(cubes);
 
-    match diegetic_stats_sections_panel(&pending_status_sections(), &mut materials) {
+    match diegetic_stats_sections_panel_with_integral_advance(
+        &pending_status_sections(),
+        &fonts,
+        &mut materials,
+    ) {
         Ok(panel) => {
             commands.spawn((CascadeStatusPanel, panel, Transform::default()));
         },
@@ -408,6 +414,7 @@ fn refresh_status_panel(
     panels: Query<Entity, With<CascadeStatusPanel>>,
     mut displayed: Local<Option<StatusSnapshot>>,
     mut commands: Commands,
+    fonts: Res<FontRegistry>,
 ) {
     let Some(snapshot) = status_snapshot(default.0, *cubes, &participants) else {
         return;
@@ -418,7 +425,7 @@ fn refresh_status_panel(
     for panel in &panels {
         if let Err(error) = commands.set_tree(
             panel,
-            diegetic_stats_sections_tree(&status_sections(snapshot)),
+            diegetic_stats_sections_tree_with_integral_advance(&status_sections(snapshot), &fonts),
         ) {
             warn!("failed to replace cascade stats panel tree: {error}");
         }

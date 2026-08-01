@@ -14,17 +14,24 @@ use hana_diegetic::CornerRadius;
 use hana_diegetic::DiegeticPanel;
 use hana_diegetic::DiegeticUiPlugin;
 use hana_diegetic::El;
+use hana_diegetic::FontId;
+use hana_diegetic::FontRegistry;
 use hana_diegetic::LayoutBuilder;
 use hana_diegetic::Padding;
 use hana_diegetic::PanelPicking;
+use hana_diegetic::Pt;
 use hana_diegetic::Sizing;
 use hana_diegetic::default_panel_material;
 pub use performance::StatsPanelRow;
 pub use performance::StatsPanelSection;
 pub use performance::diegetic_stats_panel;
+pub use performance::diegetic_stats_panel_with_integral_advance;
 pub use performance::diegetic_stats_sections_panel;
+pub use performance::diegetic_stats_sections_panel_with_integral_advance;
 pub use performance::diegetic_stats_sections_tree;
+pub use performance::diegetic_stats_sections_tree_with_integral_advance;
 pub use performance::diegetic_stats_tree;
+pub use performance::diegetic_stats_tree_with_integral_advance;
 pub use performance::fps_stats_panel;
 pub use performance::gpu_meter_panel;
 pub use title_bar::ControlActivation;
@@ -58,8 +65,10 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(
         Startup,
-        move |mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>| {
-            description::spawn_description_panel(&mut commands, &panel, &mut materials);
+        move |mut commands: Commands,
+              fonts: Res<FontRegistry>,
+              mut materials: ResMut<Assets<StandardMaterial>>| {
+            description::spawn_description_panel(&mut commands, &panel, &fonts, &mut materials);
         },
     );
 }
@@ -74,14 +83,16 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
         Startup,
         move |mut commands: Commands,
               mut materials: ResMut<Assets<StandardMaterial>>,
+              fonts: Res<FontRegistry>,
               home: Option<Res<CameraHomeConfig>>,
-              registry: Option<Res<TitleBarControlRegistry>>| {
+              control_registry: Option<Res<TitleBarControlRegistry>>| {
             title_bar::spawn_title_bar_with_home_chip(
                 &mut commands,
                 &mut materials,
                 &title_bar,
+                &fonts,
                 home.as_deref(),
-                registry.as_deref(),
+                control_registry.as_deref(),
             );
         },
     );
@@ -114,6 +125,27 @@ pub fn screen_panel_material_handle(
     materials: &mut Assets<StandardMaterial>,
 ) -> Handle<StandardMaterial> {
     materials.add(screen_panel_material())
+}
+
+/// Resolves a screen-panel request to the nearest size whose monospace glyph
+/// advance spans a whole logical pixel.
+pub(crate) fn integral_advance_size(fonts: &FontRegistry, requested: Pt) -> Pt {
+    let Some(font) = fonts.font(FontId::MONOSPACE) else {
+        bevy::log::warn_once!(
+            "fairy_dust: embedded monospace font is unavailable; using requested text size"
+        );
+        return requested;
+    };
+    match font.nearest_integral_advance_size(requested) {
+        Ok(size) => size,
+        Err(error) => {
+            bevy::log::warn_once!(
+                "fairy_dust: cannot resolve an integral-advance screen text size: {error}; \
+                 using requested size"
+            );
+            requested
+        },
+    }
 }
 
 /// Adds the standard Fairy Dust screen-panel frame, then lets the caller
