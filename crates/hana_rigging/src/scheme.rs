@@ -178,6 +178,9 @@ impl RegisteredSchemes {
     #[must_use]
     pub fn contains(&self, name: &SchemeName) -> bool { self.names.contains(name) }
 
+    #[cfg(test)]
+    pub(crate) const fn count(&self) -> usize { self.names.len() }
+
     /// Reject a reported `DeviceKey` whose scheme was absent from app-build registration.
     ///
     /// Synthesized keys need no registration because their digest has no provider-defined identity

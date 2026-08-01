@@ -12,48 +12,49 @@ use crate::DeviceKey;
 use crate::OsDeviceId;
 use crate::ReportedSerial;
 
-/// Provider report of whether a unit can be reached in its most recently completed device set.
+/// Reporter observation of whether a unit can be reached in its most recently completed device
+/// set.
 ///
-/// `Presence` is an entity component because providers update it as hardware appears, departs, or
+/// `Presence` is an entity component because reporters update it as hardware appears, departs, or
 /// becomes unreachable. `Unreachable` is not `Absent`: treating a silent remote node as removed
 /// can retire output still attached to a live device.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Component, Reflect)]
 #[reflect(Component)]
 pub enum Presence {
-    /// The provider observed the unit and can use it, such as a connected display or camera.
+    /// The reporter observed the unit and can use it, such as a connected display or camera.
     Present,
-    /// The provider established that the unit is gone from its whole current device set.
+    /// The reporter established that the unit is gone from its whole current device set.
     Absent,
-    /// The provider cannot determine whether the unit remains available, such as when a remote
+    /// The reporter cannot determine whether the unit remains available, such as when a remote
     /// node stopped responding or its transport disconnected.
     Unreachable {
-        /// Time elapsed since the provider first observed this unit as unreachable.
+        /// Time elapsed since the reporter first observed this unit as unreachable.
         since: Duration,
     },
 }
 
-/// Name status a provider assigns to the unit represented by one `DeviceRecord`.
+/// Name status a reporter assigns to the unit represented by one `DeviceRecord`.
 ///
-/// The two variants replace `Option<DeviceKey>` because a provider that can name a unit durably
-/// participates in key reconciliation, while a provider with only operating-system match evidence
+/// The two variants replace `Option<DeviceKey>` because a reporter that can name a unit durably
+/// participates in key reconciliation, while a reporter with only operating-system match evidence
 /// must not fabricate a durable identity.
 #[derive(Clone, PartialEq, Eq, Debug, Reflect)]
 pub enum ReportedAs {
-    /// The provider minted a durable key from evidence that can identify this unit across runs.
+    /// The reporter minted a durable key from evidence that can identify this unit across runs.
     Keyed(DeviceKey),
-    /// The provider recognizes the unit but has no durable name, as with a display API report
-    /// that can join another provider through `DeviceRecord::os_id` only.
+    /// The reporter recognizes the unit but has no durable name, as with a display API report
+    /// that can join another reporter through `DeviceRecord::os_id` only.
     ///
     /// Reconciliation keeps this evidence only when it joins a keyed record. A report with no
     /// keyed match creates no device entity and cannot expose a fabricated `DeviceKey`.
     MatchEvidenceOnly,
 }
 
-/// One unit in a provider's completed whole-set report.
+/// One unit in a reporter's completed whole-set report.
 ///
 /// `DeviceRecord` carries observed evidence but no `crate::IdentityVerdict` or `crate::DeviceId`.
 /// Reconciliation creates those conclusions after comparing this report with saved keys; allowing
-/// a provider to supply either would let it assert identity for a unit that supplied no evidence.
+/// a reporter to supply either would let it assert identity for a unit that supplied no evidence.
 pub struct DeviceRecord {
     /// Durable naming status for this report, including the evidence-only case with no device key.
     pub reported_as:  ReportedAs,
@@ -61,44 +62,49 @@ pub struct DeviceRecord {
     /// their host. A root has exactly one absence state, so `None` does not erase a policy
     /// distinction.
     pub transport:    Option<DeviceKey>,
-    /// Provider observation of whether this unit is present, absent, or unreachable.
+    /// Reporter observation of whether this unit is present, absent, or unreachable.
     pub presence:     Presence,
-    /// Provider observation of exclusive ownership, independent from whether the unit is present.
+    /// Reporter observation of exclusive ownership, independent from whether the unit is present.
     pub claim:        Claim,
-    /// Component values that describe what this unit can do from this provider's perspective.
+    /// Component values that describe what this unit can do from this reporter's perspective.
     pub capabilities: Capabilities,
-    /// Serial evidence supplied by the unit or the reason no serial value was available.
+    /// Serial evidence supplied by the unit or the reason no serial value was available to the
+    /// reporter.
     pub serial:       ReportedSerial,
     /// Process-local operating-system handle that can join reports without becoming persisted
     /// identity.
     pub os_id:        OsDeviceId,
     /// Observed attachment location that reconciliation compares when a saved unit was displaced.
     pub attachment:   AttachmentPath,
-    /// Vendor, product, and model evidence used for synthesized identity and diagnostics.
+    /// Vendor, product, and model evidence the reporter uses for synthesized identity and
+    /// diagnostics.
     pub descriptor:   DeviceDescriptor,
 }
 
-/// Provider result for one opportunity to enumerate its devices.
+/// Reporter result for one opportunity to enumerate its devices.
 ///
-/// Providers return `DeviceScan::Unchanged` on frames where no scan ran; reconciliation retains
-/// the last complete set. A completed scan always contains the provider's whole current set, so a
+/// Reporters return `DeviceScan::Unchanged` on frames where no scan ran; reconciliation retains
+/// the last complete set. A completed scan always contains the reporter's whole current set, so a
 /// missing record is meaningful evidence of departure.
 pub enum DeviceScan {
-    /// The provider did not scan after its prior report, as when a camera enumeration interval has
+    /// The reporter did not scan after its prior report, as when a camera enumeration interval has
     /// not elapsed or display configuration has not changed.
     Unchanged,
-    /// The provider scanned and supplied every currently visible device record.
-    Complete(DeviceSet),
+    /// The reporter scanned and supplied every currently visible device record.
+    ///
+    /// The reporter registry stamps this list with the registry-issued `ReporterId` and its next
+    /// `ReporterRevision`; reporter implementations cannot supply either value themselves.
+    Complete(Vec<DeviceRecord>),
 }
 
-/// Whole current device set reported by one provider after it completes a scan.
+/// Whole current device set the reporter registry prepared after one completed scan.
 pub struct DeviceSet {
-    /// Process-local reporter handle that identifies which registered reporter produced this set.
+    /// Process-local reporter handle the reporter registry entry assigned to this set's reporter.
     pub reporter: ReporterId,
     /// Every currently visible device from the reporter, with absent devices omitted. Parent links
     /// form a forest that reconciliation ingests from roots toward children.
     pub devices:  Vec<DeviceRecord>,
-    /// Per-reporter monotonic count that reconciliation folds into a global rigging revision.
+    /// Per-reporter monotonic count the reporter registry entry advances for reconciliation.
     pub revision: ReporterRevision,
 }
 
@@ -107,6 +113,7 @@ pub struct DeviceSet {
 /// `ReporterId` has no public constructor because reporters receive it from the reporter registry;
 /// permitting a reporter to mint one would let it overwrite another reporter's whole device set.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
+#[reflect(opaque)]
 pub struct ReporterId(pub(crate) u32);
 
 /// Monotonic counter attached to each completed scan from one reporter.
@@ -114,14 +121,16 @@ pub struct ReporterId(pub(crate) u32);
 /// A `ReporterRevision` is per reporter, not a topology counter: camera, HID, and display
 /// reporters advance independently before reconciliation combines their latest complete reports.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Reflect)]
+#[reflect(opaque)]
 pub struct ReporterRevision(u64);
 
 impl ReporterRevision {
-    /// Wrap a reporter's current completed-scan counter without assigning it global meaning.
+    /// Wrap a reporter registry entry's current completed-scan count without assigning it global
+    /// meaning.
     #[must_use]
-    pub const fn new(value: u64) -> Self { Self(value) }
+    pub(crate) const fn new(value: u64) -> Self { Self(value) }
 
-    /// Return the reporter-owned count for diagnostics and reporter-side monotonic updates.
+    /// Return the reporter registry entry's count for diagnostics.
     #[must_use]
     pub const fn get(self) -> u64 { self.0 }
 }
@@ -130,9 +139,14 @@ impl ReporterRevision {
 mod tests {
     use std::time::Duration;
 
+    use bevy::reflect::FromReflect;
+    use bevy::reflect::tuple_struct::DynamicTupleStruct;
+
     use super::DeviceRecord;
     use super::Presence;
     use super::ReportedAs;
+    use super::ReporterId;
+    use super::ReporterRevision;
     use crate::AttachmentPath;
     use crate::Capabilities;
     use crate::Claim;
@@ -141,7 +155,7 @@ mod tests {
     use crate::ReportedSerial;
 
     #[test]
-    fn unreachable_presence_retains_when_the_provider_lost_contact() {
+    fn unreachable_presence_retains_when_the_reporter_lost_contact() {
         let since = Duration::from_secs(6);
         let presence = Presence::Unreachable { since };
 
@@ -167,5 +181,21 @@ mod tests {
             ReportedAs::MatchEvidenceOnly
         ));
         assert!(device_record.transport.is_none());
+    }
+
+    #[test]
+    fn reflection_cannot_construct_reporter_id() {
+        let mut dynamic_reporter_id = DynamicTupleStruct::default();
+        dynamic_reporter_id.insert(0_u32);
+
+        assert!(ReporterId::from_reflect(&dynamic_reporter_id).is_none());
+    }
+
+    #[test]
+    fn reflection_cannot_construct_reporter_revision() {
+        let mut dynamic_reporter_revision = DynamicTupleStruct::default();
+        dynamic_reporter_revision.insert(0_u64);
+
+        assert!(ReporterRevision::from_reflect(&dynamic_reporter_revision).is_none());
     }
 }

@@ -43,3 +43,15 @@ fn attempt_progress_finished_requires_an_attempt_outcome() {
         "tests/compile_fail/attempt_progress_finished_requires_an_attempt_outcome.rs",
     );
 }
+
+#[test]
+fn apply_permit_cannot_be_constructed() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/apply_permit_cannot_be_constructed.rs");
+}
+
+#[test]
+fn apply_permit_cannot_be_matched() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/apply_permit_cannot_be_matched.rs");
+}

@@ -42,19 +42,19 @@ pub enum AttemptOutcome {
 ///
 /// The kernel stores the driver's value without learning whether it represents window placement,
 /// camera settings, or another device-specific configuration. The concrete type remains
-/// recoverable by the erased driver adapter and is mirrored later as the provider's own component
-/// for inspection.
+/// recoverable by the erased driver registry entry and is mirrored later as the driver's own
+/// component for inspection.
 #[derive(Reflect)]
 pub struct CapturedConfiguration(
     #[reflect(ignore, default = "default_erased_configuration")] Box<dyn Reflect>,
 );
 
 impl CapturedConfiguration {
-    /// Erase a provider configuration after the driver reported a successful capture or apply.
+    /// Erase a driver configuration after the driver reported a successful capture or apply.
     #[must_use]
     pub fn new(configuration: impl Reflect) -> Self { Self(Box::new(configuration)) }
 
-    /// Borrow the provider value so the erased driver adapter can recover its concrete type.
+    /// Borrow the driver value so the erased driver registry entry can recover its concrete type.
     #[must_use]
     pub fn as_reflect(&self) -> &dyn Reflect { self.0.as_ref() }
 }
