@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       bench: ${{ steps.filter.outputs.bench }}
+      trybuild: ${{ steps.filter.outputs.trybuild }}
     steps:
       - uses: actions/checkout@v6
 
@@ -47,6 +48,20 @@ jobs:
               - 'crates/hana_diegetic/src/constants.rs'
               - 'crates/hana_diegetic/src/lib.rs'
               - 'crates/hana_diegetic/Cargo.toml'
+            trybuild:
+              - 'Cargo.lock'
+              - 'Cargo.toml'
+              - 'crates/fairy_dust/Cargo.toml'
+              - 'crates/fairy_dust/src/**'
+              - 'crates/fairy_dust/tests/trybuild.rs'
+              - 'crates/fairy_dust/tests/trybuild/**'
+              - 'crates/hana_diegetic/Cargo.toml'
+              - 'crates/hana_diegetic/src/ime/**'
+              - 'crates/hana_diegetic/src/layout/**'
+              - 'crates/hana_diegetic/src/lib.rs'
+              - 'crates/hana_diegetic/src/widgets/**'
+              - 'crates/hana_diegetic/tests/trybuild.rs'
+              - 'crates/hana_diegetic/tests/trybuild/**'
 
   format:
     name: Format Check
@@ -164,10 +179,65 @@ jobs:
           df -h
 
       - name: Run test targets
-        run: cargo nextest run --all-features --workspace --tests --run-ignored all
+        run: cargo nextest run --all-features --workspace --tests
         env:
           WGPU_BACKEND: gl
           WINIT_UNIX_BACKEND: x11
+          RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
+      - name: Run slow rendering diagnostics
+        run: >-
+          cargo nextest run --all-features -p hana_diegetic --lib
+          --run-ignored only center_dilation_bounds_corner_wing
+        env:
+          WGPU_BACKEND: gl
+          WINIT_UNIX_BACKEND: x11
+          RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
+  trybuild:
+    name: Compile-Time API
+    needs: changes
+    if: >-
+      needs.changes.outputs.trybuild == 'true' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Install and cache Linux dependencies
+        uses: natepiano/cache-apt-pkgs-action@1a93bf1cfca3126459c9aea5af90d717f9ea216f
+        with:
+          packages: libudev-dev libasound2-dev pkg-config clang libwayland-dev libxkbcommon-dev
+          version: 1.0
+
+      - name: Cache compile-time API dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: trybuild
+
+      - name: Run Hana compile-time API tests
+        run: >-
+          cargo nextest run --all-features -p hana_diegetic --test trybuild
+          --run-ignored only
+        env:
+          RUSTFLAGS: -C link-arg=-fuse-ld=mold
+
+      - name: Run Fairy Dust compile-time API tests
+        run: >-
+          cargo nextest run --all-features -p fairy_dust --test trybuild
+          --run-ignored only
+        env:
           RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
   bench:

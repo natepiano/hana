@@ -61,7 +61,6 @@ use crate::layout::TextMeasure;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
 use crate::layout::Unit;
-use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 
 const UNIT_GAP_CHILD_SIDE: f32 = 10.0;
@@ -3157,29 +3156,5 @@ fn can_reuse_geometry_rejects_a_wrapped_leaf() {
     assert!(
         !result.can_reuse_geometry(&tree, &measure, VIEWPORT, VIEWPORT, 1.0),
         "a wrapped leaf can never reuse its stale line breaks",
-    );
-}
-
-#[test]
-#[ignore = "manual perf benchmark — run with --ignored"]
-fn perf_element_sizes() {
-    println!("Element: {} bytes", std::mem::size_of::<Element>());
-    println!(
-        "ElementContent: {} bytes",
-        std::mem::size_of::<ElementContent>()
-    );
-    println!("TextStyle: {} bytes", std::mem::size_of::<TextStyle>());
-    println!("Border: {} bytes", std::mem::size_of::<Border>());
-    println!("Sizing: {} bytes", std::mem::size_of::<Sizing>());
-    println!("Padding: {} bytes", std::mem::size_of::<Padding>());
-    println!("String: {} bytes", std::mem::size_of::<String>());
-    println!("Vec<usize>: {} bytes", std::mem::size_of::<Vec<usize>>());
-    println!(
-        "Option<Color>: {} bytes",
-        std::mem::size_of::<Option<Color>>()
-    );
-    println!(
-        "Option<Border>: {} bytes",
-        std::mem::size_of::<Option<Border>>()
     );
 }
