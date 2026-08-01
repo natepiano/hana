@@ -102,4 +102,7 @@ name = "paper_sizes"
 name = "screen_space"
 
 [[example]]
+name = "integral_advance"
+
+[[example]]
 name = "slug_text"

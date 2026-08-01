@@ -284,6 +284,8 @@ impl Font {
     /// Repeated glyphs then retain the same horizontal pixel phase instead of
     /// moving through different fractional positions. The first glyph's origin
     /// remains under the caller's control.
+    /// Using the returned size improves the on-screen appearance of monospace
+    /// text by keeping glyph-edge coverage consistent across a run.
     ///
     /// The calculation uses the standard screen conversion of 96 logical
     /// pixels per inch and 72 typographic points per inch. It assumes no extra
