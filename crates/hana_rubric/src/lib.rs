@@ -7,6 +7,7 @@
 mod allocation_test_support;
 mod command;
 mod condition;
+mod derived_context;
 mod diagnostic;
 mod disk;
 mod keymap;
@@ -38,6 +39,7 @@ pub use command::ReflectKeymapCommand;
 pub use condition::ActiveCondition;
 pub use condition::ConditionName;
 pub use condition::KeymapContext;
+pub use derived_context::DerivedContext;
 pub use diagnostic::Diagnostic;
 pub use diagnostic::DiagnosticKind;
 pub use diagnostic::DiagnosticSeverity;

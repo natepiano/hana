@@ -136,6 +136,7 @@ impl ConditionRegistry {
             if is_duplicate {
                 diagnostics.push(condition_diagnostic(
                     condition_name.as_str(),
+                    DiagnosticSeverity::Failure,
                     format!(
                         "Condition `{}` is registered more than once.",
                         condition_name.as_str()
@@ -150,6 +151,7 @@ impl ConditionRegistry {
                 }),
                 None => diagnostics.push(condition_diagnostic(
                     condition_name.as_str(),
+                    DiagnosticSeverity::Failure,
                     format!(
                         "Condition `{}` has no description. Add #[strum(message = \"…\")].",
                         condition_name.as_str()
@@ -227,7 +229,11 @@ fn update_active_condition<C: KeymapContext>(
     }
 }
 
-fn condition_diagnostic(condition_name: &str, message: String) -> Diagnostic {
+pub(crate) fn condition_diagnostic(
+    condition_name: &str,
+    severity: DiagnosticSeverity,
+    message: String,
+) -> Diagnostic {
     Diagnostic {
         source_path: String::new(),
         byte_range: 0..0,
@@ -238,7 +244,7 @@ fn condition_diagnostic(condition_name: &str, message: String) -> Diagnostic {
         original_keystroke: String::new(),
         command_id: String::new(),
         kind: DiagnosticKind::Context,
-        severity: DiagnosticSeverity::Failure,
+        severity,
         message,
         suggestions: Vec::new(),
     }
@@ -273,6 +279,8 @@ where
     }
 
     fn finish(&self, app: &mut App) { crate::KeymapPlugin::finish_assembly(app); }
+
+    fn is_unique(&self) -> bool { false }
 }
 
 pub(crate) struct StateContextPlugin<C> {
@@ -304,15 +312,18 @@ where
     }
 
     fn finish(&self, app: &mut App) { crate::KeymapPlugin::finish_assembly(app); }
+
+    fn is_unique(&self) -> bool { false }
 }
 
 #[derive(Resource)]
 struct ContextSourceInstalled(ContextSource);
 
 #[derive(Clone, Copy)]
-enum ContextSource {
+pub(crate) enum ContextSource {
     Resource,
     State,
+    Derived,
 }
 
 impl ContextSource {
@@ -320,11 +331,12 @@ impl ContextSource {
         match self {
             Self::Resource => "resource-backed",
             Self::State => "state-backed",
+            Self::Derived => "derived",
         }
     }
 }
 
-fn register_context<C: KeymapContext>(
+pub(crate) fn register_context<C: KeymapContext>(
     app: &mut App,
     context_source: ContextSource,
 ) -> Result<(), Vec<Diagnostic>> {
@@ -332,6 +344,7 @@ fn register_context<C: KeymapContext>(
     if let Some(previous_context_source) = app.world().get_resource::<ContextSourceInstalled>() {
         let diagnostics = vec![condition_diagnostic(
             "",
+            DiagnosticSeverity::Failure,
             format!(
                 "A {} keymap context is already registered; a keymap accepts exactly one context source.",
                 previous_context_source.0.description()
@@ -361,9 +374,12 @@ fn register_context<C: KeymapContext>(
     result
 }
 
-fn retain_context_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
+pub(crate) fn retain_context_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
     for diagnostic in diagnostics {
-        bevy::log::error!("{}", diagnostic.message);
+        match diagnostic.severity {
+            DiagnosticSeverity::Failure => bevy::log::error!("{}", diagnostic.message),
+            DiagnosticSeverity::Advisory => bevy::log::warn!("{}", diagnostic.message),
+        }
     }
     app.init_resource::<KeymapLoadFailures>();
     app.world_mut()

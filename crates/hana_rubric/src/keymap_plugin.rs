@@ -9,10 +9,12 @@ use bevy::prelude::PreUpdate;
 use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use bevy::prelude::States;
+use bevy::state::state::FreelyMutableState;
 use bevy_enhanced_input::prelude::EnhancedInputSystems;
 
 use crate::ActiveCondition;
 use crate::CommandRegistry;
+use crate::DerivedContext;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
@@ -22,6 +24,7 @@ use crate::Keystroke;
 use crate::condition::ConditionRegistry;
 use crate::condition::ResourceContextPlugin;
 use crate::condition::StateContextPlugin;
+use crate::derived_context::DerivedContextPlugin;
 use crate::disk::DiskWorkerChannels;
 use crate::disk::DiskWorkerMessage;
 use crate::disk::KeymapPaths;
@@ -33,7 +36,8 @@ const EMBEDDED_DEFAULTS_SOURCE: &str = "embedded defaults";
 /// Registers the application's keymap context enum.
 ///
 /// Add this plugin directly for global-only bindings, or construct it with [`Self::new`] and
-/// choose a context source with [`Self::for_context`] or [`Self::for_state_context`].
+/// choose a context source with [`Self::for_context`], [`Self::for_state_context`], or
+/// [`Self::for_derived_context`].
 pub struct KeymapPlugin {
     app_name:             Option<String>,
     defaults:             Option<&'static str>,
@@ -88,6 +92,15 @@ impl KeymapPlugin {
         C: KeymapContext + States,
     {
         StateContextPlugin::<C>::new(self)
+    }
+
+    /// Registers an internally derived state context and synchronizes its active condition.
+    #[must_use]
+    pub fn for_derived_context<C>(self, derived_context: DerivedContext<C>) -> impl Plugin
+    where
+        C: KeymapContext + FreelyMutableState,
+    {
+        DerivedContextPlugin::<C>::new(self, derived_context)
     }
 
     pub(crate) fn install(&self, app: &mut App) {
