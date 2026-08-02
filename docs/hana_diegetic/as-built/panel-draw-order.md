@@ -27,7 +27,7 @@ That sorted stream feeds the render values:
 - Batch material `depth_bias`: derived from the batch key's `DrawZIndexRank`.
 - Uploaded record `clip_depth_nudge`: the command's absolute
   `ClipDepthNudge`, made relative to the batch material base.
-- Uploaded record `oit_depth_offset`: the command's text-anchored
+- Uploaded record `oit_depth_offset`: the command's positive
   `OitDepthOffset`, kept absolute to the panel.
 
 Scissor commands remain in the layout command stream, but they do not receive a
@@ -70,19 +70,22 @@ clip and OIT values still change once per sorted draw command:
 
 | `DrawOrderIndex` | `CommandIndex` | `DrawOrderKey` | `DrawZIndexRank` | `ScreenDepthBias` | `ClipDepthNudge` | `OitDepthOffset` |
 | ---: | ---: | --- | ---: | --- | --- | --- |
-| 0 | 3 | `(-1, Text, 3)` | 0 | `0 * LAYER_DEPTH_BIAS` | `0` | `(0 - text_anchor) * OIT_DEPTH_STEP` |
-| 1 | 0 | `(0, Surface, 0)` | 1 | `1 * LAYER_DEPTH_BIAS` | `1` | `(1 - text_anchor) * OIT_DEPTH_STEP` |
-| 2 | 2 | `(0, Surface, 2)` | 1 | `1 * LAYER_DEPTH_BIAS` | `2` | `(2 - text_anchor) * OIT_DEPTH_STEP` |
-| 3 | 1 | `(0, Text, 1)` | 1 | `1 * LAYER_DEPTH_BIAS` | `3` | `(3 - text_anchor) * OIT_DEPTH_STEP` |
-| 4 | 5 | `(1, PanelShape, 5)` | 2 | `2 * LAYER_DEPTH_BIAS` | `4` | `(4 - text_anchor) * OIT_DEPTH_STEP` |
-| 5 | 6 | `(1, Text, 6)` | 2 | `2 * LAYER_DEPTH_BIAS` | `5` | `(5 - text_anchor) * OIT_DEPTH_STEP` |
+| 0 | 3 | `(-1, Text, 3)` | 0 | `0 * LAYER_DEPTH_BIAS` | `0` | `1 * OIT_DEPTH_STEP` |
+| 1 | 0 | `(0, Surface, 0)` | 1 | `1 * LAYER_DEPTH_BIAS` | `1` | `2 * OIT_DEPTH_STEP` |
+| 2 | 2 | `(0, Surface, 2)` | 1 | `1 * LAYER_DEPTH_BIAS` | `2` | `3 * OIT_DEPTH_STEP` |
+| 3 | 1 | `(0, Text, 1)` | 1 | `1 * LAYER_DEPTH_BIAS` | `3` | `4 * OIT_DEPTH_STEP` |
+| 4 | 5 | `(1, PanelShape, 5)` | 2 | `2 * LAYER_DEPTH_BIAS` | `4` | `5 * OIT_DEPTH_STEP` |
+| 5 | 6 | `(1, Text, 6)` | 2 | `2 * LAYER_DEPTH_BIAS` | `5` | `6 * OIT_DEPTH_STEP` |
 
 Command `1` was emitted before command `2`, but it sorts after command `2`
 because `Text` sorts after `Surface` inside `DrawZIndex(0)`. `CommandIndex`
 breaks ties only after `DrawZIndex` and `DrawSortTier` match.
 
-In this example, `text_anchor` is `0` because the first sorted command is also
-the first text command. If there is no text, the anchor falls back to `0`.
+The positive one-step base is deliberate. Bevy packs each OIT fragment's
+adjusted depth and alpha together, then compares that packed value with opaque
+depth during resolve. A zero or negative offset can reject a translucent
+fragment coplanar with an opaque panel substrate. Starting at one full
+`OIT_DEPTH_STEP` keeps every command in front while preserving relative order.
 
 ## Cached Values
 
@@ -124,7 +127,7 @@ The projections are:
 ```text
 screen_depth_bias = z_index_rank * LAYER_DEPTH_BIAS
 clip_depth_nudge = draw_order_index
-oit_depth_offset = (draw_order_index - text_anchor) * OIT_DEPTH_STEP
+oit_depth_offset = (draw_order_index + 1) * OIT_DEPTH_STEP
 ```
 
 These are separate projections even when the numeric values are close. The
@@ -204,7 +207,7 @@ stays in `clip_depth_nudge` and `oit_depth_offset`.
 - Batch material `depth_bias` uses the batch key's `DrawZIndexRank`.
 - Uploaded non-OIT `clip_depth_nudge` values are relative to the batch's
   `first_draw_order_index`.
-- OIT `oit_depth_offset` values stay absolute to the panel's text anchor.
+- OIT `oit_depth_offset` values stay positive and absolute to the panel.
 - `DrawZIndex` is panel-local; it must not reorder one panel's content against
   another panel's content.
 - `CommandIndex` is the layout command index. Batching must not replace it with

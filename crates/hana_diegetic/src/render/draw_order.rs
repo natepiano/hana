@@ -9,9 +9,12 @@
 //! `clip_depth_nudge` values are made relative to that batch's minimum
 //! [`DrawOrderIndex`].
 //!
-//! [`OitDepthOffset`] is a panel-global draw-order index span added to
-//! `position.z` and packed into 24-bit depth. [`OIT_DEPTH_STEP`] keeps adjacent
-//! layers separated in the packed OIT depth value.
+//! [`OitDepthOffset`] is a positive panel-global draw-order index span added to
+//! `position.z` and packed into 24-bit depth. The first command starts one
+//! [`OIT_DEPTH_STEP`] in front of its physical plane: Bevy's OIT resolve pass
+//! compares that packed value with opaque depth, so a zero or negative offset
+//! can reject a coplanar translucent fragment before composition. Adjacent
+//! commands remain one step apart.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -190,8 +193,8 @@ impl DrawZIndexRank {
 impl DrawOrderIndex {
     pub(crate) fn clip_depth_nudge(self) -> ClipDepthNudge { ClipDepthNudge(self.0.to_f32()) }
 
-    fn text_anchored_oit_depth_offset(self, text_anchor: Self) -> OitDepthOffset {
-        OitDepthOffset((self.0 - text_anchor.0).to_f32() * OIT_DEPTH_STEP)
+    fn oit_depth_offset(self) -> OitDepthOffset {
+        OitDepthOffset(self.0.saturating_add(1).to_f32() * OIT_DEPTH_STEP)
     }
 
     pub(crate) fn to_usize(self) -> usize { usize::try_from(self.0).unwrap_or(usize::MAX) }
@@ -202,14 +205,13 @@ impl DrawCommandDepth {
         draw_order_index: DrawOrderIndex,
         z_index_rank: DrawZIndexRank,
         z_index: DrawZIndex,
-        text_anchor: DrawOrderIndex,
     ) -> Self {
         Self {
             draw_order_index,
             z_index_rank,
             z_index,
             clip_depth_nudge: draw_order_index.clip_depth_nudge(),
-            oit_depth_offset: draw_order_index.text_anchored_oit_depth_offset(text_anchor),
+            oit_depth_offset: draw_order_index.oit_depth_offset(),
         }
     }
 
@@ -240,13 +242,6 @@ impl DrawOrder {
     /// Builds index-aligned draw order from a full panel command stream.
     pub(crate) fn from_commands(commands: &[RenderCommand]) -> Self {
         let enumerated = enumerate_draw_commands(commands);
-        let text_anchor = commands
-            .iter()
-            .enumerate()
-            .filter(|(_, command)| command.kind.draw_sort_tier() == Some(DrawSortTier::Text))
-            .filter_map(|(index, _)| enumerated[index].map(|command| command.draw_order_index))
-            .min()
-            .unwrap_or_default();
         let depths = enumerated
             .into_iter()
             .map(|command| {
@@ -255,7 +250,6 @@ impl DrawOrder {
                         command.draw_order_index,
                         command.z_index_rank,
                         command.z_index,
-                        text_anchor,
                     )
                 })
             })
@@ -475,19 +469,6 @@ mod tests {
         draw_depth.z_index_rank().screen_depth_bias()
     }
 
-    fn text_anchor_index(
-        commands: &[RenderCommand],
-        draw_order_indices: &[Option<DrawOrderIndex>],
-    ) -> i32 {
-        commands
-            .iter()
-            .enumerate()
-            .filter(|(_, command)| command.kind.draw_sort_tier() == Some(DrawSortTier::Text))
-            .map(|(index, _)| draw_order_index_at(draw_order_indices, CommandIndex::from(index)).0)
-            .min()
-            .unwrap_or(0)
-    }
-
     fn draw_order_indices_for_tier(
         commands: &[RenderCommand],
         draw_order_indices: &[Option<DrawOrderIndex>],
@@ -557,7 +538,6 @@ mod tests {
         );
         let draw_order_indices = index_draw_commands_for_test(commands);
         let draw_order = DrawOrder::from_commands(commands);
-        let text_anchor = text_anchor_index(commands, &draw_order_indices);
 
         for index in drawing_indices(commands) {
             let command = &commands[index.get()];
@@ -584,8 +564,8 @@ mod tests {
             );
             assert_eq!(
                 draw_command_depth.oit_depth_offset().get().to_bits(),
-                ((draw_order_index.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
-                "no-override command {index:?} keeps its text-anchored OIT offset",
+                (draw_order_index.0.saturating_add(1).to_f32() * OIT_DEPTH_STEP).to_bits(),
+                "no-override command {index:?} keeps its positive OIT offset",
             );
 
             assert!(command.kind.draw_sort_tier().is_some());
@@ -654,22 +634,19 @@ mod tests {
     }
 
     #[test]
-    fn text_anchor_keeps_lowest_text_oit_offset_at_zero() {
+    fn oit_offsets_start_one_step_in_front_of_coplanar_opaque_depth() {
         let commands = representative_streams()
             .into_iter()
             .next()
-            .expect("representative streams include a text stream");
-        let draw_order_indices = index_draw_commands_for_test(&commands);
-        let text_anchor = text_anchor_index(&commands, &draw_order_indices);
-        let lowest_text_index =
-            draw_order_indices_for_tier(&commands, &draw_order_indices, DrawSortTier::Text)
-                .into_iter()
-                .min()
-                .expect("representative stream includes text commands");
-        let text_anchored_offset = (lowest_text_index - text_anchor).to_f32() * OIT_DEPTH_STEP;
+            .expect("representative streams include drawing commands");
+        let draw_order = DrawOrder::from_commands(&commands);
+        let lowest_offset = drawing_indices(&commands)
+            .into_iter()
+            .map(|index| draw_depth_at(&draw_order, index).oit_depth_offset().get())
+            .reduce(f32::min)
+            .expect("representative stream includes drawing commands");
 
-        assert_eq!(lowest_text_index - text_anchor, 0);
-        assert_eq!(text_anchored_offset.to_bits(), 0.0f32.to_bits());
+        assert_eq!(lowest_offset.to_bits(), OIT_DEPTH_STEP.to_bits());
     }
 
     #[test]
@@ -687,10 +664,9 @@ mod tests {
     }
 
     #[test]
-    fn draw_order_uses_indices_and_text_anchor() {
+    fn draw_order_uses_indices_and_positive_oit_offsets() {
         for commands in representative_streams() {
             let draw_order_indices = index_draw_commands_for_test(&commands);
-            let text_anchor = text_anchor_index(&commands, &draw_order_indices);
             let draw_order = DrawOrder::from_commands(&commands);
 
             for index in drawing_indices(&commands) {
@@ -713,7 +689,7 @@ mod tests {
                 );
                 assert_eq!(
                     draw_depth.oit_depth_offset().get().to_bits(),
-                    ((draw_order_index.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
+                    (draw_order_index.0.saturating_add(1).to_f32() * OIT_DEPTH_STEP).to_bits(),
                 );
             }
         }

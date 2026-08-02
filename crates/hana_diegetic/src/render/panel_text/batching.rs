@@ -2303,7 +2303,10 @@ mod tests {
 
         assert_eq!(
             run_record_depths(&app),
-            vec![(0.0, 0.0), (1.0, constants::OIT_DEPTH_STEP),],
+            vec![
+                (0.0, constants::OIT_DEPTH_STEP),
+                (1.0, 2.0 * constants::OIT_DEPTH_STEP),
+            ],
         );
     }
 

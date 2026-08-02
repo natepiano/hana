@@ -1377,7 +1377,7 @@ mod tests {
     }
 
     #[test]
-    fn text_toggle_updates_resolved_sdf_oit_depth_offset() {
+    fn text_toggle_keeps_resolved_sdf_oit_depth_positive() {
         let mut app = geometry_app();
         let panel = app
             .world_mut()
@@ -1395,7 +1395,7 @@ mod tests {
         let surface_before = single_surface_snapshot(&app);
         assert_eq!(
             surface_before.draw_depth.oit_depth_offset().get().to_bits(),
-            (-constants::OIT_DEPTH_STEP).to_bits(),
+            constants::OIT_DEPTH_STEP.to_bits(),
         );
 
         assert!(
@@ -1409,13 +1409,13 @@ mod tests {
 
         let surface_after = single_surface_snapshot(&app);
         assert_eq!(surface_after.command_index, surface_before.command_index);
-        assert_ne!(
+        assert_eq!(
             surface_before.draw_depth.oit_depth_offset().get().to_bits(),
             surface_after.draw_depth.oit_depth_offset().get().to_bits(),
         );
         assert_eq!(
             surface_after.draw_depth.oit_depth_offset().get().to_bits(),
-            0.0_f32.to_bits(),
+            constants::OIT_DEPTH_STEP.to_bits(),
         );
     }
 
@@ -1468,11 +1468,11 @@ mod tests {
         );
         assert_eq!(
             below.draw_depth.oit_depth_offset().get().to_bits(),
-            0.0_f32.to_bits()
+            constants::OIT_DEPTH_STEP.to_bits()
         );
         assert_eq!(
             above.draw_depth.oit_depth_offset().get().to_bits(),
-            constants::OIT_DEPTH_STEP.to_bits()
+            (2.0 * constants::OIT_DEPTH_STEP).to_bits()
         );
 
         assert_eq!(below.sdf_half_size, above.sdf_half_size);

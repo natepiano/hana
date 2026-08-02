@@ -2298,7 +2298,10 @@ mod tests {
         assert_eq!(material_oit_offset.to_bits(), 0.0_f32.to_bits());
         assert_eq!(
             records,
-            vec![(0.0, 0.0), (0.0, 0.0)],
+            vec![
+                (0.0, crate::render::constants::OIT_DEPTH_STEP),
+                (0.0, crate::render::constants::OIT_DEPTH_STEP),
+            ],
             "per-record offsets stay in the run table"
         );
     }
