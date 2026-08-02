@@ -225,6 +225,7 @@ fn build_panel_text(
             render_mode: config.render_mode(),
             shadow_mode: config.shadow_mode(),
             fill_color: config.color(),
+            em_height: config.size() * placement.scale.y.abs(),
             clip_rect,
             render_only: false,
         }),

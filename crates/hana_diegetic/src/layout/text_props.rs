@@ -598,11 +598,11 @@ impl TextStyle {
 
     /// Sets the per-label HDR text coverage-bias override.
     ///
-    /// `0.0` leaves analytic glyph coverage unchanged. Positive values make
-    /// fractional glyph edges more opaque, which can compensate for dark text
-    /// that looks too thin under HDR, especially on light backgrounds. Tune
-    /// this per scene, panel, or label; it can make light text on dark
-    /// backgrounds look heavier.
+    /// `0.0` keeps the automatic screen-size adjustment unchanged. Positive
+    /// values make fractional glyph edges more opaque beyond that adjustment,
+    /// which can compensate for dark text that looks too thin under HDR,
+    /// especially on light backgrounds. Tune this per scene, panel, or label;
+    /// it can make light text on dark backgrounds look heavier.
     #[must_use]
     pub const fn with_hdr_text_coverage_bias(mut self, bias: f32) -> Self {
         self.hdr_text_coverage_bias = Cascade::Override(bias);

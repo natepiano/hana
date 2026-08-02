@@ -75,6 +75,14 @@ const DEGENERATE_EPS: f32 = 0.00000001;
 const SQRT_3_OVER_2: f32 = 0.8660254037844386;
 const DISCARD_ALPHA: f32 = 0.02;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
+// Small analytic text can look lighter than its geometric coverage suggests:
+// most of each stroke lands in fractional edge pixels, while few fully covered
+// pixels remain to carry its intended optical weight. Fade in a bounded
+// coverage transfer as the projected em shrinks. These thresholds are in
+// physical device pixels because derivatives operate in device-pixel space.
+const AUTO_TEXT_BIAS_FULL_BELOW_PX: f32 = 8.0;
+const AUTO_TEXT_BIAS_NONE_ABOVE_PX: f32 = 22.0;
+const AUTO_TEXT_BIAS_MAX: f32 = 0.85;
 // Anisotropic sub-sample ceiling for the line/circle path
 // (analytic_line_coverage). The sample count tracks footprint anisotropy and
 // collapses to 1 head-on. The line path's convex-corner wing is handled by the
@@ -321,6 +329,7 @@ struct PathRenderRecord {
     oit_depth_offset: f32,
     aa_flags: u32,
     text_coverage_bias: f32,
+    text_em_height: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathQuadRecord>;
@@ -421,6 +430,23 @@ fn path_bounds_min(path: PackedPathRecord) -> vec2<f32> {
 
 fn path_bounds_size(path: PackedPathRecord) -> vec2<f32> {
     return path.bounds_min_size.zw;
+}
+
+// Converts the run's local em height back into this glyph's design units.
+// rect_size / (uv_size * path_bounds_size) is the glyph's affine
+// design-to-layout scale and remains valid when the quad has been clipped.
+fn text_em_design_height(in: VertexOutput, path: PackedPathRecord) -> f32 {
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+    let instance = instances[instance_index(in)];
+    let run = run_records[instance.render_index];
+    let bounds_height = max(abs(path_bounds_size(path).y), ROOT_EPSILON);
+    let uv_height = max(abs(instance.uv_size.y), ROOT_EPSILON);
+    let rect_height = max(abs(instance.rect_size.y), ROOT_EPSILON);
+    let layout_per_design_y = rect_height / (uv_height * bounds_height);
+    return run.text_em_height / max(layout_per_design_y, ROOT_EPSILON);
+#else
+    return 0.0;
+#endif
 }
 
 // uv_a → design-space point inside the path bounds. v flips: uv origin is
@@ -1414,12 +1440,35 @@ fn apply_text_coverage_bias(coverage: f32, bias: f32) -> f32 {
     return clamped;
 }
 
+// Length in screen pixels of a design-space vector along +Y. dx/dy form the
+// Jacobian from screen pixels to design space; its inverse maps the requested
+// design-space em vector back into screen space. This captures perspective,
+// tilt, non-uniform scale, and window scale factor without CPU camera state.
+fn projected_design_y_px(design_height: f32, dx: vec2<f32>, dy: vec2<f32>) -> f32 {
+    let determinant = dx.x * dy.y - dy.x * dx.y;
+    let inverse_y_column = vec2<f32>(-dy.x, dx.x) / max(abs(determinant), ROOT_EPSILON);
+    return abs(design_height) * length(inverse_y_column);
+}
+
+fn automatic_text_coverage_bias(projected_em_px: f32) -> f32 {
+    if projected_em_px <= 0.0 {
+        return 0.0;
+    }
+    let resolved = smoothstep(
+        AUTO_TEXT_BIAS_FULL_BELOW_PX,
+        AUTO_TEXT_BIAS_NONE_ABOVE_PX,
+        projected_em_px,
+    );
+    return (1.0 - resolved) * AUTO_TEXT_BIAS_MAX;
+}
+
 fn render_coverage(
     uv: vec2<f32>,
     path: PackedPathRecord,
     render_mode: u32,
     aa_flags: u32,
     text_coverage_bias: f32,
+    text_em_design_height: f32,
 ) -> f32 {
     // Derivatives stay at the top, BEFORE any branch: aa_flags is per-run data
     // recovered from an interpolated varying, so the branches below are
@@ -1498,7 +1547,9 @@ fn render_coverage(
     }
 
     if path.min_feature == 0.0 {
-        coverage = apply_text_coverage_bias(coverage, text_coverage_bias);
+        let projected_em_px = projected_design_y_px(text_em_design_height, dx, dy);
+        let effective_bias = text_coverage_bias + automatic_text_coverage_bias(projected_em_px);
+        coverage = apply_text_coverage_bias(coverage, effective_bias);
     }
 
     if render_mode == RENDER_MODE_PUNCH_OUT {
@@ -1579,6 +1630,7 @@ fn fragment(
         run_render_mode(in),
         run_aa_flags(in),
         run_text_coverage_bias(in),
+        text_em_design_height(in, path),
     );
     let material_id = run_material_id(in);
     var pbr_input = pbr_input_from_material_table(

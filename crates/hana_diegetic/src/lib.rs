@@ -39,8 +39,8 @@
 //!         ..default()
 //!     })
 //!     .insert_resource(TextAlpha(AlphaMode::Add))
-//!     // Optional: compensate analytic glyph coverage when HDR makes dark text
-//!     // look too thin on light backgrounds. The default is no compensation.
+//!     // Optional: add coverage compensation beyond the automatic
+//!     // screen-size adjustment when HDR makes text look too thin.
 //!     .insert_resource(HdrTextCoverageBias(2.0))
 //!     .add_plugins(DiegeticUiPlugin);
 //! ```

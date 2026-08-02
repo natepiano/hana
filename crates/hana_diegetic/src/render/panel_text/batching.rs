@@ -726,6 +726,7 @@ fn run_record_for(
         oit_depth_offset:   panel_text_child.oit_depth_offset,
         aa_flags:           anti_alias.aa_flags(),
         text_coverage_bias: hdr_text_coverage_bias.shader_value(),
+        text_em_height:     prepared.em_height,
     }
 }
 
@@ -979,6 +980,7 @@ fn padded_run_records(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Pa
             oit_depth_offset:   0.0,
             aa_flags:           0,
             text_coverage_bias: 0.0,
+            text_em_height:     0.0,
         },
     );
     padded
@@ -2526,6 +2528,7 @@ mod tests {
             oit_depth_offset:   0.0,
             aa_flags:           AntiAlias::Both.aa_flags(),
             text_coverage_bias: 0.0,
+            text_em_height:     0.0,
         };
 
         for count in 0..=8_usize {

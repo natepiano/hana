@@ -378,9 +378,10 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// Sets a panel-wide HDR text coverage bias inherited by text runs in this
     /// panel.
     ///
-    /// The default is `0.0`, which leaves analytic glyph coverage unchanged.
-    /// Positive values make fractional glyph edges more opaque, which can help
-    /// dark text on light backgrounds under HDR. Per-label
+    /// The default is `0.0`, which leaves the automatic screen-size adjustment
+    /// unchanged. Positive values add opacity to fractional glyph edges beyond
+    /// that adjustment, which can help dark text on light backgrounds under
+    /// HDR. Per-label
     /// [`TextStyle::with_hdr_text_coverage_bias`](crate::TextStyle::with_hdr_text_coverage_bias)
     /// still wins.
     #[must_use]

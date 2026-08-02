@@ -987,7 +987,7 @@ fn center_dilation_bounds_corner_wing() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0x8212_47ad_8ffc_f6d6;
+    const EXPECTED_SHADER_FNV1A: u64 = 0xb7a2_b3f0_8884_b007;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,

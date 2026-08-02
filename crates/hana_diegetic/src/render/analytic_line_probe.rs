@@ -273,6 +273,7 @@ fn build_line(
         // Matches the probe material's supersample + aa_band settings.
         aa_flags:           AntiAlias::Both.aa_flags(),
         text_coverage_bias: 0.0,
+        text_em_height:     0.0,
     };
 
     let instances = storage_buffers.add(ShaderBuffer::from(vec![instance]));

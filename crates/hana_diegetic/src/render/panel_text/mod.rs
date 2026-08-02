@@ -67,6 +67,8 @@ pub(super) struct PreparedPanelText {
     pub shadow_mode: Cascade<GlyphShadowMode>,
     /// Text fill color.
     pub fill_color:  Color,
+    /// One em along the run's local Y axis.
+    pub em_height:   f32,
     /// Optional panel-local clipping rect.
     pub clip_rect:   Option<[f32; 4]>,
     /// Set when the change that marked this component dirty touched only render

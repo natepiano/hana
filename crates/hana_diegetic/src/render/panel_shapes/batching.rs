@@ -1080,6 +1080,7 @@ fn build_panel_line_group(
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
         text_coverage_bias: 0.0,
+        text_em_height: 0.0,
     };
     let instance = path_quad_record(&path);
     Some(BuiltPanelShapePrimitive {
@@ -1528,6 +1529,7 @@ fn padded_line_runs(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Path
             oit_depth_offset:   0.0,
             aa_flags:           0,
             text_coverage_bias: 0.0,
+            text_em_height:     0.0,
         },
     );
     padded
@@ -2991,6 +2993,7 @@ mod tests {
                 oit_depth_offset:   0.0,
                 aa_flags:           AntiAlias::Both.aa_flags(),
                 text_coverage_bias: 0.0,
+                text_em_height:     0.0,
             },
         }
     }
