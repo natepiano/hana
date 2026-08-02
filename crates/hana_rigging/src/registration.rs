@@ -20,6 +20,8 @@ use crate::DiscoveryProgress;
 use crate::DiscoveryProgressSender;
 use crate::DiscoverySchedulerState;
 use crate::DiscoveryStatus;
+use crate::DiscoveryWork;
+use crate::DriverContractError;
 use crate::LastDiscoveryOutcome;
 use crate::RegisteredSchemes;
 use crate::ReporterActivation;
@@ -33,6 +35,8 @@ use crate::contract::DiscoveryProgressReceiver;
 use crate::contract::DriverEntry;
 use crate::contract::EndpointDriver;
 use crate::contract::PendingDiscoveryProgress;
+use crate::discovery::DiscoveryDirtyState;
+use crate::discovery::DiscoveryRequest;
 use crate::discovery::StartupRequirement;
 
 /// Process-local driver handle that the driver registry issues in registration order.
@@ -654,8 +658,8 @@ impl ReporterEntry {
     fn record_due_signal(
         &mut self,
         now: Instant,
-        requested: crate::discovery::DiscoveryRequest,
-        dirty: crate::discovery::DiscoveryDirtyState,
+        requested: DiscoveryRequest,
+        dirty: DiscoveryDirtyState,
     ) -> bool {
         let cadence_due = matches!(self.next_due, NextDue::At(deadline) if deadline <= now);
         let signalled = matches!(requested, crate::discovery::DiscoveryRequest::Requested)
@@ -714,15 +718,11 @@ impl ReporterEntry {
             return;
         };
         *pending = match discovery_work {
-            crate::DiscoveryWork::Immediate(main_thread_discovery_job) => {
-                PendingDiscovery::Completed {
-                    scan:         main_thread_discovery_job.run(world),
-                    completed_at: Instant::now(),
-                }
+            DiscoveryWork::Immediate(main_thread_discovery_job) => PendingDiscovery::Completed {
+                scan:         main_thread_discovery_job.run(world),
+                completed_at: Instant::now(),
             },
-            crate::DiscoveryWork::Background(discovery_job) => {
-                PendingDiscovery::Background(discovery_job)
-            },
+            DiscoveryWork::Background(discovery_job) => PendingDiscovery::Background(discovery_job),
         };
     }
 
@@ -882,7 +882,7 @@ impl Drivers {
     ) -> Result<crate::CaptureOutcome<crate::CapturedConfiguration>, crate::DriverContractError>
     {
         self.get_mut(driver_id)
-            .ok_or(crate::DriverContractError::DriverNotRegistered { driver_id })?
+            .ok_or(DriverContractError::DriverNotRegistered { driver_id })?
             .capture(world, endpoint)
     }
 
@@ -911,7 +911,7 @@ impl Drivers {
         permit: ApplyPermit,
     ) -> Result<(), crate::DriverContractError> {
         self.get_mut(driver_id)
-            .ok_or(crate::DriverContractError::DriverNotRegistered { driver_id })?
+            .ok_or(DriverContractError::DriverNotRegistered { driver_id })?
             .start_apply(world, endpoint, configuration, attempt, permit)
     }
 
@@ -936,7 +936,7 @@ impl Drivers {
         attempt: crate::AttemptId,
     ) -> Result<crate::AttemptProgress, crate::DriverContractError> {
         self.get_mut(driver_id)
-            .ok_or(crate::DriverContractError::DriverNotRegistered { driver_id })?
+            .ok_or(DriverContractError::DriverNotRegistered { driver_id })?
             .poll(world, attempt)
     }
 
@@ -1029,6 +1029,7 @@ impl RiggingAppExt for App {
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use std::collections::VecDeque;
     use std::error::Error;
     use std::num::NonZeroU32;
     use std::num::NonZeroUsize;
@@ -1041,6 +1042,7 @@ mod tests {
     use std::sync::mpsc::Sender;
     use std::sync::mpsc::TryRecvError;
     use std::sync::mpsc::channel;
+    use std::thread::JoinHandle;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -1151,7 +1153,7 @@ mod tests {
     }
 
     struct SequenceReporter {
-        scans: std::collections::VecDeque<DeviceScan>,
+        scans: VecDeque<DeviceScan>,
     }
 
     struct BackgroundReporter {
@@ -1327,7 +1329,7 @@ mod tests {
         started: Receiver<&'static str>,
         expected_count: usize,
         releases: Vec<BackgroundJobRelease>,
-    ) -> std::thread::JoinHandle<(Vec<&'static str>, Receiver<&'static str>)> {
+    ) -> JoinHandle<(Vec<&'static str>, Receiver<&'static str>)> {
         std::thread::spawn(move || {
             let reporter_names = wait_for_started_jobs(&started, expected_count);
             for release in releases {
@@ -2974,7 +2976,7 @@ mod tests {
             DiscoveryRequest::NotRequested,
             DiscoveryDirtyState::Dirty,
         ));
-        reporter_entry.next_due = super::NextDue::At(now);
+        reporter_entry.next_due = NextDue::At(now);
         assert!(!reporter_entry.record_due_signal(
             now,
             DiscoveryRequest::NotRequested,
