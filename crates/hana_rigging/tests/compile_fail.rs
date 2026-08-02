@@ -13,6 +13,7 @@ use hana_rigging::DiscoveryStatusError;
 use hana_rigging::DiscoveryWork;
 use hana_rigging::LastDiscoveryOutcome;
 use hana_rigging::MainThreadDiscoveryJob;
+use hana_rigging::ReporterCoverage;
 use hana_rigging::ReporterRegistration;
 use hana_rigging::RiggingAppExt;
 use hana_rigging::RiggingPlugin;
@@ -44,7 +45,10 @@ fn required_background_reporter_stays_blocked_before_io_pool_initialization()
     app.add_plugins(RiggingPlugin);
     let reporter = app.add_device_reporter(
         BackgroundReporter,
-        ReporterRegistration::required(DiscoveryCadence::OnDemand),
+        ReporterRegistration::required(
+            DiscoveryCadence::OnDemand,
+            ReporterCoverage::MatchingEvidenceOnly,
+        ),
     );
 
     app.update();
@@ -78,7 +82,10 @@ fn immediate_reporter_completes_without_io_pool_initialization() -> Result<(), D
     app.add_plugins(RiggingPlugin);
     let reporter = app.add_device_reporter(
         ImmediateReporter,
-        ReporterRegistration::required(DiscoveryCadence::OnDemand),
+        ReporterRegistration::required(
+            DiscoveryCadence::OnDemand,
+            ReporterCoverage::MatchingEvidenceOnly,
+        ),
     );
 
     app.update();
@@ -152,6 +159,13 @@ fn apply_permit_cannot_be_constructed() {
 fn apply_permit_cannot_be_matched() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/apply_permit_cannot_be_matched.rs");
+}
+
+#[test]
+fn lifecycle_mutation_and_request_minting_are_kernel_only() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/lifecycle_mutation_is_kernel_only.rs");
+    cases.compile_fail("tests/compile_fail/state_issued_request_cannot_be_constructed.rs");
 }
 
 #[test]

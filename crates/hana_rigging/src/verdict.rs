@@ -52,8 +52,8 @@ pub enum IdentityVerdict {
     /// A `crate::DeviceIdSource::Reported` key matched one live unit uniquely, as when a display
     /// panel reports the EDID serial a saved layout was written against.
     ///
-    /// `Proven` is the only `IdentityVerdict` that can mint an authorization for in-service use
-    /// because a value reported by the unit establishes which physical device receives output.
+    /// `Proven` can mint an authorization for in-service use because a value reported by the unit
+    /// establishes which physical device receives output.
     Proven,
     /// A `crate::DeviceIdSource::Synthesized` key matched one live unit uniquely.
     ///
@@ -64,7 +64,8 @@ pub enum IdentityVerdict {
     /// A human assigned this durable address because the unit reports no usable identity.
     ///
     /// The authored patch is authoritative by construction: for example, a lighting fixture with
-    /// no serial uses its human-maintained patch as its identity.
+    /// no serial uses its human-maintained patch as its identity. Like `Proven`, `Authored` can
+    /// authorize in-service use after presence and claim checks succeed.
     Authored,
     /// A saved key matched no live unit even though a unit of the required kind occupies the same
     /// transport slot, as when a second camera is plugged into the USB port the saved camera used.
@@ -98,8 +99,8 @@ pub enum IdentityVerdict {
 impl IdentityVerdict {
     /// Report whether this verdict identifies the physical unit and nothing more.
     ///
-    /// This is not the in-service predicate: `Devices::authorize_service` also requires presence,
-    /// a claim, and reported identity before it can authorize output.
+    /// This is not the in-service predicate: `Devices::authorize_service` also requires presence
+    /// and a claim before `Proven` or `Authored` identity can authorize output.
     /// `IdentityVerdict::RestoreOnly` is identified so saved configuration can return to the
     /// matching unit while it remains ineligible to drive output.
     #[must_use]

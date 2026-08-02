@@ -13,10 +13,10 @@ use thiserror::Error;
 use crate::ApplyPermit;
 use crate::AttemptId;
 use crate::AttemptProgress;
-use crate::CapturedConfiguration;
 use crate::DeviceAccessError;
 use crate::DeviceEndpoint;
 use crate::DeviceScan;
+use crate::LastKnownGoodConfiguration;
 
 /// Reports the whole current set of hardware devices from an integration crate.
 ///
@@ -200,7 +200,7 @@ pub trait EndpointDriver: Send + Sync + 'static {
     /// The driver-specific configuration the kernel captures, erases, and later returns here.
     ///
     /// Driver authors must add `#[derive(Component, Reflect)]` and `#[reflect(Component)]` to the
-    /// concrete configuration type. `Reflect` permits storage in `CapturedConfiguration`, while
+    /// concrete configuration type. `Reflect` permits erased configuration retention, while
     /// `#[reflect(Component)]` creates the `ReflectComponent` metadata the kernel needs to mirror
     /// the concrete configuration on the binding entity. The trait bounds alone do not create that
     /// metadata.
@@ -255,7 +255,7 @@ pub enum CaptureOutcome<Configuration> {
     /// A transient read failed while the endpoint remained reachable, such as a camera that is
     /// switching modes.
     ///
-    /// The kernel retains its prior `CapturedConfiguration` and tries again during a later
+    /// The kernel retains its prior `LastKnownGoodConfiguration` and tries again during a later
     /// reconcile.
     ReadFailed(DeviceAccessError),
 }
@@ -280,7 +280,7 @@ pub enum DriverContractError {
         expected_driver: &'static str,
     },
     /// A binding or capture value reached a driver whose `Configuration` type differs from the
-    /// concrete value inside `CapturedConfiguration`.
+    /// concrete value selected by a state-issued driver request.
     ///
     /// This remains recoverable because two drivers can serve one device while accepting distinct
     /// configuration types; terminating the app would turn one authored routing error into loss
@@ -291,22 +291,33 @@ pub enum DriverContractError {
     ConfigurationTypeMismatch {
         /// The concrete `EndpointDriver::Configuration` type the registered driver accepts.
         expected_configuration: &'static str,
-        /// The reflected type path stored in the supplied `CapturedConfiguration`.
+        /// The reflected type path stored in the supplied requested or established value.
         received_configuration: String,
+    },
+    /// A state-issued restore request no longer has its checked readback value at dispatch time.
+    ///
+    /// Normal request ownership prevents this result: the request retains the binding borrow until
+    /// dispatch completes. It remains recoverable so a future kernel caller cannot commit an
+    /// applying state after a malformed internal request.
+    #[error("state-issued apply request for role `{role}` has no last-known-good configuration")]
+    LastKnownGoodConfigurationUnavailable {
+        /// Binding role whose restore request no longer selected a safe readback value.
+        role: crate::RoleKey,
     },
 }
 
 type ErasedDriver = dyn Any + Send + Sync;
-type CaptureFunction = fn(
-    &mut ErasedDriver,
-    &mut World,
-    &DeviceEndpoint,
-) -> Result<CaptureOutcome<CapturedConfiguration>, DriverContractError>;
+type CaptureFunction =
+    fn(
+        &mut ErasedDriver,
+        &mut World,
+        &DeviceEndpoint,
+    ) -> Result<CaptureOutcome<LastKnownGoodConfiguration>, DriverContractError>;
 type StartApplyFunction = fn(
     &mut ErasedDriver,
     &mut World,
     &DeviceEndpoint,
-    &CapturedConfiguration,
+    &dyn Reflect,
     AttemptId,
     ApplyPermit,
 ) -> Result<(), DriverContractError>;
@@ -338,7 +349,7 @@ impl DriverEntry {
         &mut self,
         world: &mut World,
         endpoint: &DeviceEndpoint,
-    ) -> Result<CaptureOutcome<CapturedConfiguration>, DriverContractError> {
+    ) -> Result<CaptureOutcome<LastKnownGoodConfiguration>, DriverContractError> {
         (self.capture)(self.driver.as_mut(), world, endpoint)
     }
 
@@ -346,7 +357,7 @@ impl DriverEntry {
         &mut self,
         world: &mut World,
         endpoint: &DeviceEndpoint,
-        configuration: &CapturedConfiguration,
+        configuration: &dyn Reflect,
         attempt: AttemptId,
         permit: ApplyPermit,
     ) -> Result<(), DriverContractError> {
@@ -373,7 +384,7 @@ fn capture_driver<Driver>(
     driver: &mut ErasedDriver,
     world: &mut World,
     endpoint: &DeviceEndpoint,
-) -> Result<CaptureOutcome<CapturedConfiguration>, DriverContractError>
+) -> Result<CaptureOutcome<LastKnownGoodConfiguration>, DriverContractError>
 where
     Driver: EndpointDriver,
 {
@@ -381,7 +392,7 @@ where
 
     Ok(match driver.capture(world, endpoint) {
         CaptureOutcome::Read(configuration) => {
-            CaptureOutcome::Read(CapturedConfiguration::new(configuration))
+            CaptureOutcome::Read(LastKnownGoodConfiguration::known(configuration))
         },
         CaptureOutcome::NotReadable => CaptureOutcome::NotReadable,
         CaptureOutcome::ReadFailed(error) => CaptureOutcome::ReadFailed(error),
@@ -392,7 +403,7 @@ fn start_apply_driver<Driver>(
     driver: &mut ErasedDriver,
     world: &mut World,
     endpoint: &DeviceEndpoint,
-    configuration: &CapturedConfiguration,
+    configuration: &dyn Reflect,
     attempt: AttemptId,
     permit: ApplyPermit,
 ) -> Result<(), DriverContractError>
@@ -401,13 +412,12 @@ where
 {
     let driver = typed_driver_mut::<Driver>(driver)?;
     let Some(configuration) = configuration
-        .as_reflect()
         .as_any()
         .downcast_ref::<Driver::Configuration>()
     else {
         return Err(DriverContractError::ConfigurationTypeMismatch {
             expected_configuration: type_name::<Driver::Configuration>(),
-            received_configuration: configuration.as_reflect().reflect_type_path().to_owned(),
+            received_configuration: configuration.reflect_type_path().to_owned(),
         });
     };
 
@@ -464,7 +474,6 @@ mod tests {
     use crate::ApplyPermit;
     use crate::AttemptId;
     use crate::AttemptProgress;
-    use crate::CapturedConfiguration;
     use crate::DeviceEndpoint;
     use crate::DeviceIdSource;
     use crate::DeviceKey;
@@ -473,6 +482,7 @@ mod tests {
     use crate::DiscoveryProgress;
     use crate::DiscoveryProgressSendError;
     use crate::EndpointId;
+    use crate::LastKnownGoodConfiguration;
     use crate::ReportedId;
     use crate::SchemeName;
 
@@ -605,11 +615,13 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         let mut app = App::new();
         let mut driver_entry = DriverEntry::new(TestDriver);
-        let configuration = CapturedConfiguration::new(OtherConfiguration);
+        let configuration = LastKnownGoodConfiguration::known(OtherConfiguration);
         let result = driver_entry.start_apply(
             app.world_mut(),
             &display_endpoint()?,
-            &configuration,
+            configuration
+                .as_reflect()
+                .map_err(|_| "missing configuration")?,
             AttemptId::default(),
             ApplyPermit::restore_only(),
         );

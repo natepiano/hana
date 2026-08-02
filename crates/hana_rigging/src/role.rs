@@ -23,12 +23,13 @@ use crate::AttemptId;
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Component, Reflect)]
 #[reflect(Component, PartialEq)]
 pub enum RoleState {
-    /// The role has a present, usable unit and no configuration operation is pending.
-    #[default]
-    Ready,
     /// The role cannot start an attempt because its device is missing, contended, or gated by
-    /// policy. `RecoveryPolicy::Retain` remains here until application code changes the binding.
+    /// policy. A newly authored binding starts here because no usable hardware has been observed.
+    /// `RecoveryPolicy::Retain` remains here until application code changes the binding.
+    #[default]
     Waiting,
+    /// The role has a present, usable unit and no configuration operation is pending.
+    Ready,
     /// The provider has started an apply operation for this role.
     ///
     /// Deadline status is not stored here because polling continues after the deadline. The

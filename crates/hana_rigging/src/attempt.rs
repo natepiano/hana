@@ -38,25 +38,37 @@ pub enum AttemptOutcome {
     Substituted,
 }
 
-/// Configuration a driver last applied successfully to one endpoint.
+/// The most recent configuration a safe readback established on one endpoint.
 ///
-/// The kernel stores the driver's value without learning whether it represents window placement,
-/// camera settings, or another device-specific configuration. The concrete type remains
-/// recoverable by the erased driver registry entry and is mirrored later as the driver's own
-/// component for inspection.
-#[derive(Reflect)]
-pub struct CapturedConfiguration(
-    #[reflect(ignore, default = "default_erased_configuration")] Box<dyn Reflect>,
-);
+/// This enum distinguishes the absence of endpoint evidence from an established driver value.
+/// `RequestedConfiguration` is application intent; it must never fill this value after an apply
+/// because a driver can normalize or substitute the value that actually reached the hardware.
+#[derive(Default, Reflect)]
+pub enum LastKnownGoodConfiguration {
+    /// No successful safe readback has established what is on this endpoint.
+    #[default]
+    NotEstablished,
+    /// A safe readback established this driver-specific endpoint value.
+    Known(#[reflect(ignore, default = "default_erased_configuration")] Box<dyn Reflect>),
+}
 
-impl CapturedConfiguration {
-    /// Erase a driver configuration after the driver reported a successful capture or apply.
+impl LastKnownGoodConfiguration {
+    /// Erase one value returned by a successful safe endpoint readback.
     #[must_use]
-    pub fn new(configuration: impl Reflect) -> Self { Self(Box::new(configuration)) }
+    pub fn known(configuration: impl Reflect) -> Self { Self::Known(Box::new(configuration)) }
 
-    /// Borrow the driver value so the erased driver registry entry can recover its concrete type.
-    #[must_use]
-    pub fn as_reflect(&self) -> &dyn Reflect { self.0.as_ref() }
+    pub(crate) fn as_reflect(&self) -> Result<&dyn Reflect, LastKnownGoodConfigurationAccessError> {
+        match self {
+            Self::NotEstablished => Err(LastKnownGoodConfigurationAccessError::NotEstablished),
+            Self::Known(configuration) => Ok(configuration.as_ref()),
+        }
+    }
+}
+
+/// Reason erased dispatch could not borrow a readback value from lifecycle state.
+pub(crate) enum LastKnownGoodConfigurationAccessError {
+    /// No driver readback proved an endpoint value for the binding yet.
+    NotEstablished,
 }
 
 fn default_erased_configuration() -> Box<dyn Reflect> { Box::new(()) }
@@ -71,7 +83,7 @@ mod tests {
     use bevy::reflect::FromReflect;
     use bevy::reflect::ReflectFromReflect;
 
-    use super::CapturedConfiguration;
+    use super::LastKnownGoodConfiguration;
 
     #[derive(Debug, PartialEq, Eq, Reflect)]
     struct ProviderConfiguration {
@@ -79,19 +91,19 @@ mod tests {
     }
 
     #[derive(Reflect)]
-    struct CapturedConfigurationRecord {
-        captured_configuration: CapturedConfiguration,
+    struct LastKnownGoodConfigurationRecord {
+        last_known_good_configuration: LastKnownGoodConfiguration,
     }
 
     #[test]
-    fn captured_configuration_allows_its_enclosing_record_to_reflect() {
+    fn last_known_good_configuration_allows_its_enclosing_record_to_reflect() {
         fn assert_from_reflect<T: FromReflect>() {}
 
-        assert_from_reflect::<CapturedConfigurationRecord>();
+        assert_from_reflect::<LastKnownGoodConfigurationRecord>();
 
         let app = App::new();
         let type_registry = app.world().resource::<AppTypeRegistry>().read();
-        let type_id = TypeId::of::<CapturedConfigurationRecord>();
+        let type_id = TypeId::of::<LastKnownGoodConfigurationRecord>();
 
         assert!(type_registry.contains(type_id));
         assert!(
@@ -104,15 +116,24 @@ mod tests {
     }
 
     #[test]
-    fn captured_configuration_recovers_the_provider_value_after_erasure() {
-        let captured_configuration =
-            CapturedConfiguration::new(ProviderConfiguration { frame_rate: 60 });
+    fn known_configuration_recovers_the_provider_value_after_erasure() {
+        let last_known_good =
+            LastKnownGoodConfiguration::known(ProviderConfiguration { frame_rate: 60 });
 
-        let recovered = captured_configuration
-            .as_reflect()
-            .as_any()
-            .downcast_ref::<ProviderConfiguration>();
+        let recovered = last_known_good.as_reflect().ok().and_then(|configuration| {
+            configuration
+                .as_any()
+                .downcast_ref::<ProviderConfiguration>()
+        });
 
         assert_eq!(recovered, Some(&ProviderConfiguration { frame_rate: 60 }));
+    }
+
+    #[test]
+    fn last_known_good_configuration_defaults_to_not_established() {
+        assert!(matches!(
+            LastKnownGoodConfiguration::default(),
+            LastKnownGoodConfiguration::NotEstablished
+        ));
     }
 }

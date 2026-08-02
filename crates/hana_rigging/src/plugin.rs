@@ -5,9 +5,11 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::SystemSet;
 use bevy::prelude::World;
 
+use crate::Bindings;
 use crate::DiscoveryControl;
 use crate::DiscoveryLimits;
 use crate::DiscoveryStatus;
+use crate::HardwareInventory;
 use crate::RegisteredSchemes;
 use crate::registration::Drivers;
 use crate::registration::Reporters;
@@ -37,9 +39,11 @@ pub enum RiggingSystems {
 impl Plugin for RiggingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Drivers>()
+            .init_resource::<Bindings>()
             .init_resource::<DiscoveryControl>()
             .init_resource::<DiscoveryLimits>()
             .init_resource::<DiscoveryStatus>()
+            .init_resource::<HardwareInventory>()
             .init_resource::<RegisteredSchemes>()
             .init_resource::<Reporters>()
             .configure_sets(

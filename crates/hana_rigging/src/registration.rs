@@ -9,6 +9,7 @@ use bevy::tasks::Task;
 use bevy::tasks::block_on;
 use bevy::tasks::poll_once;
 
+use crate::CaptureRequest;
 use crate::DeviceReporter;
 use crate::DeviceScan;
 use crate::DeviceSet;
@@ -23,6 +24,7 @@ use crate::DiscoveryStatus;
 use crate::DiscoveryWork;
 use crate::DriverContractError;
 use crate::LastDiscoveryOutcome;
+use crate::PollRequest;
 use crate::RegisteredSchemes;
 use crate::ReporterActivation;
 use crate::ReporterActivity;
@@ -30,6 +32,7 @@ use crate::ReporterId;
 use crate::ReporterRegistration;
 use crate::ReporterRevision;
 use crate::SchemeName;
+use crate::StartApplyRequest;
 use crate::StartupDiscoveryState;
 use crate::contract::DiscoveryProgressReceiver;
 use crate::contract::DriverEntry;
@@ -877,12 +880,16 @@ impl Drivers {
     pub(crate) fn capture(
         &mut self,
         world: &mut World,
-        driver_id: DriverId,
-        endpoint: &crate::DeviceEndpoint,
-    ) -> Result<crate::CaptureOutcome<crate::CapturedConfiguration>, crate::DriverContractError>
+        capture_request: CaptureRequest<'_>,
+    ) -> Result<crate::CaptureOutcome<crate::LastKnownGoodConfiguration>, crate::DriverContractError>
     {
-        self.get_mut(driver_id)
-            .ok_or(DriverContractError::DriverNotRegistered { driver_id })?
+        let CaptureRequest {
+            role: _,
+            driver,
+            endpoint,
+        } = capture_request;
+        self.get_mut(driver)
+            .ok_or(DriverContractError::DriverNotRegistered { driver_id: driver })?
             .capture(world, endpoint)
     }
 
@@ -904,15 +911,31 @@ impl Drivers {
     pub(crate) fn start_apply(
         &mut self,
         world: &mut World,
-        driver_id: DriverId,
-        endpoint: &crate::DeviceEndpoint,
-        configuration: &crate::CapturedConfiguration,
-        attempt: crate::AttemptId,
-        permit: ApplyPermit,
+        start_apply_request: StartApplyRequest<'_>,
     ) -> Result<(), crate::DriverContractError> {
-        self.get_mut(driver_id)
-            .ok_or(DriverContractError::DriverNotRegistered { driver_id })?
-            .start_apply(world, endpoint, configuration, attempt, permit)
+        let StartApplyRequest {
+            binding,
+            configuration_source,
+            attempt,
+            permit,
+        } = start_apply_request;
+        let driver = binding.driver;
+        let start_apply_result = {
+            let endpoint = &binding.endpoint;
+            let configuration = configuration_source.configuration(binding).map_err(|_| {
+                DriverContractError::LastKnownGoodConfigurationUnavailable {
+                    role: binding.role.clone(),
+                }
+            })?;
+            self.get_mut(driver)
+                .ok_or(DriverContractError::DriverNotRegistered { driver_id: driver })?
+                .start_apply(world, endpoint, configuration, attempt, permit)
+        };
+        if start_apply_result.is_ok() {
+            binding.state = crate::RoleState::Applying(attempt);
+        }
+
+        start_apply_result
     }
 
     /// Poll one in-flight apply through the driver selected by `driver_id`.
@@ -932,11 +955,16 @@ impl Drivers {
     pub(crate) fn poll(
         &mut self,
         world: &mut World,
-        driver_id: DriverId,
-        attempt: crate::AttemptId,
+        poll_request: PollRequest<'_>,
     ) -> Result<crate::AttemptProgress, crate::DriverContractError> {
-        self.get_mut(driver_id)
-            .ok_or(DriverContractError::DriverNotRegistered { driver_id })?
+        let PollRequest {
+            role: _,
+            driver,
+            endpoint: _,
+            attempt,
+        } = poll_request;
+        self.get_mut(driver)
+            .ok_or(DriverContractError::DriverNotRegistered { driver_id: driver })?
             .poll(world, attempt)
     }
 
@@ -1075,10 +1103,12 @@ mod tests {
     use super::RiggingAppExt;
     use crate::AttachmentPath;
     use crate::AttemptId;
+    use crate::AttemptOutcome;
     use crate::AttemptProgress;
+    use crate::Binding;
+    use crate::Bindings;
     use crate::Capabilities;
     use crate::CaptureOutcome;
-    use crate::CapturedConfiguration;
     use crate::Claim;
     use crate::DeviceAccessError;
     use crate::DeviceDescriptor;
@@ -1100,18 +1130,29 @@ mod tests {
     use crate::DiscoveryWork;
     use crate::EndpointDriver;
     use crate::EndpointId;
+    use crate::HardwareInventory;
     use crate::LastDiscoveryOutcome;
+    use crate::LastKnownGoodConfiguration;
     use crate::MainThreadDiscoveryJob;
+    use crate::OnAbort;
+    use crate::OnSessionLoss;
     use crate::OsDeviceId;
     use crate::Presence;
+    use crate::RecoveryPolicy;
     use crate::RegisteredSchemes;
     use crate::ReportedAs;
     use crate::ReportedId;
     use crate::ReportedSerial;
     use crate::ReporterActivation;
     use crate::ReporterActivity;
+    use crate::ReporterCoverage;
     use crate::ReporterRegistration;
+    use crate::RequestedConfiguration;
+    use crate::RetryOn;
     use crate::RiggingPlugin;
+    use crate::RoleKey;
+    use crate::RoleState;
+    use crate::RoleView;
     use crate::SchemeName;
     use crate::StartupDiscoveryState;
     use crate::discovery::DiscoveryDirtyState;
@@ -1489,7 +1530,10 @@ mod tests {
                     },
                 )]),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         )
     }
 
@@ -1501,7 +1545,10 @@ mod tests {
             GatedBackgroundReporter {
                 background_job_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         )
     }
 
@@ -1611,7 +1658,7 @@ mod tests {
                 runs: 0,
                 background_job_gate,
             },
-            ReporterRegistration::required(cadence),
+            ReporterRegistration::required(cadence, ReporterCoverage::MatchingEvidenceOnly),
         );
 
         app.update();
@@ -1752,7 +1799,10 @@ mod tests {
                 scans: Arc::new(AtomicUsize::new(0)),
             },
             ReporterId(0),
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         assert!(matches!(
@@ -1825,9 +1875,12 @@ mod tests {
             CountingReporter {
                 scans: Arc::clone(&scans),
             },
-            ReporterRegistration::required(DiscoveryCadence::Periodic {
-                interval: Duration::ZERO,
-            }),
+            ReporterRegistration::required(
+                DiscoveryCadence::Periodic {
+                    interval: Duration::ZERO,
+                },
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -1862,7 +1915,10 @@ mod tests {
                 scans: Arc::clone(&scans),
             },
             ReporterId(0),
-            ReporterRegistration::required(DiscoveryCadence::Periodic { interval }),
+            ReporterRegistration::required(
+                DiscoveryCadence::Periodic { interval },
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         assert!(reporter_entry.record_due_signal(
@@ -1931,7 +1987,10 @@ mod tests {
                 scans: Arc::clone(&scans),
             },
             ReporterId(0),
-            ReporterRegistration::required(DiscoveryCadence::EventDriven { backstop }),
+            ReporterRegistration::required(
+                DiscoveryCadence::EventDriven { backstop },
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         reporter_entry.schedule_after_completion(first_completed_at);
@@ -1991,13 +2050,19 @@ mod tests {
             RecordReporter {
                 scans: Arc::clone(&first_scans),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         app.add_device_reporter(
             CountingReporter {
                 scans: Arc::clone(&second_scans),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2029,19 +2094,28 @@ mod tests {
             GatedBackgroundReporter {
                 background_job_gate: first_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let second = app.add_device_reporter(
             GatedBackgroundReporter {
                 background_job_gate: second_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let third = app.add_device_reporter(
             GatedBackgroundReporter {
                 background_job_gate: third_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         let release_jobs =
@@ -2107,13 +2181,19 @@ mod tests {
             GatedBackgroundReporter {
                 background_job_gate: blocker_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let subject = app.add_device_reporter(
             GatedBackgroundReporter {
                 background_job_gate: subject_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2183,13 +2263,19 @@ mod tests {
             GatedBackgroundReporter {
                 background_job_gate: first_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let second = app.add_device_reporter(
             GatedBackgroundReporter {
                 background_job_gate: second_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         let release_first_job = release_jobs_after_start(started_receiver, 1, vec![first_release]);
@@ -2261,19 +2347,28 @@ mod tests {
             GatedBackgroundReporter {
                 background_job_gate: first_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let second = app.add_device_reporter(
             GatedBackgroundReporter {
                 background_job_gate: second_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let third = app.add_device_reporter(
             GatedBackgroundReporter {
                 background_job_gate: third_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         let release_jobs =
@@ -2338,14 +2433,21 @@ mod tests {
                 name:        "required",
                 discoveries: Arc::clone(&discoveries),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let optional = app.add_device_reporter(
             OrderedReporter {
                 name:        "optional",
                 discoveries: Arc::clone(&discoveries),
             },
-            ReporterRegistration::optional(DiscoveryCadence::OnDemand, ReporterActivation::Enabled),
+            ReporterRegistration::optional(
+                DiscoveryCadence::OnDemand,
+                ReporterActivation::Enabled,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2436,9 +2538,12 @@ mod tests {
                     }),
                 ]),
             },
-            ReporterRegistration::required(DiscoveryCadence::Periodic {
-                interval: Duration::ZERO,
-            }),
+            ReporterRegistration::required(
+                DiscoveryCadence::Periodic {
+                    interval: Duration::ZERO,
+                },
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2471,9 +2576,12 @@ mod tests {
                     }),
                 ]),
             },
-            ReporterRegistration::required(DiscoveryCadence::Periodic {
-                interval: Duration::ZERO,
-            }),
+            ReporterRegistration::required(
+                DiscoveryCadence::Periodic {
+                    interval: Duration::ZERO,
+                },
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2503,6 +2611,7 @@ mod tests {
             ReporterRegistration::optional(
                 DiscoveryCadence::OnDemand,
                 ReporterActivation::Disabled,
+                ReporterCoverage::MatchingEvidenceOnly,
             ),
         );
 
@@ -2533,13 +2642,19 @@ mod tests {
                     test_device_record(),
                 ])]),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let second = app.add_device_reporter(
             CountingReporter {
                 scans: Arc::clone(&second_scans),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2585,10 +2700,16 @@ mod tests {
     fn completion_budget_preserves_actual_completion_clock_for_delayed_acceptance() {
         let scans = Arc::new(AtomicUsize::new(0));
         let cadence_interval = Duration::from_secs(10);
-        let first_registration = ReporterRegistration::required(DiscoveryCadence::OnDemand);
-        let delayed_registration = ReporterRegistration::required(DiscoveryCadence::Periodic {
-            interval: cadence_interval,
-        });
+        let first_registration = ReporterRegistration::required(
+            DiscoveryCadence::OnDemand,
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
+        let delayed_registration = ReporterRegistration::required(
+            DiscoveryCadence::Periodic {
+                interval: cadence_interval,
+            },
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
         let mut reporters = Reporters::default();
         let first = reporters.add(
             CountingReporter {
@@ -2686,7 +2807,10 @@ mod tests {
                     test_device_record(),
                 ])]),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let second = app.add_device_reporter(
             SequenceReporter {
@@ -2697,6 +2821,7 @@ mod tests {
             ReporterRegistration::optional(
                 DiscoveryCadence::OnDemand,
                 ReporterActivation::Disabled,
+                ReporterCoverage::MatchingEvidenceOnly,
             ),
         );
 
@@ -2746,7 +2871,10 @@ mod tests {
             BackgroundReporter {
                 discoveries: Arc::clone(&discoveries),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         for _ in 0..MAX_UPDATES {
@@ -2806,6 +2934,7 @@ mod tests {
             ReporterRegistration::optional(
                 DiscoveryCadence::OnDemand,
                 ReporterActivation::Disabled,
+                ReporterCoverage::MatchingEvidenceOnly,
             ),
         );
         let subject = app.add_device_reporter(
@@ -2815,7 +2944,11 @@ mod tests {
                 runs:                    0,
                 background_job_gate:     subject_gate,
             },
-            ReporterRegistration::optional(DiscoveryCadence::OnDemand, ReporterActivation::Enabled),
+            ReporterRegistration::optional(
+                DiscoveryCadence::OnDemand,
+                ReporterActivation::Enabled,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2877,7 +3010,11 @@ mod tests {
                 runs: 0,
                 background_job_gate,
             },
-            ReporterRegistration::optional(DiscoveryCadence::OnDemand, ReporterActivation::Enabled),
+            ReporterRegistration::optional(
+                DiscoveryCadence::OnDemand,
+                ReporterActivation::Enabled,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -2952,7 +3089,10 @@ mod tests {
                 discoveries: Arc::clone(&discoveries),
             },
             ReporterId(0),
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         assert!(reporter_entry.record_due_signal(
@@ -3033,7 +3173,10 @@ mod tests {
                 runs: 0,
                 background_job_gate,
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -3092,7 +3235,11 @@ mod tests {
                 discoveries: Arc::clone(&discoveries),
             },
             ReporterId(0),
-            ReporterRegistration::optional(DiscoveryCadence::OnDemand, ReporterActivation::Enabled),
+            ReporterRegistration::optional(
+                DiscoveryCadence::OnDemand,
+                ReporterActivation::Enabled,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         assert!(reporter_entry.record_due_signal(
@@ -3136,11 +3283,17 @@ mod tests {
             CountingReporter {
                 scans: Arc::clone(&scans),
             },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let second_reporter = app.add_device_reporter(
             CountingReporter { scans },
-            ReporterRegistration::required(DiscoveryCadence::OnDemand),
+            ReporterRegistration::required(
+                DiscoveryCadence::OnDemand,
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
         let first_driver = app.add_endpoint_driver(TestDriver);
         let second_driver = app.add_endpoint_driver(TestDriver);
@@ -3165,9 +3318,12 @@ mod tests {
         app.add_plugins(RiggingPlugin);
         let reporter_id = app.add_device_reporter(
             CountingReporter { scans },
-            ReporterRegistration::required(DiscoveryCadence::Periodic {
-                interval: Duration::ZERO,
-            }),
+            ReporterRegistration::required(
+                DiscoveryCadence::Periodic {
+                    interval: Duration::ZERO,
+                },
+                ReporterCoverage::MatchingEvidenceOnly,
+            ),
         );
 
         app.update();
@@ -3188,24 +3344,57 @@ mod tests {
         let mut app = App::new();
         let driver_id = app.add_endpoint_driver(TestDriver);
         let endpoint = display_endpoint()?;
-        let configuration = CapturedConfiguration::new(TestConfiguration);
+        let role = RoleKey::new("test-driver")?;
+        let mut bindings = Bindings::default();
+        let hardware_inventory = HardwareInventory::default();
+        bindings.register(Binding {
+            role: role.clone(),
+            endpoint,
+            driver: driver_id,
+            recovery: RecoveryPolicy::default(),
+            retry: RetryOn::NewRevision,
+            on_abort: OnAbort::default(),
+            on_loss: OnSessionLoss::default(),
+            state: RoleState::default(),
+            requested: RequestedConfiguration::new(TestConfiguration),
+            last_known_good: LastKnownGoodConfiguration::default(),
+        })?;
 
-        let (capture, start, poll) =
-            app.world_mut()
-                .resource_scope::<Drivers, _>(|world, mut drivers| {
-                    let capture = drivers.capture(world, driver_id, &endpoint);
-                    let start = drivers.start_apply(
-                        world,
-                        driver_id,
-                        &endpoint,
-                        &configuration,
-                        AttemptId::default(),
-                        ApplyPermit::restore_only(),
-                    );
-                    let poll = drivers.poll(world, driver_id, AttemptId::default());
-
-                    (capture, start, poll)
-                });
+        let start_apply_request = match bindings.role_view(&role)? {
+            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
+                AttemptId::default(),
+                ApplyPermit::in_service(),
+                &hardware_inventory,
+            )?,
+            _ => return Err("registered binding must begin waiting".into()),
+        };
+        let start = app
+            .world_mut()
+            .resource_scope::<Drivers, _>(|world, mut drivers| {
+                drivers.start_apply(world, start_apply_request)
+            });
+        let poll_request = match bindings.role_view(&role)? {
+            RoleView::Applying(applying_role) => applying_role.poll_request(&hardware_inventory)?,
+            _ => return Err("started apply must select applying role view".into()),
+        };
+        let poll = app
+            .world_mut()
+            .resource_scope::<Drivers, _>(|world, mut drivers| drivers.poll(world, poll_request));
+        match bindings.role_view(&role)? {
+            RoleView::Applying(mut applying_role) => {
+                applying_role.finish(AttemptOutcome::Succeeded);
+            },
+            _ => return Err("poll requires applying role view".into()),
+        }
+        let capture_request = match bindings.role_view(&role)? {
+            RoleView::Ready(ready_role) => ready_role.capture_request(&hardware_inventory)?,
+            _ => return Err("successful apply must make role ready".into()),
+        };
+        let capture = app
+            .world_mut()
+            .resource_scope::<Drivers, _>(|world, mut drivers| {
+                drivers.capture(world, capture_request)
+            });
 
         assert!(matches!(
             capture,

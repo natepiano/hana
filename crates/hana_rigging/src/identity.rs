@@ -6,6 +6,7 @@ use bevy::reflect::ReflectSerialize;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::scheme::AuthoredId;
 use super::scheme::Digest;
 use super::scheme::ReportedId;
 use super::scheme::SchemeName;
@@ -16,7 +17,7 @@ use super::scheme::SchemeName;
 /// integer from a monotonic counter so a removed device leaves a dangling handle instead of a
 /// handle that silently denotes a later device.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Component, Reflect)]
-#[reflect(Component)]
+#[reflect(Component, PartialEq)]
 pub struct DeviceId(u64);
 
 /// Durable designation for a device that can cross process and storage boundaries.
@@ -24,7 +25,7 @@ pub struct DeviceId(u64);
 /// `DeviceKey::id` retains whether its value is proof or a hint. Storing that distinction in the
 /// enum variant prevents callers from copying a string while losing the rule that controls output.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Component, Serialize, Deserialize, Reflect)]
-#[reflect(Component, Serialize, Deserialize)]
+#[reflect(Component, PartialEq, Serialize, Deserialize)]
 pub struct DeviceKey {
     /// Physical role that keeps a display, audio interface, DMX universe, or HID panel separate
     /// even when two providers use similar identifier values.
@@ -36,7 +37,8 @@ pub struct DeviceKey {
 /// Trust classification for the value used in a `DeviceKey`.
 ///
 /// `DeviceIdSource` prevents a synthesized location hint from being treated like a value reported
-/// by the unit itself. Only `Reported` can later authorize output.
+/// by the unit itself. Only `Reported` and explicitly authored inventory identity can later
+/// authorize output.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Reflect)]
 #[reflect(Serialize, Deserialize)]
 pub enum DeviceIdSource {
@@ -57,6 +59,15 @@ pub enum DeviceIdSource {
     Synthesized {
         /// Fixed-width FNV-1a result derived from the provider's descriptors.
         digest: Digest,
+    },
+    /// Application-authored durable identity for hardware retained in `HardwareInventory`.
+    ///
+    /// An authored display entry can authorize its own declared endpoint after reporter evidence
+    /// identifies the live unit under this key. Unlike `Synthesized`, this is explicit operator
+    /// intent persisted by the application instead of a reusable location hint.
+    Authored {
+        /// Checked persisted value the application assigned to this durable inventory identity.
+        value: AuthoredId,
     },
 }
 
@@ -100,6 +111,7 @@ mod tests {
     use super::DeviceIdSource;
     use super::DeviceKey;
     use super::DeviceKind;
+    use crate::AuthoredId;
     use crate::Digest;
     use crate::ReportedId;
     use crate::SchemeName;
@@ -127,6 +139,12 @@ mod tests {
                 digest: Digest::new(14_695_981_039_346_656_037),
             },
         };
+        let authored_display = DeviceKey {
+            kind: DeviceKind::Display,
+            id:   DeviceIdSource::Authored {
+                value: AuthoredId::new("studio-display-a")?,
+            },
+        };
 
         for (ron, expected) in [
             (
@@ -152,6 +170,10 @@ mod tests {
             (
                 r"DeviceKey(kind: Camera, id: Synthesized(digest: 14695981039346656037))",
                 camera,
+            ),
+            (
+                r#"DeviceKey(kind: Display, id: Authored(value: "studio-display-a"))"#,
+                authored_display,
             ),
         ] {
             let parsed = options.from_str::<DeviceKey>(ron)?;

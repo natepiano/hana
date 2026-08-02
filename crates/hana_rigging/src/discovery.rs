@@ -9,8 +9,12 @@ use bevy::tasks::IoTaskPool;
 use thiserror::Error;
 
 use crate::DeviceAccessError;
+use crate::DeviceIdSource;
+use crate::DeviceKey;
+use crate::DeviceKind;
 use crate::DiscoveryProgress;
 use crate::ReporterId;
+use crate::SchemeName;
 
 const DEFAULT_MAX_COMPLETIONS_PER_FRAME: usize = 2;
 const DEFAULT_MAX_CONCURRENT_JOBS: usize = 2;
@@ -43,6 +47,149 @@ pub enum ReporterActivation {
     Disabled,
 }
 
+/// Whether a successful complete report can establish absence for authored inventory identity.
+///
+/// A reporter may contribute live matching evidence without being able to enumerate every device
+/// in an identity space. This distinction prevents a camera-only or partial display report from
+/// treating omitted authored hardware as absent.
+#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+pub enum ReporterCoverage {
+    /// This reporter can contribute live records and matching evidence, but omission proves
+    /// nothing about an authored device.
+    MatchingEvidenceOnly,
+    /// A fresh successful complete report can establish absence in the declared identity spaces.
+    EstablishesAbsence(AuthoritativeReporterCoverage),
+}
+
+impl ReporterCoverage {
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "phase 10 reconciliation asks coverage before it marks inventory absent"
+        )
+    )]
+    pub(crate) fn establishes_absence_for(&self, device_key: &DeviceKey) -> bool {
+        match self {
+            Self::MatchingEvidenceOnly => false,
+            Self::EstablishesAbsence(authoritative_reporter_coverage) => {
+                authoritative_reporter_coverage.covers(device_key)
+            },
+        }
+    }
+}
+
+/// Checked identity spaces that one reporter completely enumerates on a successful scan.
+///
+/// The collection cannot be empty because absence authority with no identity space would look
+/// enabled while proving nothing. Duplicate spaces are rejected so one reporter declaration has
+/// one reading when future coverage diagnostics render it.
+#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+#[reflect(opaque)]
+pub struct AuthoritativeReporterCoverage {
+    identity_spaces: Vec<CoveredDeviceIdentitySpace>,
+}
+
+impl AuthoritativeReporterCoverage {
+    /// Construct absence authority for one complete durable identity space.
+    #[must_use]
+    pub fn one(covered_device_identity_space: CoveredDeviceIdentitySpace) -> Self {
+        Self {
+            identity_spaces: vec![covered_device_identity_space],
+        }
+    }
+
+    /// Construct absence authority for several distinct complete durable identity spaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthoritativeReporterCoverageError` when no spaces were supplied or the same
+    /// space appears more than once.
+    pub fn new(
+        identity_spaces: Vec<CoveredDeviceIdentitySpace>,
+    ) -> Result<Self, AuthoritativeReporterCoverageError> {
+        if identity_spaces.is_empty() {
+            return Err(AuthoritativeReporterCoverageError::Empty);
+        }
+        for (index, covered_device_identity_space) in identity_spaces.iter().enumerate() {
+            if identity_spaces[..index].contains(covered_device_identity_space) {
+                return Err(AuthoritativeReporterCoverageError::Duplicate {
+                    covered_device_identity_space: covered_device_identity_space.clone(),
+                });
+            }
+        }
+
+        Ok(Self { identity_spaces })
+    }
+
+    fn covers(&self, device_key: &DeviceKey) -> bool {
+        self.identity_spaces
+            .iter()
+            .any(|covered_device_identity_space| covered_device_identity_space.covers(device_key))
+    }
+}
+
+/// One durable identity space a successful complete reporter scan can enumerate.
+#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+pub enum CoveredDeviceIdentitySpace {
+    /// The reporter enumerates every durable key of this physical device kind.
+    AllKeysOfKind {
+        /// Physical kind completely enumerated by this reporter.
+        kind: DeviceKind,
+    },
+    /// The reporter enumerates every unit-reported value in this registered identity scheme.
+    ReportedScheme {
+        /// Physical kind separated from unrelated users of the same scheme name.
+        kind:   DeviceKind,
+        /// Registered identity space fully enumerated by this reporter.
+        scheme: SchemeName,
+    },
+    /// The reporter enumerates synthesized durable keys of this physical device kind.
+    SynthesizedKeysOfKind {
+        /// Physical kind whose synthesized identity records are complete in this report.
+        kind: DeviceKind,
+    },
+    /// The reporter enumerates operator-authored durable keys of this physical device kind.
+    AuthoredKeysOfKind {
+        /// Physical kind whose authored inventory identities are complete in this report.
+        kind: DeviceKind,
+    },
+}
+
+impl CoveredDeviceIdentitySpace {
+    fn covers(&self, device_key: &DeviceKey) -> bool {
+        match self {
+            Self::AllKeysOfKind { kind } => device_key.kind == *kind,
+            Self::ReportedScheme { kind, scheme } => {
+                device_key.kind == *kind
+                    && matches!(&device_key.id, DeviceIdSource::Reported { scheme: key_scheme, .. } if key_scheme == scheme)
+            },
+            Self::SynthesizedKeysOfKind { kind } => {
+                device_key.kind == *kind
+                    && matches!(&device_key.id, DeviceIdSource::Synthesized { .. })
+            },
+            Self::AuthoredKeysOfKind { kind } => {
+                device_key.kind == *kind
+                    && matches!(&device_key.id, DeviceIdSource::Authored { .. })
+            },
+        }
+    }
+}
+
+/// Failure from defining absence authority that has no unambiguous identity-space meaning.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum AuthoritativeReporterCoverageError {
+    /// No identity space was supplied, so a complete scan could not establish any absence.
+    #[error("authoritative reporter coverage must include at least one identity space")]
+    Empty,
+    /// One identity space was listed twice in one reporter declaration.
+    #[error("authoritative reporter coverage repeats `{covered_device_identity_space:?}`")]
+    Duplicate {
+        /// Repeated complete identity space that has no additional coverage meaning.
+        covered_device_identity_space: CoveredDeviceIdentitySpace,
+    },
+}
+
 /// Registration policy that separates startup requirements from reporter activation.
 ///
 /// Required reporters always start enabled because startup cannot become ready without their first
@@ -54,6 +201,7 @@ pub struct ReporterRegistration {
     cadence:             DiscoveryCadence,
     startup_requirement: StartupRequirement,
     activation:          ReporterActivation,
+    coverage:            ReporterCoverage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,21 +213,27 @@ pub(crate) enum StartupRequirement {
 impl ReporterRegistration {
     /// Require an enabled reporter's first successful complete result before hardware is ready.
     #[must_use]
-    pub const fn required(cadence: DiscoveryCadence) -> Self {
+    pub const fn required(cadence: DiscoveryCadence, coverage: ReporterCoverage) -> Self {
         Self {
             cadence,
             startup_requirement: StartupRequirement::Required,
             activation: ReporterActivation::Enabled,
+            coverage,
         }
     }
 
     /// Register hardware that application policy may enable or leave offline independently.
     #[must_use]
-    pub const fn optional(cadence: DiscoveryCadence, activation: ReporterActivation) -> Self {
+    pub const fn optional(
+        cadence: DiscoveryCadence,
+        activation: ReporterActivation,
+        coverage: ReporterCoverage,
+    ) -> Self {
         Self {
             cadence,
             startup_requirement: StartupRequirement::Optional,
             activation,
+            coverage,
         }
     }
 
@@ -88,6 +242,15 @@ impl ReporterRegistration {
     pub(crate) const fn requirement(&self) -> StartupRequirement { self.startup_requirement }
 
     pub(crate) const fn cadence(&self) -> &DiscoveryCadence { &self.cadence }
+
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "phase 10 reconciliation reads reporter coverage from registration"
+        )
+    )]
+    pub(crate) const fn coverage(&self) -> &ReporterCoverage { &self.coverage }
 }
 
 /// Runtime control surface for reporter activation and explicit discovery triggers.
@@ -541,14 +704,20 @@ pub fn hardware_ready(discovery_status: Res<DiscoveryStatus>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::any::TypeId;
     use std::num::NonZeroUsize;
 
+    use bevy::app::App;
+    use bevy::ecs::reflect::AppTypeRegistry;
     use bevy::reflect::FromReflect;
     use bevy::reflect::PartialReflect;
     use bevy::reflect::ReflectMut;
     use bevy::reflect::ReflectRef;
     use bevy::reflect::structs::DynamicStruct;
 
+    use super::AuthoritativeReporterCoverage;
+    use super::AuthoritativeReporterCoverageError;
+    use super::CoveredDeviceIdentitySpace;
     use super::DEFAULT_MAX_COMPLETIONS_PER_FRAME;
     use super::DEFAULT_MAX_CONCURRENT_JOBS;
     use super::DEFAULT_PROGRESS_AFTER;
@@ -559,9 +728,14 @@ mod tests {
     use super::DiscoveryLimits;
     use super::DiscoveryRequest;
     use super::ReporterActivation;
+    use super::ReporterCoverage;
     use super::ReporterRegistration;
     use super::StartupRequirement;
     use super::effective_discovery_job_capacity;
+    use crate::AuthoredId;
+    use crate::DeviceIdSource;
+    use crate::DeviceKey;
+    use crate::DeviceKind;
     use crate::ReporterId;
 
     #[test]
@@ -594,9 +768,106 @@ mod tests {
     }
 
     #[test]
+    fn absence_coverage_rejects_empty_and_duplicate_spaces() {
+        let display = CoveredDeviceIdentitySpace::AllKeysOfKind {
+            kind: DeviceKind::Display,
+        };
+
+        assert_eq!(
+            AuthoritativeReporterCoverage::new(Vec::new()),
+            Err(AuthoritativeReporterCoverageError::Empty)
+        );
+        assert_eq!(
+            AuthoritativeReporterCoverage::new(vec![display.clone(), display.clone()]),
+            Err(AuthoritativeReporterCoverageError::Duplicate {
+                covered_device_identity_space: display,
+            })
+        );
+    }
+
+    #[test]
+    fn coverage_requires_an_explicit_identity_space_and_never_crosses_device_kind()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let display_key = DeviceKey {
+            kind: DeviceKind::Display,
+            id:   DeviceIdSource::Authored {
+                value: AuthoredId::new("studio-display")?,
+            },
+        };
+        let camera_coverage = ReporterCoverage::EstablishesAbsence(
+            AuthoritativeReporterCoverage::one(CoveredDeviceIdentitySpace::AllKeysOfKind {
+                kind: DeviceKind::Camera,
+            }),
+        );
+
+        assert!(!ReporterCoverage::MatchingEvidenceOnly.establishes_absence_for(&display_key));
+        assert!(!camera_coverage.establishes_absence_for(&display_key));
+        assert!(
+            ReporterCoverage::EstablishesAbsence(AuthoritativeReporterCoverage::one(
+                CoveredDeviceIdentitySpace::AuthoredKeysOfKind {
+                    kind: DeviceKind::Display,
+                }
+            ))
+            .establishes_absence_for(&display_key)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn reporter_coverage_registers_for_reflection_without_manual_app_calls() {
+        let app = App::new();
+        let world = app.world();
+        let type_registry = world.resource::<AppTypeRegistry>().read();
+
+        assert!(type_registry.contains(TypeId::of::<ReporterCoverage>()));
+        assert!(type_registry.contains(TypeId::of::<AuthoritativeReporterCoverage>()));
+        assert!(type_registry.contains(TypeId::of::<CoveredDeviceIdentitySpace>()));
+        drop(type_registry);
+    }
+
+    #[test]
+    fn reflection_cannot_construct_or_mutate_authoritative_reporter_coverage() {
+        let display_coverage = CoveredDeviceIdentitySpace::AllKeysOfKind {
+            kind: DeviceKind::Display,
+        };
+        let mut authoritative_reporter_coverage =
+            AuthoritativeReporterCoverage::one(display_coverage.clone());
+
+        assert!(matches!(
+            authoritative_reporter_coverage.reflect_ref(),
+            ReflectRef::Opaque(_)
+        ));
+        assert!(matches!(
+            authoritative_reporter_coverage.reflect_mut(),
+            ReflectMut::Opaque(_)
+        ));
+
+        let mut unchecked_coverage = DynamicStruct::default();
+        unchecked_coverage.insert("identity_spaces", Vec::<CoveredDeviceIdentitySpace>::new());
+        assert!(AuthoritativeReporterCoverage::from_reflect(&unchecked_coverage).is_none());
+        assert!(
+            authoritative_reporter_coverage
+                .try_apply(&unchecked_coverage)
+                .is_err()
+        );
+        assert_eq!(
+            authoritative_reporter_coverage,
+            AuthoritativeReporterCoverage::one(display_coverage)
+        );
+    }
+
+    #[test]
     fn dirty_notifications_coalesce_in_runtime_control() {
         let reporter = ReporterId(0);
-        let registration = ReporterRegistration::required(DiscoveryCadence::OnDemand);
+        let registration = ReporterRegistration::required(
+            DiscoveryCadence::OnDemand,
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
+        assert!(matches!(
+            registration.coverage(),
+            ReporterCoverage::MatchingEvidenceOnly
+        ));
         let mut discovery_control = DiscoveryControl::default();
         discovery_control.register(reporter, &registration);
 
@@ -616,7 +887,10 @@ mod tests {
     fn rejected_controls_leave_registered_reporter_state_unchanged() {
         let reporter = ReporterId(0);
         let unknown_reporter = ReporterId(u32::MAX);
-        let registration = ReporterRegistration::required(DiscoveryCadence::OnDemand);
+        let registration = ReporterRegistration::required(
+            DiscoveryCadence::OnDemand,
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
         let mut discovery_control = DiscoveryControl::default();
         discovery_control.register(reporter, &registration);
 
@@ -657,7 +931,10 @@ mod tests {
 
     #[test]
     fn reflection_preserves_registration_and_control_invariants() {
-        let reporter_registration = ReporterRegistration::required(DiscoveryCadence::OnDemand);
+        let reporter_registration = ReporterRegistration::required(
+            DiscoveryCadence::OnDemand,
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
         assert!(matches!(
             reporter_registration.reflect_ref(),
             ReflectRef::Opaque(_)

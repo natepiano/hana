@@ -135,6 +135,60 @@ pub enum ReportedIdError {
     ContainsControlCharacter,
 }
 
+/// Persisted identity value that application configuration assigns to one authored device.
+///
+/// `AuthoredId` is separate from `ReportedId` because an operator label is authorization intent,
+/// not a value supplied by the physical unit or one of its identity schemes.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Reflect)]
+#[reflect(opaque)]
+#[reflect(Serialize, Deserialize)]
+pub struct AuthoredId(String);
+
+impl AuthoredId {
+    /// Create one persisted authored identifier without blank or control-character text.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthoredIdError` when `value` cannot distinguish an authored inventory entry in
+    /// configuration or diagnostics.
+    pub fn new(value: impl Into<String>) -> Result<Self, AuthoredIdError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(AuthoredIdError::Empty);
+        }
+        if value.chars().any(char::is_control) {
+            return Err(AuthoredIdError::ContainsControlCharacter);
+        }
+
+        Ok(Self(value))
+    }
+
+    /// Borrow the application-authored value without treating it as reporter evidence.
+    #[must_use]
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl<'de> Deserialize<'de> for AuthoredId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(<D::Error as DeserializeError>::custom)
+    }
+}
+
+/// Reason `AuthoredId::new` rejected text before it could name a persisted inventory entry.
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub enum AuthoredIdError {
+    /// A blank value cannot identify a distinct device in authored application inventory.
+    #[error("authored identifiers must not be empty")]
+    Empty,
+    /// Control characters make an authored value ambiguous in configuration and diagnostics.
+    #[error("authored identifiers must not contain control characters")]
+    ContainsControlCharacter,
+}
+
 /// Fixed-width FNV-1a result synthesized from descriptors when a unit reports no unique identity.
 ///
 /// `Digest` uses `u64` instead of text because every `u64` is representable as an FNV-1a result;
