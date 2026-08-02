@@ -28,8 +28,7 @@ use crate::keymap_plugin::RegistryValidationFailed;
 ///
 /// Applications define these names by deriving `strum::AsRefStr` with
 /// `#[strum(serialize_all = "snake_case")]` on their context enum. Keymap parsing resolves the
-/// authored text through [`ConditionRegistry`], so the input path carries only a
-/// [`ConditionHandle`].
+/// authored text once, so the input path carries only an opaque handle.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Reflect)]
 #[reflect(opaque)]
 pub struct ConditionName(String);
