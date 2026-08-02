@@ -81,20 +81,23 @@ pub struct DeviceRecord {
     pub descriptor:   DeviceDescriptor,
 }
 
-/// Reporter result for one opportunity to enumerate its devices.
+/// Reporter result for one scheduled attempt to enumerate its devices.
 ///
-/// Reporters return `DeviceScan::Unchanged` on frames where no scan ran; reconciliation retains
-/// the last complete set. A completed scan always contains the reporter's whole current set, so a
-/// missing record is meaningful evidence of departure.
+/// Not calling a reporter is the unchanged case: cadence and activation state record why it was
+/// not due. A completed scan always contains the reporter's whole current set, so a missing record
+/// is meaningful evidence of departure.
 pub enum DeviceScan {
-    /// The reporter did not scan after its prior report, as when a camera enumeration interval has
-    /// not elapsed or display configuration has not changed.
-    Unchanged,
     /// The reporter scanned and supplied every currently visible device record.
     ///
     /// The reporter registry stamps this list with the registry-issued `ReporterId` and its next
     /// `ReporterRevision`; reporter implementations cannot supply either value themselves.
     Complete(Vec<DeviceRecord>),
+    /// Enumeration failed before the reporter could establish its whole current set.
+    ///
+    /// The registry retains the preceding complete set and revision, because treating an I/O
+    /// failure like an empty device list would falsely report every connected camera or display as
+    /// departed.
+    Failed(crate::DeviceAccessError),
 }
 
 /// Whole current device set the reporter registry prepared after one completed scan.

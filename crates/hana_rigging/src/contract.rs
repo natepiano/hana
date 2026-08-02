@@ -1,5 +1,9 @@
 use std::any::Any;
 use std::any::type_name;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::Weak;
 
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
@@ -13,34 +17,169 @@ use crate::CapturedConfiguration;
 use crate::DeviceAccessError;
 use crate::DeviceEndpoint;
 use crate::DeviceScan;
-use crate::DeviceSet;
-use crate::ReporterId;
-use crate::ReporterRevision;
 
 /// Reports the whole current set of hardware devices from an integration crate.
 ///
 /// This trait is an external extension point: a monitor integration reports display records while
 /// a camera integration reports camera records, and the kernel must not name either type. An
-/// implementation never touches a device directly; hardware enumeration happens on its own
-/// reporter-owned thread before `scan` drains the completed result. An
-/// implementation must not insert, remove, or read the reporter registry while `scan` runs, and
-/// it must not mutate kernel-owned resources, device entities, binding entities, or their kernel
-/// components through the supplied `World`. Kernel dispatch temporarily removes the
-/// reporter registry during this call, so accessing it would panic; returning `DeviceScan` is the
-/// only reporting path.
+/// implementation prepares work on the main thread without receiving the application `World`,
+/// then hands one owned enumeration job to the kernel. Kernel dispatch temporarily removes the
+/// reporter registry while `discover` and a returned `MainThreadDiscoveryJob` run. The main-thread
+/// job may read `!Send` integration state, but it must not mutate kernel-owned resources, device
+/// entities, binding entities, or their kernel components; returning `DeviceScan` is the only
+/// reporting path.
 ///
 /// An implementation panic is fatal, and the kernel does not catch it. Continuing after a
-/// partially completed scan would leave the reporter's device set and scan progress
+/// partially prepared discovery run would leave the reporter's device set and progress
 /// untrustworthy.
 pub trait DeviceReporter: Send + Sync + 'static {
-    /// Report the whole current device set once per `RiggingSystems::Collect`.
+    /// Prepare one complete discovery run when the kernel schedules this reporter.
     ///
-    /// The exclusive `World` access keeps this call on the main thread, so a monitor reporter may
-    /// reach `!Send` state with `World::non_send_resource_mut` and a HID reporter may drain the
-    /// channel owned by its background enumeration thread. This method must return immediately:
-    /// hardware enumeration belongs on a reporter-owned thread, while `scan` drains that thread's
-    /// channel. Return `DeviceScan::Unchanged` when no completed report is available.
-    fn scan(&mut self, world: &mut World) -> DeviceScan;
+    /// This method runs on the main thread, receives no `World`, and must return without blocking.
+    /// A main-thread-only reporter returns a `MainThreadDiscoveryJob` that the kernel immediately
+    /// invokes with `World`. A reporter that needs a slow probe captures sendable data it already
+    /// owns and returns `DiscoveryWork::Background`.
+    fn discover(&mut self) -> DiscoveryWork;
+}
+
+/// Work a `DeviceReporter` prepared after the kernel selected one discovery opportunity.
+pub enum DiscoveryWork {
+    /// Owned work the kernel immediately invokes with `World` on the main thread.
+    Immediate(MainThreadDiscoveryJob),
+    /// Owned enumeration that Bevy may run on `IoTaskPool` without access to `World`.
+    Background(DiscoveryJob),
+}
+
+/// Owned device enumeration that the kernel immediately runs on the main thread.
+///
+/// This is the only discovery job that receives the application `World`. Its closure may read
+/// `!Send` resources and must return an owned whole-set `DeviceScan` before scheduler admission
+/// continues. The kernel never stores this job in reporter runtime state or submits it to
+/// `IoTaskPool`.
+pub struct MainThreadDiscoveryJob(Box<dyn FnOnce(&mut World) -> DeviceScan + 'static>);
+
+impl MainThreadDiscoveryJob {
+    /// Store one main-thread discovery closure for immediate synchronous execution.
+    #[must_use]
+    pub fn new(run: impl FnOnce(&mut World) -> DeviceScan + 'static) -> Self { Self(Box::new(run)) }
+
+    pub(crate) fn run(self, world: &mut World) -> DeviceScan { self.0(world) }
+}
+
+/// Owned device enumeration that the kernel can move onto Bevy's I/O task pool.
+///
+/// The closure cannot receive a `World`, `Devices`, bindings, or a reporter identifier. It can
+/// only send descriptive progress and return an owned `DeviceScan`, leaving kernel mutation and
+/// reporter revision assignment on the main thread.
+pub struct DiscoveryJob(
+    Mutex<Box<dyn FnOnce(DiscoveryProgressSender) -> DeviceScan + Send + 'static>>,
+);
+
+impl DiscoveryJob {
+    /// Store one sendable discovery closure for a later `IoTaskPool` submission.
+    #[must_use]
+    pub fn new(run: impl FnOnce(DiscoveryProgressSender) -> DeviceScan + Send + 'static) -> Self {
+        Self(Mutex::new(Box::new(run)))
+    }
+
+    pub(crate) fn run(self, discovery_progress_sender: DiscoveryProgressSender) -> DeviceScan {
+        let run = self
+            .0
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        run(discovery_progress_sender)
+    }
+}
+
+/// Send-only handle a background discovery job uses to describe its current work.
+///
+/// The sender deliberately carries no reporter identity. The scheduler associates each update
+/// with the reporter and discovery batch that submitted the job. Unread updates coalesce in one
+/// latest-value slot, so sending replaces any progress the scheduler has not collected yet.
+#[derive(Clone)]
+pub struct DiscoveryProgressSender(Weak<DiscoveryProgressMailbox>);
+
+struct DiscoveryProgressMailbox {
+    pending: Mutex<PendingDiscoveryProgress>,
+}
+
+pub(crate) struct DiscoveryProgressReceiver(Arc<DiscoveryProgressMailbox>);
+
+pub(crate) enum PendingDiscoveryProgress {
+    NoUpdate,
+    Latest(DiscoveryProgress),
+}
+
+impl DiscoveryProgressSender {
+    pub(crate) fn scheduler_mailbox() -> (Self, DiscoveryProgressReceiver) {
+        let discovery_progress_mailbox = Arc::new(DiscoveryProgressMailbox {
+            pending: Mutex::new(PendingDiscoveryProgress::NoUpdate),
+        });
+        (
+            Self(Arc::downgrade(&discovery_progress_mailbox)),
+            DiscoveryProgressReceiver(discovery_progress_mailbox),
+        )
+    }
+
+    /// Replace any unread progress with the job's latest observed progress.
+    ///
+    /// Sending uses constant storage and briefly synchronizes on the single-slot mailbox lock
+    /// while replacing unread progress. It neither queues earlier updates nor waits for the
+    /// scheduler to collect them.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DiscoveryProgressSendError::SchedulerStopped` after the kernel has stopped
+    /// retaining this job, such as during application shutdown.
+    pub fn send(
+        &self,
+        discovery_progress: DiscoveryProgress,
+    ) -> Result<(), DiscoveryProgressSendError> {
+        let discovery_progress_mailbox = self
+            .0
+            .upgrade()
+            .ok_or(DiscoveryProgressSendError::SchedulerStopped)?;
+        *discovery_progress_mailbox
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            PendingDiscoveryProgress::Latest(discovery_progress);
+
+        Ok(())
+    }
+}
+
+impl DiscoveryProgressReceiver {
+    pub(crate) fn take_latest(&self) -> PendingDiscoveryProgress {
+        let mut pending = self
+            .0
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::mem::replace(&mut *pending, PendingDiscoveryProgress::NoUpdate)
+    }
+}
+
+/// Progress state a background discovery job can report without exposing a bare optional count.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+pub enum DiscoveryProgress {
+    /// The job can identify the current operation but cannot count its remaining devices.
+    Indeterminate,
+    /// The job counted device operations, such as opening three of eight camera descriptors.
+    Measured {
+        /// Number of completed device operations from this discovery run.
+        completed: u32,
+        /// Total device operations known to this discovery run; it cannot be zero when measured.
+        total:     NonZeroU32,
+    },
+}
+
+/// Failure returned when a background job sends progress after scheduler retention ended.
+#[derive(Debug, Error)]
+pub enum DiscoveryProgressSendError {
+    /// The scheduler released this job's progress receiver during application shutdown.
+    #[error("discovery scheduler stopped receiving background progress")]
+    SchedulerStopped,
 }
 
 /// Drives one endpoint from an integration crate after the kernel authorizes an apply.
@@ -174,40 +313,6 @@ type StartApplyFunction = fn(
 type PollFunction =
     fn(&mut ErasedDriver, &mut World, AttemptId) -> Result<AttemptProgress, DriverContractError>;
 
-/// Erased reporter closure plus the identifier and revision the reporter cannot mint itself.
-pub(crate) struct ReporterEntry {
-    scan:        Box<dyn FnMut(&mut World) -> DeviceScan + Send + Sync>,
-    reporter_id: ReporterId,
-    revision:    u64,
-}
-
-impl ReporterEntry {
-    pub(crate) fn new(
-        scan: Box<dyn FnMut(&mut World) -> DeviceScan + Send + Sync>,
-        reporter_id: ReporterId,
-    ) -> Self {
-        Self {
-            scan,
-            reporter_id,
-            revision: 0,
-        }
-    }
-
-    pub(crate) fn scan(&mut self, world: &mut World) -> Option<DeviceSet> {
-        let DeviceScan::Complete(devices) = (self.scan)(world) else {
-            return None;
-        };
-
-        self.revision += 1;
-
-        Some(DeviceSet {
-            reporter: self.reporter_id,
-            devices,
-            revision: ReporterRevision::new(self.revision),
-        })
-    }
-}
-
 /// Erased driver value and the typed functions the kernel routes by `DriverId`.
 pub(crate) struct DriverEntry {
     driver:      Box<ErasedDriver>,
@@ -338,6 +443,8 @@ mod tests {
     use std::any::TypeId;
     use std::any::type_name;
     use std::error::Error;
+    use std::num::NonZeroU32;
+    use std::rc::Rc;
 
     use bevy::app::App;
     use bevy::ecs::reflect::AppTypeRegistry;
@@ -348,9 +455,12 @@ mod tests {
     use bevy::prelude::World;
 
     use super::CaptureOutcome;
+    use super::DiscoveryProgressSender;
     use super::DriverContractError;
     use super::DriverEntry;
     use super::EndpointDriver;
+    use super::MainThreadDiscoveryJob;
+    use super::PendingDiscoveryProgress;
     use crate::ApplyPermit;
     use crate::AttemptId;
     use crate::AttemptProgress;
@@ -359,6 +469,9 @@ mod tests {
     use crate::DeviceIdSource;
     use crate::DeviceKey;
     use crate::DeviceKind;
+    use crate::DeviceScan;
+    use crate::DiscoveryProgress;
+    use crate::DiscoveryProgressSendError;
     use crate::EndpointId;
     use crate::ReportedId;
     use crate::SchemeName;
@@ -373,6 +486,10 @@ mod tests {
 
     #[derive(Resource)]
     struct Running;
+
+    struct MainThreadDiscoverySource {
+        name: Rc<str>,
+    }
 
     struct TestDriver;
 
@@ -400,6 +517,87 @@ mod tests {
         fn poll(&mut self, _: &mut World, _: AttemptId) -> AttemptProgress {
             AttemptProgress::Pending
         }
+    }
+
+    #[test]
+    fn main_thread_discovery_job_reads_non_send_resource_and_returns_owned_whole_set() {
+        let mut world = World::new();
+        world.insert_non_send(MainThreadDiscoverySource {
+            name: Rc::from("monitor-api"),
+        });
+        let main_thread_discovery_job = MainThreadDiscoveryJob::new(|world| {
+            let main_thread_discovery_source = world.non_send::<MainThreadDiscoverySource>();
+            assert_eq!(main_thread_discovery_source.name.as_ref(), "monitor-api");
+
+            DeviceScan::Complete(Vec::new())
+        });
+
+        let device_scan = main_thread_discovery_job.run(&mut world);
+
+        assert!(matches!(
+            device_scan,
+            DeviceScan::Complete(device_records) if device_records.is_empty()
+        ));
+    }
+
+    #[test]
+    fn progress_mailbox_coalesces_to_latest_measured_and_indeterminate_updates() {
+        const UPDATE_COUNT: u32 = 1_000;
+
+        let (discovery_progress_sender, discovery_progress_receiver) =
+            DiscoveryProgressSender::scheduler_mailbox();
+        let total = NonZeroU32::new(UPDATE_COUNT).unwrap_or(NonZeroU32::MIN);
+        for completed in 0..UPDATE_COUNT {
+            assert!(
+                discovery_progress_sender
+                    .send(DiscoveryProgress::Measured { completed, total })
+                    .is_ok(),
+                "scheduler must retain the progress receiver"
+            );
+        }
+
+        assert!(matches!(
+            discovery_progress_receiver.take_latest(),
+            PendingDiscoveryProgress::Latest(DiscoveryProgress::Measured {
+                completed,
+                total,
+            }) if completed == UPDATE_COUNT - 1 && total.get() == UPDATE_COUNT
+        ));
+        assert!(matches!(
+            discovery_progress_receiver.take_latest(),
+            PendingDiscoveryProgress::NoUpdate
+        ));
+
+        for completed in 0..UPDATE_COUNT {
+            assert!(
+                discovery_progress_sender
+                    .send(DiscoveryProgress::Measured { completed, total })
+                    .is_ok(),
+                "scheduler must retain the progress receiver"
+            );
+        }
+        assert!(
+            discovery_progress_sender
+                .send(DiscoveryProgress::Indeterminate)
+                .is_ok(),
+            "scheduler must retain the progress receiver"
+        );
+        assert!(matches!(
+            discovery_progress_receiver.take_latest(),
+            PendingDiscoveryProgress::Latest(DiscoveryProgress::Indeterminate)
+        ));
+    }
+
+    #[test]
+    fn progress_sender_reports_stopped_after_scheduler_releases_receiver() {
+        let (discovery_progress_sender, discovery_progress_receiver) =
+            DiscoveryProgressSender::scheduler_mailbox();
+        drop(discovery_progress_receiver);
+
+        assert!(matches!(
+            discovery_progress_sender.send(DiscoveryProgress::Indeterminate),
+            Err(DiscoveryProgressSendError::SchedulerStopped)
+        ));
     }
 
     #[test]

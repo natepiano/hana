@@ -5,6 +5,9 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::SystemSet;
 use bevy::prelude::World;
 
+use crate::DiscoveryControl;
+use crate::DiscoveryLimits;
+use crate::DiscoveryStatus;
 use crate::RegisteredSchemes;
 use crate::registration::Drivers;
 use crate::registration::Reporters;
@@ -19,10 +22,10 @@ pub struct RiggingPlugin;
 #[derive(Clone, Debug, Hash, PartialEq, Eq, SystemSet)]
 #[non_exhaustive]
 pub enum RiggingSystems {
-    /// Every registered reporter scans before the kernel examines a completed device set.
+    /// Discovery cadence, task admission, and bounded completed reports run before reconciliation.
     Collect,
-    /// Reconciliation later diffs reports, computes verdicts, mirrors components, and emits
-    /// events after all reporters have run.
+    /// Reconciliation follows the current collect pass and consumes each independently accepted
+    /// reporter change; it does not wait for a global reporter completion barrier.
     Reconcile,
     /// Consumer systems prepare their requested configurations after authorization but before any
     /// endpoint driver begins an apply.
@@ -34,6 +37,9 @@ pub enum RiggingSystems {
 impl Plugin for RiggingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Drivers>()
+            .init_resource::<DiscoveryControl>()
+            .init_resource::<DiscoveryLimits>()
+            .init_resource::<DiscoveryStatus>()
             .init_resource::<RegisteredSchemes>()
             .init_resource::<Reporters>()
             .configure_sets(
@@ -52,7 +58,17 @@ impl Plugin for RiggingPlugin {
 
 fn collect(world: &mut World) {
     world.resource_scope::<Reporters, _>(|world, mut reporters| {
-        drop(reporters.scan(world));
+        let discovery_limits = world.resource::<DiscoveryLimits>().clone();
+        world.resource_scope::<DiscoveryControl, _>(|world, mut discovery_control| {
+            world.resource_scope::<DiscoveryStatus, _>(|world, mut discovery_status| {
+                reporters.collect(
+                    world,
+                    &mut discovery_control,
+                    &discovery_limits,
+                    &mut discovery_status,
+                );
+            });
+        });
     });
 }
 
