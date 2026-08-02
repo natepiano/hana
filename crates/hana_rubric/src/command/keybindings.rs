@@ -130,8 +130,9 @@ pub struct Keybindings<C: Component> {
 impl<C: Component> Keybindings<C> {
     /// Spawns non-consuming modifier actions and returns a keybinding builder.
     ///
-    /// The `S` action represents either Shift key and remains available to the
-    /// caller for actions such as Shift-click selection. Modifier actions report
+    /// `S` is the caller's action type for the Shift family: the entities spawned for it are the
+    /// Shift blockers every keybinding spawned from this builder is given a [`BlockBy`] against,
+    /// so an unshifted binding stays quiet while Shift is down. Modifier actions report
     /// physically held keys immediately when their context becomes active.
     pub fn new<S: InputAction>(
         action_spawner: &mut ActionSpawner<C>,

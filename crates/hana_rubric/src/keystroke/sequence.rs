@@ -144,13 +144,10 @@ impl Error for KeystrokeSequenceParseError {
 
 #[cfg(test)]
 mod tests {
-    use bevy::input::keyboard::KeyCode;
-
     use super::EmptyKeystrokeSequenceError;
     use super::Keystroke;
     use super::KeystrokeSequence;
     use super::KeystrokeSequenceParseError;
-    use crate::Modifiers;
 
     #[test]
     fn sequence_display_round_trips() -> Result<(), KeystrokeSequenceParseError> {
@@ -173,7 +170,9 @@ mod tests {
     fn accessors_follow_the_nonempty_sequence_invariant() -> Result<(), KeystrokeSequenceParseError>
     {
         let sequence: KeystrokeSequence = "g h".parse()?;
-        let first = Keystroke::new(Modifiers::none(), KeyCode::KeyG);
+        let first = "g"
+            .parse::<Keystroke>()
+            .map_err(KeystrokeSequenceParseError::Keystroke)?;
 
         assert_eq!(sequence.first(), first);
         assert_eq!(sequence.len(), 2);
@@ -194,5 +193,14 @@ mod tests {
             Err(KeystrokeSequenceParseError::Keystroke(error))
                 if error.token() == "unknown" && error.offset() == 6
         ));
+    }
+
+    #[test]
+    fn a_bare_modifier_is_one_sequence_keystroke() -> Result<(), KeystrokeSequenceParseError> {
+        let sequence: KeystrokeSequence = "shift".parse()?;
+
+        assert_eq!(sequence.len(), 1);
+        assert_eq!(sequence.to_string(), "shift");
+        Ok(())
     }
 }

@@ -130,28 +130,182 @@ fn modifier_pair_pressed(pressed: &ButtonInput<KeyCode>, left: KeyCode, right: K
     pressed.pressed(left) || pressed.pressed(right)
 }
 
-/// A keyboard key and its canonical modifier set.
+/// A semantic modifier family that can act as a keystroke's primary trigger.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ModifierFamily {
+    /// The physical Control modifier family.
+    Control,
+    /// The physical Alt modifier family.
+    Alt,
+    /// The physical Shift modifier family.
+    Shift,
+    /// The physical Super modifier family.
+    ///
+    /// The parse-side `secondary` alias resolves to this family on macOS.
+    Platform,
+}
+
+impl ModifierFamily {
+    const fn keymap_name(self) -> &'static str {
+        match self {
+            Self::Control => "ctrl",
+            Self::Alt => "alt",
+            Self::Shift => "shift",
+            Self::Platform => "platform",
+        }
+    }
+}
+
+impl Display for ModifierFamily {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.keymap_name())
+    }
+}
+
+impl FromStr for ModifierFamily {
+    type Err = KeystrokeParseError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        parse_modifier_family_primary(input).ok_or_else(|| KeystrokeParseError::new(input, 0))
+    }
+}
+
+/// A physical non-modifier key supported by Hana keymaps.
+///
+/// Construction rejects physical modifier keys and `KeyCode` values without a canonical keymap
+/// spelling, so every value can be routed, displayed, and parsed back.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct OrdinaryKey(KeyCode);
+
+impl OrdinaryKey {
+    /// How many distinct key codes an [`OrdinaryKey`] can hold.
+    ///
+    /// One per entry in `CANONICAL_KEY_MAPPINGS`, which is the whole set of key codes routing
+    /// can reach — every other key code fails construction.
+    pub(crate) const COUNT: usize = CANONICAL_KEY_MAPPINGS.len();
+
+    /// Returns the validated physical key code.
+    #[must_use]
+    pub const fn key_code(self) -> KeyCode { self.0 }
+}
+
+impl TryFrom<KeyCode> for OrdinaryKey {
+    type Error = InvalidOrdinaryKeyCode;
+
+    fn try_from(key_code: KeyCode) -> Result<Self, Self::Error> {
+        ordinary_key_name(key_code).map_or_else(
+            || Err(InvalidOrdinaryKeyCode(key_code)),
+            |_| Ok(Self(key_code)),
+        )
+    }
+}
+
+impl Display for OrdinaryKey {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(ordinary_key_name(self.0).ok_or(fmt::Error)?)
+    }
+}
+
+impl FromStr for OrdinaryKey {
+    type Err = KeystrokeParseError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        parse_ordinary_key(input).ok_or_else(|| KeystrokeParseError::new(input, 0))
+    }
+}
+
+/// A physical key code that cannot serve as an ordinary Hana keymap key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InvalidOrdinaryKeyCode(KeyCode);
+
+impl InvalidOrdinaryKeyCode {
+    /// Returns the rejected physical key code.
+    #[must_use]
+    pub const fn key_code(self) -> KeyCode { self.0 }
+}
+
+impl Display for InvalidOrdinaryKeyCode {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "physical key code {:?} is not a supported ordinary Hana keymap key",
+            self.0
+        )
+    }
+}
+
+impl Error for InvalidOrdinaryKeyCode {}
+
+/// The semantic trigger that completes a keystroke after its modifier set.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum PrimaryTrigger {
+    /// An ordinary physical key with zero or more canonical modifiers.
+    OrdinaryKey(OrdinaryKey),
+    /// A bare modifier family with no other modifiers.
+    ModifierFamily(ModifierFamily),
+}
+
+impl Display for PrimaryTrigger {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OrdinaryKey(ordinary_key) => ordinary_key.fmt(formatter),
+            Self::ModifierFamily(modifier_family) => modifier_family.fmt(formatter),
+        }
+    }
+}
+
+impl FromStr for PrimaryTrigger {
+    type Err = KeystrokeParseError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        if let Some(modifier_family) = parse_modifier_family_primary(input) {
+            return Ok(Self::ModifierFamily(modifier_family));
+        }
+
+        parse_ordinary_key(input)
+            .map(Self::OrdinaryKey)
+            .ok_or_else(|| KeystrokeParseError::new(input, 0))
+    }
+}
+
+/// A keyboard primary trigger and its canonical modifier set.
 ///
 /// Parse a [`Keystroke`] from text such as `"platform-shift-p"`. The parser canonicalizes
-/// modifier aliases and source ordering before the value is constructed.
+/// modifier aliases and source ordering before the value is constructed. A bare `shift`, `ctrl`,
+/// `alt`, or `secondary` names a [`PrimaryTrigger::ModifierFamily`]; `shift-f` instead has an
+/// [`PrimaryTrigger::OrdinaryKey`] with Shift in its modifier set.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Keystroke {
-    modifiers: Modifiers,
-    key:       KeyCode,
+    modifiers:       Modifiers,
+    primary_trigger: PrimaryTrigger,
 }
 
 impl Keystroke {
-    /// Creates a keystroke from canonical modifiers and a physical key code.
+    /// Creates a keystroke with an ordinary physical key as its primary trigger.
     #[must_use]
-    pub const fn new(modifiers: Modifiers, key: KeyCode) -> Self { Self { modifiers, key } }
+    pub const fn from_ordinary_key(modifiers: Modifiers, ordinary_key: OrdinaryKey) -> Self {
+        Self {
+            modifiers,
+            primary_trigger: PrimaryTrigger::OrdinaryKey(ordinary_key),
+        }
+    }
+
+    /// Creates a keystroke with a bare modifier family as its primary trigger.
+    #[must_use]
+    pub const fn from_modifier_family(modifier_family: ModifierFamily) -> Self {
+        Self {
+            modifiers:       Modifiers::none(),
+            primary_trigger: PrimaryTrigger::ModifierFamily(modifier_family),
+        }
+    }
 
     /// Returns this keystroke's canonical modifiers.
     #[must_use]
     pub const fn modifiers(self) -> Modifiers { self.modifiers }
 
-    /// Returns this keystroke's physical key code.
+    /// Returns the semantic trigger that completes this keystroke.
     #[must_use]
-    pub const fn key(self) -> KeyCode { self.key }
+    pub const fn primary_trigger(self) -> PrimaryTrigger { self.primary_trigger }
 }
 
 impl Display for Keystroke {
@@ -169,7 +323,7 @@ impl Display for Keystroke {
             formatter.write_str("shift-")?;
         }
 
-        formatter.write_str(key_name(self.key).ok_or(fmt::Error)?)
+        self.primary_trigger.fmt(formatter)
     }
 }
 
@@ -177,16 +331,20 @@ impl FromStr for Keystroke {
     type Err = KeystrokeParseError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
+        if let Some(modifier_family) = parse_modifier_family_primary(input) {
+            return Ok(Self::from_modifier_family(modifier_family));
+        }
+
         let mut modifiers = Modifiers::none();
         let mut remaining = input;
 
         loop {
             let Some((token, after_token)) = remaining.split_once('-') else {
                 let offset = input.len() - remaining.len();
-                let Some(key) = parse_key(remaining) else {
+                let Some(ordinary_key) = parse_ordinary_key(remaining) else {
                     return Err(KeystrokeParseError::new(remaining, offset));
                 };
-                return Ok(Self::new(modifiers, key));
+                return Ok(Self::from_ordinary_key(modifiers, ordinary_key));
             };
             if after_token.is_empty() {
                 return Err(KeystrokeParseError::new("", input.len()));
@@ -276,7 +434,37 @@ fn parse_modifier(token: &str) -> Option<Modifier> {
     }
 }
 
-const CANONICAL_KEY_MAPPINGS: &[(&str, KeyCode)] = &[
+fn parse_modifier_family_primary(token: &str) -> Option<ModifierFamily> {
+    match token {
+        "ctrl" | "control" => Some(ModifierFamily::Control),
+        "alt" | "opt" | "option" => Some(ModifierFamily::Alt),
+        "shift" => Some(ModifierFamily::Shift),
+        "secondary" => Some(if cfg!(target_os = "macos") {
+            ModifierFamily::Platform
+        } else {
+            ModifierFamily::Control
+        }),
+        "cmd" | "command" | "super" | "win" | "platform" => Some(ModifierFamily::Platform),
+        _ => None,
+    }
+}
+
+macro_rules! define_canonical_key_mappings {
+    ($(($name:literal, $key_code:path)),+ $(,)?) => {
+        const CANONICAL_KEY_MAPPINGS: &[(&str, KeyCode)] = &[
+            $(($name, $key_code),)+
+        ];
+
+        const fn ordinary_key_name(key_code: KeyCode) -> Option<&'static str> {
+            match key_code {
+                $($key_code => Some($name),)+
+                _ => None,
+            }
+        }
+    };
+}
+
+define_canonical_key_mappings! {
     ("a", KeyCode::KeyA),
     ("b", KeyCode::KeyB),
     ("c", KeyCode::KeyC),
@@ -380,14 +568,14 @@ const CANONICAL_KEY_MAPPINGS: &[(&str, KeyCode)] = &[
     ("quote", KeyCode::Quote),
     ("semicolon", KeyCode::Semicolon),
     ("slash", KeyCode::Slash),
-];
+}
 
-fn parse_key(token: &str) -> Option<KeyCode> {
+fn parse_ordinary_key(token: &str) -> Option<OrdinaryKey> {
     if let Some((_, key)) = CANONICAL_KEY_MAPPINGS
         .iter()
         .find(|(name, _)| *name == token)
     {
-        return Some(*key);
+        return Some(OrdinaryKey(*key));
     }
 
     let canonical_name = match token {
@@ -415,27 +603,27 @@ fn parse_key(token: &str) -> Option<KeyCode> {
         .iter()
         .find(|(name, _)| *name == canonical_name)
     {
-        return Some(*key);
+        return Some(OrdinaryKey(*key));
     }
 
     None
 }
 
-fn key_name(key: KeyCode) -> Option<&'static str> {
-    CANONICAL_KEY_MAPPINGS
-        .iter()
-        .find_map(|(name, mapped_key)| (*mapped_key == key).then_some(*name))
-}
-
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use bevy::input::ButtonInput;
     use bevy::input::keyboard::KeyCode;
 
     use super::CANONICAL_KEY_MAPPINGS;
+    use super::InvalidOrdinaryKeyCode;
     use super::Keystroke;
     use super::KeystrokeParseError;
+    use super::ModifierFamily;
     use super::Modifiers;
+    use super::OrdinaryKey;
+    use super::PrimaryTrigger;
 
     fn parsed(input: &str) -> Result<Keystroke, KeystrokeParseError> { input.parse() }
 
@@ -452,6 +640,14 @@ mod tests {
             pressed.press(*key);
         }
         pressed
+    }
+
+    fn ordinary_keystroke(
+        modifiers: Modifiers,
+        key_code: KeyCode,
+    ) -> Result<Keystroke, super::InvalidOrdinaryKeyCode> {
+        OrdinaryKey::try_from(key_code)
+            .map(|ordinary_key| Keystroke::from_ordinary_key(modifiers, ordinary_key))
     }
 
     #[test]
@@ -475,17 +671,46 @@ mod tests {
 
     #[test]
     fn constructed_platform_keystroke_equals_parsed_command_on_every_platform()
-    -> Result<(), KeystrokeParseError> {
-        let constructed = Keystroke::new(
+    -> Result<(), Box<dyn Error>> {
+        let constructed = ordinary_keystroke(
             Modifiers::none().with_platform().with_shift(),
             KeyCode::KeyP,
-        );
+        )?;
         let parsed = parsed("cmd-shift-p")?;
 
         assert_eq!(constructed, parsed);
         assert_eq!(parsed, constructed);
 
         Ok(())
+    }
+
+    #[test]
+    fn supported_ordinary_key_constructs_and_round_trips() -> Result<(), Box<dyn Error>> {
+        let ordinary_key = OrdinaryKey::try_from(KeyCode::KeyP)?;
+        let keystroke =
+            Keystroke::from_ordinary_key(Modifiers::none().with_control(), ordinary_key);
+
+        assert_eq!(ordinary_key.key_code(), KeyCode::KeyP);
+        assert_eq!(keystroke, parsed("ctrl-p")?);
+        assert_eq!(keystroke.to_string().parse::<Keystroke>()?, keystroke);
+
+        Ok(())
+    }
+
+    #[test]
+    fn ordinary_key_construction_rejects_modifier_key_codes() {
+        assert_eq!(
+            OrdinaryKey::try_from(KeyCode::ShiftLeft).map(OrdinaryKey::key_code),
+            Err(InvalidOrdinaryKeyCode(KeyCode::ShiftLeft))
+        );
+    }
+
+    #[test]
+    fn ordinary_key_construction_rejects_unsupported_key_codes() {
+        assert_eq!(
+            OrdinaryKey::try_from(KeyCode::AudioVolumeUp).map(OrdinaryKey::key_code),
+            Err(InvalidOrdinaryKeyCode(KeyCode::AudioVolumeUp))
+        );
     }
 
     #[test]
@@ -499,9 +724,9 @@ mod tests {
     }
 
     #[test]
-    fn physical_control_g_matches_ctrl_g_on_every_platform() -> Result<(), KeystrokeParseError> {
+    fn physical_control_g_matches_ctrl_g_on_every_platform() -> Result<(), Box<dyn Error>> {
         let keys = pressed(&[KeyCode::ControlLeft, KeyCode::KeyG]);
-        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
+        let physical = ordinary_keystroke(Modifiers::from_pressed(&keys), KeyCode::KeyG)?;
 
         assert_eq!(physical, parsed("ctrl-g")?);
         assert!(physical.modifiers.has_control());
@@ -512,9 +737,9 @@ mod tests {
     }
 
     #[test]
-    fn physical_control_and_super_g_preserve_both_modifiers() -> Result<(), KeystrokeParseError> {
+    fn physical_control_and_super_g_preserve_both_modifiers() -> Result<(), Box<dyn Error>> {
         let keys = pressed(&[KeyCode::ControlLeft, KeyCode::SuperLeft, KeyCode::KeyG]);
-        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
+        let physical = ordinary_keystroke(Modifiers::from_pressed(&keys), KeyCode::KeyG)?;
 
         assert_eq!(physical, parsed("platform-ctrl-g")?);
         assert!(physical.modifiers.has_control());
@@ -526,13 +751,13 @@ mod tests {
     }
 
     #[test]
-    fn secondary_g_matches_the_platform_shortcut_modifier() -> Result<(), KeystrokeParseError> {
+    fn secondary_g_matches_the_platform_shortcut_modifier() -> Result<(), Box<dyn Error>> {
         let keys = if cfg!(target_os = "macos") {
             pressed(&[KeyCode::SuperLeft, KeyCode::KeyG])
         } else {
             pressed(&[KeyCode::ControlLeft, KeyCode::KeyG])
         };
-        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
+        let physical = ordinary_keystroke(Modifiers::from_pressed(&keys), KeyCode::KeyG)?;
         let secondary = parsed("secondary-g")?;
         let display = secondary.to_string();
 
@@ -562,9 +787,9 @@ mod tests {
 
     #[test]
     fn physical_super_g_matches_platform_aliases_without_matching_ctrl_or_bare_g()
-    -> Result<(), KeystrokeParseError> {
+    -> Result<(), Box<dyn Error>> {
         let keys = pressed(&[KeyCode::SuperLeft, KeyCode::KeyG]);
-        let physical = Keystroke::new(Modifiers::from_pressed(&keys), KeyCode::KeyG);
+        let physical = ordinary_keystroke(Modifiers::from_pressed(&keys), KeyCode::KeyG)?;
 
         assert_eq!(physical, parsed("cmd-g")?);
         assert_eq!(physical, parsed("super-g")?);
@@ -576,11 +801,71 @@ mod tests {
     }
 
     #[test]
-    fn display_round_trips_parsed_values() -> Result<(), KeystrokeParseError> {
+    fn every_constructible_primary_trigger_round_trips() -> Result<(), Box<dyn Error>> {
         for &(name, key) in CANONICAL_KEY_MAPPINGS {
+            let ordinary_key = OrdinaryKey::try_from(key)?;
+            let primary_trigger = PrimaryTrigger::OrdinaryKey(ordinary_key);
             let keystroke = parsed(name)?;
-            assert_eq!(keystroke.key(), key);
+
+            assert_eq!(
+                ordinary_key.to_string().parse::<OrdinaryKey>()?,
+                ordinary_key
+            );
+            assert_eq!(
+                primary_trigger.to_string().parse::<PrimaryTrigger>()?,
+                primary_trigger
+            );
+            assert_eq!(keystroke.primary_trigger(), primary_trigger);
             assert_eq!(keystroke, parsed(&keystroke.to_string())?);
+        }
+
+        for modifier_family in [
+            ModifierFamily::Control,
+            ModifierFamily::Alt,
+            ModifierFamily::Shift,
+            ModifierFamily::Platform,
+        ] {
+            let primary_trigger = PrimaryTrigger::ModifierFamily(modifier_family);
+
+            assert_eq!(
+                modifier_family.to_string().parse::<ModifierFamily>()?,
+                modifier_family
+            );
+            assert_eq!(
+                primary_trigger.to_string().parse::<PrimaryTrigger>()?,
+                primary_trigger
+            );
+            assert_eq!(
+                Keystroke::from_modifier_family(modifier_family)
+                    .to_string()
+                    .parse::<Keystroke>()?
+                    .primary_trigger(),
+                primary_trigger
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn physical_modifier_keys_cannot_be_constructed_as_ordinary_primary_keys() -> Result<(), String>
+    {
+        for key_code in [
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::AltLeft,
+            KeyCode::AltRight,
+            KeyCode::ShiftLeft,
+            KeyCode::ShiftRight,
+            KeyCode::SuperLeft,
+            KeyCode::SuperRight,
+        ] {
+            let Err(error) = OrdinaryKey::try_from(key_code) else {
+                return Err(format!(
+                    "physical modifier {key_code:?} was accepted as an ordinary key"
+                ));
+            };
+            assert_eq!(error.key_code(), key_code);
         }
 
         Ok(())
@@ -604,10 +889,6 @@ mod tests {
         assert_eq!(empty_leading_token.token(), "");
         assert_eq!(empty_leading_token.offset(), 0);
 
-        let missing_key = parse_error("ctrl")?;
-        assert_eq!(missing_key.token(), "ctrl");
-        assert_eq!(missing_key.offset(), 0);
-
         let trailing_separator = parse_error("p-")?;
         assert_eq!(trailing_separator.token(), "");
         assert_eq!(trailing_separator.offset(), 2);
@@ -624,17 +905,52 @@ mod tests {
     }
 
     #[test]
-    fn side_token_is_a_key_only_when_no_key_follows() -> Result<(), KeystrokeParseError> {
+    fn side_token_is_a_key_only_when_no_key_follows() -> Result<(), Box<dyn Error>> {
         let control = Modifiers::none().with_control();
 
         assert_eq!(
             parsed("ctrl-left")?,
-            Keystroke::new(control, KeyCode::ArrowLeft)
+            ordinary_keystroke(control, KeyCode::ArrowLeft)?
         );
         assert_eq!(
             parsed("ctrl-left-p")?,
-            Keystroke::new(control, KeyCode::KeyP)
+            ordinary_keystroke(control, KeyCode::KeyP)?
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn bare_modifier_families_are_distinct_from_modified_keys() -> Result<(), KeystrokeParseError> {
+        assert_eq!(
+            parsed("shift")?.primary_trigger(),
+            PrimaryTrigger::ModifierFamily(ModifierFamily::Shift)
+        );
+        assert_eq!(parsed("shift")?.modifiers(), Modifiers::none());
+        assert_eq!(
+            parsed("shift-f")?.primary_trigger(),
+            PrimaryTrigger::OrdinaryKey(
+                OrdinaryKey::try_from(KeyCode::KeyF)
+                    .map_err(|error| KeystrokeParseError::new(&error.to_string(), 0))?
+            )
+        );
+        assert!(parsed("shift-f")?.modifiers().has_shift());
+        assert_ne!(parsed("shift")?, parsed("shift-f")?);
+        assert_eq!(parsed("shift")?.to_string(), "shift");
+        assert_eq!(parsed("ctrl")?.to_string(), "ctrl");
+        assert_eq!(parsed("alt")?.to_string(), "alt");
+        assert_eq!(
+            parsed("secondary")?.to_string(),
+            if cfg!(target_os = "macos") {
+                "platform"
+            } else {
+                "ctrl"
+            }
+        );
+        assert_eq!(parsed("cmd")?.to_string(), "platform");
+        assert_eq!(parsed("super")?.to_string(), "platform");
+        assert_eq!(parsed("win")?.to_string(), "platform");
+        assert_eq!(parsed("platform")?.to_string(), "platform");
 
         Ok(())
     }

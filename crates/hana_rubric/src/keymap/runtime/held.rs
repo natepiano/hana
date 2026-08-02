@@ -8,8 +8,46 @@ use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::CustomInput;
 use bevy_enhanced_input::prelude::CustomInputs;
 
+use super::key_edge::PHYSICAL_MODIFIER_KEYS;
+use crate::Modifiers;
+use crate::OrdinaryKey;
 use crate::condition::ConditionHandle;
+use crate::keymap::ActiveKeymapScope;
 use crate::keymap::Generation;
+
+/// How many physical keys can own an entry in `KeymapRuntime::physical_sources` at once.
+///
+/// A key reaches that map as either the primary key of an ordinary chord — necessarily an
+/// [`OrdinaryKey`] — or one side of a modifier family, so the whole routable domain is every
+/// `OrdinaryKey` plus `PHYSICAL_MODIFIER_KEYS`. Reserving that much at setup keeps routing free
+/// of reallocation even when all four modifier families and both sides of each are held at once.
+const ROUTABLE_PHYSICAL_KEYS: usize = OrdinaryKey::COUNT + PHYSICAL_MODIFIER_KEYS.len();
+
+/// How many custom inputs `KeymapRuntime::held_sources` can carry while routing drives them.
+///
+/// Routing reaches that map only through `KeymapRuntime::activate_physical_source`, which records
+/// at most one physical source per key, so it can never make more distinct [`CustomInput`]s active
+/// than there are routable physical keys. `KeymapRuntime::set_event_source` adds further entries
+/// from `HoldPhase` events, which arrive from observers rather than from the input path.
+const ROUTING_HELD_CUSTOM_INPUTS: usize = ROUTABLE_PHYSICAL_KEYS;
+
+/// How many key codes `KeymapRuntime::inhibited` reserves room for.
+///
+/// `KeymapRuntime::inhibit` refills the set from every key `ButtonInput<KeyCode>` reports pressed
+/// at a keymap swap, including key codes no keystroke can spell, so the routable domain is a
+/// reservation rather than a ceiling — a swap that exceeds it grows the set on the swap path,
+/// which already collects those keys into a `Vec`. Routing only ever removes from the set, through
+/// `KeymapRuntime::release_inhibition`.
+const INHIBITED_KEYS_AT_A_KEYMAP_SWAP: usize = ROUTABLE_PHYSICAL_KEYS;
+
+/// How many key codes `KeymapRuntime::processed_keycodes` can gather in one routing pass.
+///
+/// The set records the keys `route_releases` and `route_ordinary_key_presses` already consumed
+/// this frame, including key codes routing cannot spell as an [`OrdinaryKey`], so it is bounded by
+/// how many keys change state in a single frame. Reserving the routable domain leaves that count
+/// far below capacity — no keyboard reports every ordinary key and both sides of all four modifier
+/// families changing state at once.
+const KEYS_PROCESSED_IN_ONE_FRAME: usize = ROUTABLE_PHYSICAL_KEYS;
 
 #[derive(Resource)]
 pub(crate) struct KeymapRuntime {
@@ -17,8 +55,7 @@ pub(crate) struct KeymapRuntime {
     generation:         Option<Generation>,
     active_matcher:     ActiveMatcher,
     held_sources:       HashMap<CustomInput, HeldSources>,
-    physical_sources:   HashMap<KeyCode, CustomInput>,
-    pending_inputs:     Vec<(CustomInput, bool)>,
+    physical_sources:   HashMap<KeyCode, HeldPhysicalSource>,
     inhibited:          HashSet<KeyCode>,
     processed_keycodes: HashSet<KeyCode>,
 }
@@ -29,11 +66,10 @@ impl Default for KeymapRuntime {
             clock:              Clock::System,
             generation:         None,
             active_matcher:     ActiveMatcher::Uninitialized,
-            held_sources:       HashMap::with_capacity(1),
-            physical_sources:   HashMap::with_capacity(1),
-            pending_inputs:     Vec::with_capacity(1),
-            inhibited:          HashSet::with_capacity(1),
-            processed_keycodes: HashSet::with_capacity(1),
+            held_sources:       HashMap::with_capacity(ROUTING_HELD_CUSTOM_INPUTS),
+            physical_sources:   HashMap::with_capacity(ROUTABLE_PHYSICAL_KEYS),
+            inhibited:          HashSet::with_capacity(INHIBITED_KEYS_AT_A_KEYMAP_SWAP),
+            processed_keycodes: HashSet::with_capacity(KEYS_PROCESSED_IN_ONE_FRAME),
         }
     }
 }
@@ -45,21 +81,18 @@ impl KeymapRuntime {
 
     pub(super) const fn active_matcher(&self) -> ActiveMatcher { self.active_matcher }
 
-    pub(super) fn condition_changed(&self, active_condition: Option<ConditionHandle>) -> bool {
-        match self.active_matcher {
-            ActiveMatcher::Uninitialized => false,
-            ActiveMatcher::Global => active_condition.is_some(),
-            ActiveMatcher::Condition(previous) => Some(previous) != active_condition,
-        }
+    pub(super) fn condition_changed(&self, active_keymap_scope: ActiveKeymapScope) -> bool {
+        self.active_matcher != ActiveMatcher::Uninitialized
+            && self.active_matcher != ActiveMatcher::from(active_keymap_scope)
     }
 
     pub(super) fn update_generation(
         &mut self,
         generation: Generation,
-        active_condition: Option<ConditionHandle>,
+        active_keymap_scope: ActiveKeymapScope,
     ) {
         self.generation = Some(generation);
-        self.active_matcher = ActiveMatcher::from(active_condition);
+        self.active_matcher = ActiveMatcher::from(active_keymap_scope);
     }
 
     pub(super) fn inhibit(&mut self, pressed: impl Iterator<Item = KeyCode>) {
@@ -79,55 +112,98 @@ impl KeymapRuntime {
 
     pub(super) fn mark_processed(&mut self, key: KeyCode) { self.processed_keycodes.insert(key); }
 
-    pub(super) fn activate_physical(&mut self, key: KeyCode, custom_input: CustomInput) {
-        if self.physical_sources.contains_key(&key) {
-            return;
-        }
-
-        let (was_active, is_active) = {
-            let held_sources = self.held_sources.entry(custom_input).or_default();
-            let was_active = held_sources.is_active();
-            held_sources.physical += 1;
-            (was_active, held_sources.is_active())
-        };
-        self.physical_sources.insert(key, custom_input);
-        self.record_custom_input_if_changed(custom_input, was_active, is_active);
+    pub(super) fn activate_modifier_family(
+        &mut self,
+        key: KeyCode,
+        custom_input: CustomInput,
+    ) -> CustomInputTransition {
+        self.activate_physical_source(key, HeldPhysicalSource::ModifierFamily { custom_input })
     }
 
-    pub(super) fn release_physical(&mut self, key: KeyCode) {
-        let Some(custom_input) = self.physical_sources.remove(&key) else {
-            return;
+    pub(super) fn activate_ordinary_chord(
+        &mut self,
+        ownership: HeldChordPhysicalOwnership,
+        custom_input: CustomInput,
+    ) -> CustomInputTransition {
+        self.activate_physical_source(
+            ownership.primary_key,
+            HeldPhysicalSource::OrdinaryChord {
+                custom_input,
+                ownership,
+            },
+        )
+    }
+
+    pub(super) fn release_key(&mut self, key: KeyCode) -> CustomInputTransition {
+        let Some(held_physical_source) = self.physical_sources.remove(&key) else {
+            return CustomInputTransition::Unchanged;
         };
-        let Some((was_active, is_active)) =
-            self.held_sources
-                .get_mut(&custom_input)
-                .map(|held_sources| {
-                    let was_active = held_sources.is_active();
-                    held_sources.physical -= 1;
-                    (was_active, held_sources.is_active())
-                })
+        let custom_input = held_physical_source.custom_input();
+        let Some((before, after)) = self
+            .held_sources
+            .get_mut(&custom_input)
+            .map(|held_sources| {
+                let before = held_sources.activity();
+                held_sources.physical -= 1;
+                (before, held_sources.activity())
+            })
         else {
-            return;
+            return CustomInputTransition::Unchanged;
         };
-        self.record_custom_input_if_changed(custom_input, was_active, is_active);
-        if !is_active {
+        if matches!(after, HeldInputActivity::Inactive) {
             self.held_sources.remove(&custom_input);
         }
+
+        CustomInputTransition::between(custom_input, before, after)
     }
 
-    pub(super) fn clear_physical(&mut self) {
-        self.physical_sources.clear();
-        let mut input_changes = Vec::new();
-        self.held_sources.retain(|custom_input, held_sources| {
-            let was_active = held_sources.is_active();
-            held_sources.physical = 0;
-            let is_active = held_sources.is_active();
-            if was_active != is_active {
-                input_changes.push((*custom_input, is_active));
-            }
-            is_active
-        });
-        self.pending_inputs.extend(input_changes);
+    pub(super) fn release_one_chord_missing_modifiers(
+        &mut self,
+        pressed_modifiers: Modifiers,
+    ) -> PhysicalSourceReleaseProgress {
+        let key = self
+            .physical_sources
+            .iter()
+            .find_map(|(key, held_physical_source)| match held_physical_source {
+                HeldPhysicalSource::ModifierFamily { .. } => None,
+                HeldPhysicalSource::OrdinaryChord { ownership, .. } => {
+                    (!ownership.modifiers_are_held(pressed_modifiers)).then_some(*key)
+                },
+            });
+        let Some(key) = key else {
+            return PhysicalSourceReleaseProgress::Complete;
+        };
+
+        PhysicalSourceReleaseProgress::ReleasedOne(self.release_key(key))
+    }
+
+    pub(super) fn release_one_physical_source(&mut self) -> PhysicalSourceReleaseProgress {
+        let Some(key) = self.physical_sources.keys().next().copied() else {
+            return PhysicalSourceReleaseProgress::Complete;
+        };
+
+        PhysicalSourceReleaseProgress::ReleasedOne(self.release_key(key))
+    }
+
+    fn activate_physical_source(
+        &mut self,
+        key: KeyCode,
+        held_physical_source: HeldPhysicalSource,
+    ) -> CustomInputTransition {
+        if self.physical_sources.contains_key(&key) {
+            return CustomInputTransition::Unchanged;
+        }
+
+        let custom_input = held_physical_source.custom_input();
+        let (before, after) = {
+            let held_sources = self.held_sources.entry(custom_input).or_default();
+            let before = held_sources.activity();
+            held_sources.physical += 1;
+            (before, held_sources.activity())
+        };
+        self.physical_sources.insert(key, held_physical_source);
+
+        CustomInputTransition::between(custom_input, before, after)
     }
 
     pub(super) fn set_event_source(
@@ -138,14 +214,10 @@ impl KeymapRuntime {
     ) {
         if is_active {
             let held_sources = self.held_sources.entry(custom_input).or_default();
-            let was_active = held_sources.is_active();
+            let before = held_sources.activity();
             held_sources.event = 1;
-            write_custom_input_if_changed(
-                custom_inputs,
-                custom_input,
-                was_active,
-                held_sources.is_active(),
-            );
+            CustomInputTransition::between(custom_input, before, held_sources.activity())
+                .write_to(custom_inputs);
             return;
         }
 
@@ -153,51 +225,131 @@ impl KeymapRuntime {
             custom_inputs.insert(custom_input, ActionValue::Bool(false));
             return;
         };
-        let was_active = held_sources.is_active();
+        let before = held_sources.activity();
         held_sources.event = 0;
-        let input_is_active = held_sources.is_active();
-        write_custom_input_if_changed(custom_inputs, custom_input, was_active, input_is_active);
-        if !input_is_active {
+        let after = held_sources.activity();
+        CustomInputTransition::between(custom_input, before, after).write_to(custom_inputs);
+        if matches!(after, HeldInputActivity::Inactive) {
             self.held_sources.remove(&custom_input);
         }
     }
 
-    pub(super) fn take_pending_inputs(&mut self) -> Vec<(CustomInput, bool)> {
-        std::mem::take(&mut self.pending_inputs)
-    }
-
-    pub(super) fn restore_pending_inputs(&mut self, mut pending_inputs: Vec<(CustomInput, bool)>) {
-        pending_inputs.clear();
-        self.pending_inputs = pending_inputs;
-    }
-
     #[cfg(test)]
     pub(super) const fn set_test_clock(&mut self, now: Instant) { self.clock = Clock::Test(now); }
+}
 
-    fn record_custom_input_if_changed(
-        &mut self,
+pub(super) enum PhysicalSourceReleaseProgress {
+    ReleasedOne(CustomInputTransition),
+    Complete,
+}
+
+/// The one held-input write a single [`KeymapRuntime`] mutation can produce.
+///
+/// Each mutation hands its transition straight back to its caller, which writes it into
+/// [`CustomInputs`] before it calls the next mutation, so two unwritten transitions never coexist.
+#[derive(Clone, Copy)]
+#[must_use]
+pub(super) enum CustomInputTransition {
+    Unchanged,
+    Changed {
         custom_input: CustomInput,
-        was_active: bool,
-        is_active: bool,
-    ) {
-        if was_active != is_active {
-            self.pending_inputs.push((custom_input, is_active));
+        activity:     HeldInputActivity,
+    },
+}
+
+impl CustomInputTransition {
+    const fn between(
+        custom_input: CustomInput,
+        before: HeldInputActivity,
+        after: HeldInputActivity,
+    ) -> Self {
+        match (before, after) {
+            (HeldInputActivity::Active, HeldInputActivity::Active)
+            | (HeldInputActivity::Inactive, HeldInputActivity::Inactive) => Self::Unchanged,
+            (HeldInputActivity::Inactive, HeldInputActivity::Active)
+            | (HeldInputActivity::Active, HeldInputActivity::Inactive) => Self::Changed {
+                custom_input,
+                activity: after,
+            },
+        }
+    }
+
+    pub(super) fn write_to(self, custom_inputs: &mut CustomInputs) {
+        if let Self::Changed {
+            custom_input,
+            activity,
+        } = self
+        {
+            custom_inputs.insert(custom_input, activity.action_value());
         }
     }
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum HeldInputActivity {
+    Active,
+    Inactive,
+}
+
+impl HeldInputActivity {
+    const fn action_value(self) -> ActionValue { ActionValue::Bool(matches!(self, Self::Active)) }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct HeldChordPhysicalOwnership {
+    primary_key:        KeyCode,
+    required_modifiers: Modifiers,
+}
+
+impl HeldChordPhysicalOwnership {
+    pub(super) const fn new(primary_key: KeyCode, required_modifiers: Modifiers) -> Self {
+        Self {
+            primary_key,
+            required_modifiers,
+        }
+    }
+
+    const fn modifiers_are_held(self, pressed_modifiers: Modifiers) -> bool {
+        (!self.required_modifiers.has_control() || pressed_modifiers.has_control())
+            && (!self.required_modifiers.has_alt() || pressed_modifiers.has_alt())
+            && (!self.required_modifiers.has_shift() || pressed_modifiers.has_shift())
+            && (!self.required_modifiers.has_platform() || pressed_modifiers.has_platform())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum HeldPhysicalSource {
+    ModifierFamily {
+        custom_input: CustomInput,
+    },
+    OrdinaryChord {
+        custom_input: CustomInput,
+        ownership:    HeldChordPhysicalOwnership,
+    },
+}
+
+impl HeldPhysicalSource {
+    const fn custom_input(self) -> CustomInput {
+        match self {
+            Self::ModifierFamily { custom_input } | Self::OrdinaryChord { custom_input, .. } => {
+                custom_input
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum ActiveMatcher {
     Uninitialized,
     Global,
     Condition(ConditionHandle),
 }
 
-impl From<Option<ConditionHandle>> for ActiveMatcher {
-    fn from(condition_handle: Option<ConditionHandle>) -> Self {
-        match condition_handle {
-            Some(condition_handle) => Self::Condition(condition_handle),
-            None => Self::Global,
+impl From<ActiveKeymapScope> for ActiveMatcher {
+    fn from(active_keymap_scope: ActiveKeymapScope) -> Self {
+        match active_keymap_scope {
+            ActiveKeymapScope::Global => Self::Global,
+            ActiveKeymapScope::Condition(condition_handle) => Self::Condition(condition_handle),
         }
     }
 }
@@ -226,16 +378,11 @@ struct HeldSources {
 }
 
 impl HeldSources {
-    const fn is_active(&self) -> bool { self.event + self.physical != 0 }
-}
-
-fn write_custom_input_if_changed(
-    custom_inputs: &mut CustomInputs,
-    custom_input: CustomInput,
-    was_active: bool,
-    is_active: bool,
-) {
-    if was_active != is_active {
-        custom_inputs.insert(custom_input, ActionValue::Bool(is_active));
+    const fn activity(&self) -> HeldInputActivity {
+        if self.event + self.physical == 0 {
+            HeldInputActivity::Inactive
+        } else {
+            HeldInputActivity::Active
+        }
     }
 }

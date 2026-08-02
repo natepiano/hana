@@ -269,6 +269,7 @@ mod tests {
     use crate::Capability;
     use crate::CommandId;
     use crate::CommandRegistry;
+    use crate::HeldCommandLookupOutcome;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeymapLoadFailures;
@@ -390,10 +391,19 @@ mod tests {
         let command_id = CommandId::try_from(ReloadHeld::ID)
             .map_err(|error| format!("invalid held command ID: {error}"))?;
 
-        app.world()
+        match app
+            .world()
             .resource::<CommandRegistry>()
-            .custom_input(&command_id)
-            .ok_or_else(|| String::from("reload registry has no held custom input"))
+            .held_command_lookup(&command_id)
+        {
+            HeldCommandLookupOutcome::RegisteredHeldInput(custom_input) => Ok(custom_input),
+            HeldCommandLookupOutcome::KnownNonHeld => {
+                Err(String::from("reload held command is not held"))
+            },
+            HeldCommandLookupOutcome::UnknownCommand => {
+                Err(String::from("reload held command is not registered"))
+            },
+        }
     }
 
     fn press(app: &mut App, key: KeyCode) {

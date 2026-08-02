@@ -222,7 +222,9 @@ mod tests {
 
     const TIMEOUT: Duration = Duration::from_millis(500);
 
-    fn keystroke(key: KeyCode) -> Keystroke { Keystroke::new(crate::Modifiers::default(), key) }
+    fn keystroke(key: KeyCode) -> Keystroke {
+        Keystroke::from_ordinary_key(crate::Modifiers::default(), super::super::OrdinaryKey(key))
+    }
 
     fn matcher(
         sequences: &[(&str, usize)],

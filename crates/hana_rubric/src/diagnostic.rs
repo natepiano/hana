@@ -31,6 +31,8 @@ pub enum DiagnosticKind {
     CommandEventNotReflected,
     /// A hold-to-act command was bound to a multi-keystroke sequence.
     HeldCommandInSequence,
+    /// A bare modifier was not the sole keystroke of a hold-to-act command.
+    BareModifierRequiresHeldCommand,
     /// A permanently registered recovery command appeared in a keymap file.
     UnremappableCommand,
     /// A keymap sequence begins with a protected recovery keystroke.

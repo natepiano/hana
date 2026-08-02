@@ -158,7 +158,7 @@ fn block_schema(binding_value_schema: Value, context_schema: Value) -> Value {
             "description": "Maps a keystroke sequence to a command or null tombstone.",
             "propertyNames": {
                 "type": "string",
-                "description": "A Hana keystroke sequence."
+                "description": "A Hana keystroke sequence. Modifiers before an ordinary key form a chord. A bare shift, ctrl, alt, or secondary modifier family is valid only as the sole keystroke bound to a held command."
             },
             "additionalProperties": binding_value_schema
         }),
@@ -530,6 +530,28 @@ mod tests {
             "correct keymap document should be accepted"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn keystroke_schema_describes_bare_modifier_family_triggers() -> Result<(), String> {
+        let (command_registry, condition_registry) = registries()?;
+        let schema = generated_schema(&command_registry, &condition_registry)?;
+        let property_names = value_field(
+            value_field(
+                value_field(block_schema(&schema)?, "properties")?
+                    .get("bindings")
+                    .ok_or_else(|| String::from("block schema is missing `bindings`"))?,
+                "propertyNames",
+            )?,
+            "description",
+        )?
+        .as_str()
+        .ok_or_else(|| String::from("keystroke schema description is not text"))?;
+
+        assert!(property_names.contains("bare shift, ctrl, alt, or secondary"));
+        assert!(property_names.contains("sole keystroke bound to a held command"));
+        assert!(property_names.contains("ordinary key"));
         Ok(())
     }
 

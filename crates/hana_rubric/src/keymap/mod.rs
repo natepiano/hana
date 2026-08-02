@@ -11,9 +11,11 @@ mod reload;
 mod runtime;
 mod schema;
 
+pub(super) use compiled::ActiveKeymapScope;
 pub(super) use compiled::CommandHandle;
 pub(crate) use compiled::CompiledKeymap;
 pub(crate) use compiled::Generation;
+pub(super) use compiled::ModifierFamilyHeldBinding;
 pub(crate) use document::KeymapDocument;
 pub(crate) use merged::MergedKeymap;
 pub(crate) use reload::PendingReload;

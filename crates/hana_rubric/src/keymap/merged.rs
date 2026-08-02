@@ -1,6 +1,7 @@
 //! Semantic keymap layering before matcher construction.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use super::CompiledKeymap;
 use super::Generation;
@@ -17,6 +18,7 @@ use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
 use crate::Keystroke;
 use crate::KeystrokeSequence;
+use crate::PrimaryTrigger;
 use crate::condition::ConditionHandle;
 use crate::condition::ConditionRegistry;
 
@@ -25,32 +27,150 @@ pub(super) const RECOGNIZED_BLOCK_MEMBERS: [&str; 2] = ["bindings", "context"];
 /// The exact valid edits that remain after defaults and user keymaps are layered.
 #[derive(Default)]
 pub(crate) struct ResolvedEdits {
-    entries: HashMap<Option<ConditionHandle>, HashMap<KeystrokeSequence, ResolvedEdit>>,
+    entries: HashMap<Option<ConditionHandle>, HashMap<KeystrokeSequence, LayeredEdit>>,
 }
 
 impl ResolvedEdits {
-    fn insert(
+    fn apply(
         &mut self,
         condition_handle: Option<ConditionHandle>,
         keystroke_sequence: KeystrokeSequence,
+        source_layer: BindingSourceLayer,
         resolved_edit: ResolvedEdit,
     ) {
-        self.entries
+        match self
+            .entries
             .entry(condition_handle)
             .or_default()
-            .insert(keystroke_sequence, resolved_edit);
+            .entry(keystroke_sequence)
+        {
+            Entry::Occupied(mut occupied) => occupied.get_mut().apply(source_layer, resolved_edit),
+            Entry::Vacant(vacant) => {
+                vacant.insert(LayeredEdit::from_layer(source_layer, resolved_edit));
+            },
+        }
     }
 
-    fn global(&self) -> Option<&HashMap<KeystrokeSequence, ResolvedEdit>> {
-        self.entries.get(&None)
+    /// Drops one layer's edit at a keystroke identity, restoring the layer beneath it.
+    ///
+    /// Repeated rejections of the same identity and layer are a no-op: a held binding that
+    /// collides with several longer sequences is recorded once per collision.
+    fn reject(
+        &mut self,
+        condition_handle: Option<ConditionHandle>,
+        keystroke_sequence: &KeystrokeSequence,
+        source_layer: BindingSourceLayer,
+    ) {
+        let Some(edits) = self.entries.get_mut(&condition_handle) else {
+            return;
+        };
+        let Entry::Occupied(mut occupied) = edits.entry(keystroke_sequence.clone()) else {
+            return;
+        };
+
+        if matches!(
+            occupied.get_mut().reject_layer(source_layer),
+            BindingRetention::Unbound
+        ) {
+            occupied.remove();
+        }
     }
+
+    fn global(&self) -> Option<&HashMap<KeystrokeSequence, LayeredEdit>> { self.entries.get(&None) }
 
     fn for_condition(
         &self,
         condition_handle: ConditionHandle,
-    ) -> Option<&HashMap<KeystrokeSequence, ResolvedEdit>> {
+    ) -> Option<&HashMap<KeystrokeSequence, LayeredEdit>> {
         self.entries.get(&Some(condition_handle))
     }
+}
+
+/// Every layer's edit at one keystroke identity, newest layer first.
+///
+/// A shipped default stays reachable underneath a user edit at the same identity so that
+/// rejecting the user edit — as [`MergedKeymap::reject_held_prefixes`] does for a held prefix
+/// that collides with a longer user sequence — restores the shipped binding instead of leaving
+/// the identity unbound. Only a user [`ResolvedEdit::Tombstone`] removes the shipped binding.
+#[derive(Clone)]
+enum LayeredEdit {
+    ShippedDefault(ResolvedEdit),
+    User(ResolvedEdit),
+    UserOverShippedDefault {
+        user:            ResolvedEdit,
+        shipped_default: ResolvedEdit,
+    },
+}
+
+impl LayeredEdit {
+    const fn from_layer(source_layer: BindingSourceLayer, resolved_edit: ResolvedEdit) -> Self {
+        match source_layer {
+            BindingSourceLayer::ShippedDefault => Self::ShippedDefault(resolved_edit),
+            BindingSourceLayer::User => Self::User(resolved_edit),
+        }
+    }
+
+    fn apply(&mut self, source_layer: BindingSourceLayer, resolved_edit: ResolvedEdit) {
+        *self = match (source_layer, &*self) {
+            (BindingSourceLayer::ShippedDefault, Self::ShippedDefault(_) | Self::User(_)) => {
+                Self::ShippedDefault(resolved_edit)
+            },
+            (BindingSourceLayer::ShippedDefault, Self::UserOverShippedDefault { user, .. }) => {
+                Self::UserOverShippedDefault {
+                    user:            user.clone(),
+                    shipped_default: resolved_edit,
+                }
+            },
+            (BindingSourceLayer::User, Self::User(_)) => Self::User(resolved_edit),
+            (
+                BindingSourceLayer::User,
+                Self::ShippedDefault(shipped_default)
+                | Self::UserOverShippedDefault {
+                    shipped_default, ..
+                },
+            ) => Self::UserOverShippedDefault {
+                user:            resolved_edit,
+                shipped_default: shipped_default.clone(),
+            },
+        };
+    }
+
+    /// The edit the keymap acts on: the user's when the user authored one, else the shipped one.
+    const fn live(&self) -> &ResolvedEdit {
+        match self {
+            Self::ShippedDefault(resolved_edit) | Self::User(resolved_edit) => resolved_edit,
+            Self::UserOverShippedDefault { user, .. } => user,
+        }
+    }
+
+    /// Drops `source_layer`'s edit, leaving whatever the layer underneath still binds.
+    fn reject_layer(&mut self, source_layer: BindingSourceLayer) -> BindingRetention {
+        match (source_layer, &mut *self) {
+            (BindingSourceLayer::ShippedDefault, Self::ShippedDefault(_))
+            | (BindingSourceLayer::User, Self::User(_)) => BindingRetention::Unbound,
+            (
+                BindingSourceLayer::User,
+                Self::UserOverShippedDefault {
+                    shipped_default, ..
+                },
+            ) => {
+                *self = Self::ShippedDefault(shipped_default.clone());
+                BindingRetention::Layered
+            },
+            (BindingSourceLayer::ShippedDefault, Self::UserOverShippedDefault { user, .. }) => {
+                *self = Self::User(user.clone());
+                BindingRetention::Layered
+            },
+            (BindingSourceLayer::ShippedDefault, Self::User(_))
+            | (BindingSourceLayer::User, Self::ShippedDefault(_)) => BindingRetention::Layered,
+        }
+    }
+}
+
+/// Whether a keystroke identity still binds a command once one layer's edit is rejected.
+enum BindingRetention {
+    Layered,
+    Unbound,
 }
 
 #[derive(Clone)]
@@ -61,9 +181,10 @@ enum ResolvedEdit {
 
 #[derive(Clone)]
 struct ResolvedBinding {
-    command_id:  CommandId,
-    source:      BindingSource,
-    source_path: String,
+    command_id:   CommandId,
+    source:       BindingSource,
+    source_layer: BindingSourceLayer,
+    source_path:  String,
 }
 
 #[derive(Clone)]
@@ -71,6 +192,31 @@ struct ScopedBinding {
     keystroke_sequence: KeystrokeSequence,
     binding:            ResolvedBinding,
     origin:             Option<ConditionHandle>,
+}
+
+/// One held-prefix collision participant to drop, named down to the layer that authored it so
+/// the layer beneath survives.
+struct RejectedBinding {
+    keystroke_sequence: KeystrokeSequence,
+    origin:             Option<ConditionHandle>,
+    source_layer:       BindingSourceLayer,
+}
+
+impl From<&ScopedBinding> for RejectedBinding {
+    fn from(scoped_binding: &ScopedBinding) -> Self {
+        Self {
+            keystroke_sequence: scoped_binding.keystroke_sequence.clone(),
+            origin:             scoped_binding.origin,
+            source_layer:       scoped_binding.binding.source_layer,
+        }
+    }
+}
+
+/// The keymap layer that authored a resolved binding.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum BindingSourceLayer {
+    ShippedDefault,
+    User,
 }
 
 enum ContextResolution {
@@ -146,6 +292,7 @@ impl MergedKeymap {
 
         Self::apply_document(
             defaults,
+            BindingSourceLayer::ShippedDefault,
             &mut resolved_edits,
             &mut diagnostics,
             command_registry,
@@ -155,6 +302,7 @@ impl MergedKeymap {
         if let Some(user) = user {
             Self::apply_document(
                 user,
+                BindingSourceLayer::User,
                 &mut resolved_edits,
                 &mut diagnostics,
                 command_registry,
@@ -187,6 +335,7 @@ impl MergedKeymap {
 
     fn apply_document(
         document: &KeymapDocument,
+        source_layer: BindingSourceLayer,
         resolved_edits: &mut ResolvedEdits,
         diagnostics: &mut Vec<Diagnostic>,
         command_registry: &CommandRegistry,
@@ -233,6 +382,7 @@ impl MergedKeymap {
                     binding.edit.clone(),
                     &binding.keystroke_sequence,
                     &binding.source,
+                    source_layer,
                     &document.source_path,
                     command_registry,
                     protected_keystrokes,
@@ -241,9 +391,10 @@ impl MergedKeymap {
                     continue;
                 };
 
-                resolved_edits.insert(
+                resolved_edits.apply(
                     condition_handle,
                     binding.keystroke_sequence.clone(),
+                    source_layer,
                     resolved_edit,
                 );
             }
@@ -347,6 +498,7 @@ impl MergedKeymap {
         edit: BindingEdit,
         keystroke_sequence: &KeystrokeSequence,
         binding_source: &BindingSource,
+        source_layer: BindingSourceLayer,
         source_path: &str,
         command_registry: &CommandRegistry,
         protected_keystrokes: &[Keystroke],
@@ -397,6 +549,31 @@ impl MergedKeymap {
                     return None;
                 };
 
+                if let Some((index, modifier_family)) = keystroke_sequence
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, keystroke)| match keystroke.primary_trigger() {
+                        PrimaryTrigger::ModifierFamily(modifier_family) => {
+                            Some((index, modifier_family))
+                        },
+                        PrimaryTrigger::OrdinaryKey(_) => None,
+                    })
+                    && (capability != Capability::Held || keystroke_sequence.len() != 1)
+                {
+                    diagnostics.push(binding_source.diagnostic(
+                        source_path,
+                        command_id.to_string(),
+                        DiagnosticKind::BareModifierRequiresHeldCommand,
+                        DiagnosticSeverity::Failure,
+                        format!(
+                            "Bare modifier keystroke {} `{modifier_family}` can only be the sole keystroke bound to a hold-to-act command.",
+                            index + 1
+                        ),
+                    ));
+
+                    return None;
+                }
+
                 if capability == Capability::Held && keystroke_sequence.len() > 1 {
                     diagnostics.push(binding_source.diagnostic(
                         source_path,
@@ -426,6 +603,7 @@ impl MergedKeymap {
                 Some(ResolvedEdit::Bind(ResolvedBinding {
                     command_id,
                     source: binding_source.clone(),
+                    source_layer,
                     source_path: source_path.to_owned(),
                 }))
             },
@@ -456,23 +634,16 @@ impl MergedKeymap {
             let mut bindings = global_bindings.clone();
 
             if let Some(condition_edits) = resolved_edits.for_condition(condition_handle) {
-                for (keystroke_sequence, resolved_edit) in condition_edits {
-                    match resolved_edit {
-                        ResolvedEdit::Bind(binding) => {
-                            bindings.retain(|candidate| {
-                                candidate.keystroke_sequence != *keystroke_sequence
-                            });
-                            bindings.push(ScopedBinding {
-                                keystroke_sequence: keystroke_sequence.clone(),
-                                binding:            binding.clone(),
-                                origin:             Some(condition_handle),
-                            });
-                        },
-                        ResolvedEdit::Tombstone => {
-                            bindings.retain(|candidate| {
-                                candidate.keystroke_sequence != *keystroke_sequence
-                            });
-                        },
+                for (keystroke_sequence, layered_edit) in condition_edits {
+                    bindings
+                        .retain(|candidate| candidate.keystroke_sequence != *keystroke_sequence);
+
+                    if let ResolvedEdit::Bind(binding) = layered_edit.live() {
+                        bindings.push(ScopedBinding {
+                            keystroke_sequence: keystroke_sequence.clone(),
+                            binding:            binding.clone(),
+                            origin:             Some(condition_handle),
+                        });
                     }
                 }
             }
@@ -486,28 +657,32 @@ impl MergedKeymap {
             );
         }
 
-        for (origin, keystroke_sequence) in rejected_bindings {
-            if let Some(edits) = resolved_edits.entries.get_mut(&origin) {
-                edits.remove(&keystroke_sequence);
-            }
+        for rejected_binding in rejected_bindings {
+            resolved_edits.reject(
+                rejected_binding.origin,
+                &rejected_binding.keystroke_sequence,
+                rejected_binding.source_layer,
+            );
         }
     }
 
     fn scoped_bindings(
-        edits: Option<&HashMap<KeystrokeSequence, ResolvedEdit>>,
+        edits: Option<&HashMap<KeystrokeSequence, LayeredEdit>>,
         origin: Option<ConditionHandle>,
     ) -> Vec<ScopedBinding> {
         edits.map_or_else(Vec::new, |edits| {
             edits
                 .iter()
-                .filter_map(|(keystroke_sequence, resolved_edit)| match resolved_edit {
-                    ResolvedEdit::Bind(binding) => Some(ScopedBinding {
-                        keystroke_sequence: keystroke_sequence.clone(),
-                        binding: binding.clone(),
-                        origin,
-                    }),
-                    ResolvedEdit::Tombstone => None,
-                })
+                .filter_map(
+                    |(keystroke_sequence, layered_edit)| match layered_edit.live() {
+                        ResolvedEdit::Bind(binding) => Some(ScopedBinding {
+                            keystroke_sequence: keystroke_sequence.clone(),
+                            binding: binding.clone(),
+                            origin,
+                        }),
+                        ResolvedEdit::Tombstone => None,
+                    },
+                )
                 .collect()
         })
     }
@@ -517,7 +692,7 @@ impl MergedKeymap {
         command_registry: &CommandRegistry,
         is_condition_scope: bool,
         diagnostics: &mut Vec<Diagnostic>,
-        rejected_bindings: &mut Vec<(Option<ConditionHandle>, KeystrokeSequence)>,
+        rejected_bindings: &mut Vec<RejectedBinding>,
     ) {
         for held_binding in bindings {
             let is_held = command_registry.capability(&held_binding.binding.command_id)
@@ -537,22 +712,39 @@ impl MergedKeymap {
                     continue;
                 }
 
-                diagnostics.push(held_binding.binding.source.diagnostic(
-                    &held_binding.binding.source_path,
-                    held_binding.binding.command_id.to_string(),
-                    DiagnosticKind::HeldCommandInSequence,
-                    DiagnosticSeverity::Failure,
-                    format!(
-                        "Hold-to-act command `{}` shares its keystroke with multi-stroke binding `{}`.",
-                        held_binding.binding.command_id, other_binding.binding.command_id
-                    ),
-                ));
-                rejected_bindings
-                    .push((held_binding.origin, held_binding.keystroke_sequence.clone()));
-                rejected_bindings.push((
-                    other_binding.origin,
-                    other_binding.keystroke_sequence.clone(),
-                ));
+                if held_binding.binding.source_layer == BindingSourceLayer::ShippedDefault
+                    && other_binding.binding.source_layer == BindingSourceLayer::User
+                {
+                    diagnostics.push(other_binding.binding.source.diagnostic(
+                        &other_binding.binding.source_path,
+                        other_binding.binding.command_id.to_string(),
+                        DiagnosticKind::HeldCommandInSequence,
+                        DiagnosticSeverity::Failure,
+                        format!(
+                            "Multi-stroke binding `{}` in `{}` shares its prefix with shipped hold-to-act binding `{}` in `{}`.",
+                            other_binding.binding.command_id,
+                            other_binding.binding.source_path,
+                            held_binding.binding.command_id,
+                            held_binding.binding.source_path,
+                        ),
+                    ));
+                } else {
+                    diagnostics.push(held_binding.binding.source.diagnostic(
+                        &held_binding.binding.source_path,
+                        held_binding.binding.command_id.to_string(),
+                        DiagnosticKind::HeldCommandInSequence,
+                        DiagnosticSeverity::Failure,
+                        format!(
+                            "Hold-to-act command `{}` in `{}` shares its keystroke with multi-stroke binding `{}` in `{}`.",
+                            held_binding.binding.command_id,
+                            held_binding.binding.source_path,
+                            other_binding.binding.command_id,
+                            other_binding.binding.source_path,
+                        ),
+                    ));
+                    rejected_bindings.push(RejectedBinding::from(held_binding));
+                }
+                rejected_bindings.push(RejectedBinding::from(other_binding));
             }
         }
     }
@@ -572,8 +764,8 @@ impl MergedKeymap {
             let mut bindings = global.clone();
 
             if let Some(condition_edits) = resolved_edits.for_condition(condition_handle) {
-                for (keystroke_sequence, resolved_edit) in condition_edits {
-                    match resolved_edit {
+                for (keystroke_sequence, layered_edit) in condition_edits {
+                    match layered_edit.live() {
                         ResolvedEdit::Bind(binding) => {
                             bindings.insert(keystroke_sequence.clone(), binding.command_id.clone());
                         },
@@ -594,17 +786,19 @@ impl MergedKeymap {
     }
 
     fn live_bindings(
-        edits: Option<&HashMap<KeystrokeSequence, ResolvedEdit>>,
+        edits: Option<&HashMap<KeystrokeSequence, LayeredEdit>>,
     ) -> HashMap<KeystrokeSequence, CommandId> {
         edits.map_or_else(HashMap::new, |edits| {
             edits
                 .iter()
-                .filter_map(|(keystroke_sequence, resolved_edit)| match resolved_edit {
-                    ResolvedEdit::Bind(binding) => {
-                        Some((keystroke_sequence.clone(), binding.command_id.clone()))
+                .filter_map(
+                    |(keystroke_sequence, layered_edit)| match layered_edit.live() {
+                        ResolvedEdit::Bind(binding) => {
+                            Some((keystroke_sequence.clone(), binding.command_id.clone()))
+                        },
+                        ResolvedEdit::Tombstone => None,
                     },
-                    ResolvedEdit::Tombstone => None,
-                })
+                )
                 .collect()
         })
     }
@@ -1170,7 +1364,77 @@ mod tests {
     }
 
     #[test]
-    fn held_prefix_and_longer_binding_are_both_rejected() -> Result<(), String> {
+    fn sole_bare_modifier_binding_is_valid_for_a_held_command() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "shift": "camera::hold" } }] }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "shift")?,
+            Some("camera::hold")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bare_modifier_binding_is_rejected_for_a_one_shot_command() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "shift": "camera::home" } }] }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::BareModifierRequiresHeldCommand)
+            .ok_or_else(|| String::from("bare modifier diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Failure);
+        assert_eq!(diagnostic.command_id, "camera::home");
+        assert!(diagnostic.message.contains("sole keystroke"));
+        assert!(diagnostic.message.contains("hold-to-act command"));
+        assert_eq!(command_for_sequence(merged_keymap.global(), "shift")?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn sequence_containing_a_bare_modifier_is_rejected() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "g shift": "camera::home" } }] }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, None, &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::BareModifierRequiresHeldCommand)
+            .ok_or_else(|| String::from("bare modifier sequence diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Failure);
+        assert!(diagnostic.message.contains("keystroke 2 `shift`"));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "g shift")?,
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modified_ordinary_key_remains_valid_and_routable() -> Result<(), String> {
+        let defaults = r#"{ "bindings": [{ "bindings": { "shift-f": "camera::home" } }] }"#;
+        let (merged_keymap, diagnostics, command_registry, _) = merged_keymap(defaults, None, &[])?;
+        let mut compiled_keymap = merged_keymap.compile(Generation(1), &command_registry);
+        let keystroke = "shift-f"
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid modified key test sequence: {error}"))?
+            .first();
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "shift-f")?,
+            Some("camera::home")
+        );
+        assert!(matches!(
+            compiled_keymap.match_global(keystroke, Instant::now(), MATCH_TIMEOUT),
+            MatchOutcome::Matched(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn same_source_held_prefix_and_longer_binding_are_both_rejected() -> Result<(), String> {
         let defaults = r#"{
             "bindings": [{
                 "bindings": {
@@ -1192,6 +1456,96 @@ mod tests {
         assert_eq!(command_for_sequence(merged_keymap.global(), "g")?, None);
         assert_eq!(command_for_sequence(merged_keymap.global(), "g h")?, None);
 
+        Ok(())
+    }
+
+    #[test]
+    fn later_user_sequence_does_not_replace_a_shipped_held_prefix() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": { "f": "camera::hold" }
+            }]
+        }"#;
+        let user = r#"{
+            "bindings": [{
+                "bindings": { "f g": "camera::reset" }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::HeldCommandInSequence)
+            .ok_or_else(|| String::from("user held-prefix diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.source_path, USER_PATH);
+        assert_eq!(diagnostic.command_id, "camera::reset");
+        assert!(diagnostic.message.contains("camera::hold"));
+        assert!(diagnostic.message.contains("camera::reset"));
+        assert!(diagnostic.message.contains(DEFAULTS_PATH));
+        assert!(diagnostic.message.contains(USER_PATH));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "f")?,
+            Some("camera::hold")
+        );
+        assert_eq!(command_for_sequence(merged_keymap.global(), "f g")?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn identical_user_override_and_longer_user_sequence_fall_back_to_the_shipped_hold()
+    -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": { "f": "camera::hold" }
+            }]
+        }"#;
+        let user = r#"{
+            "bindings": [{
+                "bindings": {
+                    "f": "camera::hold",
+                    "f g": "camera::reset"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::HeldCommandInSequence)
+            .ok_or_else(|| String::from("same-source held-prefix diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.source_path, USER_PATH);
+        assert_eq!(diagnostic.command_id, "camera::hold");
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "f")?,
+            Some("camera::hold")
+        );
+        assert_eq!(command_for_sequence(merged_keymap.global(), "f g")?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn user_tombstone_allows_a_sequence_after_a_shipped_held_prefix() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": { "f": "camera::hold" }
+            }]
+        }"#;
+        let user = r#"{
+            "bindings": [{
+                "bindings": {
+                    "f": null,
+                    "f g": "camera::reset"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+
+        assert!(diagnostics.is_empty());
+        assert_eq!(command_for_sequence(merged_keymap.global(), "f")?, None);
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "f g")?,
+            Some("camera::reset")
+        );
         Ok(())
     }
 

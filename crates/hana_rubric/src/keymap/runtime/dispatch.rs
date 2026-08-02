@@ -1,19 +1,29 @@
+use std::time::Instant;
+
 use bevy::ecs::world::World;
 use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
-use bevy_enhanced_input::prelude::ActionValue;
+use bevy_enhanced_input::prelude::CustomInput;
 use bevy_enhanced_input::prelude::CustomInputs;
 
 use super::held::ActiveMatcher;
+use super::held::CustomInputTransition;
+use super::held::HeldChordPhysicalOwnership;
 use super::held::KeymapRuntime;
+use super::held::PhysicalSourceReleaseProgress;
 use super::key_edge;
+use super::key_edge::OrdinaryKeyRoutingState;
+use super::key_edge::PhysicalKeyRole;
+use super::key_edge::PrimaryTriggerOwnership;
 use crate::ActiveCondition;
 use crate::MatchOutcome;
+use crate::Modifiers;
 use crate::SequenceMatcher;
 use crate::command::Invocation;
-use crate::condition::ConditionHandle;
+use crate::keymap::ActiveKeymapScope;
 use crate::keymap::CommandHandle;
 use crate::keymap::CompiledKeymap;
+use crate::keymap::ModifierFamilyHeldBinding;
 use crate::keymap::constants::SEQUENCE_TIMEOUT;
 
 pub(crate) fn cancel_pending_sequences(world: &mut World) {
@@ -36,43 +46,40 @@ pub(crate) fn reset_physical_input(world: &mut World) {
         .get_resource::<ButtonInput<KeyCode>>()
         .map(|keys| keys.get_pressed().copied().collect::<Vec<_>>())
         .unwrap_or_default();
-    {
-        let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
-        keymap_runtime.clear_physical();
-        keymap_runtime.inhibit(pressed.into_iter());
-    }
-    flush_custom_inputs(world);
+    release_all_physical_sources(world);
+    world
+        .resource_mut::<KeymapRuntime>()
+        .inhibit(pressed.into_iter());
 }
 
 pub(crate) fn route_input(world: &mut World) {
     if !world.contains_resource::<CompiledKeymap>() {
         return;
     }
-    let active_condition = match world.get_resource::<ActiveCondition>() {
+    let active_keymap_scope = match world.get_resource::<ActiveCondition>() {
         Some(active_condition) if !active_condition.is_initialized() => return,
-        Some(active_condition) => active_condition.handle(),
-        None => None,
+        Some(active_condition) => ActiveKeymapScope::from(active_condition.handle()),
+        None => ActiveKeymapScope::Global,
     };
     world.init_resource::<KeymapRuntime>();
     world.init_resource::<CustomInputs>();
 
-    let dispatches = synchronize_and_resolve_timeout(world, active_condition);
-    flush_custom_inputs(world);
-    dispatch_all(world, dispatches);
+    let routed_commands = synchronize_and_resolve_timeout(world, active_keymap_scope);
+    dispatch_all(world, routed_commands);
     route_releases(world);
-    route_presses(world);
+    route_presses(world, active_keymap_scope);
 }
 
 fn synchronize_and_resolve_timeout(
     world: &mut World,
-    active_condition: Option<ConditionHandle>,
-) -> Dispatches {
+    active_keymap_scope: ActiveKeymapScope,
+) -> RoutedCommands {
     let reset_required = world.resource_scope::<CompiledKeymap, _>(|world, mut compiled_keymap| {
         let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
         let generation_changed = keymap_runtime
             .generation()
             .is_some_and(|generation| generation != compiled_keymap.generation);
-        let condition_changed = keymap_runtime.condition_changed(active_condition);
+        let condition_changed = keymap_runtime.condition_changed(active_keymap_scope);
 
         if condition_changed
             && !generation_changed
@@ -81,7 +88,7 @@ fn synchronize_and_resolve_timeout(
         {
             sequence_matcher.cancel_pending();
         }
-        keymap_runtime.update_generation(compiled_keymap.generation, active_condition);
+        keymap_runtime.update_generation(compiled_keymap.generation, active_keymap_scope);
         generation_changed || condition_changed
     });
 
@@ -90,55 +97,162 @@ fn synchronize_and_resolve_timeout(
             .get_resource::<ButtonInput<KeyCode>>()
             .map(|pressed| pressed.get_pressed().copied().collect::<Vec<_>>())
             .unwrap_or_default();
-        let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
-        keymap_runtime.clear_physical();
-        keymap_runtime.inhibit(pressed.into_iter());
+        release_all_physical_sources(world);
+        world
+            .resource_mut::<KeymapRuntime>()
+            .inhibit(pressed.into_iter());
     }
 
     world.resource_scope::<CompiledKeymap, _>(|world, mut compiled_keymap| {
-        let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
-        let now = keymap_runtime.now();
-        matcher(&mut compiled_keymap, active_condition)
+        let now = world.resource::<KeymapRuntime>().now();
+        matcher(&mut compiled_keymap, active_keymap_scope)
             .filter(|sequence_matcher| sequence_matcher.is_pending())
             .and_then(|sequence_matcher| sequence_matcher.resolve_timeout(now, SEQUENCE_TIMEOUT))
-            .and_then(|command_handle| {
-                dispatch_for_handle(&mut keymap_runtime, &compiled_keymap, command_handle, None)
+            .map_or_else(RoutedCommands::default, |command_handle| {
+                RoutedCommands::from(routed_command(&compiled_keymap, command_handle))
             })
-            .into()
     })
 }
 
 fn route_releases(world: &mut World) {
     clear_processed_keycodes(world);
     while let Some(key) = next_released_key(world) {
-        let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
-        keymap_runtime.mark_processed(key);
-        keymap_runtime.release_inhibition(key);
-        keymap_runtime.release_physical(key);
+        let pressed_modifiers = world
+            .get_resource::<ButtonInput<KeyCode>>()
+            .map(Modifiers::from_pressed)
+            .unwrap_or_default();
+        let custom_input_transition = {
+            let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
+            keymap_runtime.mark_processed(key);
+            keymap_runtime.release_inhibition(key);
+            keymap_runtime.release_key(key)
+        };
+        write_custom_input_transition(world, custom_input_transition);
+        release_chords_missing_modifiers(world, pressed_modifiers);
     }
-    flush_custom_inputs(world);
 }
 
-fn route_presses(world: &mut World) {
+fn route_presses(world: &mut World, active_keymap_scope: ActiveKeymapScope) {
     clear_processed_keycodes(world);
+    let primary_trigger_ownership = world.get_resource::<ButtonInput<KeyCode>>().map_or(
+        PrimaryTriggerOwnership::Unclaimed,
+        PrimaryTriggerOwnership::from,
+    );
+
+    match primary_trigger_ownership {
+        PrimaryTriggerOwnership::Unclaimed => {},
+        PrimaryTriggerOwnership::ModifierFamilies => {
+            activate_modifier_family_held_bindings(world, active_keymap_scope);
+        },
+        PrimaryTriggerOwnership::OrdinaryKeys(ordinary_key_routing_state) => {
+            suspend_modifier_family_held_bindings(world);
+            route_ordinary_key_presses(world, active_keymap_scope);
+            match ordinary_key_routing_state {
+                OrdinaryKeyRoutingState::Held => {},
+                OrdinaryKeyRoutingState::PressEdgesOnly => {
+                    activate_modifier_family_held_bindings(world, active_keymap_scope);
+                },
+            }
+        },
+    }
+}
+
+fn route_ordinary_key_presses(world: &mut World, active_keymap_scope: ActiveKeymapScope) {
     while let Some(key) = next_pressed_key(world) {
         world.resource_mut::<KeymapRuntime>().mark_processed(key);
-        if key_edge::is_modifier(key) || world.resource::<KeymapRuntime>().is_inhibited(key) {
+        if world.resource::<KeymapRuntime>().is_inhibited(key) {
             continue;
         }
+        let PhysicalKeyRole::OrdinaryKey(ordinary_key) = PhysicalKeyRole::from(key) else {
+            continue;
+        };
 
         let Some(keystroke) = world
             .get_resource::<ButtonInput<KeyCode>>()
-            .map(|pressed| key_edge::keystroke(pressed, key))
+            .map(|pressed| key_edge::keystroke(pressed, ordinary_key))
         else {
             continue;
         };
-        let active_condition = world
-            .get_resource::<ActiveCondition>()
-            .and_then(ActiveCondition::handle);
-        let dispatches = route_keystroke(world, active_condition, keystroke, key);
-        flush_custom_inputs(world);
-        dispatch_all(world, dispatches);
+        let held_chord_physical_ownership =
+            HeldChordPhysicalOwnership::new(key, keystroke.modifiers());
+        let routed_commands = route_keystroke(world, active_keymap_scope, keystroke);
+        claim_held_chords(world, routed_commands, held_chord_physical_ownership);
+        release_physical_if_no_longer_pressed(world, key);
+        dispatch_all(world, routed_commands);
+    }
+}
+
+/// Activates the held custom input of every hold-to-act command the pressed chord matched.
+fn claim_held_chords(
+    world: &mut World,
+    routed_commands: RoutedCommands,
+    held_chord_physical_ownership: HeldChordPhysicalOwnership,
+) {
+    claim_held_chord(world, routed_commands.first, held_chord_physical_ownership);
+    claim_held_chord(world, routed_commands.second, held_chord_physical_ownership);
+}
+
+fn claim_held_chord(
+    world: &mut World,
+    routed_command: RoutedCommand,
+    held_chord_physical_ownership: HeldChordPhysicalOwnership,
+) {
+    let RoutedCommand::HoldChord(custom_input) = routed_command else {
+        return;
+    };
+    let custom_input_transition = world
+        .resource_mut::<KeymapRuntime>()
+        .activate_ordinary_chord(held_chord_physical_ownership, custom_input);
+    write_custom_input_transition(world, custom_input_transition);
+}
+
+fn release_physical_if_no_longer_pressed(world: &mut World, key: KeyCode) {
+    let key_remains_pressed = world
+        .get_resource::<ButtonInput<KeyCode>>()
+        .is_some_and(|key_input| key_input.pressed(key));
+    let pressed_modifiers = world
+        .get_resource::<ButtonInput<KeyCode>>()
+        .map(Modifiers::from_pressed)
+        .unwrap_or_default();
+    if !key_remains_pressed {
+        let custom_input_transition = world.resource_mut::<KeymapRuntime>().release_key(key);
+        write_custom_input_transition(world, custom_input_transition);
+    }
+    release_chords_missing_modifiers(world, pressed_modifiers);
+}
+
+fn activate_modifier_family_held_bindings(
+    world: &mut World,
+    active_keymap_scope: ActiveKeymapScope,
+) {
+    for key in key_edge::PHYSICAL_MODIFIER_KEYS {
+        let is_pressed = world
+            .get_resource::<ButtonInput<KeyCode>>()
+            .is_some_and(|pressed| pressed.pressed(key));
+        if !is_pressed || world.resource::<KeymapRuntime>().is_inhibited(key) {
+            continue;
+        }
+        let PhysicalKeyRole::ModifierFamily(modifier_family) = PhysicalKeyRole::from(key) else {
+            continue;
+        };
+        let modifier_family_held_binding = world
+            .resource::<CompiledKeymap>()
+            .modifier_family_held_binding(active_keymap_scope, modifier_family);
+        let ModifierFamilyHeldBinding::Bound(custom_input) = modifier_family_held_binding else {
+            continue;
+        };
+
+        let custom_input_transition = world
+            .resource_mut::<KeymapRuntime>()
+            .activate_modifier_family(key, custom_input);
+        write_custom_input_transition(world, custom_input_transition);
+    }
+}
+
+fn suspend_modifier_family_held_bindings(world: &mut World) {
+    for key in key_edge::PHYSICAL_MODIFIER_KEYS {
+        let custom_input_transition = world.resource_mut::<KeymapRuntime>().release_key(key);
+        write_custom_input_transition(world, custom_input_transition);
     }
 }
 
@@ -168,121 +282,118 @@ fn next_released_key(world: &World) -> Option<KeyCode> {
 
 fn route_keystroke(
     world: &mut World,
-    active_condition: Option<ConditionHandle>,
+    active_keymap_scope: ActiveKeymapScope,
     keystroke: crate::Keystroke,
-    key: KeyCode,
-) -> Dispatches {
+) -> RoutedCommands {
     world.resource_scope::<CompiledKeymap, _>(|world, mut compiled_keymap| {
-        let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
-        let now = keymap_runtime.now();
+        let now = world.resource::<KeymapRuntime>().now();
         let Some(match_outcome) =
-            matcher(&mut compiled_keymap, active_condition).map(|sequence_matcher| {
+            matcher(&mut compiled_keymap, active_keymap_scope).map(|sequence_matcher| {
                 sequence_matcher.match_keystroke(keystroke, now, SEQUENCE_TIMEOUT)
             })
         else {
-            return Dispatches::default();
+            return RoutedCommands::default();
         };
-        let mut dispatches = Dispatches::default();
+        let mut routed_commands = RoutedCommands::default();
         route_match_outcome(
-            &mut keymap_runtime,
             &mut compiled_keymap,
-            active_condition,
-            Some(key),
+            active_keymap_scope,
+            now,
             match_outcome,
-            &mut dispatches,
+            &mut routed_commands,
         );
-        dispatches
+
+        routed_commands
     })
 }
 
 fn route_match_outcome(
-    keymap_runtime: &mut KeymapRuntime,
     compiled_keymap: &mut CompiledKeymap,
-    active_condition: Option<ConditionHandle>,
-    key: Option<KeyCode>,
+    active_keymap_scope: ActiveKeymapScope,
+    now: Instant,
     match_outcome: MatchOutcome<CommandHandle>,
-    dispatches: &mut Dispatches,
+    routed_commands: &mut RoutedCommands,
 ) {
     match match_outcome {
-        MatchOutcome::Matched(command_handle) => dispatches.push(dispatch_for_handle(
-            keymap_runtime,
-            compiled_keymap,
-            command_handle,
-            key,
-        )),
+        MatchOutcome::Matched(command_handle) => {
+            routed_commands.push(routed_command(compiled_keymap, command_handle));
+        },
         MatchOutcome::Reprocess {
             deferred,
             keystroke,
         } => {
             if let Some(command_handle) = deferred {
-                dispatches.push(dispatch_for_handle(
-                    keymap_runtime,
-                    compiled_keymap,
-                    command_handle,
-                    key,
-                ));
+                routed_commands.push(routed_command(compiled_keymap, command_handle));
             }
             if let Some(MatchOutcome::Matched(command_handle)) =
-                matcher(compiled_keymap, active_condition).map(|sequence_matcher| {
-                    sequence_matcher.match_keystroke(
-                        keystroke,
-                        keymap_runtime.now(),
-                        SEQUENCE_TIMEOUT,
-                    )
+                matcher(compiled_keymap, active_keymap_scope).map(|sequence_matcher| {
+                    sequence_matcher.match_keystroke(keystroke, now, SEQUENCE_TIMEOUT)
                 })
             {
-                dispatches.push(dispatch_for_handle(
-                    keymap_runtime,
-                    compiled_keymap,
-                    command_handle,
-                    key,
-                ));
+                routed_commands.push(routed_command(compiled_keymap, command_handle));
             }
         },
         MatchOutcome::Deferred(_) | MatchOutcome::NoMatch | MatchOutcome::Pending => {},
     }
 }
 
-fn dispatch_for_handle(
-    keymap_runtime: &mut KeymapRuntime,
+fn routed_command(
     compiled_keymap: &CompiledKeymap,
     command_handle: CommandHandle,
-    key: Option<KeyCode>,
-) -> Option<fn(&mut World)> {
+) -> RoutedCommand {
     match compiled_keymap.invocation(command_handle) {
-        Some(Invocation::Held(custom_input)) => {
-            if let Some(key) = key {
-                keymap_runtime.activate_physical(key, custom_input);
-            }
-            None
-        },
-        Some(Invocation::OneShot | Invocation::Unremappable) => {
-            compiled_keymap.dispatch(command_handle)
-        },
-        None => None,
+        Some(Invocation::Held(custom_input)) => RoutedCommand::HoldChord(custom_input),
+        Some(Invocation::OneShot | Invocation::Unremappable) => compiled_keymap
+            .dispatch(command_handle)
+            .map_or(RoutedCommand::Nothing, RoutedCommand::Dispatch),
+        None => RoutedCommand::Nothing,
     }
 }
 
-fn flush_custom_inputs(world: &mut World) {
-    let pending_inputs = world.resource_mut::<KeymapRuntime>().take_pending_inputs();
-    if !pending_inputs.is_empty() {
-        let mut custom_inputs = world.resource_mut::<CustomInputs>();
-        for (custom_input, is_active) in &pending_inputs {
-            custom_inputs.insert(*custom_input, ActionValue::Bool(*is_active));
+fn write_custom_input_transition(
+    world: &mut World,
+    custom_input_transition: CustomInputTransition,
+) {
+    custom_input_transition.write_to(&mut world.resource_mut::<CustomInputs>());
+}
+
+fn release_all_physical_sources(world: &mut World) {
+    loop {
+        let physical_source_release_progress = world
+            .resource_mut::<KeymapRuntime>()
+            .release_one_physical_source();
+        match physical_source_release_progress {
+            PhysicalSourceReleaseProgress::ReleasedOne(custom_input_transition) => {
+                write_custom_input_transition(world, custom_input_transition);
+            },
+            PhysicalSourceReleaseProgress::Complete => break,
         }
     }
-    world
-        .resource_mut::<KeymapRuntime>()
-        .restore_pending_inputs(pending_inputs);
+}
+
+fn release_chords_missing_modifiers(world: &mut World, pressed_modifiers: Modifiers) {
+    loop {
+        let physical_source_release_progress = world
+            .resource_mut::<KeymapRuntime>()
+            .release_one_chord_missing_modifiers(pressed_modifiers);
+        match physical_source_release_progress {
+            PhysicalSourceReleaseProgress::ReleasedOne(custom_input_transition) => {
+                write_custom_input_transition(world, custom_input_transition);
+            },
+            PhysicalSourceReleaseProgress::Complete => break,
+        }
+    }
 }
 
 fn matcher(
     compiled_keymap: &mut CompiledKeymap,
-    active_condition: Option<ConditionHandle>,
+    active_keymap_scope: ActiveKeymapScope,
 ) -> Option<&mut SequenceMatcher<CommandHandle>> {
-    match active_condition {
-        Some(condition_handle) => compiled_keymap.matchers.get_mut(&condition_handle),
-        None => Some(&mut compiled_keymap.global),
+    match active_keymap_scope {
+        ActiveKeymapScope::Global => Some(&mut compiled_keymap.global),
+        ActiveKeymapScope::Condition(condition_handle) => {
+            compiled_keymap.matchers.get_mut(&condition_handle)
+        },
     }
 }
 
@@ -299,39 +410,59 @@ fn previous_matcher(
     }
 }
 
-fn dispatch_all(world: &mut World, dispatches: Dispatches) {
-    if let Some(dispatch) = dispatches.first {
-        dispatch(world);
-    }
-    if let Some(dispatch) = dispatches.second {
-        dispatch(world);
+fn dispatch_all(world: &mut World, routed_commands: RoutedCommands) {
+    dispatch_one(world, routed_commands.first);
+    dispatch_one(world, routed_commands.second);
+}
+
+fn dispatch_one(world: &mut World, routed_command: RoutedCommand) {
+    match routed_command {
+        RoutedCommand::Dispatch(dispatch) => dispatch(world),
+        RoutedCommand::HoldChord(_) | RoutedCommand::Nothing => {},
     }
 }
 
-#[derive(Default)]
-struct Dispatches {
-    first:  Option<fn(&mut World)>,
-    second: Option<fn(&mut World)>,
+/// What a matched keystroke resolves to before the runtime acts on it.
+///
+/// Routing decides this from the compiled keymap alone; the caller then decides which halves it
+/// honors, so the sequence-timeout path can drop a [`RoutedCommand::HoldChord`] that has no
+/// physical key to own it.
+#[derive(Clone, Copy, Default)]
+enum RoutedCommand {
+    #[default]
+    Nothing,
+    Dispatch(fn(&mut World)),
+    HoldChord(CustomInput),
 }
 
-impl Dispatches {
-    fn push(&mut self, dispatch: Option<fn(&mut World)>) {
-        let Some(dispatch) = dispatch else {
+/// The commands one keystroke can resolve to.
+///
+/// A keystroke yields at most two: a sequence prefix that a longer sequence just abandoned, plus
+/// the command the reprocessed keystroke matches on its own.
+#[derive(Clone, Copy, Default)]
+struct RoutedCommands {
+    first:  RoutedCommand,
+    second: RoutedCommand,
+}
+
+impl RoutedCommands {
+    const fn push(&mut self, routed_command: RoutedCommand) {
+        if matches!(routed_command, RoutedCommand::Nothing) {
             return;
-        };
-        if self.first.is_none() {
-            self.first = Some(dispatch);
+        }
+        if matches!(self.first, RoutedCommand::Nothing) {
+            self.first = routed_command;
         } else {
-            self.second = Some(dispatch);
+            self.second = routed_command;
         }
     }
 }
 
-impl From<Option<fn(&mut World)>> for Dispatches {
-    fn from(dispatch: Option<fn(&mut World)>) -> Self {
-        let mut dispatches = Self::default();
-        dispatches.push(dispatch);
-        dispatches
+impl From<RoutedCommand> for RoutedCommands {
+    fn from(routed_command: RoutedCommand) -> Self {
+        let mut routed_commands = Self::default();
+        routed_commands.push(routed_command);
+        routed_commands
     }
 }
 
@@ -450,6 +581,24 @@ mod tests {
     }
 
     crate::command! {
+        held,
+        action:      RuntimeShiftHeldAction,
+        event:       RuntimeShiftHeld,
+        id:          "runtime::shift_held",
+        title:       "Runtime Shift Held",
+        description: "Writes a second custom input while its modifier family is pressed.",
+    }
+
+    crate::command! {
+        held,
+        action:      RuntimeAltHeldAction,
+        event:       RuntimeAltHeld,
+        id:          "runtime::alt_held",
+        title:       "Runtime Alt Held",
+        description: "Writes a third custom input while its modifier family is pressed.",
+    }
+
+    crate::command! {
         action:      RuntimeUnremappableAction,
         event:       RuntimeUnremappable,
         id:          "runtime::unremappable",
@@ -481,6 +630,26 @@ mod tests {
         )?;
 
         press(&mut app, KeyCode::KeyG);
+
+        assert_eq!(app.world().resource::<DispatchCounts>().one_shot, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn same_frame_press_and_release_dispatches_one_shot() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeOneShot::ID)]),
+            FIRST_GENERATION,
+        )?;
+        {
+            let mut key_input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            key_input.press(KeyCode::KeyG);
+            key_input.release(KeyCode::KeyG);
+        }
+
+        route_input(app.world_mut());
 
         assert_eq!(app.world().resource::<DispatchCounts>().one_shot, 1);
         Ok(())
@@ -561,6 +730,242 @@ mod tests {
         assert_eq!(
             app.world().resource::<CustomInputs>().get(&custom_input),
             Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_frame_press_and_release_leaves_held_input_inactive() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+        {
+            let mut key_input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            key_input.press(KeyCode::KeyG);
+            key_input.release(KeyCode::KeyG);
+        }
+
+        route_input(app.world_mut());
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modifier_family_binding_counts_left_and_right_shift_as_one_hold() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("shift", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+        spawn_held_action(&mut app, custom_input)?;
+
+        press(&mut app, KeyCode::ShiftLeft);
+        app.update();
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        press(&mut app, KeyCode::ShiftRight);
+        release(&mut app, KeyCode::ShiftLeft);
+        app.update();
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        release(&mut app, KeyCode::ShiftRight);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        assert_eq!(
+            *app.world().resource::<HeldTransitionCounts>(),
+            HeldTransitionCounts {
+                started:   1,
+                completed: 1,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn shifted_key_suspends_its_bare_hold_until_the_key_is_released() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("shift", RuntimeHeld::ID), ("shift-f", RuntimeOneShot::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::ShiftLeft);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        press(&mut app, KeyCode::KeyF);
+
+        assert_eq!(app.world().resource::<DispatchCounts>().one_shot, 1);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        release(&mut app, KeyCode::KeyF);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        release(&mut app, KeyCode::ShiftLeft);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unroutable_key_press_leaves_a_bare_modifier_hold_active() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("shift", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+        spawn_held_action(&mut app, custom_input)?;
+
+        press(&mut app, KeyCode::ShiftLeft);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        press(&mut app, KeyCode::AudioVolumeUp);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        assert_eq!(
+            *app.world().resource::<HeldTransitionCounts>(),
+            HeldTransitionCounts {
+                started:   1,
+                completed: 0,
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn same_frame_shift_and_key_press_never_activates_the_bare_hold() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("shift", RuntimeHeld::ID), ("shift-f", RuntimeOneShot::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+        spawn_held_action(&mut app, custom_input)?;
+        {
+            let mut pressed = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            pressed.press(KeyCode::ShiftLeft);
+            pressed.press(KeyCode::KeyF);
+        }
+
+        route_input(app.world_mut());
+        {
+            let mut pressed = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            pressed.clear_just_pressed(KeyCode::ShiftLeft);
+            pressed.clear_just_pressed(KeyCode::KeyF);
+        }
+        app.update();
+
+        assert_eq!(app.world().resource::<DispatchCounts>().one_shot, 1);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            None
+        );
+        assert_eq!(
+            *app.world().resource::<HeldTransitionCounts>(),
+            HeldTransitionCounts::default()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modified_held_chord_ends_when_primary_key_is_released_first() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("shift-f", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::KeyF);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        release(&mut app, KeyCode::KeyF);
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::ShiftLeft)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn modified_held_chord_ends_when_required_modifier_is_released_first() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("shift-f", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::KeyF);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        release(&mut app, KeyCode::ShiftLeft);
+        route_input(app.world_mut());
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyF)
         );
         Ok(())
     }
@@ -1054,6 +1459,77 @@ mod tests {
         Ok(())
     }
 
+    /// The warm-up presses and releases the same four keys together so every routing structure is
+    /// already populated, and takes one empty [`World::resource_scope`] because Bevy's own
+    /// first-touch cost lands there; the measured pass then reports only what routing allocates
+    /// while it activates all four keys at once.
+    #[test]
+    fn simultaneous_modifier_family_held_routing_does_not_allocate() -> Result<(), String> {
+        const MODIFIER_KEYS: [KeyCode; 4] = [
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::ShiftLeft,
+            KeyCode::AltLeft,
+        ];
+
+        let mut app = runtime_app();
+        insert_compiled_for_modifier_family_holds(
+            &mut app,
+            bindings(&[
+                ("ctrl", RuntimeHeld::ID),
+                ("shift", RuntimeShiftHeld::ID),
+                ("alt", RuntimeAltHeld::ID),
+            ]),
+            FIRST_GENERATION,
+        )?;
+
+        press_together(&mut app, MODIFIER_KEYS);
+        release_together(&mut app, MODIFIER_KEYS);
+        for key in MODIFIER_KEYS {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+        }
+        app.world_mut()
+            .resource_scope::<CompiledKeymap, _>(|_world, _compiled_keymap| {});
+
+        let allocations_before = crate::TEST_ALLOCATOR.allocation_count();
+        route_input(app.world_mut());
+        let allocations_after = crate::TEST_ALLOCATOR.allocation_count();
+
+        assert_eq!(allocations_after - allocations_before, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn same_frame_held_tap_does_not_allocate() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyG);
+        {
+            let mut key_input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            key_input.press(KeyCode::KeyG);
+            key_input.release(KeyCode::KeyG);
+        }
+        let allocations_before = crate::TEST_ALLOCATOR.allocation_count();
+        route_input(app.world_mut());
+        let allocations_after = crate::TEST_ALLOCATOR.allocation_count();
+
+        assert_eq!(allocations_after - allocations_before, 0);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
     fn runtime_app() -> App {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -1096,6 +1572,32 @@ mod tests {
         generation: Generation,
     ) -> Result<(), String> {
         let command_registry = command_registry(app)?;
+
+        insert_compiled_for_registry(app, command_registry, source, generation)
+    }
+
+    /// Compiles against a registry holding one held command per modifier family, so several
+    /// distinct custom inputs can be active at once.
+    fn insert_compiled_for_modifier_family_holds(
+        app: &mut App,
+        source: String,
+        generation: Generation,
+    ) -> Result<(), String> {
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<RuntimeAltHeld>();
+        type_registry.register::<RuntimeHeld>();
+        type_registry.register::<RuntimeShiftHeld>();
+        let command_registry = built_command_registry(app, &type_registry)?;
+
+        insert_compiled_for_registry(app, command_registry, source, generation)
+    }
+
+    fn insert_compiled_for_registry(
+        app: &mut App,
+        command_registry: CommandRegistry,
+        source: String,
+        generation: Generation,
+    ) -> Result<(), String> {
         let compiled_keymap = compile(source, &command_registry, generation)?;
         app.world_mut().insert_resource(compiled_keymap);
         app.world_mut().init_resource::<KeymapRuntime>();
@@ -1108,9 +1610,17 @@ mod tests {
         type_registry.register::<RuntimeOneShot>();
         type_registry.register::<RuntimeTwoStroke>();
         type_registry.register::<RuntimeUnremappable>();
+
+        built_command_registry(app, &type_registry)
+    }
+
+    fn built_command_registry(
+        app: &mut App,
+        type_registry: &TypeRegistry,
+    ) -> Result<CommandRegistry, String> {
         let command_registry = {
             let mut custom_inputs = app.world_mut().resource_mut::<CustomInputs>();
-            CommandRegistry::build(&type_registry, &mut custom_inputs).map_err(|diagnostics| {
+            CommandRegistry::build(type_registry, &mut custom_inputs).map_err(|diagnostics| {
                 format!("runtime command registry errors: {diagnostics:?}")
             })?
         };
@@ -1234,6 +1744,34 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear_just_released(key);
+    }
+
+    fn press_together<const COUNT: usize>(app: &mut App, keys: [KeyCode; COUNT]) {
+        for key in keys {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+        }
+        route_input(app.world_mut());
+        for key in keys {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .clear_just_pressed(key);
+        }
+    }
+
+    fn release_together<const COUNT: usize>(app: &mut App, keys: [KeyCode; COUNT]) {
+        for key in keys {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .release(key);
+        }
+        route_input(app.world_mut());
+        for key in keys {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .clear_just_released(key);
+        }
     }
 
     fn pause_runtime_context(mut runtime_context: ResMut<RuntimeContext>) {

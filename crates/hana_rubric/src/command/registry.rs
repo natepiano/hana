@@ -42,6 +42,17 @@ pub struct CommandInfo<'registry> {
     pub capability:  Capability,
 }
 
+/// The result of looking up a command's held custom input.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HeldCommandLookupOutcome {
+    /// The command is declared held and owns this preallocated custom input.
+    RegisteredHeldInput(CustomInput),
+    /// The command exists but is not a held command.
+    KnownNonHeld,
+    /// No command declaration matches the requested identifier.
+    UnknownCommand,
+}
+
 impl CommandRegistry {
     /// Builds a command registry from the application's reflected type registrations.
     ///
@@ -137,12 +148,14 @@ impl CommandRegistry {
         self.entries.get(command_id).map(|entry| entry.description)
     }
 
-    /// Returns the runtime custom input allocated for a held command.
+    /// Resolves whether `command_id` has a preallocated held custom input.
     #[must_use]
-    pub fn custom_input(&self, command_id: &CommandId) -> Option<CustomInput> {
+    pub fn held_command_lookup(&self, command_id: &CommandId) -> HeldCommandLookupOutcome {
         self.entries
             .get(command_id)
-            .and_then(|entry| entry.invocation.custom_input())
+            .map_or(HeldCommandLookupOutcome::UnknownCommand, |entry| {
+                entry.invocation.held_command_lookup_outcome()
+            })
     }
 
     /// Returns the declared keymap binding capability for `command_id`.
@@ -243,6 +256,15 @@ impl Invocation {
         match self {
             Self::Held(custom_input) => Some(*custom_input),
             Self::OneShot | Self::Unremappable => None,
+        }
+    }
+
+    const fn held_command_lookup_outcome(&self) -> HeldCommandLookupOutcome {
+        match self {
+            Self::Held(custom_input) => {
+                HeldCommandLookupOutcome::RegisteredHeldInput(*custom_input)
+            },
+            Self::OneShot | Self::Unremappable => HeldCommandLookupOutcome::KnownNonHeld,
         }
     }
 }
@@ -405,6 +427,7 @@ mod tests {
     use bevy_enhanced_input::prelude::InputAction;
 
     use super::CommandRegistry;
+    use super::HeldCommandLookupOutcome;
     use super::Invocation;
     use crate::Capability;
     use crate::CommandId;
@@ -676,7 +699,10 @@ mod tests {
             command_registry.capability(&command_id),
             Some(Capability::Held)
         );
-        assert!(command_registry.custom_input(&command_id).is_some());
+        assert!(matches!(
+            command_registry.held_command_lookup(&command_id),
+            HeldCommandLookupOutcome::RegisteredHeldInput(_)
+        ));
         assert_eq!(
             command_registry
                 .iter()
@@ -687,7 +713,7 @@ mod tests {
     }
 
     #[test]
-    fn held_command_registers_one_custom_input_and_updates_it_from_events() {
+    fn held_command_registers_one_custom_input_and_updates_it_from_events() -> Result<(), String> {
         let mut app = App::new();
         app.world_mut().init_resource::<CustomInputs>();
         let mut type_registry = TypeRegistry::default();
@@ -702,9 +728,15 @@ mod tests {
         command_registry.register_held_observers(app.world_mut());
         let command_id = CommandId::try_from(RegistryHeld::ID)
             .expect("the command macro validates the command ID");
-        let custom_input = command_registry
-            .custom_input(&command_id)
-            .expect("held commands must have one custom input");
+        let custom_input = match command_registry.held_command_lookup(&command_id) {
+            HeldCommandLookupOutcome::RegisteredHeldInput(custom_input) => custom_input,
+            HeldCommandLookupOutcome::KnownNonHeld => {
+                return Err(String::from("held command was reported as non-held"));
+            },
+            HeldCommandLookupOutcome::UnknownCommand => {
+                return Err(String::from("held command was missing from the registry"));
+            },
+        };
 
         assert!(matches!(
             command_registry
@@ -750,6 +782,38 @@ mod tests {
             app.world().resource::<CustomInputs>().get(&custom_input),
             Some(&ActionValue::Bool(false))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn held_command_lookup_distinguishes_registered_known_and_unknown_commands()
+    -> Result<(), String> {
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<RegistryHeld>();
+        type_registry.register::<RegistryOneShot>();
+        let mut custom_inputs = CustomInputs::default();
+        let command_registry = CommandRegistry::build(&type_registry, &mut custom_inputs)
+            .map_err(|diagnostics| format!("command registry errors: {diagnostics:?}"))?;
+        let held_command_id = CommandId::try_from(RegistryHeld::ID)
+            .map_err(|error| format!("held command ID is invalid: {error}"))?;
+        let one_shot_command_id = CommandId::try_from(RegistryOneShot::ID)
+            .map_err(|error| format!("one-shot command ID is invalid: {error}"))?;
+        let unknown_command_id = CommandId::try_from("registry::unknown")
+            .map_err(|error| format!("unknown command ID is invalid: {error}"))?;
+
+        assert!(matches!(
+            command_registry.held_command_lookup(&held_command_id),
+            HeldCommandLookupOutcome::RegisteredHeldInput(_)
+        ));
+        assert_eq!(
+            command_registry.held_command_lookup(&one_shot_command_id),
+            HeldCommandLookupOutcome::KnownNonHeld
+        );
+        assert_eq!(
+            command_registry.held_command_lookup(&unknown_command_id),
+            HeldCommandLookupOutcome::UnknownCommand
+        );
+        Ok(())
     }
 
     #[test]
