@@ -566,7 +566,7 @@ mod tests {
                 );
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         press_key(&mut app, window, KeyCode::ShiftLeft);
@@ -612,7 +612,7 @@ mod tests {
                 );
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         let world = app.world_mut();
@@ -643,7 +643,7 @@ mod tests {
                 keybindings.spawn_key::<HeldAction>(spawner, KeyCode::ArrowUp);
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         press_key(&mut app, window, KeyCode::ArrowUp);
@@ -675,7 +675,7 @@ mod tests {
                 }
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         for (expected_starts, key_code) in [
@@ -723,7 +723,7 @@ mod tests {
                 }
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         for (primary, opposite) in [
@@ -765,7 +765,7 @@ mod tests {
                 keybindings.spawn_shortcut::<BareAction>(spawner, KeyCode::AltLeft.into());
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         press_key(&mut app, window, KeyCode::ControlRight);
@@ -808,7 +808,7 @@ mod tests {
                 keybindings.spawn_shortcut::<GamepadAction>(spawner, GamepadButton::South.into());
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         let gamepad = app.world_mut().spawn(Gamepad::default()).id();
         app.update();
 
@@ -852,7 +852,7 @@ mod tests {
                 spawner.spawn((Action::<LowerAction>::new(), bindings![KeyCode::Enter]));
             })),
         ));
-        let window = app.world_mut().spawn(Window::default()).id();
+        let window = app.world_mut().spawn_empty().id();
         app.update();
 
         press_key(&mut app, window, KeyCode::Enter);

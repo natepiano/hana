@@ -23,6 +23,14 @@ pub mod prelude;
 /// keystroke instead of completing an earlier sequence.
 pub fn cancel_pending_sequences(world: &mut World) { keymap::cancel_pending_sequences(world); }
 
+/// Resets physical keymap input after a focus or input-suppression transition.
+///
+/// This cancels partially matched sequences, releases physical held sources while preserving
+/// semantic-event sources, publishes resulting held-value changes, and inhibits every key that
+/// remains down until its release. Calling it on the next transition refreshes that inhibition
+/// from the keys still down.
+pub fn reset_physical_input(world: &mut World) { keymap::reset_physical_input(world); }
+
 #[cfg(test)]
 pub(crate) use allocation_test_support::TEST_ALLOCATOR;
 use bevy::prelude::World;

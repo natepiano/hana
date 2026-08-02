@@ -25,3 +25,4 @@ pub use super::Modifiers;
 pub use super::ReflectKeymapCommand;
 pub use super::SequenceMatcher;
 pub use super::cancel_pending_sequences;
+pub use super::reset_physical_input;

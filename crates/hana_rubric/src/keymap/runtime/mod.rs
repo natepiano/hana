@@ -5,6 +5,7 @@ mod key_edge;
 use bevy_enhanced_input::prelude::CustomInput;
 use bevy_enhanced_input::prelude::CustomInputs;
 pub(crate) use dispatch::cancel_pending_sequences;
+pub(crate) use dispatch::reset_physical_input;
 pub(crate) use dispatch::route_input;
 pub(crate) use held::KeymapRuntime;
 

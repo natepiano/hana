@@ -27,6 +27,23 @@ pub(crate) fn cancel_pending_sequences(world: &mut World) {
     }
 }
 
+pub(crate) fn reset_physical_input(world: &mut World) {
+    cancel_pending_sequences(world);
+    world.init_resource::<KeymapRuntime>();
+    world.init_resource::<CustomInputs>();
+
+    let pressed = world
+        .get_resource::<ButtonInput<KeyCode>>()
+        .map(|keys| keys.get_pressed().copied().collect::<Vec<_>>())
+        .unwrap_or_default();
+    {
+        let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
+        keymap_runtime.clear_physical();
+        keymap_runtime.inhibit(pressed.into_iter());
+    }
+    flush_custom_inputs(world);
+}
+
 pub(crate) fn route_input(world: &mut World) {
     if !world.contains_resource::<CompiledKeymap>() {
         return;
@@ -836,6 +853,73 @@ mod tests {
         assert!(!app.world().resource::<CompiledKeymap>().global.is_pending());
         press(&mut app, KeyCode::KeyH);
         assert_eq!(app.world().resource::<DispatchCounts>().two_stroke, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn physical_input_reset_cancels_sequences_and_refreshes_held_state() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeHeld::ID), ("h j", RuntimeTwoStroke::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyH);
+        release(&mut app, KeyCode::KeyH);
+        assert!(app.world().resource::<CompiledKeymap>().global.is_pending());
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        crate::reset_physical_input(app.world_mut());
+
+        assert!(!app.world().resource::<CompiledKeymap>().global.is_pending());
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        assert!(
+            app.world()
+                .resource::<KeymapRuntime>()
+                .is_inhibited(KeyCode::KeyG)
+        );
+        press(&mut app, KeyCode::KeyJ);
+        assert_eq!(app.world().resource::<DispatchCounts>().two_stroke, 0);
+
+        app.world_mut().trigger(RuntimeHeld {
+            phase: HoldPhase::Begin,
+        });
+        crate::reset_physical_input(app.world_mut());
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::KeyG);
+        crate::reset_physical_input(app.world_mut());
+        assert!(
+            !app.world()
+                .resource::<KeymapRuntime>()
+                .is_inhibited(KeyCode::KeyG)
+        );
+        app.world_mut().trigger(RuntimeHeld {
+            phase: HoldPhase::End,
+        });
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear_just_released(KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyG);
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
         Ok(())
     }
 

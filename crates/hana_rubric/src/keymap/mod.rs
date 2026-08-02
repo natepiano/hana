@@ -23,6 +23,7 @@ pub(crate) use reload::commit_defaults;
 pub(crate) use reload::commit_reload;
 pub(super) use runtime::KeymapRuntime;
 pub(super) use runtime::cancel_pending_sequences;
+pub(super) use runtime::reset_physical_input;
 pub(super) use runtime::route_input;
 pub(crate) use schema::reference_default_bytes;
 pub(crate) use schema::schema_bytes;
