@@ -3,9 +3,17 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
+use bevy::ecs::entity::Entity;
+use bevy::ecs::reflect::ReflectComponent;
 use bevy::ecs::reflect::ReflectResource;
+use bevy::prelude::Commands;
+use bevy::prelude::Component;
+use bevy::prelude::Query;
 use bevy::prelude::Reflect;
+use bevy::prelude::Res;
+use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
+use bevy::prelude::With;
 use thiserror::Error;
 
 use crate::ApplyPermit;
@@ -386,13 +394,10 @@ impl Bindings {
         Ok(())
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "phase 9 moves binding transitions into its frame batch"
-        )
-    )]
+    pub(crate) fn has_pending_transitions(&self) -> bool {
+        !self.pending_transitions.queue.is_empty()
+    }
+
     pub(crate) fn take_pending_transitions(&mut self) -> VecDeque<BindingTransition> {
         std::mem::take(&mut self.pending_transitions.queue)
     }
@@ -954,6 +959,185 @@ impl HardwareInventory {
     }
 }
 
+/// Process-local entity that carries one registered role's mirrored lifecycle state.
+///
+/// The entity exists for as long as the role is registered, which is longer than any device that
+/// fills it: a projector that is unplugged mid-show leaves its role's policy, state, and later its
+/// configuration mirror addressable, so a panel does not lose the row it was drawing. `RoleKey`,
+/// `RecoveryPolicy`, and `RoleState` sit on this entity rather than on the device entity because a
+/// Stream Deck with `"key/3"`, `"dial/1"`, and `"strip"` bound has one of each per role, and a
+/// single component per unit would keep only whichever role was written last.
+///
+/// `Bindings` stays authoritative. The components here are refreshed from it on every reconcile, so
+/// a Bevy Remote Protocol write to the mirrored `RecoveryPolicy` is overwritten on the next frame
+/// instead of quietly changing what the kernel will do to live hardware.
+#[derive(Debug, Default, Resource, Reflect)]
+#[reflect(Resource)]
+pub struct BindingEntities {
+    by_role: HashMap<RoleKey, Entity>,
+}
+
+impl BindingEntities {
+    /// Find the entity carrying one registered role's mirrored state.
+    #[must_use]
+    pub fn entity(&self, role: &RoleKey) -> BindingEntityLookup {
+        self.by_role
+            .get(role)
+            .map_or(BindingEntityLookup::Unregistered, |entity| {
+                BindingEntityLookup::Registered(*entity)
+            })
+    }
+
+    /// How many registered roles currently have a binding entity.
+    #[must_use]
+    pub fn count(&self) -> usize { self.by_role.len() }
+}
+
+/// Result of asking which entity carries one role's mirrored binding state.
+///
+/// A named result rather than an optional entity, because the absent case means the role was never
+/// registered or has been retired — not that its device is missing. A caller that read "no entity"
+/// as "offline" would wait forever for a role nothing will ever spawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BindingEntityLookup {
+    /// No registered binding uses this role, so nothing mirrors its lifecycle state.
+    Unregistered,
+    /// The role is registered, and this entity carries its mirrored policy and state for as long as
+    /// the registration lasts.
+    Registered(Entity),
+}
+
+/// The binding entity's current link to the live device entity its endpoint resolves to.
+///
+/// Present only while the durable `DeviceEndpoint` names a device the kernel currently retains, so
+/// its absence is exactly "this role has no live hardware right now". It is a relationship rather
+/// than a second ownership map because Bevy then maintains `ResolvedBindings` on the device side
+/// for free, and replacing the link moves the binding between reverse collections with no
+/// bookkeeping that could drift from the authored record in `Bindings`.
+///
+/// It deliberately omits `linked_spawn`: despawning a departed device must remove this link and
+/// nothing else. Despawning the binding entity would erase the role's retained policy and
+/// configuration, which is the state that makes a returning unit recoverable at all.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Component, Reflect)]
+#[relationship(relationship_target = ResolvedBindings)]
+#[reflect(Component, PartialEq)]
+pub struct ResolvedToDevice(Entity);
+
+/// Every binding entity whose endpoint currently resolves to this live device entity.
+///
+/// Bevy maintains this collection from `ResolvedToDevice`, so a tool holding a device entity can
+/// walk to every role using that unit — the Stream Deck's three bound endpoints, or a display
+/// shared by two window roles — without the kernel keeping a second entity index that could
+/// disagree with the authored record. It reports live resolution only; `Bindings::roles_for`
+/// remains authoritative for durable ownership and for roles whose device is absent, and the
+/// relationship cannot enforce endpoint uniqueness because it targets the whole device rather than
+/// one endpoint of it.
+#[derive(Debug, Component, Reflect)]
+#[relationship_target(relationship = ResolvedToDevice)]
+#[reflect(Component)]
+pub struct ResolvedBindings(Vec<Entity>);
+
+/// Every binding transition accepted before this frame's drain, in the order they were accepted.
+///
+/// One drain per frame moves `Bindings::take_pending_transitions` in here so the binding-entity
+/// stage, the attempt aborts, and the public event stage all read one identical ordered
+/// list. Reading `Bindings` directly from three stages would let the first drain hide the
+/// registration from the other two. Entries are never removed one at a time: the event stage clears
+/// the whole batch once it has emitted this frame's transitions, and `drain_binding_transitions`
+/// replaces the contents wholesale on the next frame regardless, so a missing `clear` cannot strand
+/// entries past the frame that produced them.
+#[derive(Debug, Default, Resource)]
+pub(crate) struct BindingTransitionBatch {
+    transitions: Vec<BindingTransition>,
+}
+
+impl BindingTransitionBatch {
+    /// Read this frame's accepted transitions in the order `Bindings` sequenced them.
+    pub(crate) fn transitions(&self) -> &[BindingTransition] { &self.transitions }
+
+    /// Drop this frame's transitions once the last consumer has read them.
+    pub(crate) fn clear(&mut self) { self.transitions.clear(); }
+}
+
+/// Move every binding transition accepted since the last frame into this frame's shared batch.
+///
+/// Registration and retirement are application work, not discovery work, so this runs whether or
+/// not a reporter completed a scan: it is ordered only `before` reconciliation, which returns early
+/// on a settled frame and would otherwise strand an accepted transition until the next scan landed.
+/// Operations submitted after this system runs stay in `Bindings` and are drained next frame.
+///
+/// A frame with nothing to move leaves `Bindings` untouched rather than taking an empty queue
+/// through `ResMut`, so change detection on the resource still means "an authored operation was
+/// accepted" for a once-per-change event stage or a Bevy Remote Protocol resource watch.
+pub(crate) fn drain_binding_transitions(
+    mut bindings: ResMut<Bindings>,
+    mut binding_transition_batch: ResMut<BindingTransitionBatch>,
+) {
+    if bindings.has_pending_transitions() {
+        binding_transition_batch.transitions = bindings.take_pending_transitions().into();
+    } else if !binding_transition_batch.transitions.is_empty() {
+        binding_transition_batch.clear();
+    }
+}
+
+/// Spawn, refresh, and despawn the entity that mirrors each registered role's lifecycle state.
+///
+/// Retirement despawns the entity, which also removes any `ResolvedToDevice` link without touching
+/// the device entity on the other side. Mirrors are written only when the authored value differs,
+/// so a settled frame reports no component change and once-per-change events stay derivable.
+///
+/// The mirror refresh runs before this frame's transitions because `Commands::spawn` is deferred:
+/// an entity registered in the loop below is not queryable until the schedule applies its commands,
+/// so refreshing afterwards would read every new entity as one that no longer exists.
+pub(crate) fn project_binding_entities(
+    mut commands: Commands,
+    binding_transition_batch: Res<BindingTransitionBatch>,
+    bindings: Res<Bindings>,
+    mut binding_entities: ResMut<BindingEntities>,
+    mut mirrors: Query<(&mut RecoveryPolicy, &mut RoleState), With<RoleKey>>,
+) {
+    binding_entities.by_role.retain(|role, entity| {
+        let Ok(binding) = bindings.binding(role) else {
+            return true;
+        };
+        // Anything but a retirement — a despawn from outside the kernel — leaves a mapping that
+        // would keep promising a live entity carrying mirrored state, so it is dropped here.
+        let Ok((mut recovery_policy, mut role_state)) = mirrors.get_mut(*entity) else {
+            return false;
+        };
+        if *recovery_policy != binding.recovery {
+            *recovery_policy = binding.recovery;
+        }
+        if *role_state != binding.state {
+            *role_state = binding.state;
+        }
+
+        true
+    });
+
+    for binding_transition in binding_transition_batch.transitions() {
+        match binding_transition {
+            BindingTransition::Registered { role, .. } => {
+                let Ok(binding) = bindings.binding(role) else {
+                    continue;
+                };
+                let entity = commands
+                    .spawn((role.clone(), binding.recovery, binding.state))
+                    .id();
+                binding_entities.by_role.insert(role.clone(), entity);
+            },
+            // A replacement keeps the role registered and its entity alive; the refresh above
+            // writes the `RoleState::Waiting` that `Bindings::replace` already stored.
+            BindingTransition::Replaced { .. } => {},
+            BindingTransition::Retired { role, .. } => {
+                if let Some(entity) = binding_entities.by_role.remove(role) {
+                    commands.entity(entity).despawn();
+                }
+            },
+        }
+    }
+}
+
 /// Failure from reading or updating an authored inventory key that does not exist.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum HardwareInventoryError {
@@ -966,6 +1150,11 @@ pub enum HardwareInventoryError {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use std::any::TypeId;
     use std::error::Error;
@@ -974,24 +1163,42 @@ mod tests {
     use std::sync::Mutex;
 
     use bevy::app::App;
+    use bevy::app::Update;
+    use bevy::ecs::change_detection::DetectChanges;
+    use bevy::ecs::entity::Entity;
     use bevy::ecs::reflect::AppTypeRegistry;
+    use bevy::ecs::reflect::ReflectComponent;
+    use bevy::ecs::relationship::Relationship;
+    use bevy::ecs::relationship::RelationshipTarget;
+    use bevy::ecs::schedule::IntoScheduleConfigs;
     use bevy::prelude::Component;
     use bevy::prelude::Reflect;
+    use bevy::prelude::Res;
+    use bevy::prelude::ResMut;
+    use bevy::prelude::Resource;
     use bevy::prelude::World;
 
     use super::AvailableConfiguration;
     use super::Binding;
     use super::BindingCapacityError;
+    use super::BindingEntities;
+    use super::BindingEntityLookup;
     use super::BindingError;
     use super::BindingTransition;
+    use super::BindingTransitionBatch;
+    use super::BindingTransitionSequence;
     use super::Bindings;
     use super::ConfiguredDevice;
     use super::ConfiguredDeviceConnection;
     use super::ConfiguredDeviceMode;
     use super::HardwareInventory;
     use super::RequestedConfiguration;
+    use super::ResolvedBindings;
+    use super::ResolvedToDevice;
     use super::RetirementOutcome;
     use super::RoleView;
+    use super::drain_binding_transitions;
+    use super::project_binding_entities;
     use crate::ApplyPermit;
     use crate::AttemptId;
     use crate::AttemptOutcome;
@@ -1003,16 +1210,18 @@ mod tests {
     use crate::DeviceKey;
     use crate::DeviceKind;
     use crate::DriverContractError;
-    use crate::DriverId;
     use crate::EndpointDriver;
     use crate::EndpointId;
     use crate::LastKnownGoodConfiguration;
     use crate::OnAbort;
     use crate::OnSessionLoss;
+    use crate::PartName;
     use crate::RecoveryPolicy;
     use crate::RetryOn;
+    use crate::RiggingPlugin;
     use crate::RoleKey;
     use crate::RoleState;
+    use crate::registration::DriverId;
     use crate::registration::Drivers;
     use crate::scheme::AuthoredId;
 
@@ -2013,5 +2222,447 @@ mod tests {
                 value: AuthoredId::new(value)?,
             },
         })
+    }
+
+    // --- binding entities, the frame batch, and the resolved-device relationship ---
+
+    /// Build an app with the kernel plugin and one authored role bound to a fresh endpoint.
+    fn app_with_role(role: &str) -> Result<(App, RoleKey), Box<dyn Error>> {
+        let mut app = App::new();
+        app.add_plugins(RiggingPlugin);
+        let role = RoleKey::new(role)?;
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .register(test_binding(role.clone(), endpoint_named(role.as_str())?))?;
+
+        Ok((app, role))
+    }
+
+    fn endpoint_named(value: &str) -> Result<DeviceEndpoint, Box<dyn Error>> {
+        Ok(DeviceEndpoint {
+            device: DeviceKey {
+                kind: DeviceKind::Display,
+                id:   DeviceIdSource::Authored {
+                    value: AuthoredId::new(value)?,
+                },
+            },
+            id:     EndpointId::Whole,
+        })
+    }
+
+    fn test_binding(role: RoleKey, endpoint: DeviceEndpoint) -> Binding {
+        Binding {
+            role,
+            endpoint,
+            driver: DriverId(0),
+            recovery: RecoveryPolicy::Forget,
+            retry: RetryOn::NewRevision,
+            on_abort: OnAbort::default(),
+            on_loss: OnSessionLoss::default(),
+            state: RoleState::default(),
+            requested: RequestedConfiguration::new(()),
+            last_known_good: LastKnownGoodConfiguration::default(),
+        }
+    }
+
+    fn registered_entity(app: &App, role: &RoleKey) -> Entity {
+        match app.world().resource::<BindingEntities>().entity(role) {
+            BindingEntityLookup::Registered(entity) => entity,
+            BindingEntityLookup::Unregistered => {
+                panic!("role `{role}` has no binding entity")
+            },
+        }
+    }
+
+    #[test]
+    fn registration_spawns_one_binding_entity_per_role_with_no_reporter_running()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        let second_role = RoleKey::new("window/inspector")?;
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .register(test_binding(
+                second_role.clone(),
+                endpoint_named(second_role.as_str())?,
+            ))?;
+
+        app.update();
+
+        let binding_entities = app.world().resource::<BindingEntities>();
+        assert_eq!(binding_entities.count(), 2);
+        assert_ne!(
+            registered_entity(&app, &role),
+            registered_entity(&app, &second_role)
+        );
+        assert_eq!(
+            binding_entities.entity(&RoleKey::new("window/never-registered")?),
+            BindingEntityLookup::Unregistered
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_binding_entity_outlives_every_frame_in_which_its_role_has_no_device()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        app.update();
+        let entity = registered_entity(&app, &role);
+
+        for _ in 0..4 {
+            app.update();
+        }
+
+        assert_eq!(registered_entity(&app, &role), entity);
+        assert!(app.world().get_entity(entity).is_ok());
+        assert_eq!(
+            app.world().get::<RoleState>(entity),
+            Some(&RoleState::Waiting)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn retirement_despawns_the_binding_entity_on_a_frame_with_no_reporter_completion()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        app.update();
+        let entity = registered_entity(&app, &role);
+        app.world_mut().resource_mut::<Bindings>().retire(&role)?;
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<BindingEntities>().entity(&role),
+            BindingEntityLookup::Unregistered
+        );
+        assert!(app.world().get_entity(entity).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn one_drain_moves_every_pending_transition_in_sequence_and_later_work_waits_a_frame()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        let late_role = RoleKey::new("window/late")?;
+        app.world_mut().resource_mut::<Bindings>().retire(&role)?;
+
+        app.update();
+
+        let batch = app.world().resource::<BindingTransitionBatch>();
+        let sequences: Vec<u64> = batch
+            .transitions()
+            .iter()
+            .map(|binding_transition| match binding_transition {
+                BindingTransition::Registered { sequence, .. }
+                | BindingTransition::Replaced { sequence, .. }
+                | BindingTransition::Retired { sequence, .. } => sequence.get(),
+            })
+            .collect();
+        assert_eq!(sequences, vec![0, 1]);
+        assert!(
+            app.world_mut()
+                .resource_mut::<Bindings>()
+                .take_pending_transitions()
+                .is_empty()
+        );
+
+        // Submitted after this frame's drain: it stays in `Bindings` until the next frame.
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .register(test_binding(
+                late_role.clone(),
+                endpoint_named(late_role.as_str())?,
+            ))?;
+        assert_eq!(
+            app.world().resource::<BindingEntities>().entity(&late_role),
+            BindingEntityLookup::Unregistered
+        );
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<BindingTransitionBatch>()
+                .transitions()
+                .len(),
+            1
+        );
+        assert!(matches!(
+            app.world().resource::<BindingEntities>().entity(&late_role),
+            BindingEntityLookup::Registered(_)
+        ));
+
+        Ok(())
+    }
+
+    #[derive(Default, Resource)]
+    struct FramesWithChangedBindings(usize);
+
+    fn count_frames_with_changed_bindings(
+        bindings: Res<Bindings>,
+        mut frames_with_changed_bindings: ResMut<FramesWithChangedBindings>,
+    ) {
+        if bindings.is_changed() {
+            frames_with_changed_bindings.0 += 1;
+        }
+    }
+
+    #[test]
+    fn a_frame_with_no_submitted_binding_operation_leaves_bindings_unchanged()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, _) = app_with_role("window/main")?;
+        app.init_resource::<FramesWithChangedBindings>()
+            .add_systems(
+                Update,
+                count_frames_with_changed_bindings.after(drain_binding_transitions),
+            );
+
+        app.update();
+
+        assert_eq!(app.world().resource::<FramesWithChangedBindings>().0, 1);
+
+        for _ in 0..3 {
+            app.update();
+        }
+
+        // The drain took nothing on those frames, so it never asked `Bindings` for mutable access.
+        assert_eq!(app.world().resource::<FramesWithChangedBindings>().0, 1);
+
+        Ok(())
+    }
+
+    #[derive(Default, Resource)]
+    struct ObservedBatches(Vec<Vec<BindingTransitionSequence>>);
+
+    fn observe_batch(
+        binding_transition_batch: Res<BindingTransitionBatch>,
+        mut observed_batches: ResMut<ObservedBatches>,
+    ) {
+        observed_batches.0.push(
+            binding_transition_batch
+                .transitions()
+                .iter()
+                .map(|binding_transition| match binding_transition {
+                    BindingTransition::Registered { sequence, .. }
+                    | BindingTransition::Replaced { sequence, .. }
+                    | BindingTransition::Retired { sequence, .. } => *sequence,
+                })
+                .collect(),
+        );
+    }
+
+    #[test]
+    fn entity_lifecycle_attempts_and_events_observe_one_identical_ordered_batch()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, _) = app_with_role("window/main")?;
+        // Three stand-ins for the binding-entity stage, the attempt aborts, and the event stage:
+        // each reads the batch after the drain and none of them removes an entry.
+        app.init_resource::<ObservedBatches>().add_systems(
+            Update,
+            (observe_batch, observe_batch, observe_batch)
+                .chain()
+                .after(project_binding_entities)
+                .before(crate::reconcile::reconcile),
+        );
+
+        app.update();
+
+        let observed_batches = app.world().resource::<ObservedBatches>();
+        assert_eq!(observed_batches.0.len(), 3);
+        assert!(
+            observed_batches
+                .0
+                .iter()
+                .all(|observed| observed == &observed_batches.0[0])
+        );
+        assert_eq!(observed_batches.0[0].len(), 1);
+        // The batch survives its final consumer and is replaced only by the next frame's drain.
+        assert_eq!(
+            app.world()
+                .resource::<BindingTransitionBatch>()
+                .transitions()
+                .len(),
+            1
+        );
+
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<BindingTransitionBatch>()
+                .transitions()
+                .is_empty()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_reflection_write_to_the_mirrored_recovery_policy_is_overwritten_next_reconcile()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        app.update();
+        let entity = registered_entity(&app, &role);
+        assert_eq!(
+            app.world().get::<RecoveryPolicy>(entity),
+            Some(&RecoveryPolicy::Forget)
+        );
+
+        // What a Bevy Remote Protocol mutation does: write the mirrored component directly.
+        *app.world_mut()
+            .get_mut::<RecoveryPolicy>(entity)
+            .expect("the binding entity mirrors its recovery policy") =
+            RecoveryPolicy::ReapplyOnReturn;
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<RecoveryPolicy>(entity),
+            Some(&RecoveryPolicy::Forget)
+        );
+        assert_eq!(
+            app.world().resource::<Bindings>().binding(&role)?.recovery,
+            RecoveryPolicy::Forget
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn resolving_and_replacing_the_link_maintains_the_device_reverse_collection()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        app.update();
+        let entity = registered_entity(&app, &role);
+        let first_device = app.world_mut().spawn_empty().id();
+        let second_device = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(<ResolvedToDevice as Relationship>::from(first_device));
+
+        assert_eq!(
+            resolved_binding_entities(app.world(), first_device),
+            vec![entity]
+        );
+
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(<ResolvedToDevice as Relationship>::from(second_device));
+
+        assert!(resolved_binding_entities(app.world(), first_device).is_empty());
+        assert_eq!(
+            resolved_binding_entities(app.world(), second_device),
+            vec![entity]
+        );
+
+        Ok(())
+    }
+
+    fn resolved_binding_entities(world: &World, device: Entity) -> Vec<Entity> {
+        world
+            .get::<ResolvedBindings>(device)
+            .map(|resolved_bindings| resolved_bindings.iter().collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn despawning_a_live_device_removes_the_link_and_leaves_its_binding_entities_alive()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        app.update();
+        let entity = registered_entity(&app, &role);
+        let device = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(<ResolvedToDevice as Relationship>::from(device));
+
+        app.world_mut().entity_mut(device).despawn();
+
+        assert!(app.world().get_entity(entity).is_ok());
+        assert!(app.world().get::<ResolvedToDevice>(entity).is_none());
+        assert_eq!(
+            app.world().resource::<BindingEntities>().entity(&role),
+            BindingEntityLookup::Registered(entity)
+        );
+        assert!(app.world().resource::<Bindings>().binding(&role).is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn two_roles_on_one_device_share_a_reverse_collection_while_duplicates_stay_rejected()
+    -> Result<(), Box<dyn Error>> {
+        let device_key = DeviceKey {
+            kind: DeviceKind::Display,
+            id:   DeviceIdSource::Authored {
+                value: AuthoredId::new("stream-deck")?,
+            },
+        };
+        let key_endpoint = DeviceEndpoint {
+            device: device_key.clone(),
+            id:     EndpointId::Part(PartName::new("key/3")?),
+        };
+        let dial_endpoint = DeviceEndpoint {
+            device: device_key,
+            id:     EndpointId::Part(PartName::new("dial/1")?),
+        };
+        let key_role = RoleKey::new("deck/key")?;
+        let dial_role = RoleKey::new("deck/dial")?;
+        let duplicate_role = RoleKey::new("deck/duplicate")?;
+        let mut app = App::new();
+        app.add_plugins(RiggingPlugin);
+        {
+            let mut bindings = app.world_mut().resource_mut::<Bindings>();
+            bindings.register(test_binding(key_role.clone(), key_endpoint.clone()))?;
+            bindings.register(test_binding(dial_role.clone(), dial_endpoint))?;
+            assert!(matches!(
+                bindings.register(test_binding(duplicate_role, key_endpoint)),
+                Err(BindingError::EndpointAlreadyOwned { .. })
+            ));
+        }
+
+        app.update();
+
+        let device = app.world_mut().spawn_empty().id();
+        for role in [&key_role, &dial_role] {
+            let entity = registered_entity(&app, role);
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(<ResolvedToDevice as Relationship>::from(device));
+        }
+
+        let resolved = resolved_binding_entities(app.world(), device);
+        assert_eq!(resolved.len(), 2);
+        assert!(resolved.contains(&registered_entity(&app, &key_role)));
+        assert!(resolved.contains(&registered_entity(&app, &dial_role)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn binding_entity_components_register_reflection_metadata() {
+        let app = App::new();
+        let type_registry = app.world().resource::<AppTypeRegistry>().read();
+
+        for type_id in [
+            TypeId::of::<RoleKey>(),
+            TypeId::of::<RecoveryPolicy>(),
+            TypeId::of::<RoleState>(),
+            TypeId::of::<ResolvedToDevice>(),
+            TypeId::of::<ResolvedBindings>(),
+        ] {
+            assert!(type_registry.contains(type_id));
+            assert!(
+                type_registry
+                    .get_type_data::<ReflectComponent>(type_id)
+                    .is_some()
+            );
+        }
+
+        drop(type_registry);
     }
 }

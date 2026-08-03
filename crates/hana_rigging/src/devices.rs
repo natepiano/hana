@@ -8,7 +8,10 @@ use bevy::ecs::reflect::ReflectResource;
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
 use bevy::prelude::Resource;
+use thiserror::Error;
 
+use crate::Attempt;
+use crate::AttemptId;
 use crate::Claim;
 use crate::DeviceId;
 use crate::DeviceKey;
@@ -16,6 +19,9 @@ use crate::Presence;
 use crate::ReportedParent;
 use crate::ReporterId;
 use crate::SchemeName;
+
+/// First identifier `Attempts` issues, chosen so no issued value equals `AttemptId::default()`.
+const FIRST_ISSUED_ATTEMPT: u64 = 1;
 
 /// Marker for the entity that mirrors one reconciled device.
 ///
@@ -234,6 +240,102 @@ impl RiggingRevision {
     pub(crate) const fn advance(&mut self) { self.0 += 1; }
 }
 
+/// In-flight endpoint attempts, keyed by the identifier this registry issued.
+///
+/// The registry is the only issuer of `AttemptId`, and its counter is monotonic and never reused,
+/// so a driver poll that arrives after its attempt finished resolves to nothing rather than to a
+/// later attempt for another role.
+///
+/// `next` starts at 1, not 0: `AttemptId` derives `Default`, so `AttemptId::default()` is
+/// `AttemptId(0)`. An issued identifier equal to a defaulted or reflection-round-tripped one
+/// would make "a late poll for a finished attempt resolves to nothing" unenforceable, because the
+/// zero value appears wherever a field was left unset.
+#[derive(Debug, Resource, Reflect)]
+#[reflect(Resource)]
+pub struct Attempts {
+    in_flight: HashMap<AttemptId, Attempt>,
+    next:      u64,
+}
+
+impl Default for Attempts {
+    fn default() -> Self {
+        Self {
+            in_flight: HashMap::new(),
+            next:      FIRST_ISSUED_ATTEMPT,
+        }
+    }
+}
+
+impl Attempts {
+    /// Read the record the kernel retained for one issued identifier.
+    #[must_use]
+    pub fn in_flight(&self, attempt: AttemptId) -> AttemptLookup<'_> {
+        self.in_flight
+            .get(&attempt)
+            .map_or(AttemptLookup::Finished, AttemptLookup::InFlight)
+    }
+
+    /// Advance the counter and hand back the identifier the next attempt record must carry.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AttemptIssueError::SequenceExhausted` when the counter cannot advance without
+    /// wrapping back to `AttemptId::default()` and reusing identifiers a late driver poll could
+    /// still resolve.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "attempt identifiers are minted before a driver apply starts, and applies are \
+                      not wired up yet"
+        )
+    )]
+    pub(crate) fn issue(&mut self) -> Result<AttemptId, AttemptIssueError> {
+        let next = self
+            .next
+            .checked_add(1)
+            .ok_or(AttemptIssueError::SequenceExhausted)?;
+        let attempt = AttemptId::new(self.next);
+        self.next = next;
+
+        Ok(attempt)
+    }
+
+    /// Retain one attempt record until its driver reports a terminal outcome.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "started attempts are retained here for per-poll re-checks, and applies are \
+                      not wired up yet"
+        )
+    )]
+    pub(crate) fn retain(&mut self, attempt: Attempt) {
+        self.in_flight.insert(attempt.id, attempt);
+    }
+}
+
+/// Result of looking one issued identifier up in the attempt registry.
+///
+/// A named result rather than an optional record: "no record" is the terminal answer a late poll
+/// must receive, and a caller that read it as "not ready yet" would keep polling a driver whose
+/// attempt already ended.
+#[derive(Clone, Copy, Debug)]
+pub enum AttemptLookup<'a> {
+    /// No record remains for this identifier, so the attempt it named has already ended.
+    Finished,
+    /// The kernel retains this attempt and the authorization it was started under.
+    InFlight(&'a Attempt),
+}
+
+/// Failure from asking the attempt registry for another identifier.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub(crate) enum AttemptIssueError {
+    /// The registry cannot issue again without reusing an identifier a driver may still poll.
+    #[error("attempt identifier sequence is exhausted")]
+    SequenceExhausted,
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -252,6 +354,8 @@ mod tests {
     use bevy::reflect::FromReflect;
     use bevy::reflect::tuple_struct::DynamicTupleStruct;
 
+    use super::AttemptLookup;
+    use super::Attempts;
     use super::Device;
     use super::DeviceResolution;
     use super::DeviceStateLookup;
@@ -259,7 +363,10 @@ mod tests {
     use super::PresentWithUsableClaim;
     use super::ReconciledDeviceState;
     use super::RiggingRevision;
+    use crate::Attempt;
+    use crate::AttemptId;
     use crate::Claim;
+    use crate::DeviceId;
     use crate::DeviceIdSource;
     use crate::DeviceKey;
     use crate::DeviceKind;
@@ -399,6 +506,76 @@ mod tests {
                     .is_some()
             );
         }
+
+        drop(type_registry);
+    }
+
+    // --- the attempt registry ---
+
+    #[test]
+    fn successive_issued_attempt_identifiers_differ_and_none_equals_the_default() {
+        let mut attempts = Attempts::default();
+
+        let first = attempts
+            .issue()
+            .expect("a fresh registry can issue an identifier");
+        let second = attempts
+            .issue()
+            .expect("a fresh registry can issue a second identifier");
+
+        assert_ne!(first, second);
+        assert_ne!(first, AttemptId::default());
+        assert_ne!(second, AttemptId::default());
+    }
+
+    #[test]
+    fn a_retained_attempt_is_in_flight_while_an_unissued_identifier_is_finished() {
+        let mut attempts = Attempts::default();
+        let attempt = attempts
+            .issue()
+            .expect("a fresh registry can issue an identifier");
+        attempts.retain(Attempt {
+            id:                 attempt,
+            role:               crate::RoleKey::new("window/main")
+                .expect("`window/main` is a valid role handle"),
+            endpoint:           crate::DeviceEndpoint {
+                device: DeviceKey {
+                    kind: crate::DeviceKind::Display,
+                    id:   crate::DeviceIdSource::Authored {
+                        value: crate::AuthoredId::new("panel")
+                            .expect("`panel` is a valid authored identifier"),
+                    },
+                },
+                id:     crate::EndpointId::Whole,
+            },
+            permit:             crate::ApplyPermit::in_service(),
+            expected_device_id: DeviceId::new(0),
+            rigging_revision:   RiggingRevision::default(),
+            deadline:           bevy::platform::time::Instant::now(),
+        });
+
+        assert!(matches!(
+            attempts.in_flight(attempt),
+            AttemptLookup::InFlight(_)
+        ));
+        assert!(matches!(
+            attempts.in_flight(AttemptId::default()),
+            AttemptLookup::Finished
+        ));
+    }
+
+    #[test]
+    fn the_attempt_registry_registers_reflection_metadata() {
+        let app = App::new();
+        let type_registry = app.world().resource::<AppTypeRegistry>().read();
+        let type_id = TypeId::of::<Attempts>();
+
+        assert!(type_registry.contains(type_id));
+        assert!(
+            type_registry
+                .get_type_data::<ReflectResource>(type_id)
+                .is_some()
+        );
 
         drop(type_registry);
     }

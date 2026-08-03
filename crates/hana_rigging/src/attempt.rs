@@ -1,13 +1,77 @@
+use bevy::platform::time::Instant;
 use bevy::prelude::Reflect;
 
+use crate::ApplyPermit;
 use crate::DeviceAccessError;
+use crate::DeviceEndpoint;
+use crate::DeviceId;
+use crate::RiggingRevision;
+use crate::RoleKey;
 
 /// Identifier issued from the attempt registry's monotonic counter.
 ///
 /// An `AttemptId` is never reused while the process runs, so a delayed provider poll cannot
 /// resolve a later attempt after the original attempt has finished.
+///
+/// Reflection sees the counter value opaquely, so a dynamic tuple struct cannot construct an
+/// identifier the registry never issued: a reflected poll for a fabricated attempt would otherwise
+/// resolve against an in-flight record belonging to a different role.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Reflect)]
+#[reflect(opaque)]
 pub struct AttemptId(u64);
+
+impl AttemptId {
+    /// Wrap the attempt registry's next counter value.
+    ///
+    /// Private to the crate because only `crate::Attempts` issues identifiers; a driver that could
+    /// mint one would be claiming an authorization the kernel never granted.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "its only caller, `Attempts::issue`, is itself unused until applies are wired \
+                      up"
+        )
+    )]
+    pub(crate) const fn new(value: u64) -> Self { Self(value) }
+}
+
+/// One in-flight endpoint operation and the authorization it was started under.
+///
+/// The record exists so every poll can re-answer "is this still the unit the kernel authorized?"
+/// without trusting the driver's own bookkeeping. Both re-checked fields are copied in at
+/// authorization time rather than read live, because a driver that reported against a replaced unit
+/// would otherwise look correct.
+#[derive(Clone, Debug, Reflect)]
+pub struct Attempt {
+    /// Registry-issued identifier the driver echoes back on every poll and completion.
+    pub id:                 AttemptId,
+    /// Application role this operation is running for, so a completion reaches the binding entity
+    /// that outlives the device.
+    pub role:               RoleKey,
+    /// Durable endpoint the operation addresses, retained so a poll can be compared with current
+    /// resolution rather than with whatever the driver believes it opened.
+    pub endpoint:           DeviceEndpoint,
+    /// The authorisation this attempt was minted under. The kernel mints one value and both stores
+    /// it here and hands it to the driver, so there is no second copy that could disagree.
+    pub permit:             ApplyPermit,
+    /// The identity this attempt was authorised against.
+    /// Re-checked on every poll; a mismatch invalidates it.
+    pub expected_device_id: DeviceId,
+    /// Global rigging revision at authorisation. A newer revision invalidates.
+    ///
+    /// This is `RiggingRevision`, not `ReporterRevision`: a co-reported device has several
+    /// contributing reporters, so one reporter's counter cannot say whether the topology that made
+    /// this target valid still holds, and the driver need not be the reporter whose scan validated
+    /// it.
+    pub rigging_revision:   RiggingRevision,
+    /// Bounds the attempt end to end, not per step.
+    ///
+    /// `bevy_platform::time::Instant` rather than `std::time::Instant` because this record is
+    /// reflected and only the bevy type carries a `Reflect` impl; on native targets it is a
+    /// re-export of the std type, so call sites are unchanged.
+    pub deadline:           Instant,
+}
 
 /// Progress returned by a provider while the kernel polls an attempt.
 ///
@@ -135,5 +199,18 @@ mod tests {
             LastKnownGoodConfiguration::default(),
             LastKnownGoodConfiguration::NotEstablished
         ));
+    }
+
+    #[test]
+    fn runtime_reflection_cannot_construct_an_attempt_identifier_the_registry_never_issued() {
+        use bevy::reflect::FromReflect;
+        use bevy::reflect::tuple_struct::DynamicTupleStruct;
+
+        use super::AttemptId;
+
+        let mut dynamic_attempt = DynamicTupleStruct::default();
+        dynamic_attempt.insert(7_u64);
+
+        assert!(AttemptId::from_reflect(&dynamic_attempt).is_none());
     }
 }

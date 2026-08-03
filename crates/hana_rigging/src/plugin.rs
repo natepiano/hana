@@ -7,6 +7,8 @@ use bevy::prelude::World;
 use bevy::time::Real;
 use bevy::time::Time;
 
+use crate::Attempts;
+use crate::BindingEntities;
 use crate::Bindings;
 use crate::Devices;
 use crate::DiscoveryControl;
@@ -16,6 +18,9 @@ use crate::HardwareInventory;
 use crate::RegisteredSchemes;
 use crate::RiggingLimits;
 use crate::RiggingRevision;
+use crate::binding::BindingTransitionBatch;
+use crate::binding::drain_binding_transitions;
+use crate::binding::project_binding_entities;
 use crate::reconcile::reconcile;
 use crate::registration::Drivers;
 use crate::registration::Reporters;
@@ -50,7 +55,10 @@ impl Plugin for RiggingPlugin {
         // a `TimePlugin` that is already installed, which would make plugin order decide whether an
         // application starts.
         app.init_resource::<Time<Real>>()
+            .init_resource::<Attempts>()
             .init_resource::<Drivers>()
+            .init_resource::<BindingEntities>()
+            .init_resource::<BindingTransitionBatch>()
             .init_resource::<Bindings>()
             .init_resource::<Devices>()
             .init_resource::<DiscoveryControl>()
@@ -75,6 +83,10 @@ impl Plugin for RiggingPlugin {
                 Update,
                 (
                     collect.in_set(RiggingSystems::Collect),
+                    (drain_binding_transitions, project_binding_entities)
+                        .chain()
+                        .before(reconcile)
+                        .in_set(RiggingSystems::Reconcile),
                     reconcile.in_set(RiggingSystems::Reconcile),
                 ),
             );

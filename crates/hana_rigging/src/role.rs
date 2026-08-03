@@ -45,9 +45,12 @@ pub enum RoleState {
 /// `RoleKey` lets a window, camera slot, or control panel key retain its application identity
 /// when the physical unit is unplugged and replaced. It differs from `DeviceKey`, which names a
 /// particular unit and must not survive that replacement.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Reflect)]
+///
+/// It is also the component that names a binding entity, so a query or the Bevy Remote Protocol can
+/// read which role a binding entity stands for without consulting `crate::BindingEntities`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Component, Serialize, Reflect)]
 #[reflect(opaque)]
-#[reflect(Serialize, Deserialize)]
+#[reflect(Component, PartialEq, Serialize, Deserialize)]
 pub struct RoleKey(String);
 
 impl RoleKey {

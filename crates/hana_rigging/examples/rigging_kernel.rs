@@ -1,9 +1,10 @@
 //! Headless smoke run of the rigging kernel: two reporters push overlapping whole-set scans into
 //! a live Bevy `App`, and the kernel merges them into one device set.
 //!
-//! The example registers an identity scheme, registers two `DeviceReporter` implementations, drives
-//! real frames until both have completed a scan, then reads the reconciled set back out of
-//! `Devices`. It touches no window, renderer, filesystem, or network.
+//! The example registers an identity scheme, registers two `DeviceReporter` implementations and one
+//! authored role binding, drives real frames until both reporters have completed a scan, then reads
+//! the reconciled set out of `Devices` and the role's binding entity out of `BindingEntities`. It
+//! touches no window, renderer, filesystem, or network.
 
 use std::error::Error;
 use std::process::ExitCode;
@@ -11,10 +12,18 @@ use std::time::Duration;
 
 use bevy::MinimalPlugins;
 use bevy::app::App;
+use bevy::ecs::reflect::ReflectComponent;
+use bevy::ecs::relationship::Relationship;
+use bevy::ecs::relationship::RelationshipTarget;
+use bevy::prelude::Component;
+use bevy::prelude::Reflect;
 use bevy::prelude::World;
 use hana_rigging::prelude::*;
 
 const COLOR_MANAGEMENT_REPORTER: &str = "color-management";
+/// Application role bound to the built-in panel, standing in for a window whose placement outlives
+/// the display it was on.
+const PANEL_ROLE: &str = "primary-window";
 const DESK_MONITOR: &str = "DESK-4K-0002";
 const DISPLAY_SCHEME: &str = "example-edid-serial";
 /// Frames the example may spend waiting for both reporters; discovery admits a bounded number of
@@ -40,6 +49,47 @@ impl DeviceReporter for FixedSetReporter {
             DeviceScan::Complete(reported_keys.into_iter().map(present_display).collect())
         }))
     }
+}
+
+/// Endpoint driver registered only so the panel role has a real `DriverId` to name.
+///
+/// This example drives no hardware and nothing here dispatches to a driver, so every method
+/// reports the outcome that says "this endpoint gave the kernel nothing" rather than pretending an
+/// apply succeeded.
+struct UnimplementedDriver;
+
+impl EndpointDriver for UnimplementedDriver {
+    type Configuration = PanelPlacement;
+
+    fn capture(
+        &mut self,
+        _: &mut World,
+        _: &DeviceEndpoint,
+    ) -> CaptureOutcome<Self::Configuration> {
+        CaptureOutcome::NotReadable
+    }
+
+    fn start_apply(
+        &mut self,
+        _: &mut World,
+        _: &DeviceEndpoint,
+        _: &Self::Configuration,
+        _: AttemptId,
+        _: ApplyPermit,
+    ) {
+    }
+
+    fn poll(&mut self, _: &mut World, _: AttemptId) -> AttemptProgress {
+        AttemptProgress::Finished(AttemptOutcome::Aborted)
+    }
+}
+
+/// Placement this example's role would ask its driver for, standing in for a window rectangle.
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+struct PanelPlacement {
+    left_pixels: i32,
+    top_pixels:  i32,
 }
 
 /// One registered reporter and the name the report lines print beside its `ReporterId`.
@@ -81,7 +131,7 @@ fn main() -> ExitCode {
         Ok(SmokeCheck::Matched) => {
             println!(
                 "OK — three reconciled devices, the shared panel carries two contributing \
-                 reporters, no duplicate keys"
+                 reporters, no duplicate keys, and the registered role has its binding entity"
             );
             ExitCode::SUCCESS
         },
@@ -107,6 +157,18 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
     app.add_plugins(MinimalPlugins)
         .add_plugins(RiggingPlugin)
         .register_device_scheme(SchemeName::new(DISPLAY_SCHEME)?);
+
+    // Binding registration is application work, not discovery work: this role is registered before
+    // any reporter has run, and its binding entity is spawned by the first frame regardless.
+    let panel_role = RoleKey::new(PANEL_ROLE)?;
+    let panel_driver = app.add_endpoint_driver(UnimplementedDriver);
+    app.world_mut()
+        .resource_mut::<Bindings>()
+        .register(panel_binding(
+            panel_role.clone(),
+            shared_panel.clone(),
+            panel_driver,
+        ))?;
 
     // Two independent platform sources that both see the built-in panel and disagree about nothing
     // else: each one also enumerates a display the other never sees.
@@ -168,9 +230,33 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
                 "rigging revision: {}",
                 app.world().resource::<RiggingRevision>().get()
             );
+            let mut smoke_check = check_reconciled(devices, &displays);
+            print_binding(app.world(), &panel_role, &mut smoke_check);
 
-            Ok(check_reconciled(devices, &displays))
+            Ok(smoke_check)
         },
+    }
+}
+
+/// Author one role that owns the whole built-in panel, with the default retention policy.
+fn panel_binding(role: RoleKey, device: DeviceKey, driver: DriverId) -> Binding {
+    Binding {
+        role,
+        endpoint: DeviceEndpoint {
+            device,
+            id: EndpointId::Whole,
+        },
+        driver,
+        recovery: RecoveryPolicy::default(),
+        retry: RetryOn::NewRevision,
+        on_abort: OnAbort::default(),
+        on_loss: OnSessionLoss::default(),
+        state: RoleState::default(),
+        requested: RequestedConfiguration::new(PanelPlacement {
+            left_pixels: 0,
+            top_pixels:  0,
+        }),
+        last_known_good: LastKnownGoodConfiguration::default(),
     }
 }
 
@@ -331,6 +417,64 @@ fn check_reconciled(devices: &Devices, displays: &[ReportedDisplay]) -> SmokeChe
         SmokeCheck::Matched
     } else {
         SmokeCheck::Mismatched(mismatches)
+    }
+}
+
+/// Print the role's binding entity and its live link to a device entity, if it has one.
+///
+/// A registered role reports no live link until reconciliation resolves its durable endpoint to a
+/// device entity, which can be true even while its display is present. The example says which of
+/// the two it observed rather than implying the link failed.
+fn print_binding(world: &World, role: &RoleKey, smoke_check: &mut SmokeCheck) {
+    let binding_entities = world.resource::<BindingEntities>();
+    println!("binding entities: {}", binding_entities.count());
+    match binding_entities.entity(role) {
+        BindingEntityLookup::Unregistered => {
+            record_mismatch(
+                smoke_check,
+                format!("role `{role}` has no binding entity after registration"),
+            );
+        },
+        BindingEntityLookup::Registered(entity) => {
+            match (
+                world.get::<RecoveryPolicy>(entity),
+                world.get::<RoleState>(entity),
+            ) {
+                (Some(recovery_policy), Some(role_state)) => {
+                    println!("  role `{role}` | {entity} | {recovery_policy:?} | {role_state:?}");
+                },
+                _ => record_mismatch(
+                    smoke_check,
+                    format!(
+                        "role `{role}`'s binding entity is missing a mirrored recovery policy or \
+                         role state"
+                    ),
+                ),
+            }
+            match world.get::<ResolvedToDevice>(entity) {
+                None => println!(
+                    "  role `{role}` | no ResolvedToDevice link — its endpoint does not resolve to \
+                     a live device entity"
+                ),
+                Some(resolved_to_device) => {
+                    let device = resolved_to_device.get();
+                    let resolved_bindings = world
+                        .get::<ResolvedBindings>(device)
+                        .map_or(0, |resolved_bindings| resolved_bindings.len());
+                    println!(
+                        "  role `{role}` | ResolvedToDevice({device}) | that device carries \
+                         {resolved_bindings} resolved binding(s)"
+                    );
+                },
+            }
+        },
+    }
+}
+
+fn record_mismatch(smoke_check: &mut SmokeCheck, mismatch: String) {
+    match smoke_check {
+        SmokeCheck::Matched => *smoke_check = SmokeCheck::Mismatched(vec![mismatch]),
+        SmokeCheck::Mismatched(mismatches) => mismatches.push(mismatch),
     }
 }
 
