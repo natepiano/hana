@@ -180,7 +180,7 @@ mod tests {
     use super::publish_companion_files;
     use crate::DiagnosticKind;
     use crate::disk::paths::ENVIRONMENT_LOCK;
-    use crate::disk::paths::KeymapPaths;
+    use crate::disk::paths::KeymapPathAvailability;
     use crate::disk::paths::TestDirectory;
     use crate::disk::paths::XdgConfigHome;
 
@@ -197,8 +197,9 @@ mod tests {
         let temporary_directory =
             TestDirectory::new("read-only-file").expect("temporary directory exists");
         let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
-        let paths =
-            KeymapPaths::new(TEST_APP_NAME).expect("test app name and config path are valid");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test app name and config path are valid");
 
         assert!(
             paths
@@ -257,8 +258,9 @@ mod tests {
         let temporary_directory =
             TestDirectory::new("matching-file").expect("temporary directory exists");
         let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
-        let paths =
-            KeymapPaths::new(TEST_APP_NAME).expect("test app name and config path are valid");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test app name and config path are valid");
 
         assert!(
             paths
@@ -291,8 +293,9 @@ mod tests {
         let temporary_directory =
             TestDirectory::new("read-only-directory").expect("temporary directory exists");
         let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
-        let paths =
-            KeymapPaths::new(TEST_APP_NAME).expect("test app name and config path are valid");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test app name and config path are valid");
 
         assert!(
             paths
@@ -327,8 +330,9 @@ mod tests {
         let temporary_directory =
             TestDirectory::new("symlink").expect("temporary directory exists");
         let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
-        let paths =
-            KeymapPaths::new(TEST_APP_NAME).expect("test app name and config path are valid");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test app name and config path are valid");
         let linked_file = temporary_directory.path().join("linked-schema.json");
 
         assert!(

@@ -37,6 +37,11 @@ pub enum DiagnosticKind {
     UnremappableCommand,
     /// A keymap sequence begins with a protected recovery keystroke.
     ReservedKeystroke,
+    /// The keymap plugin was assembled without an embedded default keymap.
+    MissingDefaultKeymap,
+    /// The keymap plugin was assembled without an application name, embedded defaults, or a
+    /// protected keystroke, so it has nothing to compile bindings from.
+    UnconfiguredKeymapPlugin,
 }
 
 /// Describes whether a keymap diagnostic prevents its binding from loading.

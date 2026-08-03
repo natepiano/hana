@@ -12,6 +12,7 @@ use super::document::ContextExpr;
 use super::document::ContextSource;
 use crate::Capability;
 use crate::CommandId;
+use crate::CommandLookup;
 use crate::CommandRegistry;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
@@ -20,6 +21,7 @@ use crate::Keystroke;
 use crate::KeystrokeSequence;
 use crate::PrimaryTrigger;
 use crate::condition::ConditionHandle;
+use crate::condition::ConditionLookup;
 use crate::condition::ConditionRegistry;
 
 pub(super) const RECOGNIZED_BLOCK_MEMBERS: [&str; 2] = ["bindings", "context"];
@@ -431,9 +433,10 @@ impl MergedKeymap {
                 ContextResolution::Invalid
             },
             (Some(ContextExpr::Name(condition_name)), Some(context_source)) => {
-                if let Some(condition_handle) = condition_registry.resolve(condition_name.as_str())
+                if let ConditionLookup::Registered { handle, .. } =
+                    condition_registry.lookup(condition_name.as_str())
                 {
-                    ContextResolution::Condition(condition_handle)
+                    ContextResolution::Condition(handle)
                 } else {
                     let names = condition_registry
                         .iter()
@@ -526,7 +529,8 @@ impl MergedKeymap {
         match edit {
             BindingEdit::Unbind => Some(ResolvedEdit::Tombstone),
             BindingEdit::Bind(command_id) => {
-                let Some(capability) = command_registry.capability(&command_id) else {
+                let CommandLookup::Found(command_info) = command_registry.lookup(&command_id)
+                else {
                     let suggestions = Self::closest_command_ids(&command_id, command_registry);
                     let message = suggestions.first().map_or_else(
                         || format!("Command `{command_id}` is not registered."),
@@ -548,6 +552,7 @@ impl MergedKeymap {
 
                     return None;
                 };
+                let capability = command_info.capability;
 
                 if let Some((index, modifier_family)) = keystroke_sequence
                     .iter()
@@ -627,7 +632,10 @@ impl MergedKeymap {
         );
 
         for condition_info in condition_registry.iter() {
-            let Some(condition_handle) = condition_registry.resolve(condition_info.name.as_str())
+            let ConditionLookup::Registered {
+                handle: condition_handle,
+                ..
+            } = condition_registry.lookup(condition_info.name.as_str())
             else {
                 continue;
             };
@@ -695,8 +703,10 @@ impl MergedKeymap {
         rejected_bindings: &mut Vec<RejectedBinding>,
     ) {
         for held_binding in bindings {
-            let is_held = command_registry.capability(&held_binding.binding.command_id)
-                == Some(Capability::Held);
+            let is_held = matches!(
+                command_registry.lookup(&held_binding.binding.command_id),
+                CommandLookup::Found(command_info) if command_info.capability == Capability::Held
+            );
             if !is_held || held_binding.keystroke_sequence.len() != 1 {
                 continue;
             }
@@ -757,7 +767,10 @@ impl MergedKeymap {
         let mut conditions = HashMap::new();
 
         for condition_info in condition_registry.iter() {
-            let Some(condition_handle) = condition_registry.resolve(condition_info.name.as_str())
+            let ConditionLookup::Registered {
+                handle: condition_handle,
+                ..
+            } = condition_registry.lookup(condition_info.name.as_str())
             else {
                 continue;
             };
@@ -910,7 +923,9 @@ mod tests {
     use crate::KeystrokeSequence;
     use crate::MatchOutcome;
     use crate::ReflectKeymapCommand;
+    use crate::TimeoutOutcome;
     use crate::condition::ConditionHandle;
+    use crate::condition::ConditionLookup;
     use crate::condition::ConditionRegistry;
 
     const DEFAULTS_PATH: &str = "defaults.jsonc";
@@ -1041,9 +1056,12 @@ mod tests {
     fn dimension_lock_handle(
         condition_registry: &ConditionRegistry,
     ) -> Result<ConditionHandle, String> {
-        condition_registry
-            .resolve("dimension_lock")
-            .ok_or_else(|| String::from("dimension_lock condition was not registered"))
+        match condition_registry.lookup("dimension_lock") {
+            ConditionLookup::Registered { handle, .. } => Ok(handle),
+            ConditionLookup::UnregisteredName => {
+                Err(String::from("dimension_lock condition was not registered"))
+            },
+        }
     }
 
     fn command_for_sequence<'bindings>(
@@ -1286,11 +1304,10 @@ mod tests {
             matcher.match_keystroke(keystroke, now, MATCH_TIMEOUT),
             MatchOutcome::Pending
         ));
-        assert!(
-            matcher
-                .resolve_timeout(now + MATCH_TIMEOUT, MATCH_TIMEOUT)
-                .is_some()
-        );
+        assert!(matches!(
+            matcher.resolve_timeout(now + MATCH_TIMEOUT, MATCH_TIMEOUT),
+            TimeoutOutcome::Resolved(_)
+        ));
 
         Ok(())
     }

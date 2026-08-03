@@ -15,10 +15,98 @@ use std::sync::atomic::AtomicUsize;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 
+use bevy::prelude::Resource;
+
 use super::constants::DEFAULT_KEYMAP_FILE_NAME;
 use super::constants::SCHEMA_FILE_NAME;
 use super::constants::USER_KEYMAP_FILE_NAME;
 use super::constants::XDG_CONFIG_HOME;
+
+/// Whether an application's keymap configuration directory resolved.
+///
+/// The plugin inserts this resource on both outcomes, so a reader never has to tell "this
+/// application has no keymap directory" apart from "keymap assembly has not run yet".
+#[derive(Clone, Debug, Eq, PartialEq, Resource)]
+pub enum KeymapPathAvailability {
+    /// Every keymap file has a location under a resolved configuration directory.
+    Resolved(KeymapPaths),
+    /// No configuration directory resolved, so no keymap file can be read or written.
+    Unavailable(KeymapPathFailure),
+}
+
+impl KeymapPathAvailability {
+    /// Resolves the keymap paths for one application name.
+    #[must_use]
+    pub fn for_app_name(app_name: &str) -> Self {
+        let Some(app_name) = valid_app_name(app_name) else {
+            return Self::Unavailable(KeymapPathFailure::AppNameNotOnePathComponent);
+        };
+        let Some(configuration_directory) = configuration_directory() else {
+            return Self::Unavailable(KeymapPathFailure::NoPlatformConfigurationDirectory);
+        };
+
+        Self::Resolved(KeymapPaths::from_config_directory(
+            configuration_directory.join(app_name),
+        ))
+    }
+
+    /// Returns the resolved paths, or the reason the application has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`KeymapPathFailure`] recorded when the configuration directory did not
+    /// resolve.
+    pub const fn resolved(&self) -> Result<&KeymapPaths, KeymapPathFailure> {
+        match self {
+            Self::Resolved(keymap_paths) => Ok(keymap_paths),
+            Self::Unavailable(keymap_path_failure) => Err(*keymap_path_failure),
+        }
+    }
+
+    /// Takes the resolved paths, or reports the reason the application has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`KeymapPathFailure`] recorded when the configuration directory did not
+    /// resolve.
+    pub fn into_resolved(self) -> Result<KeymapPaths, KeymapPathFailure> {
+        match self {
+            Self::Resolved(keymap_paths) => Ok(keymap_paths),
+            Self::Unavailable(keymap_path_failure) => Err(keymap_path_failure),
+        }
+    }
+}
+
+/// Why an application's keymap configuration directory did not resolve.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeymapPathFailure {
+    /// The keymap plugin was built without an application name to name a directory after.
+    AppNameNotConfigured,
+    /// The configured application name is not one ordinary path component.
+    AppNameNotOnePathComponent,
+    /// The platform reported no configuration directory to place the application directory in.
+    NoPlatformConfigurationDirectory,
+}
+
+impl KeymapPathFailure {
+    /// Returns the sentence a startup diagnostic reports this failure with.
+    #[must_use]
+    pub const fn reason(self) -> &'static str {
+        match self {
+            Self::AppNameNotConfigured => {
+                "Could not resolve a configuration directory because no keymap application name \
+                 was configured."
+            },
+            Self::AppNameNotOnePathComponent => {
+                "Could not resolve a configuration directory because the keymap application name \
+                 is not one path component."
+            },
+            Self::NoPlatformConfigurationDirectory => {
+                "Could not resolve a configuration directory for the keymap application."
+            },
+        }
+    }
+}
 
 /// Resolved locations for an application's user keymap and generated companions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,18 +118,6 @@ pub struct KeymapPaths {
 }
 
 impl KeymapPaths {
-    /// Resolves the keymap paths for one application name.
-    ///
-    /// Returns `None` when the platform has no configuration directory or when `app_name` is not
-    /// one normal path component.
-    #[must_use]
-    pub fn new(app_name: &str) -> Option<Self> {
-        let app_name = valid_app_name(app_name)?;
-        let config_directory = configuration_directory()?.join(app_name);
-
-        Some(Self::from_config_directory(config_directory))
-    }
-
     /// Returns the directory that contains every keymap file for this application.
     #[must_use]
     pub fn config_directory(&self) -> &Path { &self.config_directory }
@@ -175,7 +251,8 @@ impl Drop for XdgConfigHome {
 )]
 mod tests {
     use super::ENVIRONMENT_LOCK;
-    use super::KeymapPaths;
+    use super::KeymapPathAvailability;
+    use super::KeymapPathFailure;
     use super::TestDirectory;
     use super::XdgConfigHome;
     use super::configuration_root;
@@ -189,8 +266,9 @@ mod tests {
             .expect("environment lock is available");
         let temporary_directory = TestDirectory::new("paths").expect("temporary directory exists");
         let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
-        let paths =
-            KeymapPaths::new(TEST_APP_NAME).expect("test app name and config path are valid");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test app name and config path are valid");
 
         assert!(
             paths
@@ -245,8 +323,11 @@ mod tests {
 
     #[test]
     fn rejects_app_names_that_are_not_one_path_component() {
-        assert!(KeymapPaths::new("").is_none());
-        assert!(KeymapPaths::new("hana/rubric").is_none());
-        assert!(KeymapPaths::new("../hana").is_none());
+        for rejected_app_name in ["", "hana/rubric", "../hana"] {
+            assert_eq!(
+                KeymapPathAvailability::for_app_name(rejected_app_name).into_resolved(),
+                Err(KeymapPathFailure::AppNameNotOnePathComponent)
+            );
+        }
     }
 }

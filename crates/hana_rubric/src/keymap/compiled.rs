@@ -40,12 +40,6 @@ pub(crate) enum ActiveKeymapScope {
     Condition(ConditionHandle),
 }
 
-impl From<Option<ConditionHandle>> for ActiveKeymapScope {
-    fn from(condition_handle: Option<ConditionHandle>) -> Self {
-        condition_handle.map_or(Self::Global, Self::Condition)
-    }
-}
-
 /// One complete set of matchers and command handles for a keymap generation.
 #[derive(Resource)]
 pub(crate) struct CompiledKeymap {

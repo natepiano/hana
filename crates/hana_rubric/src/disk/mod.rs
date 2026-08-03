@@ -13,6 +13,8 @@ mod worker;
 pub(crate) use constants::MAX_RETAINED_DIAGNOSTICS;
 #[cfg(test)]
 pub(crate) use paths::ENVIRONMENT_LOCK;
+pub use paths::KeymapPathAvailability;
+pub use paths::KeymapPathFailure;
 pub use paths::KeymapPaths;
 #[cfg(test)]
 pub(crate) use paths::TestDirectory;

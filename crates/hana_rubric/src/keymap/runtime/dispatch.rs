@@ -16,9 +16,11 @@ use super::key_edge::OrdinaryKeyRoutingState;
 use super::key_edge::PhysicalKeyRole;
 use super::key_edge::PrimaryTriggerOwnership;
 use crate::ActiveCondition;
+use crate::ActiveConditionState;
 use crate::MatchOutcome;
 use crate::Modifiers;
 use crate::SequenceMatcher;
+use crate::TimeoutOutcome;
 use crate::command::Invocation;
 use crate::keymap::ActiveKeymapScope;
 use crate::keymap::CommandHandle;
@@ -57,8 +59,20 @@ pub(crate) fn route_input(world: &mut World) {
         return;
     }
     let active_keymap_scope = match world.get_resource::<ActiveCondition>() {
-        Some(active_condition) if !active_condition.is_initialized() => return,
-        Some(active_condition) => ActiveKeymapScope::from(active_condition.handle()),
+        Some(active_condition) => match active_condition.state() {
+            ActiveConditionState::GlobalRouting => ActiveKeymapScope::Global,
+            ActiveConditionState::ResolvedCondition { handle, .. }
+                if handle.is_registry_issued() =>
+            {
+                ActiveKeymapScope::Condition(*handle)
+            },
+            // A handle the registry never issued reaches this resource only through a reflected
+            // reconstruction of `ActiveCondition`, whose ignored handle field comes from
+            // `ConditionHandle::default`. Routing on it would select the first registered
+            // condition regardless of the name the resource reports.
+            ActiveConditionState::AwaitingContext
+            | ActiveConditionState::ResolvedCondition { .. } => return,
+        },
         None => ActiveKeymapScope::Global,
     };
     world.init_resource::<KeymapRuntime>();
@@ -105,12 +119,19 @@ fn synchronize_and_resolve_timeout(
 
     world.resource_scope::<CompiledKeymap, _>(|world, mut compiled_keymap| {
         let now = world.resource::<KeymapRuntime>().now();
-        matcher(&mut compiled_keymap, active_keymap_scope)
-            .filter(|sequence_matcher| sequence_matcher.is_pending())
-            .and_then(|sequence_matcher| sequence_matcher.resolve_timeout(now, SEQUENCE_TIMEOUT))
-            .map_or_else(RoutedCommands::default, |command_handle| {
+        let timeout_outcome = matcher(&mut compiled_keymap, active_keymap_scope)
+            .map_or(TimeoutOutcome::NoPendingSequence, |sequence_matcher| {
+                sequence_matcher.resolve_timeout(now, SEQUENCE_TIMEOUT)
+            });
+
+        match timeout_outcome {
+            TimeoutOutcome::Resolved(command_handle) => {
                 RoutedCommands::from(routed_command(&compiled_keymap, command_handle))
-            })
+            },
+            TimeoutOutcome::DiscardedPartialPrefix
+            | TimeoutOutcome::AwaitingKeystroke
+            | TimeoutOutcome::NoPendingSequence => RoutedCommands::default(),
+        }
     })
 }
 
@@ -490,7 +511,11 @@ mod tests {
     use bevy::prelude::ResMut;
     use bevy::prelude::Resource;
     use bevy::prelude::With;
+    use bevy::reflect::FromReflect;
     use bevy::reflect::TypeRegistry;
+    use bevy::reflect::enums::DynamicEnum;
+    use bevy::reflect::enums::DynamicVariant;
+    use bevy::reflect::structs::DynamicStruct;
     use bevy::time::TimePlugin;
     use bevy_enhanced_input::bindings;
     use bevy_enhanced_input::prelude::Action;
@@ -511,6 +536,7 @@ mod tests {
 
     use super::KeymapRuntime;
     use super::route_input;
+    use crate::ActiveCondition;
     use crate::CommandRegistry;
     use crate::HoldPhase;
     use crate::KeymapCommand;
@@ -520,6 +546,8 @@ mod tests {
     use crate::ReflectKeymapCommand;
     use crate::SequenceMatcher;
     use crate::command::Invocation;
+    use crate::condition::ConditionLookup;
+    use crate::condition::ConditionName;
     use crate::condition::ConditionRegistry;
     use crate::keymap::CommandHandle;
     use crate::keymap::CompiledKeymap;
@@ -1118,9 +1146,11 @@ mod tests {
             condition_registry,
             FIRST_GENERATION,
         )?;
-        let flying = condition_registry
-            .resolve("flying")
-            .ok_or_else(|| "runtime context did not resolve flying".to_owned())?;
+        let ConditionLookup::Registered { handle: flying, .. } =
+            condition_registry.lookup("flying")
+        else {
+            return Err(String::from("runtime context did not register flying"));
+        };
         app.world_mut().insert_resource(compiled_keymap);
 
         press(&mut app, KeyCode::KeyG);
@@ -1528,6 +1558,69 @@ mod tests {
             Some(&ActionValue::Bool(false))
         );
         Ok(())
+    }
+
+    /// A remote client can rebuild `ActiveCondition` from a name alone, which leaves the ignored
+    /// handle field at `ConditionHandle::default`. Routing must refuse that handle instead of
+    /// selecting whichever condition registered first — here `flying`, the condition that binds
+    /// `g`.
+    #[test]
+    fn a_reflected_active_condition_does_not_route_through_the_first_condition()
+    -> Result<(), String> {
+        let mut app = runtime_app();
+        app.insert_resource(RuntimeContext::Flying)
+            .add_plugins(KeymapPlugin::new().for_context::<RuntimeContext>());
+        app.update();
+        let command_registry = command_registry(&mut app)?;
+        let condition_registry = app.world().resource::<ConditionRegistry>();
+        let compiled_keymap = compile_with_conditions(
+            r#"{
+                "bindings": [
+                    { "context": "flying", "bindings": { "g": "runtime::one_shot" }}
+                ]
+            }"#,
+            &command_registry,
+            condition_registry,
+            FIRST_GENERATION,
+        )?;
+        let ConditionLookup::Registered { handle: flying, .. } =
+            condition_registry.lookup("flying")
+        else {
+            return Err(String::from("runtime context did not register flying"));
+        };
+        app.world_mut().insert_resource(compiled_keymap);
+        app.world_mut()
+            .insert_resource(reflected_active_condition("flying")?);
+
+        press(&mut app, KeyCode::KeyG);
+
+        assert_eq!(app.world().resource::<DispatchCounts>().one_shot, 0);
+
+        release(&mut app, KeyCode::KeyG);
+        app.world_mut()
+            .resource_mut::<ActiveCondition>()
+            .resolve(flying, &ConditionName::new("flying"));
+        press(&mut app, KeyCode::KeyG);
+
+        assert_eq!(app.world().resource::<DispatchCounts>().one_shot, 1);
+        Ok(())
+    }
+
+    /// Rebuilds `ActiveCondition` the way a remote `insert_resource` does: through reflection,
+    /// carrying only the condition name.
+    fn reflected_active_condition(condition_name: &str) -> Result<ActiveCondition, String> {
+        let mut resolved_condition = DynamicStruct::default();
+        resolved_condition.insert("name", ConditionName::new(condition_name));
+        let mut active_condition_state = DynamicEnum::default();
+        active_condition_state.set_variant(
+            "ResolvedCondition",
+            DynamicVariant::Struct(resolved_condition),
+        );
+        let mut reflected_active_condition = DynamicStruct::default();
+        reflected_active_condition.insert("state", active_condition_state);
+
+        ActiveCondition::from_reflect(&reflected_active_condition)
+            .ok_or_else(|| String::from("ActiveCondition did not rebuild through reflection"))
     }
 
     fn runtime_app() -> App {

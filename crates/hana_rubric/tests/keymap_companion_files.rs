@@ -15,7 +15,7 @@ use bevy::prelude::States;
 use bevy::state::app::AppExtStates;
 use bevy::state::app::StatesPlugin;
 use hana_rubric::KeymapCommand;
-use hana_rubric::KeymapPaths;
+use hana_rubric::KeymapPathAvailability;
 use hana_rubric::KeymapPlugin;
 use serde_json_lenient::Value;
 use strum::AsRefStr;
@@ -90,8 +90,11 @@ fn companion_files_cover_every_registered_command_and_condition() -> Result<(), 
     let temporary_directory = TemporaryDirectory::new("companion-files")
         .map_err(|error| format!("temporary directory creation failed: {error}"))?;
     let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
-    let paths = KeymapPaths::new(TEST_APP_NAME)
-        .ok_or_else(|| String::from("test keymap paths did not resolve"))?;
+    let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+        .into_resolved()
+        .map_err(|keymap_path_failure| {
+            format!("test keymap paths did not resolve: {keymap_path_failure:?}")
+        })?;
 
     assert!(
         paths

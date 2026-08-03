@@ -16,6 +16,8 @@ pub use reflect_command::KeymapCommand;
 pub use reflect_command::ReflectKeymapCommand;
 pub(crate) use registry::CommandEntry;
 pub use registry::CommandInfo;
+pub use registry::CommandInvocationOutcome;
+pub use registry::CommandLookup;
 pub use registry::CommandRegistry;
 pub use registry::HeldCommandLookupOutcome;
 pub(crate) use registry::Invocation;

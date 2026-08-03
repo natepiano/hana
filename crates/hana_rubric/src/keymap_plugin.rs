@@ -28,7 +28,8 @@ use crate::derived_context::DerivedContextPlugin;
 use crate::disk;
 use crate::disk::DiskWorkerChannels;
 use crate::disk::DiskWorkerMessage;
-use crate::disk::KeymapPaths;
+use crate::disk::KeymapPathAvailability;
+use crate::disk::KeymapPathFailure;
 use crate::keymap;
 use crate::keymap::KeymapRuntime;
 use crate::keymap::PendingReload;
@@ -43,7 +44,7 @@ const EMBEDDED_DEFAULTS_SOURCE: &str = "embedded defaults";
 /// [`Self::for_derived_context`].
 pub struct KeymapPlugin {
     app_name:             Option<String>,
-    defaults:             Option<&'static str>,
+    defaults:             DefaultKeymapSource,
     protected_keystrokes: Vec<Keystroke>,
 }
 
@@ -53,7 +54,7 @@ impl KeymapPlugin {
     pub const fn new() -> Self {
         Self {
             app_name:             None,
-            defaults:             None,
+            defaults:             DefaultKeymapSource::NotSupplied,
             protected_keystrokes: Vec::new(),
         }
     }
@@ -68,7 +69,7 @@ impl KeymapPlugin {
     /// Sets the application-embedded default JSONC keymap.
     #[must_use]
     pub const fn with_defaults(mut self, defaults: &'static str) -> Self {
-        self.defaults = Some(defaults);
+        self.defaults = DefaultKeymapSource::Embedded(defaults);
         self
     }
 
@@ -161,13 +162,19 @@ impl KeymapPlugin {
             .get_resource::<KeymapPluginConfiguration>()
             .cloned()
         else {
-            return;
-        };
-        let Some(defaults) = keymap_plugin_configuration.defaults else {
+            app.insert_resource(KeymapAssemblyFinished);
+            insert_keymap_path_availability(app, None);
+            record_unconfigured_keymap_plugin(app);
             return;
         };
 
         app.insert_resource(KeymapAssemblyFinished);
+        let keymap_path_availability =
+            insert_keymap_path_availability(app, keymap_plugin_configuration.app_name.as_deref());
+        let DefaultKeymapSource::Embedded(defaults) = keymap_plugin_configuration.defaults else {
+            record_missing_default_keymap(app);
+            return;
+        };
         #[cfg(test)]
         increment_assembly_runs(app);
         let command_registry = match CommandRegistry::initialize(app.world_mut()) {
@@ -203,27 +210,16 @@ impl KeymapPlugin {
             return;
         }
 
-        let Some(app_name) = keymap_plugin_configuration.app_name.as_deref() else {
-            record_startup_diagnostics(
-                app,
-                &[startup_diagnostic(
-                    EMBEDDED_DEFAULTS_SOURCE,
-                    DiagnosticKind::Disk,
-                    "Could not resolve a configuration directory because no keymap application name was configured.",
-                )],
-            );
-            return;
-        };
-        let Some(paths) = KeymapPaths::new(app_name) else {
-            record_startup_diagnostics(
-                app,
-                &[startup_diagnostic(
-                    app_name,
-                    DiagnosticKind::Disk,
-                    "Could not resolve a configuration directory for the keymap application.",
-                )],
-            );
-            return;
+        let paths = match keymap_path_availability.resolved() {
+            Ok(paths) => paths,
+            Err(keymap_path_failure) => {
+                record_unavailable_keymap_paths(
+                    app,
+                    keymap_plugin_configuration.app_name.as_deref(),
+                    keymap_path_failure,
+                );
+                return;
+            },
         };
         let schema_result = {
             let world = app.world();
@@ -248,7 +244,7 @@ impl KeymapPlugin {
         };
         app.world_mut().insert_resource(KeymapDiskWorker {
             disk_worker_channels: disk::start_disk_worker(
-                &paths,
+                paths,
                 published_defaults.into_bytes(),
                 schema,
             ),
@@ -256,7 +252,9 @@ impl KeymapPlugin {
     }
 
     const fn has_configuration(&self) -> bool {
-        self.app_name.is_some() || self.defaults.is_some() || !self.protected_keystrokes.is_empty()
+        self.app_name.is_some()
+            || matches!(self.defaults, DefaultKeymapSource::Embedded(_))
+            || !self.protected_keystrokes.is_empty()
     }
 }
 
@@ -270,10 +268,19 @@ impl Plugin for KeymapPlugin {
     fn finish(&self, app: &mut App) { Self::finish_assembly(app); }
 }
 
+/// Where the keymap plugin takes an application's shipped default bindings from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DefaultKeymapSource {
+    /// The application compiled a JSONC keymap into its binary.
+    Embedded(&'static str),
+    /// The application supplied no defaults, so no bindings can be compiled.
+    NotSupplied,
+}
+
 #[derive(Clone, Resource)]
 struct KeymapPluginConfiguration {
     app_name:             Option<String>,
-    defaults:             Option<&'static str>,
+    defaults:             DefaultKeymapSource,
     protected_keystrokes: Vec<Keystroke>,
 }
 
@@ -336,6 +343,64 @@ fn record_startup_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
         .resource_mut::<KeymapLoadFailures>()
         .retained_diagnostics
         .extend(diagnostics.iter().cloned());
+}
+
+/// Inserts [`KeymapPathAvailability`] and hands the same value back to the assembly that needs it.
+///
+/// Every `finish_assembly` outcome inserts it, including the ones that stop before any binding
+/// compiles, so `Res<KeymapPathAvailability>` never distinguishes an application without a keymap
+/// directory from an assembly that has not run.
+fn insert_keymap_path_availability(
+    app: &mut App,
+    app_name: Option<&str>,
+) -> KeymapPathAvailability {
+    let keymap_path_availability = app_name.map_or(
+        KeymapPathAvailability::Unavailable(KeymapPathFailure::AppNameNotConfigured),
+        KeymapPathAvailability::for_app_name,
+    );
+    app.world_mut()
+        .insert_resource(keymap_path_availability.clone());
+
+    keymap_path_availability
+}
+
+fn record_unconfigured_keymap_plugin(app: &mut App) {
+    record_startup_diagnostics(
+        app,
+        &[startup_diagnostic(
+            EMBEDDED_DEFAULTS_SOURCE,
+            DiagnosticKind::UnconfiguredKeymapPlugin,
+            "Could not compile any bindings because the keymap plugin was added without an \
+             application name, an embedded default keymap, or a protected keystroke.",
+        )],
+    );
+}
+
+fn record_missing_default_keymap(app: &mut App) {
+    record_startup_diagnostics(
+        app,
+        &[startup_diagnostic(
+            EMBEDDED_DEFAULTS_SOURCE,
+            DiagnosticKind::MissingDefaultKeymap,
+            "Could not compile any bindings because the keymap plugin was configured without an \
+             embedded default keymap.",
+        )],
+    );
+}
+
+fn record_unavailable_keymap_paths(
+    app: &mut App,
+    app_name: Option<&str>,
+    keymap_path_failure: KeymapPathFailure,
+) {
+    record_startup_diagnostics(
+        app,
+        &[startup_diagnostic(
+            app_name.unwrap_or(EMBEDDED_DEFAULTS_SOURCE),
+            DiagnosticKind::Disk,
+            keymap_path_failure.reason(),
+        )],
+    );
 }
 
 fn startup_diagnostic(source_path: &str, kind: DiagnosticKind, message: &str) -> Diagnostic {
@@ -420,6 +485,7 @@ mod tests {
     use super::KeymapPlugin;
     use super::KeymapPluginConfiguration;
     use crate::ActiveCondition;
+    use crate::ActiveConditionState;
     use crate::Capability;
     use crate::DiagnosticKind;
     use crate::HoldPhase;
@@ -430,7 +496,8 @@ mod tests {
     use crate::ReflectKeymapCommand;
     use crate::condition::ConditionRegistry;
     use crate::disk::ENVIRONMENT_LOCK;
-    use crate::disk::KeymapPaths;
+    use crate::disk::KeymapPathAvailability;
+    use crate::disk::KeymapPathFailure;
     use crate::disk::TestDirectory;
     use crate::disk::XdgConfigHome;
     use crate::keymap;
@@ -550,8 +617,83 @@ mod tests {
         type_registry.register::<PluginDuplicateSecond>();
     }
 
+    #[test]
+    fn a_plugin_without_defaults_records_a_missing_default_keymap_diagnostic() {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("missing-defaults").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let mut app = App::new();
+        register_plugin_command(&mut app);
+        app.add_plugins(KeymapPlugin::new().with_app_name(TEST_APP_NAME));
+        app.finish();
+
+        assert!(
+            app.world()
+                .resource::<KeymapLoadFailures>()
+                .all_diagnostics()
+                .any(|diagnostic| diagnostic.kind == DiagnosticKind::MissingDefaultKeymap)
+        );
+        assert!(!app.world().contains_resource::<CompiledKeymap>());
+
+        drop(app);
+        drop(xdg_config_home);
+        drop(temporary_directory);
+        drop(environment_lock);
+    }
+
+    #[test]
+    fn keymap_path_availability_is_present_for_both_resolved_and_unavailable_states() {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("path-availability").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let defaults = r#"{ "bindings": [{ "bindings": { "g": "plugin::dispatch" } }] }"#;
+
+        let mut named_app = App::new();
+        register_plugin_command(&mut named_app);
+        named_app.add_plugins(
+            KeymapPlugin::new()
+                .with_app_name(TEST_APP_NAME)
+                .with_defaults(defaults),
+        );
+        named_app.finish();
+
+        let mut unnamed_app = App::new();
+        register_plugin_command(&mut unnamed_app);
+        unnamed_app.add_plugins(KeymapPlugin::new().with_defaults(defaults));
+        unnamed_app.finish();
+
+        assert!(matches!(
+            named_app.world().resource::<KeymapPathAvailability>(),
+            KeymapPathAvailability::Resolved(paths)
+                if paths.config_directory().starts_with(temporary_directory.path())
+        ));
+        assert_eq!(
+            unnamed_app
+                .world()
+                .resource::<KeymapPathAvailability>()
+                .resolved()
+                .err(),
+            Some(KeymapPathFailure::AppNameNotConfigured)
+        );
+        assert!(!KeymapPathFailure::AppNameNotConfigured.reason().is_empty());
+
+        drop(named_app);
+        drop(unnamed_app);
+        drop(xdg_config_home);
+        drop(temporary_directory);
+        drop(environment_lock);
+    }
+
     fn assert_isolated_paths(temporary_directory: &TestDirectory) {
-        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test keymap paths resolve");
 
         assert!(
             paths
@@ -570,6 +712,28 @@ mod tests {
             .match_global(sequence.first(), Instant::now(), Duration::from_secs(1));
 
         assert!(matches!(match_outcome, MatchOutcome::Matched(_)));
+    }
+
+    /// A context source alone compiles no bindings, so the assembly has to say so and still leave
+    /// `KeymapPathAvailability` readable rather than absent.
+    #[test]
+    fn a_plugin_with_only_a_context_source_records_an_unconfigured_diagnostic() {
+        let mut app = App::new();
+        app.add_plugins(KeymapPlugin::new().for_context::<PluginContext>());
+        app.finish();
+
+        assert!(
+            app.world()
+                .resource::<KeymapLoadFailures>()
+                .all_diagnostics()
+                .any(|diagnostic| diagnostic.kind == DiagnosticKind::UnconfiguredKeymapPlugin)
+        );
+        assert_eq!(
+            *app.world().resource::<KeymapPathAvailability>(),
+            KeymapPathAvailability::Unavailable(KeymapPathFailure::AppNameNotConfigured)
+        );
+        assert!(app.world().contains_resource::<KeymapAssemblyFinished>());
+        assert!(!app.world().contains_resource::<CompiledKeymap>());
     }
 
     #[test]
@@ -699,7 +863,10 @@ mod tests {
             assert_eq!(app.world().resource::<CompiledKeymap>().generation().0, 0);
             assert!(app.world().contains_resource::<KeymapAssemblyFinished>());
             if context_first {
-                assert!(!app.world().resource::<ActiveCondition>().is_initialized());
+                assert!(matches!(
+                    app.world().resource::<ActiveCondition>().state(),
+                    ActiveConditionState::AwaitingContext
+                ));
             }
 
             drop(app);

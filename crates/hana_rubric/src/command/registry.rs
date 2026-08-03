@@ -31,6 +31,7 @@ pub struct CommandRegistry {
 }
 
 /// One command's declared metadata, as read from the registry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CommandInfo<'registry> {
     /// The command's validated identifier.
     pub id:          &'registry CommandId,
@@ -40,6 +41,26 @@ pub struct CommandInfo<'registry> {
     pub description: &'registry str,
     /// Declared keymap binding capability.
     pub capability:  Capability,
+}
+
+/// The result of resolving a command ID against the registry's declared metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandLookup<'registry> {
+    /// The registry declares this command.
+    Found(CommandInfo<'registry>),
+    /// No command declaration matches the requested identifier.
+    UnknownCommand,
+}
+
+/// What [`CommandRegistry::invoke`] did with a requested command ID.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandInvocationOutcome {
+    /// The command's event was triggered.
+    Invoked,
+    /// No command declaration matches the requested identifier.
+    UnknownCommand,
+    /// The command is hold-to-act, so its caller must trigger the event with a [`HoldPhase`].
+    HeldCommandRequiresPhase,
 }
 
 /// The result of looking up a command's held custom input.
@@ -136,16 +157,20 @@ impl CommandRegistry {
         entries.into_iter()
     }
 
-    /// Returns the authored title for `command_id`.
+    /// Resolves `command_id` to the metadata the registry declared for it.
     #[must_use]
-    pub fn title(&self, command_id: &CommandId) -> Option<&str> {
-        self.entries.get(command_id).map(|entry| entry.title)
-    }
-
-    /// Returns the authored description for `command_id`.
-    #[must_use]
-    pub fn description(&self, command_id: &CommandId) -> Option<&str> {
-        self.entries.get(command_id).map(|entry| entry.description)
+    pub fn lookup(&self, command_id: &CommandId) -> CommandLookup<'_> {
+        self.entries.get_key_value(command_id).map_or(
+            CommandLookup::UnknownCommand,
+            |(command_id, entry)| {
+                CommandLookup::Found(CommandInfo {
+                    id:          command_id,
+                    title:       entry.title,
+                    description: entry.description,
+                    capability:  entry.capability,
+                })
+            },
+        )
     }
 
     /// Resolves whether `command_id` has a preallocated held custom input.
@@ -158,22 +183,25 @@ impl CommandRegistry {
             })
     }
 
-    /// Returns the declared keymap binding capability for `command_id`.
-    #[must_use]
-    pub fn capability(&self, command_id: &CommandId) -> Option<Capability> {
-        self.entries.get(command_id).map(|entry| entry.capability)
-    }
-
     /// Dispatches the event registered for `command_id`.
     ///
     /// This resolves the command ID and calls its monomorphized dispatch function without
     /// reflection type-data lookup or reflected event reconstruction. Reflection registration is
     /// still validated during initialization so BRP and other reflection consumers can find the
     /// command event.
-    pub fn invoke(&self, command_id: &CommandId, world: &mut World) -> Option<()> {
-        self.entries
-            .get(command_id)
-            .map(|entry| (entry.dispatch)(world))
+    ///
+    /// A hold-to-act command carries a [`HoldPhase`] its caller must choose, so it is rejected
+    /// before its event is constructed.
+    pub fn invoke(&self, command_id: &CommandId, world: &mut World) -> CommandInvocationOutcome {
+        let Some(entry) = self.entries.get(command_id) else {
+            return CommandInvocationOutcome::UnknownCommand;
+        };
+        if matches!(entry.invocation, Invocation::Held(_)) {
+            return CommandInvocationOutcome::HeldCommandRequiresPhase;
+        }
+
+        (entry.dispatch)(world);
+        CommandInvocationOutcome::Invoked
     }
 
     pub(crate) fn register_held_observers(&self, world: &mut World) {
@@ -426,6 +454,8 @@ mod tests {
     use bevy_enhanced_input::prelude::CustomInputs;
     use bevy_enhanced_input::prelude::InputAction;
 
+    use super::CommandInvocationOutcome;
+    use super::CommandLookup;
     use super::CommandRegistry;
     use super::HeldCommandLookupOutcome;
     use super::Invocation;
@@ -635,17 +665,15 @@ mod tests {
         let command_id = CommandId::try_from("registry::one_shot")
             .expect("the command macro validates the command ID");
 
-        assert_eq!(
-            command_registry.title(&command_id),
-            Some(RegistryOneShot::TITLE)
-        );
-        assert_eq!(
-            command_registry.description(&command_id),
-            Some(RegistryOneShot::DESCRIPTION)
-        );
+        assert!(matches!(
+            command_registry.lookup(&command_id),
+            CommandLookup::Found(command_info)
+                if command_info.title == RegistryOneShot::TITLE
+                    && command_info.description == RegistryOneShot::DESCRIPTION
+        ));
         assert_eq!(
             command_registry.invoke(&command_id, app.world_mut()),
-            Some(())
+            CommandInvocationOutcome::Invoked
         );
         assert_eq!(app.world().resource::<InvocationCount>().0, 1);
     }
@@ -670,7 +698,7 @@ mod tests {
 
         assert_eq!(
             command_registry.invoke(&command_id, app.world_mut()),
-            Some(())
+            CommandInvocationOutcome::Invoked
         );
         assert_eq!(app.world().resource::<InvocationCount>().0, 1);
     }
@@ -691,14 +719,12 @@ mod tests {
         let command_id = CommandId::try_from(RegistryHeld::ID)
             .expect("the command macro validates the command ID");
 
-        assert_eq!(
-            command_registry.title(&command_id),
-            Some(RegistryHeld::TITLE)
-        );
-        assert_eq!(
-            command_registry.capability(&command_id),
-            Some(Capability::Held)
-        );
+        assert!(matches!(
+            command_registry.lookup(&command_id),
+            CommandLookup::Found(command_info)
+                if command_info.title == RegistryHeld::TITLE
+                    && command_info.capability == Capability::Held
+        ));
         assert!(matches!(
             command_registry.held_command_lookup(&command_id),
             HeldCommandLookupOutcome::RegisteredHeldInput(_)
@@ -760,8 +786,11 @@ mod tests {
 
         assert_eq!(
             command_registry.invoke(&command_id, app.world_mut()),
-            Some(())
+            CommandInvocationOutcome::HeldCommandRequiresPhase
         );
+        app.world_mut().trigger(RegistryHeld {
+            phase: HoldPhase::Begin,
+        });
         assert_eq!(
             app.world().resource::<CustomInputs>().get(&custom_input),
             Some(&ActionValue::Bool(true))
@@ -817,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_dispatch_does_not_allocate_after_warmup() {
+    fn invoke_names_unknown_and_held_commands_without_dispatching_them() {
         let mut app = App::new();
         app.world_mut().init_resource::<InvocationCount>();
         app.world_mut().add_observer(
@@ -831,17 +860,60 @@ mod tests {
         let mut custom_inputs = CustomInputs::default();
         let command_registry = CommandRegistry::build(&type_registry, &mut custom_inputs)
             .expect("a valid command must build a registry");
-        let command_id = CommandId::try_from(RegistryHeld::ID)
+        let held_command_id = CommandId::try_from(RegistryHeld::ID)
+            .expect("the command macro validates the command ID");
+        let unknown_command_id = CommandId::try_from("registry::absent")
+            .expect("the test command ID text is well formed");
+
+        assert_eq!(
+            command_registry.invoke(&unknown_command_id, app.world_mut()),
+            CommandInvocationOutcome::UnknownCommand
+        );
+        assert_eq!(
+            command_registry.invoke(&held_command_id, app.world_mut()),
+            CommandInvocationOutcome::HeldCommandRequiresPhase
+        );
+        assert_eq!(app.world().resource::<InvocationCount>().0, 0);
+        assert_eq!(
+            command_registry.lookup(&unknown_command_id),
+            CommandLookup::UnknownCommand
+        );
+        assert!(matches!(
+            command_registry.lookup(&held_command_id),
+            CommandLookup::Found(command_info)
+                if command_info.id == &held_command_id
+                    && command_info.title == RegistryHeld::TITLE
+                    && command_info.description == RegistryHeld::DESCRIPTION
+                    && command_info.capability == Capability::Held
+        ));
+    }
+
+    #[test]
+    fn registry_dispatch_does_not_allocate_after_warmup() {
+        let mut app = App::new();
+        app.world_mut().init_resource::<InvocationCount>();
+        app.world_mut().add_observer(
+            |_: On<RegistryOneShot>, mut invocation_count: ResMut<InvocationCount>| {
+                invocation_count.0 += 1;
+            },
+        );
+
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<RegistryOneShot>();
+        let mut custom_inputs = CustomInputs::default();
+        let command_registry = CommandRegistry::build(&type_registry, &mut custom_inputs)
+            .expect("a valid command must build a registry");
+        let command_id = CommandId::try_from(RegistryOneShot::ID)
             .expect("the command macro validates the command ID");
 
         assert_eq!(
             command_registry.invoke(&command_id, app.world_mut()),
-            Some(())
+            CommandInvocationOutcome::Invoked
         );
         let allocations_before = crate::TEST_ALLOCATOR.allocation_count();
         assert_eq!(
             command_registry.invoke(&command_id, app.world_mut()),
-            Some(())
+            CommandInvocationOutcome::Invoked
         );
         let allocations_after = crate::TEST_ALLOCATOR.allocation_count();
 

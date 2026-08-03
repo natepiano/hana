@@ -39,6 +39,19 @@ pub enum MatchOutcome<T> {
     NoMatch,
 }
 
+/// What a pending prefix was doing when [`SequenceMatcher::resolve_timeout`] examined it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimeoutOutcome<T> {
+    /// A completed sequence timed out; its deferred value is now the caller's to fire.
+    Resolved(T),
+    /// A partial prefix timed out with no completed sequence to fire, and was discarded.
+    DiscardedPartialPrefix,
+    /// A prefix is pending and its timeout has not elapsed yet.
+    AwaitingKeystroke,
+    /// No prefix is pending.
+    NoPendingSequence,
+}
+
 struct PrefixNode<T> {
     children: HashMap<Keystroke, PrefixNodeId>,
     value:    Option<T>,
@@ -93,15 +106,21 @@ impl<T: Copy> SequenceMatcher<T> {
     ///
     /// The timeout is measured from the most recent matched keystroke. A partial prefix without a
     /// deferred value is also discarded when the timeout elapses.
-    pub fn resolve_timeout(&mut self, now: Instant, timeout: Duration) -> Option<T> {
-        let pending_sequence = self.pending.as_ref()?;
+    pub fn resolve_timeout(&mut self, now: Instant, timeout: Duration) -> TimeoutOutcome<T> {
+        let Some(pending_sequence) = self.pending.as_ref() else {
+            return TimeoutOutcome::NoPendingSequence;
+        };
         if now.duration_since(pending_sequence.last_stroke_at) < timeout {
-            return None;
+            return TimeoutOutcome::AwaitingKeystroke;
         }
 
         self.pending
             .take()
             .and_then(|pending_sequence| pending_sequence.deferred)
+            .map_or(
+                TimeoutOutcome::DiscardedPartialPrefix,
+                TimeoutOutcome::Resolved,
+            )
     }
 
     fn insert(&mut self, sequence: KeystrokeSequence, value: T) {
@@ -147,7 +166,7 @@ impl<T: Copy> SequenceMatcher<T> {
         now: Instant,
         timeout: Duration,
     ) -> MatchOutcome<T> {
-        if let Some(deferred) = self.resolve_timeout(now, timeout) {
+        if let TimeoutOutcome::Resolved(deferred) = self.resolve_timeout(now, timeout) {
             return MatchOutcome::Reprocess {
                 deferred: Some(deferred),
                 keystroke,
@@ -218,6 +237,7 @@ mod tests {
     use super::KeystrokeSequence;
     use super::MatchOutcome;
     use super::SequenceMatcher;
+    use super::TimeoutOutcome;
     use crate::KeystrokeSequenceParseError;
 
     const TIMEOUT: Duration = Duration::from_millis(500);
@@ -262,7 +282,7 @@ mod tests {
         );
         assert_eq!(
             sequence_matcher.resolve_timeout(now + TIMEOUT, TIMEOUT),
-            Some(1)
+            TimeoutOutcome::Resolved(1)
         );
 
         Ok(())
@@ -308,7 +328,7 @@ mod tests {
         assert!(!sequence_matcher.is_pending());
         assert_eq!(
             sequence_matcher.resolve_timeout(now + TIMEOUT, TIMEOUT),
-            None
+            TimeoutOutcome::NoPendingSequence
         );
 
         Ok(())
@@ -389,7 +409,7 @@ mod tests {
         );
         assert_eq!(
             sequence_matcher.resolve_timeout(now + TIMEOUT, TIMEOUT),
-            Some(1)
+            TimeoutOutcome::Resolved(1)
         );
 
         Ok(())
@@ -439,7 +459,7 @@ mod tests {
         );
         assert_eq!(
             sequence_matcher.resolve_timeout(now + TIMEOUT, TIMEOUT),
-            None
+            TimeoutOutcome::NoPendingSequence
         );
 
         Ok(())

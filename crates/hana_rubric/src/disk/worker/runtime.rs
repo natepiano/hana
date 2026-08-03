@@ -123,6 +123,42 @@ pub(super) fn start_disk_worker_with(
     }
 }
 
+/// Builds a worker whose thread never starts, so a test can drive one method directly, paired
+/// with the [`CoalescingSlot`] its diagnostics publish into.
+#[cfg(test)]
+pub(super) fn watch_test_worker(paths: &KeymapPaths) -> (DiskWorker, CoalescingSlot) {
+    let slot = CoalescingSlot::new();
+    let (_, control_receiver) = mpsc::channel();
+    let (_, first_read_hold) = mpsc::sync_channel(1);
+    let disk_worker = DiskWorker {
+        paths: paths.clone(),
+        default_keymap: Vec::new(),
+        schema: None,
+        slot: slot.clone(),
+        control_receiver,
+        status: Arc::new(WorkerStatus::default()),
+        worker_timings: WorkerTimings {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     None,
+            retry:    RETRY_INTERVAL,
+        },
+        watch_mode: WatchMode::Native,
+        watcher: None,
+        watcher_notifications: None,
+        watcher_receiver: None,
+        first_read_hold,
+        observed_keymap: ObservedKeymap::Unknown,
+        dirty_at: None,
+        missing_retry_at: None,
+        next_poll_at: None,
+        parent_exists: false,
+        reported_read_error: None,
+        reported_watch_error: None,
+    };
+
+    (disk_worker, slot)
+}
+
 pub(super) struct DiskWorker {
     paths:                            KeymapPaths,
     default_keymap:                   Vec<u8>,
@@ -408,6 +444,7 @@ mod tests {
     use super::WatchMode;
     use super::WorkerTimings;
     use super::start_disk_worker_with;
+    use crate::disk::KeymapPathAvailability;
     use crate::disk::KeymapPaths;
     use crate::disk::paths::ENVIRONMENT_LOCK;
     use crate::disk::paths::TestDirectory;
@@ -458,8 +495,11 @@ mod tests {
     }
 
     fn isolated_paths(temporary_directory: &TestDirectory) -> Result<KeymapPaths, String> {
-        let paths = KeymapPaths::new(TEST_APP_NAME)
-            .ok_or_else(|| String::from("test keymap paths should resolve"))?;
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .map_err(|keymap_path_failure| {
+                format!("test keymap paths should resolve: {keymap_path_failure:?}")
+            })?;
 
         if !paths
             .config_directory()
@@ -474,7 +514,9 @@ mod tests {
     }
 
     fn start_worker(watch_mode: WatchMode) -> DiskWorkerChannels {
-        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test keymap paths resolve");
         start_disk_worker_with(
             &paths,
             DEFAULT_KEYMAP.to_vec(),
@@ -485,7 +527,9 @@ mod tests {
     }
 
     fn start_injected_worker(worker_timings: WorkerTimings) -> DiskWorkerChannels {
-        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test keymap paths resolve");
         start_disk_worker_with(
             &paths,
             DEFAULT_KEYMAP.to_vec(),
@@ -498,7 +542,9 @@ mod tests {
     fn start_injected_worker_holding_first_read(
         worker_timings: WorkerTimings,
     ) -> DiskWorkerChannels {
-        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test keymap paths resolve");
         start_disk_worker_with(
             &paths,
             DEFAULT_KEYMAP.to_vec(),

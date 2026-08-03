@@ -17,6 +17,7 @@ pub use sequence::KeystrokeSequence;
 pub use sequence::KeystrokeSequenceParseError;
 pub use sequence_matcher::MatchOutcome;
 pub use sequence_matcher::SequenceMatcher;
+pub use sequence_matcher::TimeoutOutcome;
 
 bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

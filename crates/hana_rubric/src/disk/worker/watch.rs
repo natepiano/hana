@@ -157,7 +157,8 @@ impl DiskWorker {
             return;
         }
 
-        let watch_targets = user_keymap_watch_targets(paths);
+        let user_keymap_watch = resolve_user_keymap_watch(paths);
+        let callback_keymap_watch = user_keymap_watch.clone();
         let watch_notifications = Arc::new(Mutex::new(WatchNotifications::default()));
         let callback_notifications = Arc::clone(&watch_notifications);
         let (watcher_sender, watcher_receiver) = mpsc::sync_channel(1);
@@ -176,7 +177,7 @@ impl DiskWorker {
                     if event
                         .paths
                         .iter()
-                        .any(|event_path| watch_targets.contains(event_path)) =>
+                        .any(|event_path| callback_keymap_watch.reports(event_path)) =>
                 {
                     notifications.dirty = true;
                     true
@@ -213,12 +214,25 @@ impl DiskWorker {
             );
             return;
         }
+        let symlink_parent_watch = watch_symlink_target_parent(&mut watcher, &user_keymap_watch);
+
+        let previously_reported_watch_error = self.reported_watch_error.take();
 
         self.watcher = Some(watcher);
         self.watcher_notifications = Some(watch_notifications);
         self.watcher_receiver = Some(watcher_receiver);
-        self.reported_watch_error = None;
         self.status.watching.store(true, Ordering::Release);
+
+        if let SymlinkParentWatch::Unwatched {
+            target_parent,
+            message,
+        } = symlink_parent_watch
+        {
+            // The symlink-parent failure survives every recreation, so it is compared against what
+            // `report_watcher_setup_failure` last reported rather than against the cleared field.
+            self.reported_watch_error = previously_reported_watch_error;
+            self.report_watcher_setup_failure(&target_parent, message);
+        }
     }
 
     fn report_watcher_setup_failure(&mut self, path: &Path, message: String) {
@@ -226,6 +240,100 @@ impl DiskWorker {
             self.report_diagnostics(vec![channels::disk_diagnostic(path, &message)]);
             self.reported_watch_error = Some(message);
         }
+    }
+}
+
+/// How [`KeymapPaths::user_keymap`] sits relative to the watched configuration directory.
+///
+/// Each variant carries every path form [`Self::reports`] accepts as an event for that keymap
+/// file, and [`SymlinkParentWatch`] reads [`Self::ThroughSymlink`] to decide whether a second
+/// watch is placed.
+#[derive(Clone)]
+enum UserKeymapWatch {
+    /// The configuration directory did not canonicalize, so only the configured path is known.
+    UnresolvedPath { configured: PathBuf },
+    /// The keymap file itself lives in the watched configuration directory.
+    WithinConfigDirectory {
+        configured: PathBuf,
+        resolved:   PathBuf,
+    },
+    /// The keymap file is a symlink to a file in another directory.
+    ///
+    /// An editor saves by writing a temporary file and renaming it over the target, which replaces
+    /// the file the watch was placed on. A watch on `target_parent` sees that rename, so edits
+    /// keep arriving after the first save.
+    ThroughSymlink {
+        configured:     PathBuf,
+        resolved:       PathBuf,
+        symlink_target: PathBuf,
+        target_parent:  PathBuf,
+    },
+}
+
+impl UserKeymapWatch {
+    fn reports(&self, event_path: &Path) -> bool {
+        match self {
+            Self::UnresolvedPath { configured } => event_path == configured,
+            Self::WithinConfigDirectory {
+                configured,
+                resolved,
+            } => event_path == configured || event_path == resolved,
+            Self::ThroughSymlink {
+                configured,
+                resolved,
+                symlink_target,
+                ..
+            } => event_path == configured || event_path == resolved || event_path == symlink_target,
+        }
+    }
+}
+
+/// Whether the directory holding a symlinked keymap file is watched alongside the keymap.
+enum SymlinkParentWatch {
+    /// The keymap file is not a symlink out of the configuration directory.
+    NotNeeded,
+    /// The directory holding the symlink target is watched, so a rename-over save is seen.
+    Established,
+    /// The directory holding the symlink target is not watched, and why.
+    Unwatched {
+        target_parent: PathBuf,
+        message:       String,
+    },
+}
+
+/// Also watches the directory a symlinked keymap file resolves into.
+///
+/// Skipped when the platform's recommended watcher is a polling one: a network or virtual mount
+/// would then be walked on every interval, so the failure is recorded instead of paid for.
+fn watch_symlink_target_parent(
+    watcher: &mut notify::RecommendedWatcher,
+    user_keymap_watch: &UserKeymapWatch,
+) -> SymlinkParentWatch {
+    let UserKeymapWatch::ThroughSymlink { target_parent, .. } = user_keymap_watch else {
+        return SymlinkParentWatch::NotNeeded;
+    };
+
+    if matches!(
+        notify::RecommendedWatcher::kind(),
+        notify::WatcherKind::PollWatcher
+    ) {
+        return SymlinkParentWatch::Unwatched {
+            target_parent: target_parent.clone(),
+            message:       String::from(
+                "The keymap file is a symlink and this platform watches only by polling, so a \
+                 save that renames over the symlink target is carried by the poll audit instead.",
+            ),
+        };
+    }
+
+    match watcher.watch(target_parent, RecursiveMode::NonRecursive) {
+        Ok(()) => SymlinkParentWatch::Established,
+        Err(error) => SymlinkParentWatch::Unwatched {
+            target_parent: target_parent.clone(),
+            message:       format!(
+                "Could not watch the directory holding the keymap symlink target: {error}"
+            ),
+        },
     }
 }
 
@@ -238,21 +346,55 @@ impl DiskWorker {
 /// within [`WorkerTimings::debounce`] rather than leaving it to the much later
 /// [`WorkerTimings::poll`] audit.
 ///
+/// The keymap file may also be a symlink of its own, which a dotfile manager creates when it
+/// links one tracked file into an otherwise untracked directory. Resolving it costs one
+/// `read_link` that fails on the ordinary case.
+///
 /// [`WorkerTimings::debounce`]: super::runtime::WorkerTimings::debounce
 /// [`WorkerTimings::poll`]: super::runtime::WorkerTimings::poll
-fn user_keymap_watch_targets(paths: &KeymapPaths) -> [PathBuf; 2] {
-    let configured_keymap = paths.user_keymap().to_path_buf();
-    let resolved_keymap = paths
+fn resolve_user_keymap_watch(paths: &KeymapPaths) -> UserKeymapWatch {
+    let configured = paths.user_keymap().to_path_buf();
+    let Some((config_directory, file_name)) = paths
         .config_directory()
         .canonicalize()
         .ok()
         .zip(paths.user_keymap().file_name())
-        .map_or_else(
-            || configured_keymap.clone(),
-            |(config_directory, file_name)| config_directory.join(file_name),
-        );
+    else {
+        return UserKeymapWatch::UnresolvedPath { configured };
+    };
+    let resolved = config_directory.join(file_name);
 
-    [configured_keymap, resolved_keymap]
+    let Ok(link_target) = resolved.read_link() else {
+        return UserKeymapWatch::WithinConfigDirectory {
+            configured,
+            resolved,
+        };
+    };
+    let absolute_target = if link_target.is_absolute() {
+        link_target
+    } else {
+        config_directory.join(link_target)
+    };
+    let symlink_target = absolute_target
+        .canonicalize()
+        .unwrap_or_else(|_| absolute_target.clone());
+    let target_parent = symlink_target
+        .parent()
+        .map_or_else(|| config_directory.clone(), Path::to_path_buf);
+
+    if target_parent == config_directory {
+        return UserKeymapWatch::WithinConfigDirectory {
+            configured,
+            resolved,
+        };
+    }
+
+    UserKeymapWatch::ThroughSymlink {
+        configured,
+        resolved,
+        symlink_target,
+        target_parent,
+    }
 }
 
 #[cfg(test)]
@@ -268,6 +410,7 @@ mod tests {
     use std::time::Instant;
 
     use super::WatchMode;
+    use crate::disk::KeymapPathAvailability;
     use crate::disk::KeymapPaths;
     use crate::disk::paths::ENVIRONMENT_LOCK;
     use crate::disk::paths::TestDirectory;
@@ -281,13 +424,17 @@ mod tests {
     const NATIVE_WATCH_DEADLINE: Duration = Duration::from_millis(500);
     const POLL_AUDIT_INTERVAL: Duration = Duration::from_millis(20);
     const RETRY_INTERVAL: Duration = Duration::from_millis(30);
+    const MISSING_SYMLINK_TARGET: &str = "missing-keymap-target/user-keymap.jsonc";
     const TEST_APP_NAME: &str = "hana-rubric-watch-test";
     const TEST_TIMEOUT: Duration = Duration::from_secs(3);
     const WAIT_INTERVAL: Duration = Duration::from_millis(5);
 
     fn isolated_paths(temporary_directory: &TestDirectory) -> Result<KeymapPaths, String> {
-        let paths = KeymapPaths::new(TEST_APP_NAME)
-            .ok_or_else(|| String::from("test keymap paths should resolve"))?;
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .map_err(|keymap_path_failure| {
+                format!("test keymap paths should resolve: {keymap_path_failure:?}")
+            })?;
 
         if !paths
             .config_directory()
@@ -302,7 +449,9 @@ mod tests {
     }
 
     fn start_worker(worker_timings: WorkerTimings, watch_mode: WatchMode) -> DiskWorkerChannels {
-        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .expect("test keymap paths resolve");
         runtime::start_disk_worker_with(
             &paths,
             DEFAULT_KEYMAP.to_vec(),
@@ -380,6 +529,47 @@ mod tests {
         Err(String::from(
             "disk worker did not handle the injected watcher notification",
         ))
+    }
+
+    /// A symlinked keymap file whose target directory is missing fails the same way on every
+    /// watcher recreation, and `recreate_watcher` clears the reported watch error before it
+    /// reports that failure. The report must still be compared against what was reported last.
+    #[cfg(unix)]
+    #[test]
+    fn a_repeated_symlink_parent_failure_is_reported_once() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("symlink-parent-failure").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        fs::create_dir_all(paths.config_directory())
+            .map_err(|error| format!("configuration directory creation failed: {error}"))?;
+        std::os::unix::fs::symlink(
+            temporary_directory.path().join(MISSING_SYMLINK_TARGET),
+            paths.user_keymap(),
+        )
+        .map_err(|error| format!("user keymap symlink creation failed: {error}"))?;
+
+        let (mut disk_worker, slot) = runtime::watch_test_worker(&paths);
+        disk_worker.recreate_watcher(&paths);
+        disk_worker.recreate_watcher(&paths);
+
+        let symlink_failures = slot
+            .take()
+            .ok_or_else(|| {
+                String::from("the symlinked keymap target did not produce a watch diagnostic")
+            })?
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message.contains("symlink"))
+            .count();
+        assert_eq!(symlink_failures, 1);
+
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
     }
 
     #[test]
@@ -483,6 +673,79 @@ mod tests {
         worker.shutdown();
         drop(xdg_config_home);
         drop(environment_lock);
+        Ok(())
+    }
+
+    /// A dotfile manager links one tracked file into an otherwise untracked directory, so the
+    /// keymap path is a symlink to a file the configuration directory does not contain. An editor
+    /// then saves by renaming a temporary file over that target, which replaces the file a
+    /// file-only watch was placed on.
+    #[cfg(unix)]
+    #[test]
+    fn a_native_watch_carries_edits_to_a_symlinked_keymap_file() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("symlinked-keymap").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let keymap_store = temporary_directory.path().join("keymap-store");
+        let linked_keymap = keymap_store.join("tracked-keymap.jsonc");
+
+        fs::create_dir_all(paths.config_directory())
+            .map_err(|error| format!("configuration directory setup failed: {error}"))?;
+        fs::create_dir_all(&keymap_store)
+            .map_err(|error| format!("keymap store setup failed: {error}"))?;
+        fs::write(&linked_keymap, runtime::USER_KEYMAP_STUB)
+            .map_err(|error| format!("linked keymap setup failed: {error}"))?;
+        std::os::unix::fs::symlink(&linked_keymap, paths.user_keymap())
+            .map_err(|error| format!("keymap symlink setup failed: {error}"))?;
+
+        let worker_timings = WorkerTimings {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     None,
+            retry:    RETRY_INTERVAL,
+        };
+        let mut worker = start_worker(worker_timings, WatchMode::Native);
+
+        wait_for_snapshot(
+            &worker,
+            paths.user_keymap(),
+            Some(runtime::USER_KEYMAP_STUB),
+        )?;
+        wait_for_watcher(&worker, true)?;
+
+        let edited_contents = b"{\"bindings\": [{\"bindings\": {}}]}";
+        let edited_at = Instant::now();
+        fs::write(paths.user_keymap(), edited_contents)
+            .map_err(|error| format!("symlinked keymap write failed: {error}"))?;
+        wait_for_snapshot(&worker, paths.user_keymap(), Some(edited_contents))?;
+        assert_within_native_deadline("a direct edit", edited_at.elapsed())?;
+
+        let renamed_contents = b"{\"bindings\": [{\"context\": \"resting\"}]}";
+        let staged_keymap = keymap_store.join("tracked-keymap.jsonc.tmp");
+        let renamed_at = Instant::now();
+        fs::write(&staged_keymap, renamed_contents)
+            .map_err(|error| format!("staged keymap write failed: {error}"))?;
+        fs::rename(&staged_keymap, &linked_keymap)
+            .map_err(|error| format!("rename-over-target save failed: {error}"))?;
+        wait_for_snapshot(&worker, paths.user_keymap(), Some(renamed_contents))?;
+        assert_within_native_deadline("a rename-over-target save", renamed_at.elapsed())?;
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    fn assert_within_native_deadline(save_form: &str, latency: Duration) -> Result<(), String> {
+        if latency > NATIVE_WATCH_DEADLINE {
+            return Err(format!(
+                "the native watch delivered {save_form} after {latency:?}, past the {NATIVE_WATCH_DEADLINE:?} deadline",
+            ));
+        }
+
         Ok(())
     }
 

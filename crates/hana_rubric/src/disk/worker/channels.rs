@@ -252,6 +252,7 @@ mod tests {
     use super::DiskSnapshot;
     use super::DiskWorkerMessage;
     use super::disk_diagnostic;
+    use crate::disk::KeymapPathAvailability;
     use crate::disk::KeymapPaths;
     use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
     use crate::disk::paths::ENVIRONMENT_LOCK;
@@ -263,8 +264,11 @@ mod tests {
     const SNAPSHOT_BURST_COUNT: usize = 1000;
 
     fn isolated_paths(temporary_directory: &TestDirectory) -> Result<KeymapPaths, String> {
-        let paths = KeymapPaths::new(TEST_APP_NAME)
-            .ok_or_else(|| String::from("test keymap paths should resolve"))?;
+        let paths = KeymapPathAvailability::for_app_name(TEST_APP_NAME)
+            .into_resolved()
+            .map_err(|keymap_path_failure| {
+                format!("test keymap paths should resolve: {keymap_path_failure:?}")
+            })?;
 
         if !paths
             .config_directory()

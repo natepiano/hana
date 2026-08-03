@@ -292,6 +292,7 @@ mod tests {
     use super::DerivedContext;
     use super::DerivedContextRules;
     use crate::ActiveCondition;
+    use crate::ActiveConditionState;
     use crate::Capability;
     use crate::DiagnosticKind;
     use crate::DiagnosticSeverity;
@@ -300,6 +301,7 @@ mod tests {
     use crate::KeymapLoadFailures;
     use crate::KeymapPlugin;
     use crate::ReflectKeymapCommand;
+    use crate::condition::ConditionLookup;
     use crate::condition::ConditionRegistry;
 
     static CONDITION_ERRORS: AtomicUsize = AtomicUsize::new(0);
@@ -590,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn active_condition_reflects_the_derived_variant_on_the_next_update() {
+    fn active_condition_reflects_the_derived_variant_on_the_next_update() -> Result<(), String> {
         let mut app = app_with_derived_context(
             DerivedContext::new(BasicContext::Resting)
                 .when(BasicContext::Active, any_with_component::<ActiveFact>),
@@ -601,14 +603,19 @@ mod tests {
         assert_eq!(state::<BasicContext>(&app), BasicContext::Active);
         app.update();
 
-        let expected_handle = app
-            .world()
-            .resource::<ConditionRegistry>()
-            .resolve("active");
-        assert_eq!(
-            app.world().resource::<ActiveCondition>().handle(),
-            expected_handle
-        );
+        let ConditionLookup::Registered {
+            handle: expected_handle,
+            ..
+        } = app.world().resource::<ConditionRegistry>().lookup("active")
+        else {
+            return Err(String::from("the derived context did not register active"));
+        };
+        assert!(matches!(
+            app.world().resource::<ActiveCondition>().state(),
+            ActiveConditionState::ResolvedCondition { handle, name }
+                if *handle == expected_handle && name.as_str() == "active"
+        ));
+        Ok(())
     }
 
     #[test]
@@ -773,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_uses_the_previous_context_until_the_next_preupdate() {
+    fn routing_uses_the_previous_context_until_the_next_preupdate() -> Result<(), String> {
         let mut app = App::new();
         register_dispatch_commands(&mut app);
         app.init_resource::<ButtonInput<KeyCode>>()
@@ -820,14 +827,19 @@ mod tests {
         assert_eq!(app.world().resource::<DispatchCounts>().resting, 1);
         assert_eq!(app.world().resource::<DispatchCounts>().active, 0);
         app.update();
-        let expected_handle = app
-            .world()
-            .resource::<ConditionRegistry>()
-            .resolve("active");
-        assert_eq!(
-            app.world().resource::<ActiveCondition>().handle(),
-            expected_handle
-        );
+        let ConditionLookup::Registered {
+            handle: expected_handle,
+            ..
+        } = app.world().resource::<ConditionRegistry>().lookup("active")
+        else {
+            return Err(String::from("the derived context did not register active"));
+        };
+        assert!(matches!(
+            app.world().resource::<ActiveCondition>().state(),
+            ActiveConditionState::ResolvedCondition { handle, name }
+                if *handle == expected_handle && name.as_str() == "active"
+        ));
+        Ok(())
     }
 
     #[test]

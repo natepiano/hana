@@ -9,11 +9,16 @@ use bevy::ecs::change_detection::DetectChanges;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::prelude::PreUpdate;
 use bevy::prelude::Reflect;
+use bevy::prelude::ReflectResource;
 use bevy::prelude::Res;
 use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use bevy::prelude::State;
 use bevy::prelude::States;
+use bevy::reflect::ReflectDeserialize;
+use bevy::reflect::ReflectSerialize;
+use serde::Deserialize;
+use serde::Serialize;
 use strum::EnumMessage;
 use strum::IntoEnumIterator;
 
@@ -29,8 +34,8 @@ use crate::keymap_plugin::RegistryValidationFailed;
 /// Applications define these names by deriving `strum::AsRefStr` with
 /// `#[strum(serialize_all = "snake_case")]` on their context enum. Keymap parsing resolves the
 /// authored text once, so the input path carries only an opaque handle.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Reflect)]
-#[reflect(opaque)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Reflect, Serialize)]
+#[reflect(opaque, Serialize, Deserialize)]
 pub struct ConditionName(String);
 
 impl ConditionName {
@@ -65,38 +70,98 @@ impl<T> KeymapContext for T where
 
 /// The registered condition currently selected by the application context.
 ///
-/// The resource contains only an internal registry handle. It deliberately does not retain a
-/// condition string, allowing the input path to select a compiled keymap without parsing or
-/// comparing names.
-#[derive(Debug, Default, Resource)]
+/// Reflection reads this resource so a remote client can ask which context is routing input.
+/// [`ActiveConditionState::ResolvedCondition`] carries the runtime handle the input path selects
+/// a compiled keymap with alongside the [`ConditionName`] the application authored, because a
+/// handle alone is an integer a reader outside the process cannot map back to a context.
+#[derive(Debug, Default, Reflect, Resource)]
+#[reflect(Resource)]
 pub struct ActiveCondition {
-    handle:         Option<ConditionHandle>,
-    is_initialized: bool,
+    state: ActiveConditionState,
 }
 
 impl ActiveCondition {
-    /// Returns whether input routing can select the active condition or the global matcher.
+    /// Returns the routing state the application's context source has reached.
     #[must_use]
-    pub const fn is_initialized(&self) -> bool { self.is_initialized }
+    pub const fn state(&self) -> &ActiveConditionState { &self.state }
 
-    pub(crate) const fn handle(&self) -> Option<ConditionHandle> { self.handle }
+    /// Records the condition the application's context now selects.
+    ///
+    /// Returns without writing when the state already holds `condition_handle`: the context
+    /// sources call this whenever `Res::is_changed` reports a `ResMut` deref, and cloning `name`
+    /// on every such frame would allocate inside [`KeymapSystems::UpdateActiveCondition`], which
+    /// runs before [`KeymapSystems::Route`].
+    pub(crate) fn resolve(&mut self, condition_handle: ConditionHandle, name: &ConditionName) {
+        if matches!(
+            self.state,
+            ActiveConditionState::ResolvedCondition { handle, .. } if handle == condition_handle
+        ) {
+            return;
+        }
 
-    const fn update(&mut self, condition_handle: ConditionHandle) {
-        self.handle = Some(condition_handle);
-        self.is_initialized = true;
+        self.state = ActiveConditionState::ResolvedCondition {
+            handle: condition_handle,
+            name:   name.clone(),
+        };
     }
 
-    pub(crate) const fn await_context(&mut self) {
-        self.handle = None;
-        self.is_initialized = false;
-    }
+    pub(crate) fn await_context(&mut self) { self.state = ActiveConditionState::AwaitingContext; }
 
-    pub(crate) const fn enable_global(&mut self) { self.is_initialized = true; }
+    pub(crate) fn enable_global(&mut self) { self.state = ActiveConditionState::GlobalRouting; }
+}
+
+/// Which keymap scope [`ActiveCondition`] currently routes input through.
+#[derive(Debug, Default, Reflect)]
+pub enum ActiveConditionState {
+    /// A context source is registered but has not reported a context yet, so no binding routes.
+    #[default]
+    AwaitingContext,
+    /// No context source is registered, so every binding routes through the global matcher.
+    GlobalRouting,
+    /// The application's context resolved to this registered condition.
+    ResolvedCondition {
+        /// The compact registry identity the input path selects a compiled matcher with.
+        #[reflect(ignore)]
+        handle: ConditionHandle,
+        /// The condition text the application's context enum declared.
+        name:   ConditionName,
+    },
 }
 
 /// A condition's compact registry identity.
+///
+/// The value is meaningful only to the [`ConditionRegistry`] that issued it.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct ConditionHandle(usize);
+pub struct ConditionHandle(usize);
+
+impl ConditionHandle {
+    /// Whether [`ConditionRegistry`] issued this handle.
+    ///
+    /// A handle that it did not issue reaches [`ActiveCondition`] only through
+    /// [`Default::default`], which [`FromReflect`] uses to fill the `#[reflect(ignore)]` handle
+    /// field of [`ActiveConditionState::ResolvedCondition`] when a remote client reconstructs the
+    /// resource from a name alone.
+    ///
+    /// [`FromReflect`]: bevy::reflect::FromReflect
+    pub(crate) const fn is_registry_issued(self) -> bool { self.0 != usize::MAX }
+}
+
+impl Default for ConditionHandle {
+    /// Produces an index [`ConditionRegistry`] can never issue, so a reconstructed handle fails
+    /// [`Self::is_registry_issued`] instead of naming the first registered condition.
+    fn default() -> Self { Self(usize::MAX) }
+}
+
+/// The result of resolving authored condition text against the registry.
+pub(crate) enum ConditionLookup<'registry> {
+    /// The registry declared this condition.
+    Registered {
+        handle: ConditionHandle,
+        name:   &'registry ConditionName,
+    },
+    /// No registered condition carries the requested text.
+    UnregisteredName,
+}
 
 /// Stable condition metadata for schema and companion-file generation.
 pub(crate) struct ConditionInfo<'registry> {
@@ -169,12 +234,18 @@ impl ConditionRegistry {
         Ok(())
     }
 
-    /// Resolves authored condition text to its compact runtime handle.
+    /// Resolves authored condition text to its handle and the name the registry stores for it.
     #[must_use]
-    pub(crate) fn resolve(&self, condition_name: &str) -> Option<ConditionHandle> {
-        self.iter()
-            .position(|condition_info| condition_info.name.as_str() == condition_name)
-            .map(ConditionHandle)
+    pub(crate) fn lookup(&self, condition_name: &str) -> ConditionLookup<'_> {
+        self.entries
+            .iter()
+            .position(|condition_entry| condition_entry.name.as_str() == condition_name)
+            .map_or(ConditionLookup::UnregisteredName, |index| {
+                ConditionLookup::Registered {
+                    handle: ConditionHandle(index),
+                    name:   &self.entries[index].name,
+                }
+            })
     }
 
     /// Iterates over registered condition metadata in declaration order.
@@ -224,8 +295,10 @@ fn update_active_condition<C: KeymapContext>(
     condition_registry: &ConditionRegistry,
     active_condition: &mut ActiveCondition,
 ) {
-    if let Some(condition_handle) = condition_registry.resolve(context.as_ref()) {
-        active_condition.update(condition_handle);
+    if let ConditionLookup::Registered { handle, name } =
+        condition_registry.lookup(context.as_ref())
+    {
+        active_condition.resolve(handle, name);
     }
 }
 
@@ -389,10 +462,19 @@ pub(crate) fn retain_context_diagnostics(app: &mut App, diagnostics: &[Diagnosti
 
 #[cfg(test)]
 mod tests {
+    use std::any::TypeId;
+
+    use bevy::ecs::system::IntoSystem;
+    use bevy::ecs::system::System;
     use bevy::prelude::App;
     use bevy::prelude::NextState;
     use bevy::prelude::Resource;
     use bevy::prelude::States;
+    use bevy::reflect::PartialReflect;
+    use bevy::reflect::ReflectDeserialize;
+    use bevy::reflect::ReflectRef;
+    use bevy::reflect::ReflectSerialize;
+    use bevy::reflect::TypeRegistry;
     use bevy::state::app::AppExtStates;
     use bevy::state::app::StatesPlugin;
     use strum::AsRefStr;
@@ -400,11 +482,19 @@ mod tests {
     use strum::EnumMessage;
 
     use super::ActiveCondition;
+    use super::ActiveConditionState;
     use super::ConditionHandle;
+    use super::ConditionLookup;
+    use super::ConditionName;
     use super::ConditionRegistry;
     use super::KeymapContext;
+    use super::sync_resource_condition;
     use crate::DiagnosticKind;
     use crate::KeymapPlugin;
+
+    /// Frames the allocation test runs before measuring, so every routing structure the sync
+    /// system touches is already populated.
+    const SYNC_WARMUP_FRAMES: usize = 3;
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq, Resource)]
     #[strum(serialize_all = "snake_case")]
@@ -428,6 +518,18 @@ mod tests {
     #[strum(serialize_all = "snake_case")]
     enum MissingDescriptionContext {
         Flying,
+    }
+
+    /// The three context names hana ships, spelled exactly as its keymap files author them.
+    #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq, Resource)]
+    #[strum(serialize_all = "snake_case")]
+    enum ShippedContext {
+        #[strum(message = "While no modal interaction is running")]
+        Resting,
+        #[strum(message = "While a dimension lock is engaged")]
+        DimensionLock,
+        #[strum(message = "While a dimension lock is rotating")]
+        DimensionLockRotation,
     }
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
@@ -519,74 +621,185 @@ mod tests {
     }
 
     #[test]
-    fn resource_context_changes_update_the_active_condition_handle() {
+    fn resource_context_changes_update_the_active_condition_handle() -> Result<(), String> {
         let mut app = App::new();
         app.insert_resource(ResourceContext::Flying)
             .add_plugins(KeymapPlugin::new().for_context::<ResourceContext>());
 
         app.update();
-        assert_active_condition(&app, "flying");
+        assert_active_condition(&app, "flying")?;
 
         *app.world_mut().resource_mut::<ResourceContext>() = ResourceContext::Paused;
         app.update();
-        assert_active_condition(&app, "paused");
+        assert_active_condition(&app, "paused")
+    }
+
+    /// A context resource an application writes every frame reports `Res::is_changed` every frame,
+    /// so the sync system must reach the routing state without allocating.
+    #[test]
+    fn an_unchanged_context_syncs_without_allocating() -> Result<(), String> {
+        let mut app = App::new();
+        app.insert_resource(ResourceContext::Flying)
+            .add_plugins(KeymapPlugin::new().for_context::<ResourceContext>());
+        app.update();
+
+        let mut sync_condition =
+            IntoSystem::into_system(sync_resource_condition::<ResourceContext>);
+        sync_condition.initialize(app.world_mut());
+        for _ in 0..SYNC_WARMUP_FRAMES {
+            *app.world_mut().resource_mut::<ResourceContext>() = ResourceContext::Flying;
+            sync_condition
+                .run((), app.world_mut())
+                .map_err(|error| format!("the condition sync system did not run: {error}"))?;
+        }
+
+        *app.world_mut().resource_mut::<ResourceContext>() = ResourceContext::Flying;
+        let allocations_before = crate::TEST_ALLOCATOR.allocation_count();
+        let sync_result = sync_condition.run((), app.world_mut());
+        let allocations_after = crate::TEST_ALLOCATOR.allocation_count();
+
+        sync_result.map_err(|error| format!("the condition sync system did not run: {error}"))?;
+        assert_eq!(allocations_after - allocations_before, 0);
+        Ok(())
     }
 
     #[test]
-    fn state_context_changes_update_the_active_condition_handle() {
+    fn state_context_changes_update_the_active_condition_handle() -> Result<(), String> {
         let mut app = App::new();
         app.add_plugins(StatesPlugin)
             .insert_state(StateContext::Flying)
             .add_plugins(KeymapPlugin::new().for_state_context::<StateContext>());
 
         app.update();
-        assert_active_condition(&app, "flying");
+        assert_active_condition(&app, "flying")?;
 
         app.world_mut()
             .resource_mut::<NextState<StateContext>>()
             .set(StateContext::Paused);
         app.update();
         app.update();
-        assert_active_condition(&app, "paused");
+        assert_active_condition(&app, "paused")
     }
 
     #[test]
     fn missing_state_resource_leaves_the_active_condition_unchanged() -> Result<(), String> {
         let mut app = App::new();
         app.add_plugins(KeymapPlugin::new().for_state_context::<StateContext>());
-        let paused = app
-            .world()
-            .resource::<ConditionRegistry>()
-            .resolve("paused")
-            .ok_or_else(|| "state context did not register paused".to_owned())?;
+        let paused = registered_condition(&app, "paused")?;
         app.world_mut()
             .resource_mut::<ActiveCondition>()
-            .update(paused);
+            .resolve(paused, &ConditionName::new("paused"));
 
         app.update();
 
+        assert!(matches!(
+            app.world().resource::<ActiveCondition>().state(),
+            ActiveConditionState::ResolvedCondition { handle, name }
+                if *handle == paused && name.as_str() == "paused"
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn every_shipped_context_name_reflects_as_its_authored_string() -> Result<(), String> {
+        let mut app = App::new();
+        app.insert_resource(ShippedContext::Resting)
+            .add_plugins(KeymapPlugin::new().for_context::<ShippedContext>());
+
+        for shipped_context in [
+            ShippedContext::Resting,
+            ShippedContext::DimensionLock,
+            ShippedContext::DimensionLockRotation,
+        ] {
+            *app.world_mut().resource_mut::<ShippedContext>() = shipped_context;
+            app.update();
+
+            let active_condition = app.world().resource::<ActiveCondition>();
+            let reflected_name = reflected_condition_name(active_condition)?;
+
+            assert_eq!(reflected_name, shipped_context.as_ref());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_condition_name_reflects_opaquely_and_carries_its_serde_type_data() -> Result<(), String> {
+        let condition_name = ConditionName::new("dimension_lock_rotation");
+        let mut type_registry = TypeRegistry::default();
+        type_registry.register::<ConditionName>();
+        let registration = type_registry
+            .get(TypeId::of::<ConditionName>())
+            .ok_or_else(|| String::from("ConditionName is not registered"))?;
+
+        assert!(matches!(
+            condition_name.reflect_ref(),
+            ReflectRef::Opaque(_)
+        ));
+        assert!(registration.data::<ReflectSerialize>().is_some());
+        assert!(registration.data::<ReflectDeserialize>().is_some());
         assert_eq!(
-            app.world().resource::<ActiveCondition>().handle(),
-            Some(paused)
+            serde_json::to_string(&condition_name)
+                .map_err(|error| format!("condition name did not serialize: {error}"))?,
+            "\"dimension_lock_rotation\""
         );
         Ok(())
     }
 
     fn assert_keymap_context<C: KeymapContext>() {}
 
-    fn assert_active_condition(app: &App, condition_name: &str) {
-        let active_condition = app.world().resource::<ActiveCondition>();
-        let condition_registry = app.world().resource::<ConditionRegistry>();
-        let _: Option<ConditionHandle> = active_condition.handle;
-        let expected_handle = condition_registry.resolve(condition_name);
+    fn registered_condition(app: &App, condition_name: &str) -> Result<ConditionHandle, String> {
+        match app
+            .world()
+            .resource::<ConditionRegistry>()
+            .lookup(condition_name)
+        {
+            ConditionLookup::Registered { handle, .. } => Ok(handle),
+            ConditionLookup::UnregisteredName => Err(format!(
+                "the test context did not register {condition_name}"
+            )),
+        }
+    }
 
-        assert!(active_condition.is_initialized());
-        assert!(expected_handle.is_some());
+    fn reflected_condition_name(active_condition: &ActiveCondition) -> Result<String, String> {
+        let ReflectRef::Struct(reflected_condition) = active_condition.reflect_ref() else {
+            return Err(String::from("ActiveCondition does not reflect as a struct"));
+        };
+        let reflected_state = reflected_condition
+            .field("state")
+            .ok_or_else(|| String::from("ActiveCondition has no reflected state field"))?;
+        let ReflectRef::Enum(reflected_state) = reflected_state.reflect_ref() else {
+            return Err(String::from(
+                "ActiveConditionState does not reflect as an enum",
+            ));
+        };
+
+        if reflected_state.variant_name() != "ResolvedCondition" {
+            return Err(format!(
+                "the active condition reflected as {}",
+                reflected_state.variant_name()
+            ));
+        }
+
+        reflected_state
+            .field("name")
+            .ok_or_else(|| String::from("ResolvedCondition has no reflected name field"))?
+            .try_downcast_ref::<ConditionName>()
+            .map(|condition_name| condition_name.as_str().to_owned())
+            .ok_or_else(|| String::from("the reflected name is not a ConditionName"))
+    }
+
+    fn assert_active_condition(app: &App, condition_name: &str) -> Result<(), String> {
+        let expected_handle = registered_condition(app, condition_name)?;
+
         assert_ne!(
-            condition_registry.resolve("flying"),
-            condition_registry.resolve("paused")
+            registered_condition(app, "flying")?,
+            registered_condition(app, "paused")?
         );
-
-        assert_eq!(active_condition.handle, expected_handle);
+        assert!(matches!(
+            app.world().resource::<ActiveCondition>().state(),
+            ActiveConditionState::ResolvedCondition { handle, name }
+                if *handle == expected_handle && name.as_str() == condition_name
+        ));
+        Ok(())
     }
 }
