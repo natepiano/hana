@@ -1679,7 +1679,7 @@ mod tests {
         if cfg!(target_os = "macos") {
             assert_eq!(
                 recovery_diagnostic.message,
-                "Keystroke 1 `platform-p` is reserved for the application's recovery command and cannot start a keymap sequence."
+                "Keystroke 1 `cmd-p` is reserved for the application's recovery command and cannot start a keymap sequence."
             );
         } else {
             assert_eq!(

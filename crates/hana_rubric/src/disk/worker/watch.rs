@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
@@ -34,6 +35,10 @@ pub(super) enum WatchMode {
     PollOnly,
     #[cfg(test)]
     Injected,
+    /// [`Self::Injected`], with the worker parked between arming its watcher and its first read
+    /// until `DiskWorkerChannels::release_first_read` lets it go.
+    #[cfg(test)]
+    InjectedHoldingFirstRead,
 }
 
 impl WatchMode {
@@ -43,12 +48,19 @@ impl WatchMode {
             #[cfg(test)]
             Self::PollOnly => false,
             #[cfg(test)]
-            Self::Injected => false,
+            Self::Injected | Self::InjectedHoldingFirstRead => false,
         }
     }
 
     #[cfg(test)]
-    pub(super) const fn is_injected(self) -> bool { matches!(self, Self::Injected) }
+    pub(super) const fn is_injected(self) -> bool {
+        matches!(self, Self::Injected | Self::InjectedHoldingFirstRead)
+    }
+
+    #[cfg(test)]
+    pub(super) const fn holds_first_read(self) -> bool {
+        matches!(self, Self::InjectedHoldingFirstRead)
+    }
 
     #[cfg(not(test))]
     pub(super) const fn is_injected(self) -> bool {
@@ -145,7 +157,7 @@ impl DiskWorker {
             return;
         }
 
-        let target_path = paths.user_keymap().to_path_buf();
+        let watch_targets = user_keymap_watch_targets(paths);
         let watch_notifications = Arc::new(Mutex::new(WatchNotifications::default()));
         let callback_notifications = Arc::clone(&watch_notifications);
         let (watcher_sender, watcher_receiver) = mpsc::sync_channel(1);
@@ -164,7 +176,7 @@ impl DiskWorker {
                     if event
                         .paths
                         .iter()
-                        .any(|event_path| event_path == &target_path) =>
+                        .any(|event_path| watch_targets.contains(event_path)) =>
                 {
                     notifications.dirty = true;
                     true
@@ -217,6 +229,32 @@ impl DiskWorker {
     }
 }
 
+/// Every path form the operating system may use when it reports an event for the user keymap.
+///
+/// macOS delivers `notify::Event` paths fully resolved, so an event for
+/// [`KeymapPaths::user_keymap`] does not equal that path whenever the configuration directory is
+/// reached through a symlink — the ordinary case under a dotfile manager, and the form `TMPDIR`
+/// always takes. Accepting the resolved form as well keeps the native watch delivering an edit
+/// within [`WorkerTimings::debounce`] rather than leaving it to the much later
+/// [`WorkerTimings::poll`] audit.
+///
+/// [`WorkerTimings::debounce`]: super::runtime::WorkerTimings::debounce
+/// [`WorkerTimings::poll`]: super::runtime::WorkerTimings::poll
+fn user_keymap_watch_targets(paths: &KeymapPaths) -> [PathBuf; 2] {
+    let configured_keymap = paths.user_keymap().to_path_buf();
+    let resolved_keymap = paths
+        .config_directory()
+        .canonicalize()
+        .ok()
+        .zip(paths.user_keymap().file_name())
+        .map_or_else(
+            || configured_keymap.clone(),
+            |(config_directory, file_name)| config_directory.join(file_name),
+        );
+
+    [configured_keymap, resolved_keymap]
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -240,6 +278,7 @@ mod tests {
 
     const DEFAULT_KEYMAP: &[u8] = b"{\"bindings\": []}";
     const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
+    const NATIVE_WATCH_DEADLINE: Duration = Duration::from_millis(500);
     const POLL_AUDIT_INTERVAL: Duration = Duration::from_millis(20);
     const RETRY_INTERVAL: Duration = Duration::from_millis(30);
     const TEST_APP_NAME: &str = "hana-rubric-watch-test";
@@ -386,6 +425,58 @@ mod tests {
         if worker.read_attempts() != read_attempts_before_write + 1 {
             return Err(String::from(
                 "the recreated watcher snapshot did not come from its injected watcher edge",
+            ));
+        }
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn a_native_watch_carries_an_edit_without_a_poll_audit() -> Result<(), String> {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("native-watch").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        // The temporary directory is deliberately left in its symlinked form. A configuration
+        // directory reached through a symlink is the ordinary case on macOS and under a dotfile
+        // manager, and it is precisely the case a path-equality watch check fails.
+        let worker_timings = WorkerTimings {
+            debounce: DEBOUNCE_INTERVAL,
+            poll:     None,
+            retry:    RETRY_INTERVAL,
+        };
+        let mut worker = start_worker(worker_timings, WatchMode::Native);
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        // Waiting for the stub proves the first read has already happened, so nothing but the
+        // native watch can carry the edit written below.
+        wait_for_snapshot(
+            &worker,
+            paths.user_keymap(),
+            Some(runtime::USER_KEYMAP_STUB),
+        )?;
+        wait_for_watcher(&worker, true)?;
+
+        let edited_contents = b"{\"bindings\": [{\"bindings\": {}}]}";
+        let edited_at = Instant::now();
+        fs::write(paths.user_keymap(), edited_contents)
+            .map_err(|error| format!("native watch keymap write failed: {error}"))?;
+        wait_for_snapshot(&worker, paths.user_keymap(), Some(edited_contents))?;
+        let latency = edited_at.elapsed();
+
+        if latency > NATIVE_WATCH_DEADLINE {
+            return Err(format!(
+                "the native watch delivered an edit after {latency:?}, past the {NATIVE_WATCH_DEADLINE:?} deadline",
             ));
         }
 

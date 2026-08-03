@@ -35,7 +35,7 @@ use crate::disk::constants::POLL_INTERVAL;
 use crate::disk::constants::RETRY_INTERVAL;
 use crate::disk::paths::KeymapPaths;
 
-const USER_KEYMAP_STUB: &[u8] = br#"{
+pub(super) const USER_KEYMAP_STUB: &[u8] = br#"{
   "$schema": "./keymap.schema.json",
   "bindings": []
 }"#;
@@ -66,8 +66,10 @@ pub(super) fn start_disk_worker_with(
     let (control_sender, control_receiver) = mpsc::channel();
     let status = Arc::new(WorkerStatus::default());
     #[cfg(test)]
+    let (first_read_release, first_read_hold) = mpsc::sync_channel(1);
+    #[cfg(test)]
     let (test_watcher, watcher_notifications, watcher_receiver) = match watch_mode {
-        WatchMode::Injected => {
+        WatchMode::Injected | WatchMode::InjectedHoldingFirstRead => {
             let watcher_notifications = Arc::new(Mutex::new(WatchNotifications::default()));
             let (watcher_sender, watcher_receiver) = mpsc::sync_channel(1);
             let test_watcher = TestWatcher {
@@ -97,6 +99,8 @@ pub(super) fn start_disk_worker_with(
         watcher: None,
         watcher_notifications,
         watcher_receiver,
+        #[cfg(test)]
+        first_read_hold,
         observed_keymap: ObservedKeymap::Unknown,
         dirty_at: None,
         missing_retry_at: None,
@@ -114,6 +118,8 @@ pub(super) fn start_disk_worker_with(
         status,
         #[cfg(test)]
         test_watcher,
+        #[cfg(test)]
+        first_read_release,
     }
 }
 
@@ -129,6 +135,8 @@ pub(super) struct DiskWorker {
     pub(super) watcher:               Option<RecommendedWatcher>,
     pub(super) watcher_notifications: Option<Arc<Mutex<WatchNotifications>>>,
     pub(super) watcher_receiver:      Option<Receiver<()>>,
+    #[cfg(test)]
+    first_read_hold:                  Receiver<()>,
     observed_keymap:                  ObservedKeymap,
     pub(super) dirty_at:              Option<Instant>,
     missing_retry_at:                 Option<Instant>,
@@ -147,9 +155,16 @@ impl DiskWorker {
             self.schema.as_deref(),
         ));
         self.create_user_stub(&paths);
-        self.read_user_keymap(&paths, Instant::now());
         self.parent_exists = paths.config_directory().is_dir();
+
+        // The watcher is armed before the first read. A native watch only reports changes made
+        // after it starts, so reading first would lose any edit that landed between that read and
+        // `recreate_watcher` — recoverable only on the next `WorkerTimings::poll` audit, seconds
+        // later. Arming first makes every edit either visible to this read or reported as an event.
         self.recreate_watcher(&paths);
+        #[cfg(test)]
+        self.hold_first_read();
+        self.read_user_keymap(&paths, Instant::now());
 
         while self.process_control() {
             let now = Instant::now();
@@ -174,6 +189,15 @@ impl DiskWorker {
         }
 
         self.status.watching.store(false, Ordering::Release);
+    }
+
+    /// Parks the worker in the window a test needs to write into: after [`Self::recreate_watcher`]
+    /// arms the watch, before [`Self::read_user_keymap`] performs the first read.
+    #[cfg(test)]
+    fn hold_first_read(&self) {
+        if self.watch_mode.holds_first_read() {
+            let _ = self.first_read_hold.recv();
+        }
     }
 
     fn process_control(&self) -> bool {
@@ -471,6 +495,19 @@ mod tests {
         )
     }
 
+    fn start_injected_worker_holding_first_read(
+        worker_timings: WorkerTimings,
+    ) -> DiskWorkerChannels {
+        let paths = KeymapPaths::new(TEST_APP_NAME).expect("test keymap paths resolve");
+        start_disk_worker_with(
+            &paths,
+            DEFAULT_KEYMAP.to_vec(),
+            Some(b"{}".to_vec()),
+            worker_timings,
+            WatchMode::InjectedHoldingFirstRead,
+        )
+    }
+
     fn wait_for_message(worker: &DiskWorkerChannels) -> Result<DiskWorkerMessage, String> {
         let deadline = Instant::now() + TEST_TIMEOUT;
 
@@ -678,6 +715,46 @@ mod tests {
             ));
         }
         expect_no_message_for(&worker, QUIESCENCE_INTERVAL)?;
+
+        worker.shutdown();
+        drop(xdg_config_home);
+        drop(environment_lock);
+        Ok(())
+    }
+
+    #[test]
+    fn an_edit_landing_before_the_first_read_is_observed_without_a_poll_audit() -> Result<(), String>
+    {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("first-read-window").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let paths = isolated_paths(&temporary_directory)?;
+        let mut worker = start_injected_worker_holding_first_read(worker_timings_without_polling());
+
+        assert!(
+            paths
+                .config_directory()
+                .starts_with(temporary_directory.path())
+        );
+        // The watch is armed before the first read, so this resolves while the worker is still
+        // parked ahead of that read. Reading first would leave it unarmed until after the read.
+        wait_for_watcher(&worker, true)?;
+
+        let edited_contents = b"{\"bindings\": [{\"bindings\": {}}]}";
+        fs::write(paths.user_keymap(), edited_contents)
+            .map_err(|error| format!("first-read-window keymap write failed: {error}"))?;
+        worker.release_first_read()?;
+
+        // Polling is off and no watcher edge is injected, so only the first read can carry this
+        // edit to the application thread.
+        assert_snapshot(
+            &wait_for_message(&worker)?,
+            paths.user_keymap(),
+            Some(edited_contents),
+        )?;
 
         worker.shutdown();
         drop(xdg_config_home);

@@ -9,6 +9,8 @@ use std::sync::atomic::AtomicUsize;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
+#[cfg(test)]
+use std::sync::mpsc::SyncSender;
 use std::thread::JoinHandle;
 
 #[cfg(test)]
@@ -44,12 +46,16 @@ pub(crate) struct DiskWorkerMessage {
     )
 )]
 pub(crate) struct DiskWorkerChannels {
-    pub(super) slot:           CoalescingSlot,
-    pub(super) control_sender: Sender<WorkerControl>,
-    pub(super) join_handle:    Option<JoinHandle<()>>,
-    pub(super) status:         Arc<WorkerStatus>,
+    pub(super) slot:               CoalescingSlot,
+    pub(super) control_sender:     Sender<WorkerControl>,
+    pub(super) join_handle:        Option<JoinHandle<()>>,
+    pub(super) status:             Arc<WorkerStatus>,
     #[cfg(test)]
-    pub(super) test_watcher:   Option<TestWatcher>,
+    pub(super) test_watcher:       Option<TestWatcher>,
+    /// Releases a worker started with `WatchMode::InjectedHoldingFirstRead` from the window
+    /// between arming its watcher and its first read.
+    #[cfg(test)]
+    pub(super) first_read_release: SyncSender<()>,
 }
 
 impl DiskWorkerChannels {
@@ -110,6 +116,13 @@ impl DiskWorkerChannels {
 
         let _ = test_watcher.watcher_sender.try_send(());
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn release_first_read(&self) -> Result<(), String> {
+        self.first_read_release
+            .try_send(())
+            .map_err(|error| format!("the disk worker's first read was not held: {error}"))
     }
 
     #[cfg(test)]

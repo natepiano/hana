@@ -151,7 +151,16 @@ impl ModifierFamily {
             Self::Control => "ctrl",
             Self::Alt => "alt",
             Self::Shift => "shift",
-            Self::Platform => "platform",
+            // Rendered under the running OS's own name for the physical Super key. `cmd`,
+            // `super`, `win`, and `platform` all parse back to this family, so the round trip
+            // holds on either platform.
+            Self::Platform => {
+                if cfg!(target_os = "macos") {
+                    "cmd"
+                } else {
+                    "super"
+                }
+            },
         }
     }
 }
@@ -183,6 +192,12 @@ impl OrdinaryKey {
     /// One per entry in `CANONICAL_KEY_MAPPINGS`, which is the whole set of key codes routing
     /// can reach — every other key code fails construction.
     pub(crate) const COUNT: usize = CANONICAL_KEY_MAPPINGS.len();
+
+    /// The `P` key, for applications that build a recovery chord in a `const` context.
+    ///
+    /// [`TryFrom<KeyCode>`](Self::try_from) is the general constructor, but it is fallible and
+    /// non-`const`, so a `const` site cannot use it without unwrapping.
+    pub const KEY_P: Self = Self(KeyCode::KeyP);
 
     /// Returns the validated physical key code.
     #[must_use]
@@ -311,16 +326,16 @@ impl Keystroke {
 impl Display for Keystroke {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         if self.modifiers.has_platform() {
-            formatter.write_str("platform-")?;
+            write!(formatter, "{}-", ModifierFamily::Platform)?;
         }
         if self.modifiers.has_control() {
-            formatter.write_str("ctrl-")?;
+            write!(formatter, "{}-", ModifierFamily::Control)?;
         }
         if self.modifiers.has_alt() {
-            formatter.write_str("alt-")?;
+            write!(formatter, "{}-", ModifierFamily::Alt)?;
         }
         if self.modifiers.has_shift() {
-            formatter.write_str("shift-")?;
+            write!(formatter, "{}-", ModifierFamily::Shift)?;
         }
 
         self.primary_trigger.fmt(formatter)
@@ -763,7 +778,7 @@ mod tests {
 
         assert_eq!(physical, secondary);
         if cfg!(target_os = "macos") {
-            assert_eq!(display, "platform-g");
+            assert_eq!(display, "cmd-g");
         } else {
             assert_eq!(display, "ctrl-g");
         }
@@ -942,15 +957,65 @@ mod tests {
         assert_eq!(
             parsed("secondary")?.to_string(),
             if cfg!(target_os = "macos") {
-                "platform"
+                "cmd"
             } else {
                 "ctrl"
             }
         );
-        assert_eq!(parsed("cmd")?.to_string(), "platform");
-        assert_eq!(parsed("super")?.to_string(), "platform");
-        assert_eq!(parsed("win")?.to_string(), "platform");
-        assert_eq!(parsed("platform")?.to_string(), "platform");
+
+        let platform_name = if cfg!(target_os = "macos") {
+            "cmd"
+        } else {
+            "super"
+        };
+        for alias in ["cmd", "super", "win", "platform"] {
+            let rendered = parsed(alias)?.to_string();
+            assert_eq!(rendered, platform_name);
+            assert_eq!(parsed(&rendered)?, parsed(alias)?);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn platform_modified_keys_render_under_the_running_platform_name() -> Result<(), Box<dyn Error>>
+    {
+        let platform_p = Keystroke::from_ordinary_key(
+            Modifiers::none().with_platform(),
+            OrdinaryKey::try_from(KeyCode::KeyP)?,
+        );
+        let rendered = platform_p.to_string();
+
+        assert_eq!(
+            rendered,
+            if cfg!(target_os = "macos") {
+                "cmd-p"
+            } else {
+                "super-p"
+            }
+        );
+        assert_eq!(parsed(&rendered)?, platform_p);
+
+        let secondary_p = parsed("secondary-p")?;
+        let secondary_rendered = secondary_p.to_string();
+        assert_eq!(
+            secondary_rendered,
+            if cfg!(target_os = "macos") {
+                "cmd-p"
+            } else {
+                "ctrl-p"
+            }
+        );
+        assert_eq!(parsed(&secondary_rendered)?, secondary_p);
+
+        Ok(())
+    }
+
+    #[test]
+    fn key_p_constant_matches_the_fallible_conversion() -> Result<(), Box<dyn Error>> {
+        assert_eq!(OrdinaryKey::KEY_P, OrdinaryKey::try_from(KeyCode::KeyP)?);
+        assert_eq!(OrdinaryKey::KEY_P.key_code(), KeyCode::KeyP);
+        assert_eq!(OrdinaryKey::KEY_P.to_string(), "p");
 
         Ok(())
     }
