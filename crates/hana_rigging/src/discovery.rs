@@ -62,13 +62,7 @@ pub enum ReporterCoverage {
 }
 
 impl ReporterCoverage {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "phase 10 reconciliation asks coverage before it marks inventory absent"
-        )
-    )]
+    /// Report whether this reporter's omission of one durable key would prove the unit is gone.
     pub(crate) fn establishes_absence_for(&self, device_key: &DeviceKey) -> bool {
         match self {
             Self::MatchingEvidenceOnly => false,
@@ -243,13 +237,6 @@ impl ReporterRegistration {
 
     pub(crate) const fn cadence(&self) -> &DiscoveryCadence { &self.cadence }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "phase 10 reconciliation reads reporter coverage from registration"
-        )
-    )]
     pub(crate) const fn coverage(&self) -> &ReporterCoverage { &self.coverage }
 }
 

@@ -33,6 +33,25 @@ pub enum Presence {
     },
 }
 
+impl Presence {
+    /// Report whether two observations are the same kind of reachability, ignoring how long an
+    /// `Self::Unreachable` one has lasted.
+    ///
+    /// Departure detection and the device-entity mirror both need this instead of `==`: the
+    /// elapsed time inside `Self::Unreachable` grows on every scan, so value equality would report
+    /// a change on every frame and make a once-per-change consumer fire forever. One function
+    /// serves both callers so the diff and the mirror can never disagree about what counts as a
+    /// presence change.
+    pub(crate) const fn is_same_variant(self, other: Self) -> bool {
+        matches!(
+            (self, other),
+            (Self::Present, Self::Present)
+                | (Self::Absent, Self::Absent)
+                | (Self::Unreachable { .. }, Self::Unreachable { .. })
+        )
+    }
+}
+
 /// Name status a reporter assigns to the unit represented by one `DeviceRecord`.
 ///
 /// The two variants replace `Option<DeviceKey>` because a reporter that can name a unit durably

@@ -1,10 +1,12 @@
 //! Headless smoke run of the rigging kernel: two reporters push overlapping whole-set scans into
 //! a live Bevy `App`, and the kernel merges them into one device set.
 //!
-//! The example registers an identity scheme, registers two `DeviceReporter` implementations and one
-//! authored role binding, drives real frames until both reporters have completed a scan, then reads
-//! the reconciled set out of `Devices` and the role's binding entity out of `BindingEntities`. It
-//! touches no window, renderer, filesystem, or network.
+//! The example registers an identity scheme, registers two `DeviceReporter` implementations, one
+//! authored role binding, and one authored inventory entry, drives real frames until both reporters
+//! have completed a scan, then reads the reconciled set out of `Devices` and the role's binding
+//! entity and its live device link out of `BindingEntities`. It then provokes a departure by having
+//! one reporter stop naming a key in a later complete scan, and prints the connection conclusion
+//! that moves as a result. It touches no window, renderer, filesystem, or network.
 
 use std::error::Error;
 use std::process::ExitCode;
@@ -29,6 +31,8 @@ const DISPLAY_SCHEME: &str = "example-edid-serial";
 /// Frames the example may spend waiting for both reporters; discovery admits a bounded number of
 /// jobs per frame, so a two-reporter startup takes more than one frame.
 const FRAME_CEILING: u32 = 64;
+/// Completed scans the window-system reporter makes before it stops naming the desk monitor.
+const SCANS_BEFORE_UNPLUG: u32 = 2;
 const SHARED_PANEL: &str = "BUILT-IN-PANEL-0001";
 const STAGE_PROJECTOR: &str = "STAGE-PROJECTOR-0003";
 const WINDOW_SYSTEM_REPORTER: &str = "window-system";
@@ -38,12 +42,34 @@ const WINDOW_SYSTEM_REPORTER: &str = "window-system";
 /// A real reporter would ask the operating system here. Every scan returns the reporter's *whole*
 /// current set, because an omitted key is how the kernel learns a device departed.
 struct FixedSetReporter {
-    reported_keys: Vec<DeviceKey>,
+    reported_keys:   Vec<DeviceKey>,
+    withdrawal:      KeyWithdrawal,
+    completed_scans: u32,
+}
+
+/// Whether this reporter eventually stops naming one of its keys, standing in for an unplug.
+///
+/// A departure is only observable because the whole set arrives every scan, so provoking one means
+/// leaving a key out of a later complete report rather than sending a removal message.
+enum KeyWithdrawal {
+    /// The reporter names its whole authored set for the life of the run.
+    Never,
+    /// Once the reporter has completed `after_scans` scans it stops naming `key`.
+    AfterScans {
+        after_scans: u32,
+        key:         DeviceKey,
+    },
 }
 
 impl DeviceReporter for FixedSetReporter {
     fn discover(&mut self) -> DiscoveryWork {
-        let reported_keys = self.reported_keys.clone();
+        self.completed_scans += 1;
+        let mut reported_keys = self.reported_keys.clone();
+        if let KeyWithdrawal::AfterScans { after_scans, key } = &self.withdrawal
+            && self.completed_scans > *after_scans
+        {
+            reported_keys.retain(|reported_key| reported_key != key);
+        }
 
         DiscoveryWork::Immediate(MainThreadDiscoveryJob::new(move |_: &mut World| {
             DeviceScan::Complete(reported_keys.into_iter().map(present_display).collect())
@@ -131,7 +157,8 @@ fn main() -> ExitCode {
         Ok(SmokeCheck::Matched) => {
             println!(
                 "OK — three reconciled devices, the shared panel carries two contributing \
-                 reporters, no duplicate keys, and the registered role has its binding entity"
+                 reporters and a live ResolvedToDevice link, no duplicate keys, and the withdrawn \
+                 desk monitor departed and left its authored inventory entry reading Absent"
             );
             ExitCode::SUCCESS
         },
@@ -172,23 +199,39 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
 
     // Two independent platform sources that both see the built-in panel and disagree about nothing
     // else: each one also enumerates a display the other never sees.
+    // Authoring the desk monitor into inventory neither enables a reporter nor creates a device:
+    // it is what gives the unit a connection conclusion to move when discovery stops naming it.
+    app.world_mut()
+        .resource_mut::<HardwareInventory>()
+        .configure(ConfiguredDevice {
+            key:  desk_monitor.clone(),
+            mode: ConfiguredDeviceMode::Managed,
+        });
+
     let reporters = vec![
         NamedReporter {
             name: WINDOW_SYSTEM_REPORTER,
             id:   app.add_device_reporter(
                 FixedSetReporter {
-                    reported_keys: vec![shared_panel.clone(), desk_monitor.clone()],
+                    reported_keys:   vec![shared_panel.clone(), desk_monitor.clone()],
+                    withdrawal:      KeyWithdrawal::AfterScans {
+                        after_scans: SCANS_BEFORE_UNPLUG,
+                        key:         desk_monitor.clone(),
+                    },
+                    completed_scans: 0,
                 },
-                every_frame_registration(),
+                every_frame_registration()?,
             ),
         },
         NamedReporter {
             name: COLOR_MANAGEMENT_REPORTER,
             id:   app.add_device_reporter(
                 FixedSetReporter {
-                    reported_keys: vec![shared_panel.clone(), stage_projector.clone()],
+                    reported_keys:   vec![shared_panel.clone(), stage_projector.clone()],
+                    withdrawal:      KeyWithdrawal::Never,
+                    completed_scans: 0,
                 },
-                every_frame_registration(),
+                every_frame_registration()?,
             ),
         },
     ];
@@ -200,7 +243,7 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
             expected_contributors: 2,
         },
         ReportedDisplay {
-            key:                   desk_monitor,
+            key:                   desk_monitor.clone(),
             label:                 "desk monitor (window-system only)",
             expected_contributors: 1,
         },
@@ -232,9 +275,85 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
             );
             let mut smoke_check = check_reconciled(devices, &displays);
             print_binding(app.world(), &panel_role, &mut smoke_check);
+            print_connection(app.world(), &desk_monitor, "before the unplug");
+
+            provoke_departure(&mut app, &desk_monitor, &displays, &mut smoke_check);
 
             Ok(smoke_check)
         },
+    }
+}
+
+/// Drive frames until the withdrawn key leaves the reconciled set, then report what followed.
+///
+/// The departure is the whole point of the run: nothing tells the kernel a display was unplugged,
+/// it simply stops appearing in a complete scan, and the authored inventory entry moves from
+/// `Present` to `Absent` because the reporter that omitted it enumerates its identity space.
+fn provoke_departure(
+    app: &mut App,
+    departing: &DeviceKey,
+    displays: &[ReportedDisplay],
+    smoke_check: &mut SmokeCheck,
+) {
+    for frame in 1..=FRAME_CEILING {
+        app.update();
+        if app.world().resource::<Devices>().resolve(departing) == DeviceResolution::NotResolved {
+            println!("frames until the withdrawn key left the reconciled set: {frame}");
+            let remaining: Vec<&ReportedDisplay> = displays
+                .iter()
+                .filter(|display| &display.key != departing)
+                .collect();
+            let devices = app.world().resource::<Devices>();
+            println!(
+                "reconciled devices after the departure: {}",
+                devices.count()
+            );
+            if devices.count() != remaining.len() {
+                record_mismatch(
+                    smoke_check,
+                    format!(
+                        "expected {} reconciled devices after the departure, kernel retained {}",
+                        remaining.len(),
+                        devices.count()
+                    ),
+                );
+            }
+            print_connection(app.world(), departing, "after the unplug");
+            let connection = app
+                .world()
+                .resource::<HardwareInventory>()
+                .connection(departing);
+            if connection != Ok(ConfiguredDeviceConnection::Absent) {
+                record_mismatch(
+                    smoke_check,
+                    format!(
+                        "expected the authored desk monitor to read Absent after the unplug, got \
+                         {connection:?}"
+                    ),
+                );
+            }
+
+            return;
+        }
+    }
+
+    record_mismatch(
+        smoke_check,
+        format!(
+            "reached the {FRAME_CEILING}-frame ceiling before the withdrawn key left the \
+             reconciled set"
+        ),
+    );
+}
+
+/// Print what passive evidence currently says about one authored inventory key.
+fn print_connection(world: &World, device_key: &DeviceKey, when: &str) {
+    match world.resource::<HardwareInventory>().connection(device_key) {
+        Ok(connection) => println!(
+            "  authored inventory {} | {when} | {connection:?}",
+            describe_key(device_key)
+        ),
+        Err(error) => println!("  authored inventory read failed {when}: {error}"),
     }
 }
 
@@ -261,13 +380,22 @@ fn panel_binding(role: RoleKey, device: DeviceKey, driver: DriverId) -> Binding 
 }
 
 /// Register a reporter that is due on every frame and whose first complete scan gates readiness.
-fn every_frame_registration() -> ReporterRegistration {
-    ReporterRegistration::required(
+///
+/// The coverage is authoritative for this example's identity space: without it a reporter leaving a
+/// key out of a complete scan would prove nothing, and the authored inventory entry could never
+/// move off `NotObserved`.
+fn every_frame_registration() -> Result<ReporterRegistration, Box<dyn Error>> {
+    Ok(ReporterRegistration::required(
         DiscoveryCadence::Periodic {
             interval: Duration::ZERO,
         },
-        ReporterCoverage::MatchingEvidenceOnly,
-    )
+        ReporterCoverage::EstablishesAbsence(AuthoritativeReporterCoverage::one(
+            CoveredDeviceIdentitySpace::ReportedScheme {
+                kind:   DeviceKind::Display,
+                scheme: SchemeName::new(DISPLAY_SCHEME)?,
+            },
+        )),
+    ))
 }
 
 fn reported_display_key(value: &str) -> Result<DeviceKey, Box<dyn Error>> {
@@ -352,10 +480,11 @@ fn print_reconciled_devices(
                 },
                 DeviceStateLookup::Retained(reconciled_device_state) => {
                     println!(
-                        "  {key} | {} | DeviceId({}) | {:?} | contributors: {}",
+                        "  {key} | {} | DeviceId({}) | {:?} | {:?} | contributors: {}",
                         display.label,
                         device_id.get(),
                         reconciled_device_state.presence,
+                        reconciled_device_state.verdict,
                         contributor_names(&reconciled_device_state.contributors, reporters)
                     );
                 },
@@ -452,9 +581,12 @@ fn print_binding(world: &World, role: &RoleKey, smoke_check: &mut SmokeCheck) {
                 ),
             }
             match world.get::<ResolvedToDevice>(entity) {
-                None => println!(
-                    "  role `{role}` | no ResolvedToDevice link — its endpoint does not resolve to \
-                     a live device entity"
+                None => record_mismatch(
+                    smoke_check,
+                    format!(
+                        "role `{role}` has no ResolvedToDevice link even though its endpoint names \
+                         a device the kernel retains"
+                    ),
                 ),
                 Some(resolved_to_device) => {
                     let device = resolved_to_device.get();

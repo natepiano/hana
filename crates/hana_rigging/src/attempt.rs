@@ -121,6 +121,21 @@ impl LastKnownGoodConfiguration {
     #[must_use]
     pub fn known(configuration: impl Reflect) -> Self { Self::Known(Box::new(configuration)) }
 
+    /// Report whether both sides hold the same established value, so a repeated readback of an
+    /// unchanged endpoint can be dropped instead of rewriting lifecycle state.
+    ///
+    /// A configuration type whose reflection declines to compare values answers `false`, which
+    /// keeps the newer readback.
+    pub(crate) fn holds_same_value(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::NotEstablished, Self::NotEstablished) => true,
+            (Self::Known(held), Self::Known(captured)) => {
+                held.reflect_partial_eq(captured.as_partial_reflect()) == Some(true)
+            },
+            _ => false,
+        }
+    }
+
     pub(crate) fn as_reflect(&self) -> Result<&dyn Reflect, LastKnownGoodConfigurationAccessError> {
         match self {
             Self::NotEstablished => Err(LastKnownGoodConfigurationAccessError::NotEstablished),

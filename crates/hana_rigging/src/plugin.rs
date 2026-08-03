@@ -21,6 +21,8 @@ use crate::RiggingRevision;
 use crate::binding::BindingTransitionBatch;
 use crate::binding::drain_binding_transitions;
 use crate::binding::project_binding_entities;
+use crate::devices::ReconciledDeviceChanges;
+use crate::reconcile::project_device_entities;
 use crate::reconcile::reconcile;
 use crate::registration::Drivers;
 use crate::registration::Reporters;
@@ -65,6 +67,7 @@ impl Plugin for RiggingPlugin {
             .init_resource::<DiscoveryLimits>()
             .init_resource::<DiscoveryStatus>()
             .init_resource::<HardwareInventory>()
+            .init_resource::<ReconciledDeviceChanges>()
             .init_resource::<RegisteredSchemes>()
             .init_resource::<Reporters>()
             .init_resource::<RiggingLimits>()
@@ -88,6 +91,9 @@ impl Plugin for RiggingPlugin {
                         .before(reconcile)
                         .in_set(RiggingSystems::Reconcile),
                     reconcile.in_set(RiggingSystems::Reconcile),
+                    project_device_entities
+                        .after(reconcile)
+                        .in_set(RiggingSystems::Reconcile),
                 ),
             );
     }

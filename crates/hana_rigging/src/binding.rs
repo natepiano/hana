@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
@@ -105,17 +104,29 @@ pub enum AvailableConfiguration<'a> {
 #[reflect(Resource)]
 pub struct Bindings {
     #[reflect(ignore, default = "default_bindings_by_role")]
-    by_role:                  HashMap<RoleKey, Binding>,
+    by_role:                   HashMap<RoleKey, Binding>,
     #[reflect(ignore, default = "default_owner_by_endpoint")]
-    owner_by_endpoint:        HashMap<DeviceEndpoint, RoleKey>,
+    owner_by_endpoint:         HashMap<DeviceEndpoint, RoleKey>,
     #[reflect(ignore, default = "default_roles_by_device")]
-    roles_by_device:          HashMap<DeviceKey, Vec<RoleKey>>,
-    #[reflect(ignore, default = "default_unreadable_configuration")]
-    unreadable_configuration: HashSet<RoleKey>,
+    roles_by_device:           HashMap<DeviceKey, Vec<RoleKey>>,
+    #[reflect(ignore, default = "default_configuration_readability")]
+    configuration_readability: HashMap<RoleKey, ConfigurationReadability>,
+    #[reflect(ignore, default = "default_waiting_work")]
+    waiting_work:              HashMap<RoleKey, WaitingWork>,
+    /// Which configuration the in-flight apply on each role draws from, so the attempt that
+    /// settles a `WaitingWork::RestorationOwed` debt is the restoration and nothing else.
+    ///
+    /// A role can owe a restoration while an ordinary apply is in flight: the debt is recorded
+    /// from `crate::RecoveryPolicy` and `LastKnownGoodConfiguration` against any role whose device
+    /// departed, including one that already minted a requested apply. Reading "the outcome reached
+    /// `RoleState::Ready`" as "the restoration ran" would clear a debt nothing paid and leave the
+    /// returning device holding the wrong configuration.
+    #[reflect(ignore, default = "default_applying_source")]
+    applying_source:           HashMap<RoleKey, ApplyConfigurationSource>,
     #[reflect(ignore, default = "PendingBindingTransitions::default")]
-    pending_transitions:      PendingBindingTransitions,
+    pending_transitions:       PendingBindingTransitions,
     #[reflect(ignore, default = "default_transition_sequence")]
-    next_transition_sequence: u64,
+    next_transition_sequence:  u64,
 }
 
 fn default_bindings_by_role() -> HashMap<RoleKey, Binding> { HashMap::new() }
@@ -124,7 +135,46 @@ fn default_owner_by_endpoint() -> HashMap<DeviceEndpoint, RoleKey> { HashMap::ne
 
 fn default_roles_by_device() -> HashMap<DeviceKey, Vec<RoleKey>> { HashMap::new() }
 
-fn default_unreadable_configuration() -> HashSet<RoleKey> { HashSet::new() }
+fn default_configuration_readability() -> HashMap<RoleKey, ConfigurationReadability> {
+    HashMap::new()
+}
+
+fn default_waiting_work() -> HashMap<RoleKey, WaitingWork> { HashMap::new() }
+
+fn default_applying_source() -> HashMap<RoleKey, ApplyConfigurationSource> { HashMap::new() }
+
+/// What a waiting role is owed, distinct from why it is waiting.
+///
+/// Stored rather than derived: the attempt systems select requested intent versus a restore from
+/// this value, and configuration capture is suppressed on `Self::RestorationOwed` instead of being
+/// re-derived from recovery policy and attempt history at each of those call sites, where the two
+/// derivations would eventually disagree.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum WaitingWork {
+    /// Nothing is owed. The role is waiting for usable, authorized hardware.
+    #[default]
+    Nothing,
+    /// A last-known-good restoration is owed and runs as soon as the role is authorized. Capture is
+    /// suppressed until it completes, because reading a value back before the owed one has been
+    /// reapplied would record the endpoint's current state as the last one known to work.
+    RestorationOwed,
+}
+
+/// Whether the kernel may still ask a driver to read one role's endpoint configuration back.
+///
+/// A named state rather than membership in a set of unreadable roles: at every lookup the reader
+/// learns what the absent case means. A display API that reports geometry without exposing the
+/// current window arrangement declines permanently, and re-asking it every reconcile pass would
+/// call a driver forever for an answer that cannot change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum ConfigurationReadability {
+    /// No driver has declined a safe readback for this role, so capture stays eligible.
+    #[default]
+    Readable,
+    /// A driver reported `CaptureOutcome::NotReadable`, which is permanent for the endpoint. This
+    /// is the retained reason later captures are suppressed.
+    PermanentlyUnreadable,
+}
 
 const fn default_transition_sequence() -> u64 { 0 }
 
@@ -270,7 +320,9 @@ impl Bindings {
                 .or_default()
                 .push(role.clone());
         }
-        self.unreadable_configuration.remove(&role);
+        self.configuration_readability.remove(&role);
+        self.waiting_work.remove(&role);
+        self.applying_source.remove(&role);
         self.enqueue(BindingTransitionKind::Replaced, role, reserved_transition);
 
         Ok(displaced)
@@ -295,7 +347,9 @@ impl Bindings {
             .ok_or_else(|| BindingError::RoleNotBound { role: role.clone() })?;
         self.owner_by_endpoint.remove(&binding.endpoint);
         self.remove_role_from_device(&binding.endpoint.device, role);
-        self.unreadable_configuration.remove(role);
+        self.configuration_readability.remove(role);
+        self.waiting_work.remove(role);
+        self.applying_source.remove(role);
         binding.state = RoleState::Retired;
         self.enqueue(
             BindingTransitionKind::Retired,
@@ -330,30 +384,76 @@ impl Bindings {
     /// # Errors
     ///
     /// Returns `BindingError::RoleNotBound` when the requested application role has no binding.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "phase 11 attempt systems select state-issued binding role views"
-        )
-    )]
     pub(crate) fn role_view(&mut self, role: &RoleKey) -> Result<RoleView<'_>, BindingError> {
-        let unreadable_configuration = &mut self.unreadable_configuration;
+        let configuration_readability = &mut self.configuration_readability;
+        let applying_source = &mut self.applying_source;
+        let waiting_work = self.waiting_work.get(role).copied().unwrap_or_default();
         let binding = self
             .by_role
             .get_mut(role)
             .ok_or_else(|| BindingError::RoleNotBound { role: role.clone() })?;
 
         Ok(match binding.state {
-            RoleState::Waiting => RoleView::Waiting(WaitingRole { binding }),
+            RoleState::Waiting => RoleView::Waiting(match waiting_work {
+                WaitingWork::Nothing => WaitingRole::ForHardware(RequestingRole {
+                    binding,
+                    applying_source,
+                }),
+                WaitingWork::RestorationOwed => WaitingRole::ForRestoration(RestoringRole {
+                    binding,
+                    applying_source,
+                }),
+            }),
             RoleState::Ready => RoleView::Ready(ReadyRole {
                 binding,
-                unreadable_configuration,
+                configuration_readability,
             }),
-            RoleState::Applying(_) => RoleView::Applying(ApplyingRole { binding }),
+            RoleState::Applying(_) => RoleView::Applying(ApplyingRole {
+                binding,
+                waiting_work: &mut self.waiting_work,
+                applying_source,
+            }),
             RoleState::Retired => RoleView::Retired,
         })
     }
+
+    /// Read what one role is owed while it waits.
+    ///
+    /// Answers `WaitingWork::Nothing` for a role nobody has recorded work against, including one
+    /// that is not waiting at all: owing a restoration is something the kernel records, so an
+    /// unrecorded role owes nothing.
+    #[must_use]
+    pub fn waiting_work(&self, role: &RoleKey) -> WaitingWork {
+        self.waiting_work.get(role).copied().unwrap_or_default()
+    }
+
+    /// Record what one role is owed while it waits.
+    pub(crate) fn set_waiting_work(&mut self, role: &RoleKey, waiting_work: WaitingWork) {
+        match waiting_work {
+            WaitingWork::Nothing => {
+                self.waiting_work.remove(role);
+            },
+            WaitingWork::RestorationOwed => {
+                self.waiting_work.insert(role.clone(), waiting_work);
+            },
+        }
+    }
+
+    /// Read whether a driver has permanently declined to read one role's endpoint back.
+    ///
+    /// A role that has never been asked reads `Readable`. This is the read-only half of the state
+    /// `ReadyRole::record_capture` writes, so the safe-capture pass can find out whether a frame
+    /// has any work before it takes mutable access to `Bindings`.
+    #[must_use]
+    pub fn configuration_readability(&self, role: &RoleKey) -> ConfigurationReadability {
+        self.configuration_readability
+            .get(role)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Iterate every role that currently has a retained binding.
+    pub(crate) fn registered_roles(&self) -> impl Iterator<Item = &RoleKey> { self.by_role.keys() }
 
     /// Return the value an offline authoring interface can show for one retained role.
     ///
@@ -549,26 +649,34 @@ pub enum RoleView<'a> {
     Retired,
 }
 
-/// View of a role that has no usable endpoint operation in progress.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 11 attempt systems mint waiting-role apply requests"
-    )
-)]
-pub struct WaitingRole<'a> {
-    binding: &'a mut Binding,
+/// A role with no usable endpoint operation in progress, resolved by what it is owed.
+///
+/// The stored `WaitingWork` picks the arm, so only the request that is actually owed exists on the
+/// value a caller holds: a role owing a restoration has no requested-apply method to reach for, and
+/// a role owing nothing has no restore method. Restating that rule with a runtime check at every
+/// call site is what this enum removes.
+pub enum WaitingRole<'a> {
+    /// Nothing is owed: the role waits for usable, authorized hardware and may start an apply from
+    /// its authored request.
+    ForHardware(RequestingRole<'a>),
+    /// A last-known-good restoration is owed and runs as soon as the role is authorized.
+    ForRestoration(RestoringRole<'a>),
+}
+
+/// View of a waiting role that owes nothing and may reach for its authored target.
+pub struct RequestingRole<'a> {
+    binding:         &'a mut Binding,
+    applying_source: &'a mut HashMap<RoleKey, ApplyConfigurationSource>,
 }
 
 #[cfg_attr(
     not(test),
     expect(
         dead_code,
-        reason = "phase 11 attempt systems start authorized waiting-role applies"
+        reason = "authored applies start from this view, and applies are not wired up yet"
     )
 )]
-impl<'a> WaitingRole<'a> {
+impl<'a> RequestingRole<'a> {
     /// Start an authorized apply from the binding's authored requested configuration.
     ///
     /// # Errors
@@ -585,6 +693,10 @@ impl<'a> WaitingRole<'a> {
             return Err(BindingError::RequestedConfigurationRequiresInServicePermit);
         }
         hardware_inventory.ensure_operational(&self.binding.endpoint.device)?;
+        self.applying_source.insert(
+            self.binding.role.clone(),
+            ApplyConfigurationSource::Requested,
+        );
         Ok(StartApplyRequest {
             binding: self.binding,
             configuration_source: ApplyConfigurationSource::Requested,
@@ -592,7 +704,22 @@ impl<'a> WaitingRole<'a> {
             permit,
         })
     }
+}
 
+/// View of a waiting role that owes a restoration of the value a safe readback established.
+pub struct RestoringRole<'a> {
+    binding:         &'a mut Binding,
+    applying_source: &'a mut HashMap<RoleKey, ApplyConfigurationSource>,
+}
+
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "owed restorations start from this view, and applies are not wired up yet"
+    )
+)]
+impl<'a> RestoringRole<'a> {
     /// Start an authorized restore from the value a safe readback previously established.
     ///
     /// # Errors
@@ -615,6 +742,10 @@ impl<'a> WaitingRole<'a> {
                 role: self.binding.role.clone(),
             }
         })?;
+        self.applying_source.insert(
+            self.binding.role.clone(),
+            ApplyConfigurationSource::LastKnownGood,
+        );
         Ok(StartApplyRequest {
             binding: self.binding,
             configuration_source: ApplyConfigurationSource::LastKnownGood,
@@ -625,25 +756,11 @@ impl<'a> WaitingRole<'a> {
 }
 
 /// View of a role that has a usable endpoint and no in-flight driver operation.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 10 reconciliation captures ready-role configuration"
-    )
-)]
 pub struct ReadyRole<'a> {
-    binding:                  &'a mut Binding,
-    unreadable_configuration: &'a mut HashSet<RoleKey>,
+    binding:                   &'a mut Binding,
+    configuration_readability: &'a mut HashMap<RoleKey, ConfigurationReadability>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 10 reconciliation records ready-role capture outcomes"
-    )
-)]
 impl<'a> ReadyRole<'a> {
     /// Mint the only capture request accepted by driver dispatch.
     ///
@@ -657,7 +774,13 @@ impl<'a> ReadyRole<'a> {
         hardware_inventory: &HardwareInventory,
     ) -> Result<CaptureRequest<'a>, BindingError> {
         hardware_inventory.ensure_operational(&self.binding.endpoint.device)?;
-        if self.unreadable_configuration.contains(&self.binding.role) {
+        if self
+            .configuration_readability
+            .get(&self.binding.role)
+            .copied()
+            .unwrap_or_default()
+            == ConfigurationReadability::PermanentlyUnreadable
+        {
             return Err(BindingError::ConfigurationNotReadable {
                 role: self.binding.role.clone(),
             });
@@ -677,11 +800,29 @@ impl<'a> ReadyRole<'a> {
     ) {
         match capture_outcome {
             CaptureOutcome::Read(last_known_good) => {
-                self.binding.last_known_good = last_known_good;
+                // `Bindings` is a resource, so assigning an equal configuration would still mark it
+                // changed and make a settled frame look like it carried new evidence.
+                if !self
+                    .binding
+                    .last_known_good
+                    .holds_same_value(&last_known_good)
+                {
+                    self.binding.last_known_good = last_known_good;
+                }
             },
             CaptureOutcome::NotReadable => {
-                self.unreadable_configuration
-                    .insert(self.binding.role.clone());
+                if self
+                    .configuration_readability
+                    .get(&self.binding.role)
+                    .copied()
+                    .unwrap_or_default()
+                    != ConfigurationReadability::PermanentlyUnreadable
+                {
+                    self.configuration_readability.insert(
+                        self.binding.role.clone(),
+                        ConfigurationReadability::PermanentlyUnreadable,
+                    );
+                }
             },
             CaptureOutcome::ReadFailed(_) => {},
         }
@@ -697,7 +838,9 @@ impl<'a> ReadyRole<'a> {
     )
 )]
 pub struct ApplyingRole<'a> {
-    binding: &'a mut Binding,
+    binding:         &'a mut Binding,
+    waiting_work:    &'a mut HashMap<RoleKey, WaitingWork>,
+    applying_source: &'a mut HashMap<RoleKey, ApplyConfigurationSource>,
 }
 
 #[cfg_attr(
@@ -733,14 +876,40 @@ impl<'a> ApplyingRole<'a> {
     }
 
     /// Stop the in-flight operation and return the role to the waiting lifecycle state.
-    pub(crate) const fn abort(&mut self) { self.binding.state = RoleState::Waiting; }
+    ///
+    /// The abandoned attempt stops being the one that could settle a restoration debt, so the next
+    /// dispatch decides that again from the request it mints.
+    pub(crate) fn abort(&mut self) {
+        self.binding.state = RoleState::Waiting;
+        self.applying_source.remove(&self.binding.role);
+    }
 
     /// Finish the in-flight operation, making only a successful apply ready for safe readback.
+    ///
+    /// A `WaitingWork::RestorationOwed` debt is settled by the restoration and by nothing else: a
+    /// role whose device departed while an ordinary apply was in flight owes a restoration that
+    /// apply never performed, so reading `RoleState::Ready` as proof would leave the returning
+    /// device holding the requested value with the debt gone. An outcome that returns the role to
+    /// `RoleState::Waiting` leaves the debt for the next pass to dispatch again.
     pub(crate) fn finish(&mut self, attempt_outcome: AttemptOutcome) {
         self.binding.state = match attempt_outcome {
             AttemptOutcome::Succeeded | AttemptOutcome::Substituted => RoleState::Ready,
             AttemptOutcome::Failed(_) | AttemptOutcome::Aborted => RoleState::Waiting,
         };
+        let restoration_completed = self.applying_source.remove(&self.binding.role)
+            == Some(ApplyConfigurationSource::LastKnownGood);
+        if self.binding.state == RoleState::Ready
+            && restoration_completed
+            && self
+                .waiting_work
+                .get(&self.binding.role)
+                .copied()
+                .unwrap_or_default()
+                != WaitingWork::Nothing
+        {
+            self.waiting_work
+                .insert(self.binding.role.clone(), WaitingWork::Nothing);
+        }
     }
 }
 
@@ -749,10 +918,6 @@ impl<'a> ApplyingRole<'a> {
 /// Its fields stay private so application code cannot choose a `DriverId` and endpoint without a
 /// `ReadyRole` proving that the binding reached the state where capture is meaningful.
 pub struct CaptureRequest<'a> {
-    #[expect(
-        dead_code,
-        reason = "phase 10 reconciliation records the capture request role in diagnostics"
-    )]
     pub(crate) role:     &'a RoleKey,
     pub(crate) driver:   DriverId,
     pub(crate) endpoint: &'a DeviceEndpoint,
@@ -770,6 +935,7 @@ pub struct StartApplyRequest<'a> {
 }
 
 /// Configuration source paired with the authorization purpose that permits its dispatch.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(
     not(test),
     expect(
@@ -918,13 +1084,22 @@ impl HardwareInventory {
         })
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "phase 10 reconciliation updates configured-device connection evidence"
-        )
-    )]
+    /// Iterate every durable key application code authored into this inventory.
+    ///
+    /// Reconciliation walks these rather than the reported device set: an authored unit that no
+    /// reporter has ever named still has a connection conclusion to record, and it is exactly the
+    /// case a walk over live evidence would miss.
+    pub fn configured_keys(&self) -> impl Iterator<Item = &DeviceKey> { self.configured.keys() }
+
+    /// Record what current reporter evidence says about one authored device's connectivity.
+    ///
+    /// Connection is separate from `ConfiguredDeviceMode`: learning that an offline unit is plugged
+    /// in neither enables a reporter nor authorizes anything to drive it.
+    ///
+    /// # Errors
+    ///
+    /// Returns `HardwareInventoryError::DeviceNotConfigured` for a key that application code did
+    /// not author into this inventory.
     pub(crate) fn set_connection(
         &mut self,
         device_key: &DeviceKey,
@@ -935,14 +1110,16 @@ impl HardwareInventory {
         Ok(())
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "phases 10 and 11 block offline capture apply and poll operations"
-        )
-    )]
-    fn ensure_operational(&self, device_key: &DeviceKey) -> Result<(), BindingError> {
+    /// Report whether an endpoint's durable device may receive driver traffic at all.
+    ///
+    /// Callers that must decide before taking mutable access — the safe-capture pass reads this to
+    /// learn whether a frame has work before it borrows `Bindings` mutably — need the same answer
+    /// the typed role views enforce, and a second copy of the offline rule would let the two drift.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BindingError::ConfiguredDeviceOffline` for a device inventory marks offline.
+    pub(crate) fn ensure_operational(&self, device_key: &DeviceKey) -> Result<(), BindingError> {
         match self.configured.get(device_key) {
             Some(ConfiguredDevice {
                 mode: ConfiguredDeviceMode::Offline,
@@ -1023,6 +1200,15 @@ pub enum BindingEntityLookup {
 #[reflect(Component, PartialEq)]
 pub struct ResolvedToDevice(Entity);
 
+impl ResolvedToDevice {
+    /// Link one binding entity to the device entity its durable endpoint currently resolves to.
+    pub(crate) const fn new(device: Entity) -> Self { Self(device) }
+
+    /// Read the device entity this link currently points at.
+    #[must_use]
+    pub const fn device(self) -> Entity { self.0 }
+}
+
 /// Every binding entity whose endpoint currently resolves to this live device entity.
 ///
 /// Bevy maintains this collection from `ResolvedToDevice`, so a tool holding a device entity can
@@ -1095,14 +1281,27 @@ pub(crate) fn project_binding_entities(
     bindings: Res<Bindings>,
     mut binding_entities: ResMut<BindingEntities>,
     mut mirrors: Query<(&mut RecoveryPolicy, &mut RoleState), With<RoleKey>>,
+    live_entities: Query<()>,
 ) {
     binding_entities.by_role.retain(|role, entity| {
         let Ok(binding) = bindings.binding(role) else {
             return true;
         };
-        // Anything but a retirement — a despawn from outside the kernel — leaves a mapping that
-        // would keep promising a live entity carrying mirrored state, so it is dropped here.
         let Ok((mut recovery_policy, mut role_state)) = mirrors.get_mut(*entity) else {
+            // A despawn from outside the kernel leaves a mapping that would keep promising a live
+            // entity carrying mirrored state, so it is dropped. An entity that is still alive but
+            // lost a mirrored component — a Bevy Remote Protocol *remove* rather than a write — is
+            // a different case: the role is still registered, so the components are re-inserted
+            // and the mapping stays. Dropping it there would permanently un-index the role, while
+            // the type doc promises a remote write is repaired on the next frame.
+            if live_entities.get(*entity).is_ok() {
+                commands
+                    .entity(*entity)
+                    .insert((role.clone(), binding.recovery, binding.state));
+
+                return true;
+            }
+
             return false;
         };
         if *recovery_policy != binding.recovery {
@@ -1197,6 +1396,8 @@ mod tests {
     use super::ResolvedToDevice;
     use super::RetirementOutcome;
     use super::RoleView;
+    use super::WaitingRole;
+    use super::WaitingWork;
     use super::drain_binding_transitions;
     use super::project_binding_entities;
     use crate::ApplyPermit;
@@ -1684,22 +1885,24 @@ mod tests {
         assert!(matches!(bindings.role_view(&role)?, RoleView::Waiting(_)));
         assert!(matches!(
             match bindings.role_view(&role)? {
-                RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                    AttemptId::default(),
-                    ApplyPermit::restore_only(),
-                    &hardware_inventory,
-                ),
+                RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                    .start_requested_apply(
+                        AttemptId::default(),
+                        ApplyPermit::restore_only(),
+                        &hardware_inventory,
+                    ),
                 _ => return Err("new binding must select waiting view".into()),
             },
             Err(BindingError::RequestedConfigurationRequiresInServicePermit)
         ));
         {
             let apply_request = match bindings.role_view(&role)? {
-                RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                    AttemptId::default(),
-                    ApplyPermit::in_service(),
-                    &hardware_inventory,
-                )?,
+                RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                    .start_requested_apply(
+                        AttemptId::default(),
+                        ApplyPermit::in_service(),
+                        &hardware_inventory,
+                    )?,
                 _ => return Err("new binding must select waiting view".into()),
             };
             assert_eq!(
@@ -1761,25 +1964,28 @@ mod tests {
             LastKnownGoodConfiguration::known(TestConfiguration(7));
         let mut bindings = Bindings::default();
         bindings.register(configured_binding)?;
+        bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
 
         assert!(matches!(
             match bindings.role_view(&role)? {
-                RoleView::Waiting(waiting_role) => waiting_role.start_last_known_good_restore(
-                    AttemptId::default(),
-                    ApplyPermit::in_service(),
-                    &hardware_inventory,
-                ),
+                RoleView::Waiting(WaitingRole::ForRestoration(restoring_role)) => restoring_role
+                    .start_last_known_good_restore(
+                        AttemptId::default(),
+                        ApplyPermit::in_service(),
+                        &hardware_inventory,
+                    ),
                 _ => return Err("registered binding must select waiting view".into()),
             },
             Err(BindingError::LastKnownGoodConfigurationRequiresRestoreOnlyPermit)
         ));
 
         let apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_last_known_good_restore(
-                AttemptId::default(),
-                ApplyPermit::restore_only(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForRestoration(restoring_role)) => restoring_role
+                .start_last_known_good_restore(
+                    AttemptId::default(),
+                    ApplyPermit::restore_only(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("restore authorization failure must retain waiting state".into()),
         };
         assert_eq!(
@@ -1805,11 +2011,12 @@ mod tests {
         bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
 
         let _ = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("registered binding must select waiting view".into()),
         };
 
@@ -1825,11 +2032,12 @@ mod tests {
         let mut bindings = Bindings::default();
         bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
         let apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("registered binding must select waiting view".into()),
         };
 
@@ -1855,11 +2063,12 @@ mod tests {
         configured_binding.driver = driver;
         bindings.register(configured_binding)?;
         let apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("registered binding must select waiting view".into()),
         };
 
@@ -1888,11 +2097,12 @@ mod tests {
         let mut bindings = Bindings::default();
         bindings.register(configured_binding)?;
         let apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("registered binding must select waiting view".into()),
         };
         drivers.start_apply(&mut World::new(), apply_request)?;
@@ -1922,11 +2132,12 @@ mod tests {
         let mut bindings = Bindings::default();
         bindings.register(configured_binding)?;
         let apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("registered binding must select waiting view".into()),
         };
         drivers.start_apply(&mut World::new(), apply_request)?;
@@ -1937,6 +2148,116 @@ mod tests {
         }
 
         assert!(matches!(bindings.role_view(&role)?, RoleView::Waiting(_)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_completed_restoration_settles_the_debt_and_a_failed_one_keeps_it()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let hardware_inventory = HardwareInventory::default();
+        let mut drivers = Drivers::default();
+        let driver = drivers.add(RecordingDriver {
+            applied_configurations: Arc::new(Mutex::new(Vec::new())),
+        });
+        let mut configured_binding = binding(role.clone(), display_endpoint("studio-display")?);
+        configured_binding.driver = driver;
+        configured_binding.last_known_good =
+            LastKnownGoodConfiguration::known(TestConfiguration(7));
+        let mut bindings = Bindings::default();
+        bindings.register(configured_binding)?;
+        bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
+
+        let restore_request = match bindings.role_view(&role)? {
+            RoleView::Waiting(WaitingRole::ForRestoration(restoring_role)) => restoring_role
+                .start_last_known_good_restore(
+                    AttemptId::default(),
+                    ApplyPermit::restore_only(),
+                    &hardware_inventory,
+                )?,
+            _ => return Err("a role owing a restoration selects the restoring view".into()),
+        };
+        drivers.start_apply(&mut World::new(), restore_request)?;
+        match bindings.role_view(&role)? {
+            RoleView::Applying(mut applying_role) => {
+                applying_role.finish(AttemptOutcome::Failed(DeviceAccessError::Contended {
+                    detail: String::from("another owner holds the display"),
+                }));
+            },
+            _ => return Err("a dispatched restore selects the applying view".into()),
+        }
+
+        // The restoration did not land, so the endpoint still does not hold the saved value and the
+        // debt is what dispatches the next attempt.
+        assert_eq!(bindings.waiting_work(&role), WaitingWork::RestorationOwed);
+
+        let retried_request = match bindings.role_view(&role)? {
+            RoleView::Waiting(WaitingRole::ForRestoration(restoring_role)) => restoring_role
+                .start_last_known_good_restore(
+                    AttemptId::default(),
+                    ApplyPermit::restore_only(),
+                    &hardware_inventory,
+                )?,
+            _ => return Err("a failed restore leaves the role owing one".into()),
+        };
+        drivers.start_apply(&mut World::new(), retried_request)?;
+        match bindings.role_view(&role)? {
+            RoleView::Applying(mut applying_role) => {
+                applying_role.finish(AttemptOutcome::Succeeded);
+            },
+            _ => return Err("a dispatched restore selects the applying view".into()),
+        }
+
+        // The saved value is on the endpoint again, so nothing is owed: the role is a safe readback
+        // opportunity once more rather than one that re-restores on every later pass.
+        assert_eq!(bindings.waiting_work(&role), WaitingWork::Nothing);
+        assert!(matches!(bindings.role_view(&role)?, RoleView::Ready(_)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn an_ordinary_apply_completing_under_an_owed_restoration_leaves_the_debt_owed()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let hardware_inventory = HardwareInventory::default();
+        let mut drivers = Drivers::default();
+        let driver = drivers.add(RecordingDriver {
+            applied_configurations: Arc::new(Mutex::new(Vec::new())),
+        });
+        let mut configured_binding = binding(role.clone(), display_endpoint("studio-display")?);
+        configured_binding.driver = driver;
+        configured_binding.last_known_good =
+            LastKnownGoodConfiguration::known(TestConfiguration(7));
+        let mut bindings = Bindings::default();
+        bindings.register(configured_binding)?;
+
+        // The role owes nothing yet, so what it mints is the authored request.
+        let apply_request = match bindings.role_view(&role)? {
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
+            _ => return Err("a role owing nothing selects the requesting view".into()),
+        };
+        drivers.start_apply(&mut World::new(), apply_request)?;
+
+        // The device departs mid-flight, which is what records the debt: the recovery rule reads
+        // policy and last-known-good, not role state, so it lands on a role already applying.
+        bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
+        match bindings.role_view(&role)? {
+            RoleView::Applying(mut applying_role) => {
+                applying_role.finish(AttemptOutcome::Succeeded);
+            },
+            _ => return Err("a dispatched requested apply selects the applying view".into()),
+        }
+
+        // The apply that landed carried the authored request, so the saved value is still not back
+        // on the endpoint and the restoration is still what the next authorized pass must run.
+        assert_eq!(bindings.waiting_work(&role), WaitingWork::RestorationOwed);
 
         Ok(())
     }
@@ -1959,8 +2280,8 @@ mod tests {
         bindings.register(configured_binding)?;
 
         match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => {
-                let apply_request = waiting_role.start_requested_apply(
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => {
+                let apply_request = requesting_role.start_requested_apply(
                     AttemptId::default(),
                     ApplyPermit::in_service(),
                     &hardware_inventory,
@@ -2012,6 +2333,49 @@ mod tests {
     }
 
     #[test]
+    fn stored_waiting_work_selects_the_only_request_a_waiting_role_is_owed()
+    -> Result<(), Box<dyn Error>> {
+        let owing_nothing = RoleKey::new("primary-window")?;
+        let owing_restoration = RoleKey::new("secondary-window")?;
+        let hardware_inventory = HardwareInventory::default();
+        let mut bindings = Bindings::default();
+        bindings.register(binding(
+            owing_nothing.clone(),
+            display_endpoint("studio-display")?,
+        ))?;
+        let mut restoring_binding =
+            binding(owing_restoration.clone(), display_endpoint("edit-display")?);
+        restoring_binding.last_known_good = LastKnownGoodConfiguration::known(TestConfiguration(7));
+        bindings.register(restoring_binding)?;
+        bindings.set_waiting_work(&owing_restoration, WaitingWork::RestorationOwed);
+
+        // `RequestingRole` carries no restore method and `RestoringRole` carries no requested-apply
+        // method, so selecting the arm is what removes the wrong call rather than refusing it.
+        match bindings.role_view(&owing_nothing)? {
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => {
+                requesting_role.start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?;
+            },
+            _ => return Err("a role owing nothing waits for hardware".into()),
+        }
+        match bindings.role_view(&owing_restoration)? {
+            RoleView::Waiting(WaitingRole::ForRestoration(restoring_role)) => {
+                restoring_role.start_last_known_good_restore(
+                    AttemptId::default(),
+                    ApplyPermit::restore_only(),
+                    &hardware_inventory,
+                )?;
+            },
+            _ => return Err("a role owing a restoration waits for that restoration".into()),
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn offline_waiting_role_cannot_mint_apply_requests() -> Result<(), Box<dyn Error>> {
         let role = RoleKey::new("primary-window")?;
         let endpoint = display_endpoint("studio-display")?;
@@ -2052,8 +2416,8 @@ mod tests {
             ConfiguredDeviceConnection::Present
         );
         match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => assert!(matches!(
-                waiting_role.start_requested_apply(
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => assert!(matches!(
+                requesting_role.start_requested_apply(
                     AttemptId::default(),
                     ApplyPermit::in_service(),
                     &hardware_inventory,
@@ -2063,9 +2427,10 @@ mod tests {
             _ => return Err("registered offline binding must remain waiting".into()),
         }
         assert!(matches!(bindings.role_view(&role)?, RoleView::Waiting(_)));
+        bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
         match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => assert!(matches!(
-                waiting_role.start_last_known_good_restore(
+            RoleView::Waiting(WaitingRole::ForRestoration(restoring_role)) => assert!(matches!(
+                restoring_role.start_last_known_good_restore(
                     AttemptId::default(),
                     ApplyPermit::restore_only(),
                     &hardware_inventory,
@@ -2105,11 +2470,12 @@ mod tests {
             mode: ConfiguredDeviceMode::Managed,
         });
         let start_apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("managed binding must select waiting state before apply".into()),
         };
         drivers.start_apply(&mut World::new(), start_apply_request)?;
@@ -2315,6 +2681,34 @@ mod tests {
 
         assert_eq!(registered_entity(&app, &role), entity);
         assert!(app.world().get_entity(entity).is_ok());
+        assert_eq!(
+            app.world().get::<RoleState>(entity),
+            Some(&RoleState::Waiting)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_binding_entity_stripped_of_its_mirrors_is_repaired_and_stays_indexed()
+    -> Result<(), Box<dyn Error>> {
+        let (mut app, role) = app_with_role("window/main")?;
+        app.update();
+        let entity = registered_entity(&app, &role);
+
+        // A Bevy Remote Protocol *remove* takes the mirrored components off a live entity, which is
+        // what separates this from a despawn: the role is still registered.
+        app.world_mut()
+            .entity_mut(entity)
+            .remove::<(RoleKey, RecoveryPolicy, RoleState)>();
+        app.update();
+
+        assert_eq!(registered_entity(&app, &role), entity);
+        assert_eq!(app.world().get::<RoleKey>(entity), Some(&role));
+        assert_eq!(
+            app.world().get::<RecoveryPolicy>(entity),
+            Some(&RecoveryPolicy::Forget)
+        );
         assert_eq!(
             app.world().get::<RoleState>(entity),
             Some(&RoleState::Waiting)

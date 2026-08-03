@@ -28,6 +28,7 @@ use crate::PollRequest;
 use crate::RegisteredSchemes;
 use crate::ReporterActivation;
 use crate::ReporterActivity;
+use crate::ReporterCoverage;
 use crate::ReporterId;
 use crate::ReporterRegistration;
 use crate::ReporterRevision;
@@ -76,16 +77,17 @@ impl ApplyPermit {
     #[must_use]
     pub const fn allows_in_service_use(self) -> bool { matches!(self.0, Purpose::InService) }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the phase 10/11 kernel dispatch")
-    )]
+    /// Mint the token that permits a device to be put in service.
+    ///
+    /// Crate-private because `Devices::authorize_service` and `Devices::authorize_service_for` are
+    /// the only in-service decision points; a driver that could mint one would be claiming an
+    /// authorization the kernel never granted.
     pub(crate) const fn in_service() -> Self { Self(Purpose::InService) }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the phase 10/11 kernel dispatch")
-    )]
+    /// Mint the weaker token that permits returning a saved configuration and nothing else.
+    ///
+    /// Crate-private for the same reason as `Self::in_service`: `Devices::authorize_restore` is the
+    /// only caller that has checked presence, claim, and verdict first.
     pub(crate) const fn restore_only() -> Self { Self(Purpose::RestoreOnly) }
 }
 
@@ -206,6 +208,7 @@ impl Reporters {
             .map(|reporter_entry| RegisteredReporter {
                 reporter:     reporter_entry.reporter_id,
                 cadence:      reporter_entry.registration.cadence(),
+                coverage:     reporter_entry.registration.coverage(),
                 contribution: match &reporter_entry.latest_set {
                     RetainedDeviceSet::NotCompleted => {
                         ReporterContribution::AwaitingFirstCompleteSet
@@ -529,6 +532,9 @@ pub(crate) struct ReporterFailure {
 pub(crate) struct RegisteredReporter<'a> {
     pub(crate) reporter:     ReporterId,
     pub(crate) cadence:      &'a DiscoveryCadence,
+    /// What this reporter's omission of a durable key is worth, which decides whether a complete
+    /// set without an authored unit proves the unit is gone or proves nothing at all.
+    pub(crate) coverage:     &'a ReporterCoverage,
     pub(crate) contribution: ReporterContribution<'a>,
 }
 
@@ -929,10 +935,6 @@ impl Drivers {
     /// Returns `DriverContractError::DriverNotRegistered` when `driver_id` is not in this
     /// process's registry, or another `DriverContractError` when erased dispatch cannot recover
     /// the typed driver boundary.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the phase 10/11 kernel dispatch")
-    )]
     pub(crate) fn capture(
         &mut self,
         world: &mut World,
@@ -1213,6 +1215,7 @@ mod tests {
     use crate::RoleView;
     use crate::SchemeName;
     use crate::StartupDiscoveryState;
+    use crate::WaitingRole;
     use crate::discovery::DiscoveryDirtyState;
     use crate::discovery::DiscoveryRequest;
 
@@ -3427,11 +3430,12 @@ mod tests {
         })?;
 
         let start_apply_request = match bindings.role_view(&role)? {
-            RoleView::Waiting(waiting_role) => waiting_role.start_requested_apply(
-                AttemptId::default(),
-                ApplyPermit::in_service(),
-                &hardware_inventory,
-            )?,
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
             _ => return Err("registered binding must begin waiting".into()),
         };
         let start = app

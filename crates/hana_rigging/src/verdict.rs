@@ -109,6 +109,25 @@ impl IdentityVerdict {
     }
 }
 
+/// Whether a verdict only a human can resolve is outstanding for a device, independent of what the
+/// current pass concluded about it.
+///
+/// `IdentityVerdict::Displaced` and `IdentityVerdict::WrongUnit` describe a join between an
+/// arriving unit and the slot a saved one left, and that evidence exists only on the pass the unit
+/// arrived. A later pass that reports a scan observation instead — a key duplicated in one scan
+/// above all — would destroy the join if the outstanding verdict lived only in
+/// `crate::ReconciledDeviceState::verdict`, and the unit a human never accepted would be authorized
+/// as soon as the scan went back to reporting it once.
+#[derive(Clone, Default, PartialEq, Eq, Debug, Reflect)]
+pub enum IdentityDecisionOwed {
+    /// Nothing is outstanding, so `crate::ReconciledDeviceState::verdict` is the whole conclusion.
+    #[default]
+    Nothing,
+    /// This verdict stands until a human accepts or rejects the unit, and is reported again as
+    /// soon as no scan observation of the current pass outranks it.
+    HumanDecision(IdentityVerdict),
+}
+
 /// Evidence that prevents reconciliation from identifying a live unit, preserved so recovery
 /// policy can distinguish hardware limits from platform limits and duplicate reports.
 ///
