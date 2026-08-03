@@ -31,6 +31,16 @@ impl Capabilities {
         self
     }
 
+    /// Borrow every declared capability component so reconciliation can compare the declarations
+    /// of two reporters that describe the same device.
+    ///
+    /// References rather than values: `Box<dyn Reflect>` is not clonable in Bevy 0.19, and copying
+    /// a declaration out of a reporter's retained set would destroy evidence a reporter that did
+    /// not re-scan this frame still needs.
+    pub(crate) fn declarations(&self) -> impl Iterator<Item = &dyn Reflect> {
+        self.0.iter().map(AsRef::as_ref)
+    }
+
     /// Insert every declared capability component into `entity` through its reflected component
     /// registration.
     ///

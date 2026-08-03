@@ -4,13 +4,19 @@ use bevy::app::Update;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::SystemSet;
 use bevy::prelude::World;
+use bevy::time::Real;
+use bevy::time::Time;
 
 use crate::Bindings;
+use crate::Devices;
 use crate::DiscoveryControl;
 use crate::DiscoveryLimits;
 use crate::DiscoveryStatus;
 use crate::HardwareInventory;
 use crate::RegisteredSchemes;
+use crate::RiggingLimits;
+use crate::RiggingRevision;
+use crate::reconcile::reconcile;
 use crate::registration::Drivers;
 use crate::registration::Reporters;
 
@@ -38,14 +44,23 @@ pub enum RiggingSystems {
 
 impl Plugin for RiggingPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Drivers>()
+        // `reconcile` reads `Time<Real>` for the freshness lease, and a missing resource makes
+        // Bevy skip the system without reporting anything. The resource is initialized here rather
+        // than by adding `TimePlugin`, because `DefaultPlugins` and `MinimalPlugins` both panic on
+        // a `TimePlugin` that is already installed, which would make plugin order decide whether an
+        // application starts.
+        app.init_resource::<Time<Real>>()
+            .init_resource::<Drivers>()
             .init_resource::<Bindings>()
+            .init_resource::<Devices>()
             .init_resource::<DiscoveryControl>()
             .init_resource::<DiscoveryLimits>()
             .init_resource::<DiscoveryStatus>()
             .init_resource::<HardwareInventory>()
             .init_resource::<RegisteredSchemes>()
             .init_resource::<Reporters>()
+            .init_resource::<RiggingLimits>()
+            .init_resource::<RiggingRevision>()
             .configure_sets(
                 Update,
                 (
@@ -56,7 +71,13 @@ impl Plugin for RiggingPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, collect.in_set(RiggingSystems::Collect));
+            .add_systems(
+                Update,
+                (
+                    collect.in_set(RiggingSystems::Collect),
+                    reconcile.in_set(RiggingSystems::Reconcile),
+                ),
+            );
     }
 }
 
@@ -78,11 +99,14 @@ fn collect(world: &mut World) {
 
 #[cfg(test)]
 mod tests {
+    use bevy::MinimalPlugins;
     use bevy::app::App;
     use bevy::app::Update;
     use bevy::ecs::schedule::IntoScheduleConfigs;
     use bevy::prelude::ResMut;
     use bevy::prelude::Resource;
+    use bevy::time::Real;
+    use bevy::time::Time;
 
     use super::RiggingPlugin;
     use super::RiggingSystems;
@@ -122,5 +146,27 @@ mod tests {
             app.world().resource::<StageLog>().0.as_slice(),
             ["reconcile", "prepare", "apply"]
         );
+    }
+
+    #[test]
+    fn an_application_may_add_the_plugin_before_its_default_plugins() {
+        let mut app = App::new();
+        app.add_plugins(RiggingPlugin).add_plugins(MinimalPlugins);
+
+        app.update();
+
+        // `MinimalPlugins` brings `TimePlugin`, which panics if the kernel had claimed it first.
+        // The lease still has the resource it reads either way.
+        assert!(app.world().get_resource::<Time<Real>>().is_some());
+    }
+
+    #[test]
+    fn a_bare_app_still_gets_the_clock_the_freshness_lease_reads() {
+        let mut app = App::new();
+        app.add_plugins(RiggingPlugin);
+
+        app.update();
+
+        assert!(app.world().get_resource::<Time<Real>>().is_some());
     }
 }

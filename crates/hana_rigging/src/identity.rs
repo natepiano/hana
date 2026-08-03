@@ -16,9 +16,28 @@ use super::scheme::SchemeName;
 /// `DeviceId` is process-local, `Copy`, and never persisted. Reconciliation assigns its private
 /// integer from a monotonic counter so a removed device leaves a dangling handle instead of a
 /// handle that silently denotes a later device.
+///
+/// Reflection sees the handle opaquely, which registers `DeviceId` as a component while denying
+/// construction from a dynamic tuple struct: without that, an inspector could mint a handle the
+/// device registry never issued and route an apply to another unit. Opacity also withholds the
+/// field, so reflection-driven tooling reads the issued value through `DeviceId::get` rather than
+/// through the type registry.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Component, Reflect)]
+#[reflect(opaque)]
 #[reflect(Component, PartialEq)]
 pub struct DeviceId(u64);
+
+impl DeviceId {
+    /// Wrap the device registry's next counter value.
+    ///
+    /// Private to the crate because only `crate::Devices` issues handles; a reporter or an
+    /// application that could mint one would be asserting an identity it never established.
+    pub(crate) const fn new(value: u64) -> Self { Self(value) }
+
+    /// Report the issued counter value for diagnostics and stable ordering in reports.
+    #[must_use]
+    pub const fn get(self) -> u64 { self.0 }
+}
 
 /// Durable designation for a device that can cross process and storage boundaries.
 ///
@@ -93,6 +112,7 @@ pub enum DeviceKind {
 
 #[cfg(test)]
 mod tests {
+    use std::any::TypeId;
     use std::error::Error;
 
     use bevy::app::App;
@@ -100,7 +120,9 @@ mod tests {
     use bevy::ecs::reflect::ReflectComponent;
     use bevy::prelude::Component;
     use bevy::prelude::Reflect;
+    use bevy::reflect::FromReflect;
     use bevy::reflect::ReflectSerialize;
+    use bevy::reflect::tuple_struct::DynamicTupleStruct;
     use bevy::world_serialization::DynamicWorldBuilder;
     use ron::Options;
     use ron::extensions::Extensions;
@@ -192,7 +214,7 @@ mod tests {
         let mut app = App::new();
         let entity = app
             .world_mut()
-            .spawn((DeviceId(7), PersistedDevice(key)))
+            .spawn((DeviceId::new(7), PersistedDevice(key)))
             .id();
         let serialized = {
             let world = app.world();
@@ -211,6 +233,28 @@ mod tests {
         assert!(!serialized.contains("DeviceId"));
 
         Ok(())
+    }
+
+    #[test]
+    fn reflection_cannot_construct_device_id() {
+        let mut dynamic_device_id = DynamicTupleStruct::default();
+        dynamic_device_id.insert(0_u64);
+
+        assert!(DeviceId::from_reflect(&dynamic_device_id).is_none());
+    }
+
+    #[test]
+    fn device_id_registers_component_reflection_metadata() {
+        let app = App::new();
+        let type_registry = app.world().resource::<AppTypeRegistry>().read();
+
+        assert!(
+            type_registry
+                .get_type_data::<ReflectComponent>(TypeId::of::<DeviceId>())
+                .is_some()
+        );
+
+        drop(type_registry);
     }
 
     fn reported_key(

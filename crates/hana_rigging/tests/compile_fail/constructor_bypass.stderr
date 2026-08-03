@@ -9,6 +9,10 @@ note: constructor is not visible here due to private fields
   |
   | pub struct DeviceId(u64);
   |                     ^^^ private field
+help: you might have meant to use the `new` associated function
+  |
+7 |     let _ = DeviceId::new(1);
+  |                     +++++
 
 error[E0423]: cannot initialize a tuple struct which contains private fields
  --> tests/compile_fail/constructor_bypass.rs:8:13

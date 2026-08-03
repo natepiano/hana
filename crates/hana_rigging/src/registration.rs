@@ -94,7 +94,9 @@ impl ApplyPermit {
     not(test),
     expect(
         dead_code,
-        reason = "reconciliation distinguishes retained complete-set handoff states"
+        reason = "reconciliation reads retained sets through `Reporters::registered_reporters`, \
+                  and this per-reporter lookup answers the handoff question for tests and later \
+                  diagnostics"
     )
 )]
 pub(crate) enum ReporterDeviceSetState<'a> {
@@ -161,7 +163,11 @@ impl Reporters {
 
     #[cfg_attr(
         not(test),
-        expect(dead_code, reason = "reconciliation borrows retained complete sets")
+        expect(
+            dead_code,
+            reason = "reconciliation iterates every reporter instead of selecting one, so this \
+                      lookup serves tests and later diagnostics"
+        )
     )]
     pub(crate) fn latest_device_set(&self, reporter: ReporterId) -> ReporterDeviceSetState<'_> {
         let Some(reporter_entry) = self
@@ -180,23 +186,54 @@ impl Reporters {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "reconciliation drains changed reporter identifiers"
-        )
-    )]
     pub(crate) fn take_changed_reporters(&mut self) -> Vec<ReporterId> {
         std::mem::take(&mut self.changed)
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "reconciliation drains retained reporter failures")
-    )]
     pub(crate) fn take_reporter_failures(&mut self) -> Vec<ReporterFailure> {
         std::mem::take(&mut self.failures)
+    }
+
+    /// Report every registered reporter with the cadence it promised and what it can contribute to
+    /// the current reconcile pass.
+    ///
+    /// Reconciliation borrows retained sets through this iterator instead of copying them, so the
+    /// registry stays the single owner of reporter evidence and a reporter that did not re-scan
+    /// this frame still contributes its latest complete set.
+    pub(crate) fn registered_reporters(&self) -> impl Iterator<Item = RegisteredReporter<'_>> {
+        self.entries
+            .iter()
+            .map(|reporter_entry| RegisteredReporter {
+                reporter:     reporter_entry.reporter_id,
+                cadence:      reporter_entry.registration.cadence(),
+                contribution: match &reporter_entry.latest_set {
+                    RetainedDeviceSet::NotCompleted => {
+                        ReporterContribution::AwaitingFirstCompleteSet
+                    },
+                    RetainedDeviceSet::Complete {
+                        device_set,
+                        completed_at,
+                    } => ReporterContribution::Completed {
+                        device_set,
+                        completed_at: *completed_at,
+                    },
+                },
+            })
+    }
+
+    /// Move one reporter's retained completion time backwards so a test can reach the freshness
+    /// lease without advancing a clock or sleeping.
+    #[cfg(test)]
+    pub(crate) fn backdate_completion(&mut self, reporter: ReporterId, by: std::time::Duration) {
+        for reporter_entry in &mut self.entries {
+            if reporter_entry.reporter_id != reporter {
+                continue;
+            }
+            if let RetainedDeviceSet::Complete { completed_at, .. } = &mut reporter_entry.latest_set
+            {
+                *completed_at -= by;
+            }
+        }
     }
 
     fn poll_running(&mut self, now: Instant) {
@@ -476,13 +513,39 @@ impl Reporters {
 }
 
 /// Failure queue entry retained for reconciliation and later user-interface event emission.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "reconciliation drains each reporter failure")
+#[expect(
+    dead_code,
+    reason = "reconciliation drains each failure so the queue stays bounded; a failed scan retains \
+              the reporter's preceding whole set, so the payload here is for the user-interface \
+              events a later phase emits"
 )]
 pub(crate) struct ReporterFailure {
     pub(crate) reporter: ReporterId,
     pub(crate) error:    crate::DeviceAccessError,
+}
+
+/// One registered reporter as reconciliation reads it: its handle, its promised cadence, and what
+/// it can contribute right now.
+pub(crate) struct RegisteredReporter<'a> {
+    pub(crate) reporter:     ReporterId,
+    pub(crate) cadence:      &'a DiscoveryCadence,
+    pub(crate) contribution: ReporterContribution<'a>,
+}
+
+/// What one registered reporter offers the current reconcile pass.
+///
+/// The retained set and the instant its scan completed travel together because they are recorded
+/// together: a failed scan retains the preceding set and leaves this completion time where it was,
+/// which is exactly what the freshness lease has to measure against.
+pub(crate) enum ReporterContribution<'a> {
+    /// The reporter has never completed a scan. It contributes no devices and is never stale by
+    /// the clock: it is starting up, not late.
+    AwaitingFirstCompleteSet,
+    /// The reporter's latest accepted whole set, with the real-time instant that scan completed.
+    Completed {
+        device_set:   &'a DeviceSet,
+        completed_at: Instant,
+    },
 }
 
 struct ReporterEntry {
@@ -499,13 +562,6 @@ enum RetainedDeviceSet {
     NotCompleted,
     Complete {
         device_set:   DeviceSet,
-        #[cfg_attr(
-            not(test),
-            expect(
-                dead_code,
-                reason = "reconciliation consumes the retained set's actual completion clock"
-            )
-        )]
         completed_at: Instant,
     },
 }
@@ -1142,6 +1198,7 @@ mod tests {
     use crate::RegisteredSchemes;
     use crate::ReportedAs;
     use crate::ReportedId;
+    use crate::ReportedParent;
     use crate::ReportedSerial;
     use crate::ReporterActivation;
     use crate::ReporterActivity;
@@ -1150,6 +1207,7 @@ mod tests {
     use crate::RequestedConfiguration;
     use crate::RetryOn;
     use crate::RiggingPlugin;
+    use crate::RiggingRevision;
     use crate::RoleKey;
     use crate::RoleState;
     use crate::RoleView;
@@ -1724,7 +1782,7 @@ mod tests {
     fn test_device_record() -> DeviceRecord {
         DeviceRecord {
             reported_as:  ReportedAs::MatchEvidenceOnly,
-            transport:    None,
+            parent:       ReportedParent::Root,
             presence:     Presence::Present,
             claim:        Claim::NotApplicable,
             capabilities: Capabilities::new(),
@@ -2564,7 +2622,7 @@ mod tests {
     }
 
     #[test]
-    fn reconciliation_handoff_retains_changed_sets_and_failures_until_phase_nine_drains_them() {
+    fn reconciliation_drains_the_changed_set_and_failure_handoff_every_frame() {
         let mut app = App::new();
         app.add_plugins(RiggingPlugin);
         let reporter_id = app.add_device_reporter(
@@ -2588,14 +2646,24 @@ mod tests {
         app.update();
         app.update();
 
+        // The completed set and the later failure both reached reconciliation, which advanced the
+        // rigging revision and left neither queue holding work for a following frame.
+        assert_eq!(app.world().resource::<RiggingRevision>().get(), 1);
         let mut reporters = app.world_mut().resource_mut::<Reporters>();
-        assert_eq!(reporters.take_changed_reporters(), vec![reporter_id]);
-        let reporter_failures = reporters.take_reporter_failures();
-        assert_eq!(reporter_failures.len(), 1);
-        assert_eq!(reporter_failures[0].reporter, reporter_id);
+        assert_eq!(reporters.take_changed_reporters(), Vec::new());
+        assert_eq!(reporters.take_reporter_failures().len(), 0);
+
+        // The failure's error stays legible after the queue drains, because the reporter's
+        // discovery status keeps it rather than the handoff queue.
         assert!(matches!(
-            reporter_failures[0].error,
-            DeviceAccessError::Transport { .. }
+            app.world()
+                .resource::<DiscoveryStatus>()
+                .reporter_status(reporter_id)
+                .map(|reporter_status| &reporter_status.last_outcome),
+            Ok(LastDiscoveryOutcome::Failed {
+                error: DeviceAccessError::Transport { .. },
+                ..
+            })
         ));
     }
 
@@ -2828,8 +2896,7 @@ mod tests {
         app.update();
         app.update();
         {
-            let mut reporters = app.world_mut().resource_mut::<Reporters>();
-            assert_eq!(reporters.take_changed_reporters(), vec![first]);
+            let reporters = app.world().resource::<Reporters>();
             let first_device_set = available_device_set(reporters.latest_device_set(first))
                 .expect("first reporter's complete set must remain available");
             assert_eq!(first_device_set.devices.len(), 2);
@@ -2847,8 +2914,7 @@ mod tests {
         app.update();
         app.update();
 
-        let mut reporters = app.world_mut().resource_mut::<Reporters>();
-        assert_eq!(reporters.take_changed_reporters(), vec![second]);
+        let reporters = app.world().resource::<Reporters>();
         let first_device_set = available_device_set(reporters.latest_device_set(first))
             .expect("unchanged first reporter set must stay borrowable");
         assert_eq!(first_device_set.devices.len(), 2);

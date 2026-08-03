@@ -19,7 +19,7 @@ use crate::ReportedSerial;
 /// becomes unreachable. `Unreachable` is not `Absent`: treating a silent remote node as removed
 /// can retire output still attached to a live device.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Component, Reflect)]
-#[reflect(Component)]
+#[reflect(Component, PartialEq)]
 pub enum Presence {
     /// The reporter observed the unit and can use it, such as a connected display or camera.
     Present,
@@ -50,6 +50,26 @@ pub enum ReportedAs {
     MatchEvidenceOnly,
 }
 
+/// How a reporter reaches one unit: directly, or through another device it already names.
+///
+/// The variants replace an optional parent key because a root and a child are different reports,
+/// not a value and its absence. The field is called a parent rather than a transport: a transport
+/// would promise a bus or protocol, which a kernel that performs no input or output must never
+/// model, while the value has always been the `DeviceKey` of another reported device.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+pub enum ReportedParent {
+    /// The reporter reaches this unit directly, as with a display panel enumerated by the window
+    /// system. A root sits at the top of one reporter's forest.
+    Root,
+    /// The reporter reaches this unit through the device named by this key, as a camera reached
+    /// through the capture card it is plugged into.
+    ///
+    /// Presence is conjunctive down the chain: reconciliation never reports a child as more
+    /// reachable than the device it hangs off, because a capture card that stopped responding
+    /// cannot deliver frames from a camera behind it.
+    ChildOf(DeviceKey),
+}
+
 /// One unit in a reporter's completed whole-set report.
 ///
 /// `DeviceRecord` carries observed evidence but no `crate::IdentityVerdict` or `crate::DeviceId`.
@@ -58,10 +78,9 @@ pub enum ReportedAs {
 pub struct DeviceRecord {
     /// Durable naming status for this report, including the evidence-only case with no device key.
     pub reported_as:  ReportedAs,
-    /// Parent link that places authored devices below their interface and child devices below
-    /// their host. A root has exactly one absence state, so `None` does not erase a policy
-    /// distinction.
-    pub transport:    Option<DeviceKey>,
+    /// Parent link that places a child device below the device it is reached through, and names
+    /// every directly reached unit a root.
+    pub parent:       ReportedParent,
     /// Reporter observation of whether this unit is present, absent, or unreachable.
     pub presence:     Presence,
     /// Reporter observation of exclusive ownership, independent from whether the unit is present.
@@ -148,6 +167,7 @@ mod tests {
     use super::DeviceRecord;
     use super::Presence;
     use super::ReportedAs;
+    use super::ReportedParent;
     use super::ReporterId;
     use super::ReporterRevision;
     use crate::AttachmentPath;
@@ -169,7 +189,7 @@ mod tests {
     fn evidence_only_record_has_no_reported_device_key() {
         let device_record = DeviceRecord {
             reported_as:  ReportedAs::MatchEvidenceOnly,
-            transport:    None,
+            parent:       ReportedParent::Root,
             presence:     Presence::Present,
             claim:        Claim::NotApplicable,
             capabilities: Capabilities::new(),
@@ -183,7 +203,7 @@ mod tests {
             device_record.reported_as,
             ReportedAs::MatchEvidenceOnly
         ));
-        assert!(device_record.transport.is_none());
+        assert_eq!(device_record.parent, ReportedParent::Root);
     }
 
     #[test]

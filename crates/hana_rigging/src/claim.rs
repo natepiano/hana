@@ -8,7 +8,7 @@ use bevy::prelude::Reflect;
 /// while another process owns its capture stream, so reconciliation keeps `Claim` independent of
 /// `Presence` before deciding whether output is permitted.
 #[derive(Clone, PartialEq, Eq, Debug, Component, Reflect)]
-#[reflect(Component)]
+#[reflect(Component, PartialEq)]
 pub enum Claim {
     /// The provider's substrate has no exclusive-ownership concept, as with a display panel that
     /// applications may address concurrently.
