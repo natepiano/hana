@@ -14,6 +14,7 @@ use notify::Watcher;
 
 use super::channels;
 use super::runtime::DiskWorker;
+use crate::DiagnosticSource;
 use crate::disk::paths::KeymapPaths;
 
 #[derive(Default)]
@@ -96,7 +97,7 @@ impl DiskWorker {
     pub(super) fn handle_watcher_failure(&mut self, paths: &KeymapPaths, message: String) {
         if self.reported_watch_error.as_deref() != Some(message.as_str()) {
             self.report_diagnostics(vec![channels::disk_diagnostic(
-                paths.config_directory(),
+                DiagnosticSource::KeymapDirectory(paths.config_directory().to_path_buf()),
                 &message,
             )]);
             self.reported_watch_error = Some(message);
@@ -237,7 +238,10 @@ impl DiskWorker {
 
     fn report_watcher_setup_failure(&mut self, path: &Path, message: String) {
         if self.reported_watch_error.as_deref() != Some(message.as_str()) {
-            self.report_diagnostics(vec![channels::disk_diagnostic(path, &message)]);
+            self.report_diagnostics(vec![channels::disk_diagnostic(
+                DiagnosticSource::KeymapDirectory(path.to_path_buf()),
+                &message,
+            )]);
             self.reported_watch_error = Some(message);
         }
     }

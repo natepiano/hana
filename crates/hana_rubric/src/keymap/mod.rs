@@ -21,6 +21,7 @@ pub(crate) use merged::MergedKeymap;
 pub(crate) use reload::PendingReload;
 pub(crate) use reload::ReloadConfiguration;
 pub(crate) use reload::ReloadRequest;
+pub(crate) use reload::UserKeymapContents;
 pub(crate) use reload::commit_defaults;
 pub(crate) use reload::commit_reload;
 pub(super) use runtime::KeymapRuntime;

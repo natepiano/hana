@@ -25,6 +25,7 @@ use strum::IntoEnumIterator;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::DiagnosticSource;
 use crate::KeymapLoadFailures;
 use crate::KeymapSystems;
 use crate::keymap_plugin::RegistryValidationFailed;
@@ -308,7 +309,7 @@ pub(crate) fn condition_diagnostic(
     message: String,
 ) -> Diagnostic {
     Diagnostic {
-        source_path: String::new(),
+        source: DiagnosticSource::ContextRegistration,
         byte_range: 0..0,
         line: 0,
         column: 0,
@@ -490,6 +491,8 @@ mod tests {
     use super::KeymapContext;
     use super::sync_resource_condition;
     use crate::DiagnosticKind;
+    use crate::DiagnosticSeverity;
+    use crate::DiagnosticSource;
     use crate::KeymapPlugin;
 
     /// Frames the allocation test runs before measuring, so every routing structure the sync
@@ -544,6 +547,17 @@ mod tests {
     enum SecondDuplicateContext {
         #[strum(message = "While flying the second context")]
         Flying,
+    }
+
+    #[test]
+    fn context_registration_failures_name_no_keymap_source() {
+        let diagnostic = super::condition_diagnostic(
+            "dimension_lock",
+            DiagnosticSeverity::Failure,
+            String::from("Duplicate keymap context name."),
+        );
+
+        assert_eq!(diagnostic.source, DiagnosticSource::ContextRegistration);
     }
 
     #[test]

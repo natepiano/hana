@@ -1,5 +1,6 @@
 //! Compiled-keymap replacement from disk-worker source snapshots.
 
+use std::path::PathBuf;
 use std::str;
 use std::str::Utf8Error;
 
@@ -9,10 +10,12 @@ use bevy::prelude::Resource;
 use super::CompiledKeymap;
 use super::Generation;
 use super::MergedKeymap;
+use super::merged::UserKeymap;
 use crate::CommandRegistry;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::DiagnosticSource;
 use crate::KeymapLoadFailures;
 use crate::Keystroke;
 use crate::condition::ConditionRegistry;
@@ -21,21 +24,21 @@ use crate::disk::MAX_RETAINED_DIAGNOSTICS;
 /// Sources shared by every keymap replacement transaction.
 #[derive(Clone, Resource)]
 pub(crate) struct ReloadConfiguration {
-    defaults_path:          String,
-    published_defaults:     String,
-    protected_keystrokes:   Vec<Keystroke>,
-    allow_default_failures: bool,
+    defaults_diagnostic_source: DiagnosticSource,
+    published_defaults:         String,
+    protected_keystrokes:       Vec<Keystroke>,
+    allow_default_failures:     bool,
 }
 
 impl ReloadConfiguration {
     pub(crate) const fn new(
-        defaults_path: String,
+        defaults_diagnostic_source: DiagnosticSource,
         published_defaults: String,
         protected_keystrokes: Vec<Keystroke>,
         allow_default_failures: bool,
     ) -> Self {
         Self {
-            defaults_path,
+            defaults_diagnostic_source,
             published_defaults,
             protected_keystrokes,
             allow_default_failures,
@@ -58,13 +61,19 @@ impl PendingReload {
     const fn take(&mut self) -> Option<ReloadRequest> { self.request.take() }
 }
 
+/// Whether the disk worker read bytes for the user keymap file.
+pub(crate) enum UserKeymapContents {
+    Read(Vec<u8>),
+    Absent,
+}
+
 /// Transport-neutral user-keymap input for the reload transaction.
 pub(crate) enum ReloadRequest {
     Defaults,
     DiskDiagnostics(Vec<Diagnostic>),
     UserSnapshot {
-        source_path: String,
-        contents:    Option<Vec<u8>>,
+        source_path: PathBuf,
+        contents:    UserKeymapContents,
         diagnostics: Vec<Diagnostic>,
     },
 }
@@ -90,8 +99,8 @@ pub(crate) fn commit_reload(world: &mut World) {
 }
 
 fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
-    let (user_source, disk_diagnostics, validates_defaults) = match request {
-        ReloadRequest::Defaults => (None, Vec::new(), true),
+    let (user_keymap, disk_diagnostics, validates_defaults) = match request {
+        ReloadRequest::Defaults => (UserKeymap::DefaultsOnly, Vec::new(), true),
         ReloadRequest::DiskDiagnostics(diagnostics) => {
             record_transport_diagnostics(world, diagnostics);
             return CommitOutcome::NoChange;
@@ -101,10 +110,13 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
             contents,
             diagnostics,
         } => match contents {
-            None => (None, diagnostics, false),
-            Some(contents) => {
-                let user_source = match str::from_utf8(&contents) {
-                    Ok(source) => Some((source_path, source.to_owned())),
+            UserKeymapContents::Absent => (UserKeymap::DefaultsOnly, diagnostics, false),
+            UserKeymapContents::Read(contents) => {
+                let user_keymap = match str::from_utf8(&contents) {
+                    Ok(source) => UserKeymap::Layered {
+                        origin:   DiagnosticSource::KeymapFile(source_path),
+                        contents: source.to_owned(),
+                    },
                     Err(error) => {
                         let diagnostic = utf8_diagnostic(source_path, error);
                         record_load_diagnostics(world, vec![diagnostic]);
@@ -113,7 +125,7 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
                     },
                 };
 
-                (user_source, diagnostics, false)
+                (user_keymap, diagnostics, false)
             },
         },
     };
@@ -126,11 +138,9 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
     let merged_keymap = world.resource_scope::<CommandRegistry, _>(|world, command_registry| {
         let condition_registry = world.resource::<ConditionRegistry>();
         MergedKeymap::from_sources(
-            &reload_configuration.defaults_path,
+            &reload_configuration.defaults_diagnostic_source,
             &reload_configuration.published_defaults,
-            user_source
-                .as_ref()
-                .map(|(source_path, source)| (source_path.as_str(), source.as_str())),
+            &user_keymap,
             &command_registry,
             condition_registry,
             &reload_configuration.protected_keystrokes,
@@ -147,7 +157,7 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
 
     let defaults_failed = validates_defaults
         && diagnostics.iter().any(|diagnostic| {
-            diagnostic.source_path == reload_configuration.defaults_path
+            diagnostic.source == reload_configuration.defaults_diagnostic_source
                 && diagnostic.severity == DiagnosticSeverity::Failure
         });
     if defaults_failed && !reload_configuration.allow_default_failures {
@@ -173,20 +183,20 @@ fn next_generation(world: &World) -> Generation {
         })
 }
 
-fn utf8_diagnostic(source_path: String, error: Utf8Error) -> Diagnostic {
+fn utf8_diagnostic(source_path: PathBuf, error: Utf8Error) -> Diagnostic {
     Diagnostic {
-        source_path,
-        byte_range: 0..0,
-        line: 0,
-        column: 0,
-        block_index: 0,
-        context: String::new(),
+        source:             DiagnosticSource::KeymapFile(source_path),
+        byte_range:         0..0,
+        line:               0,
+        column:             0,
+        block_index:        0,
+        context:            String::new(),
         original_keystroke: String::new(),
-        command_id: String::new(),
-        kind: DiagnosticKind::Syntax,
-        severity: DiagnosticSeverity::Failure,
-        message: format!("The user keymap is not valid UTF-8: {error}"),
-        suggestions: Vec::new(),
+        command_id:         String::new(),
+        kind:               DiagnosticKind::Syntax,
+        severity:           DiagnosticSeverity::Failure,
+        message:            format!("The user keymap is not valid UTF-8: {error}"),
+        suggestions:        Vec::new(),
     }
 }
 
@@ -244,6 +254,7 @@ enum CommitOutcome {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -264,11 +275,13 @@ mod tests {
     use super::PendingReload;
     use super::ReloadConfiguration;
     use super::ReloadRequest;
+    use super::UserKeymapContents;
     use super::commit_defaults;
     use super::commit_reload;
     use crate::Capability;
     use crate::CommandId;
     use crate::CommandRegistry;
+    use crate::DiagnosticSource;
     use crate::HeldCommandLookupOutcome;
     use crate::HoldPhase;
     use crate::KeymapCommand;
@@ -282,6 +295,7 @@ mod tests {
     use crate::keymap::runtime::KeymapRuntime;
 
     const DEFAULTS_PATH: &str = "published-defaults.jsonc";
+    const USER_KEYMAP_FIXTURE: &str = "user-keymap.jsonc";
     const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
 
     #[derive(Default, Event, Reflect)]
@@ -351,7 +365,7 @@ mod tests {
             .init_resource::<PendingReload>()
             .init_resource::<ReloadDispatchCount>()
             .insert_resource(ReloadConfiguration::new(
-                String::from(DEFAULTS_PATH),
+                DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH)),
                 defaults.to_owned(),
                 Vec::new(),
                 false,
@@ -368,8 +382,8 @@ mod tests {
         app.world_mut()
             .resource_mut::<PendingReload>()
             .replace(ReloadRequest::UserSnapshot {
-                source_path: String::from("user-keymap.jsonc"),
-                contents:    Some(contents.to_vec()),
+                source_path: PathBuf::from(USER_KEYMAP_FIXTURE),
+                contents:    UserKeymapContents::Read(contents.to_vec()),
                 diagnostics: Vec::new(),
             });
     }
@@ -469,7 +483,10 @@ mod tests {
                 .resource::<KeymapLoadFailures>()
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.source_path == "user-keymap.jsonc")
+                .any(|diagnostic| {
+                    diagnostic.source
+                        == DiagnosticSource::KeymapFile(PathBuf::from(USER_KEYMAP_FIXTURE))
+                })
         );
         Ok(())
     }

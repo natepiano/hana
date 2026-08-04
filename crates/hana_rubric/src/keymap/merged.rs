@@ -17,6 +17,7 @@ use crate::CommandRegistry;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::DiagnosticSource;
 use crate::Keystroke;
 use crate::KeystrokeSequence;
 use crate::PrimaryTrigger;
@@ -183,10 +184,10 @@ enum ResolvedEdit {
 
 #[derive(Clone)]
 struct ResolvedBinding {
-    command_id:   CommandId,
-    source:       BindingSource,
-    source_layer: BindingSourceLayer,
-    source_path:  String,
+    command_id:        CommandId,
+    source:            BindingSource,
+    source_layer:      BindingSourceLayer,
+    diagnostic_source: DiagnosticSource,
 }
 
 #[derive(Clone)]
@@ -227,6 +228,19 @@ enum ContextResolution {
     Invalid,
 }
 
+/// The user keymap layered over the embedded defaults, or its absence.
+///
+/// [`UserKeymap::DefaultsOnly`] covers every situation that leaves nothing to layer — a
+/// defaults-only startup commit, a missing user keymap file, and a user keymap file that is not
+/// UTF-8 — because the merge treats all three the same way.
+pub(crate) enum UserKeymap {
+    Layered {
+        origin:   DiagnosticSource,
+        contents: String,
+    },
+    DefaultsOnly,
+}
+
 /// Live command bindings after global fallback and per-condition tombstones are resolved.
 pub(crate) struct MergedKeymap {
     global:                Vec<(KeystrokeSequence, CommandId)>,
@@ -245,18 +259,18 @@ impl MergedKeymap {
     /// failing document's own diagnostics.
     /// Per-binding diagnostics are returned with the successfully merged keymap.
     pub(crate) fn from_sources(
-        defaults_source_path: &str,
+        defaults_diagnostic_source: &DiagnosticSource,
         defaults_source: &str,
-        user_source: Option<(&str, &str)>,
+        user_keymap: &UserKeymap,
         command_registry: &CommandRegistry,
         condition_registry: &ConditionRegistry,
         protected_keystrokes: &[Keystroke],
     ) -> Result<(Self, Vec<Diagnostic>), Vec<Diagnostic>> {
         let (defaults, mut diagnostics) =
-            KeymapDocument::parse(defaults_source_path, defaults_source)?;
-        let user = match user_source {
-            Some((source_path, source)) => {
-                let (user, user_diagnostics) = match KeymapDocument::parse(source_path, source) {
+            KeymapDocument::parse(defaults_diagnostic_source, defaults_source)?;
+        let user = match user_keymap {
+            UserKeymap::Layered { origin, contents } => {
+                let (user, user_diagnostics) = match KeymapDocument::parse(origin, contents) {
                     Ok(parsed) => parsed,
                     Err(mut user_diagnostics) => {
                         diagnostics.append(&mut user_diagnostics);
@@ -266,7 +280,7 @@ impl MergedKeymap {
                 diagnostics.extend(user_diagnostics);
                 Some(user)
             },
-            None => None,
+            UserKeymap::DefaultsOnly => None,
         };
         let (merged_keymap, merge_diagnostics) = Self::from_documents(
             &defaults,
@@ -349,7 +363,7 @@ impl MergedKeymap {
                 let suggestion = Self::closest_block_member(&member.name);
 
                 Diagnostic {
-                    source_path:        document.source_path.clone(),
+                    source:             document.diagnostic_source.clone(),
                     byte_range:         member.byte_range.clone(),
                     line:               member.line,
                     column:             member.column,
@@ -385,7 +399,7 @@ impl MergedKeymap {
                     &binding.keystroke_sequence,
                     &binding.source,
                     source_layer,
-                    &document.source_path,
+                    &document.diagnostic_source,
                     command_registry,
                     protected_keystrokes,
                     diagnostics,
@@ -414,7 +428,7 @@ impl MergedKeymap {
             (None, None) => ContextResolution::Global,
             (None, Some(context_source)) => {
                 diagnostics.push(Diagnostic {
-                    source_path:        document.source_path.clone(),
+                    source: document.diagnostic_source.clone(),
                     byte_range:         context_source.byte_range.clone(),
                     line:               context_source.line,
                     column:             context_source.column,
@@ -456,7 +470,7 @@ impl MergedKeymap {
                     };
 
                     diagnostics.push(Diagnostic {
-                        source_path: document.source_path.clone(),
+                        source: document.diagnostic_source.clone(),
                         byte_range: context_source.byte_range.clone(),
                         line: context_source.line,
                         column: context_source.column,
@@ -475,7 +489,7 @@ impl MergedKeymap {
             },
             (Some(ContextExpr::Name(condition_name)), None) => {
                 diagnostics.push(Diagnostic {
-                    source_path:        document.source_path.clone(),
+                    source:             document.diagnostic_source.clone(),
                     byte_range:         0..0,
                     line:               0,
                     column:             0,
@@ -502,7 +516,7 @@ impl MergedKeymap {
         keystroke_sequence: &KeystrokeSequence,
         binding_source: &BindingSource,
         source_layer: BindingSourceLayer,
-        source_path: &str,
+        diagnostic_source: &DiagnosticSource,
         command_registry: &CommandRegistry,
         protected_keystrokes: &[Keystroke],
         diagnostics: &mut Vec<Diagnostic>,
@@ -513,7 +527,7 @@ impl MergedKeymap {
         {
             diagnostics.push(
                 binding_source.diagnostic(
-                    source_path,
+                    diagnostic_source,
                     String::new(),
                     DiagnosticKind::ReservedKeystroke,
                     DiagnosticSeverity::Failure,
@@ -541,7 +555,7 @@ impl MergedKeymap {
                         },
                     );
                     let mut diagnostic = binding_source.command_diagnostic(
-                        source_path,
+                        diagnostic_source,
                         command_id.to_string(),
                         DiagnosticKind::Command,
                         DiagnosticSeverity::Failure,
@@ -566,7 +580,7 @@ impl MergedKeymap {
                     && (capability != Capability::Held || keystroke_sequence.len() != 1)
                 {
                     diagnostics.push(binding_source.diagnostic(
-                        source_path,
+                        diagnostic_source,
                         command_id.to_string(),
                         DiagnosticKind::BareModifierRequiresHeldCommand,
                         DiagnosticSeverity::Failure,
@@ -581,7 +595,7 @@ impl MergedKeymap {
 
                 if capability == Capability::Held && keystroke_sequence.len() > 1 {
                     diagnostics.push(binding_source.diagnostic(
-                        source_path,
+                        diagnostic_source,
                         command_id.to_string(),
                         DiagnosticKind::HeldCommandInSequence,
                         DiagnosticSeverity::Failure,
@@ -595,7 +609,7 @@ impl MergedKeymap {
 
                 if capability == Capability::Unremappable {
                     diagnostics.push(binding_source.diagnostic(
-                        source_path,
+                        diagnostic_source,
                         command_id.to_string(),
                         DiagnosticKind::UnremappableCommand,
                         DiagnosticSeverity::Failure,
@@ -609,7 +623,7 @@ impl MergedKeymap {
                     command_id,
                     source: binding_source.clone(),
                     source_layer,
-                    source_path: source_path.to_owned(),
+                    diagnostic_source: diagnostic_source.clone(),
                 }))
             },
         }
@@ -726,30 +740,30 @@ impl MergedKeymap {
                     && other_binding.binding.source_layer == BindingSourceLayer::User
                 {
                     diagnostics.push(other_binding.binding.source.diagnostic(
-                        &other_binding.binding.source_path,
+                        &other_binding.binding.diagnostic_source,
                         other_binding.binding.command_id.to_string(),
                         DiagnosticKind::HeldCommandInSequence,
                         DiagnosticSeverity::Failure,
                         format!(
                             "Multi-stroke binding `{}` in `{}` shares its prefix with shipped hold-to-act binding `{}` in `{}`.",
                             other_binding.binding.command_id,
-                            other_binding.binding.source_path,
+                            other_binding.binding.diagnostic_source,
                             held_binding.binding.command_id,
-                            held_binding.binding.source_path,
+                            held_binding.binding.diagnostic_source,
                         ),
                     ));
                 } else {
                     diagnostics.push(held_binding.binding.source.diagnostic(
-                        &held_binding.binding.source_path,
+                        &held_binding.binding.diagnostic_source,
                         held_binding.binding.command_id.to_string(),
                         DiagnosticKind::HeldCommandInSequence,
                         DiagnosticSeverity::Failure,
                         format!(
                             "Hold-to-act command `{}` in `{}` shares its keystroke with multi-stroke binding `{}` in `{}`.",
                             held_binding.binding.command_id,
-                            held_binding.binding.source_path,
+                            held_binding.binding.diagnostic_source,
                             other_binding.binding.command_id,
-                            other_binding.binding.source_path,
+                            other_binding.binding.diagnostic_source,
                         ),
                     ));
                     rejected_bindings.push(RejectedBinding::from(held_binding));
@@ -898,6 +912,7 @@ fn bounded_levenshtein(left: &str, right: &str, maximum_distance: usize) -> Opti
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -912,11 +927,13 @@ mod tests {
 
     use super::Generation;
     use super::MergedKeymap;
+    use super::UserKeymap;
     use crate::Capability;
     use crate::CommandRegistry;
     use crate::Diagnostic;
     use crate::DiagnosticKind;
     use crate::DiagnosticSeverity;
+    use crate::DiagnosticSource;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::Keystroke;
@@ -931,6 +948,14 @@ mod tests {
     const DEFAULTS_PATH: &str = "defaults.jsonc";
     const USER_PATH: &str = "keymap.jsonc";
     const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
+
+    fn defaults_keymap_file() -> DiagnosticSource {
+        DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH))
+    }
+
+    fn user_keymap_file() -> DiagnosticSource {
+        DiagnosticSource::KeymapFile(PathBuf::from(USER_PATH))
+    }
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
     #[strum(serialize_all = "snake_case")]
@@ -1035,10 +1060,14 @@ mod tests {
     > {
         let command_registry = command_registry()?;
         let condition_registry = condition_registry()?;
+        let user_keymap = user.map_or(UserKeymap::DefaultsOnly, |source| UserKeymap::Layered {
+            origin:   user_keymap_file(),
+            contents: source.to_owned(),
+        });
         let (merged_keymap, diagnostics) = MergedKeymap::from_sources(
-            DEFAULTS_PATH,
+            &defaults_keymap_file(),
             defaults,
-            user.map(|source| (USER_PATH, source)),
+            &user_keymap,
             &command_registry,
             &condition_registry,
             protected_keystrokes,
@@ -1143,9 +1172,12 @@ mod tests {
         let defaults = r#"{ "bindings": [{ "bindings": { "g": "camera:missing" } }] }"#;
         let user = r#"{ "bindings": [}"#;
         let Err(diagnostics) = MergedKeymap::from_sources(
-            DEFAULTS_PATH,
+            &defaults_keymap_file(),
             defaults,
-            Some((USER_PATH, user)),
+            &UserKeymap::Layered {
+                origin:   user_keymap_file(),
+                contents: user.to_owned(),
+            },
             &command_registry,
             &condition_registry,
             &[],
@@ -1154,10 +1186,10 @@ mod tests {
         };
 
         assert_eq!(diagnostics.len(), 2);
-        assert_eq!(diagnostics[0].source_path, DEFAULTS_PATH);
+        assert_eq!(diagnostics[0].source, defaults_keymap_file());
         assert_eq!(diagnostics[0].kind, DiagnosticKind::Command);
         assert_eq!(diagnostics[0].command_id, "camera:missing");
-        assert_eq!(diagnostics[1].source_path, USER_PATH);
+        assert_eq!(diagnostics[1].source, user_keymap_file());
         assert_eq!(diagnostics[1].kind, DiagnosticKind::Syntax);
 
         Ok(())
@@ -1494,7 +1526,7 @@ mod tests {
             .find(|diagnostic| diagnostic.kind == DiagnosticKind::HeldCommandInSequence)
             .ok_or_else(|| String::from("user held-prefix diagnostic is missing"))?;
 
-        assert_eq!(diagnostic.source_path, USER_PATH);
+        assert_eq!(diagnostic.source, user_keymap_file());
         assert_eq!(diagnostic.command_id, "camera::reset");
         assert!(diagnostic.message.contains("camera::hold"));
         assert!(diagnostic.message.contains("camera::reset"));
@@ -1530,7 +1562,7 @@ mod tests {
             .find(|diagnostic| diagnostic.kind == DiagnosticKind::HeldCommandInSequence)
             .ok_or_else(|| String::from("same-source held-prefix diagnostic is missing"))?;
 
-        assert_eq!(diagnostic.source_path, USER_PATH);
+        assert_eq!(diagnostic.source, user_keymap_file());
         assert_eq!(diagnostic.command_id, "camera::hold");
         assert_eq!(
             command_for_sequence(merged_keymap.global(), "f")?,

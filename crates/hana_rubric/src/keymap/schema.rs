@@ -179,6 +179,8 @@ fn block_schema(binding_value_schema: Value, context_schema: Value) -> Value {
     reason = "tests should stop when schema construction unexpectedly fails"
 )]
 mod tests {
+    use std::path::PathBuf;
+
     use bevy::prelude::Event;
     use bevy::prelude::Reflect;
     use bevy::prelude::ReflectEvent;
@@ -192,6 +194,7 @@ mod tests {
 
     use crate::Capability;
     use crate::CommandRegistry;
+    use crate::DiagnosticSource;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::Keystroke;
@@ -201,6 +204,12 @@ mod tests {
     use crate::keymap::KeymapDocument;
     use crate::keymap::document::RECOGNIZED_ROOT_MEMBERS;
     use crate::keymap::merged::RECOGNIZED_BLOCK_MEMBERS;
+
+    const PUBLISHED_DEFAULTS_PATH: &str = "published-defaults.jsonc";
+
+    fn published_defaults_keymap_file() -> DiagnosticSource {
+        DiagnosticSource::KeymapFile(PathBuf::from(PUBLISHED_DEFAULTS_PATH))
+    }
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
     #[strum(serialize_all = "snake_case")]
@@ -622,7 +631,9 @@ mod tests {
         }
         assert!(header.contains("// Context `selected_tool`: While the selected tool is active\n"));
         assert_eq!(&published_defaults[defaults_offset..], defaults);
-        assert!(KeymapDocument::parse("published-defaults.jsonc", published_defaults).is_ok());
+        assert!(
+            KeymapDocument::parse(&published_defaults_keymap_file(), published_defaults).is_ok()
+        );
         Ok(())
     }
 }

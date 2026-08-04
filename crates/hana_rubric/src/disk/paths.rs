@@ -15,6 +15,7 @@ use std::sync::atomic::AtomicUsize;
 #[cfg(test)]
 use std::sync::atomic::Ordering;
 
+use bevy::prelude::Reflect;
 use bevy::prelude::Resource;
 
 use super::constants::DEFAULT_KEYMAP_FILE_NAME;
@@ -78,7 +79,7 @@ impl KeymapPathAvailability {
 }
 
 /// Why an application's keymap configuration directory did not resolve.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
 pub enum KeymapPathFailure {
     /// The keymap plugin was built without an application name to name a directory after.
     AppNameNotConfigured,

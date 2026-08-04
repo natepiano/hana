@@ -18,6 +18,7 @@ use super::paths::KeymapPaths;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::DiagnosticSource;
 
 static NEXT_TEMPORARY_FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -27,7 +28,10 @@ pub(super) fn publish_companion_files(
     schema: Option<&[u8]>,
 ) -> Vec<Diagnostic> {
     if let Err(error) = fs::create_dir_all(paths.config_directory()) {
-        return vec![companion_diagnostic(paths.config_directory(), error)];
+        return vec![companion_diagnostic(
+            DiagnosticSource::KeymapDirectory(paths.config_directory().to_path_buf()),
+            error,
+        )];
     }
 
     let mut diagnostics = Vec::new();
@@ -38,7 +42,10 @@ pub(super) fn publish_companion_files(
     }
     for (path, contents) in companions {
         if let Err(error) = publish_companion_file(path, contents) {
-            diagnostics.push(companion_diagnostic(path, error));
+            diagnostics.push(companion_diagnostic(
+                DiagnosticSource::KeymapFile(path.to_path_buf()),
+                error,
+            ));
         }
     }
 
@@ -145,20 +152,20 @@ fn replace_file(temporary_path: &Path, destination: &Path) -> io::Result<()> {
 
 fn remove_temporary_file(temporary_path: &Path) { let _ = fs::remove_file(temporary_path); }
 
-fn companion_diagnostic(path: &Path, error: Error) -> Diagnostic {
+fn companion_diagnostic(source: DiagnosticSource, error: Error) -> Diagnostic {
     Diagnostic {
-        source_path:        path.display().to_string(),
-        byte_range:         0..0,
-        line:               0,
-        column:             0,
-        block_index:        0,
-        context:            String::new(),
+        source,
+        byte_range: 0..0,
+        line: 0,
+        column: 0,
+        block_index: 0,
+        context: String::new(),
         original_keystroke: String::new(),
-        command_id:         String::new(),
-        kind:               DiagnosticKind::Companion,
-        severity:           DiagnosticSeverity::Failure,
-        message:            format!("Could not publish the companion file: {error}"),
-        suggestions:        Vec::new(),
+        command_id: String::new(),
+        kind: DiagnosticKind::Companion,
+        severity: DiagnosticSeverity::Failure,
+        message: format!("Could not publish the companion file: {error}"),
+        suggestions: Vec::new(),
     }
 }
 

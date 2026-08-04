@@ -55,6 +55,7 @@ pub use derived_context::DerivedContext;
 pub use diagnostic::Diagnostic;
 pub use diagnostic::DiagnosticKind;
 pub use diagnostic::DiagnosticSeverity;
+pub use diagnostic::DiagnosticSource;
 pub use diagnostic::KeymapLoadFailures;
 pub use disk::KeymapPathAvailability;
 pub use disk::KeymapPathFailure;

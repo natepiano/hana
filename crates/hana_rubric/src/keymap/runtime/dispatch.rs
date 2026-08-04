@@ -493,6 +493,7 @@ impl From<RoutedCommand> for RoutedCommands {
     reason = "runtime command declarations generate action marker types used through the registry"
 )]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Instant;
 
     use bevy::ecs::schedule::IntoScheduleConfigs;
@@ -538,6 +539,7 @@ mod tests {
     use super::route_input;
     use crate::ActiveCondition;
     use crate::CommandRegistry;
+    use crate::DiagnosticSource;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeymapPlugin;
@@ -553,10 +555,15 @@ mod tests {
     use crate::keymap::CompiledKeymap;
     use crate::keymap::Generation;
     use crate::keymap::MergedKeymap;
+    use crate::keymap::merged::UserKeymap;
 
     const DEFAULTS_PATH: &str = "runtime-defaults.jsonc";
     const FIRST_GENERATION: Generation = Generation(1);
     const SECOND_GENERATION: Generation = Generation(2);
+
+    fn defaults_keymap_file() -> DiagnosticSource {
+        DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH))
+    }
 
     crate::command! {
         action:      RuntimeOneShotAction,
@@ -1729,9 +1736,9 @@ mod tests {
     ) -> Result<CompiledKeymap, String> {
         let condition_registry = ConditionRegistry::default();
         let (merged_keymap, diagnostics) = MergedKeymap::from_sources(
-            DEFAULTS_PATH,
+            &defaults_keymap_file(),
             &source,
-            None,
+            &UserKeymap::DefaultsOnly,
             command_registry,
             &condition_registry,
             &[],
@@ -1751,9 +1758,9 @@ mod tests {
         generation: Generation,
     ) -> Result<CompiledKeymap, String> {
         let (merged_keymap, diagnostics) = MergedKeymap::from_sources(
-            DEFAULTS_PATH,
+            &defaults_keymap_file(),
             source,
-            None,
+            &UserKeymap::DefaultsOnly,
             command_registry,
             condition_registry,
             &[],

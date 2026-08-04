@@ -1,8 +1,13 @@
+use std::fmt;
+use std::fmt::Formatter;
 use std::ops::Range;
+use std::path::PathBuf;
 
 use bevy::prelude::Reflect;
 use bevy::prelude::ReflectResource;
 use bevy::prelude::Resource;
+
+use crate::disk::KeymapPathFailure;
 
 /// Categorizes the keymap failure described by a [`Diagnostic`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
@@ -44,6 +49,50 @@ pub enum DiagnosticKind {
     UnconfiguredKeymapPlugin,
 }
 
+/// What produced a [`Diagnostic`]. Only [`DiagnosticSource::KeymapFile`] names a keymap source
+/// file; a consumer picks its rendering from the variant and never inspects the path's form.
+#[derive(Clone, Debug, Eq, PartialEq, Reflect)]
+pub enum DiagnosticSource {
+    /// A keymap file read from disk, named by the path it was read from.
+    KeymapFile(PathBuf),
+    /// The keymap configuration directory itself, for failures that belong to no single file —
+    /// creating the directory, or watching it.
+    KeymapDirectory(PathBuf),
+    /// The default keymap the application compiled into its binary.
+    EmbeddedDefaults,
+    /// Registering the application's keymap contexts, which reads no keymap source.
+    ContextRegistration,
+    /// Registering the application's keymap commands, which reads no keymap source.
+    CommandRegistration,
+    /// The disk worker itself, for reports about delivery rather than about any keymap source.
+    DiskWorker,
+    /// The keymap configuration directory did not resolve, so no keymap file has a location.
+    ///
+    /// Render [`KeymapPathFailure::reason`] to report why.
+    PathsUnavailable(KeymapPathFailure),
+}
+
+impl fmt::Display for DiagnosticSource {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::KeymapFile(path) | Self::KeymapDirectory(path) => {
+                write!(formatter, "{}", path.display())
+            },
+            Self::EmbeddedDefaults => formatter.write_str("embedded defaults"),
+            Self::ContextRegistration => formatter.write_str("context registration"),
+            Self::CommandRegistration => formatter.write_str("command registration"),
+            Self::DiskWorker => formatter.write_str("keymap disk worker"),
+            Self::PathsUnavailable(failure) => {
+                write!(
+                    formatter,
+                    "unresolved keymap directory: {}",
+                    failure.reason()
+                )
+            },
+        }
+    }
+}
+
 /// Describes whether a keymap diagnostic prevents its binding from loading.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
 pub enum DiagnosticSeverity {
@@ -56,9 +105,9 @@ pub enum DiagnosticSeverity {
 /// One keymap problem retained for application diagnostics and BRP inspection.
 #[derive(Clone, Debug, Eq, PartialEq, Reflect)]
 pub struct Diagnostic {
-    /// Source file that produced this diagnostic.
-    pub source_path:        String,
-    /// Byte range within the contents of [`Self::source_path`] that identifies
+    /// What produced this diagnostic.
+    pub source:             DiagnosticSource,
+    /// Byte range within the contents of [`Self::source`] that identifies
     /// the problem.
     pub byte_range:         Range<usize>,
     /// One-based source line containing [`Self::byte_range`].
@@ -108,17 +157,24 @@ impl KeymapLoadFailures {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::ops::Range;
+    use std::path::PathBuf;
 
     use super::Diagnostic;
     use super::DiagnosticKind;
     use super::DiagnosticSeverity;
+    use super::DiagnosticSource;
     use super::KeymapLoadFailures;
+    use crate::KeymapPathFailure;
+
+    const KEYMAP_FIXTURE: &str = "keymap.jsonc";
+    const KEYMAP_DIRECTORY_FIXTURE: &str = "keymap-config";
 
     #[test]
     fn diagnostic_fields_use_only_stable_data_types() {
         let diagnostic = Diagnostic {
-            source_path:        String::from("keymap.jsonc"),
+            source:             DiagnosticSource::KeymapFile(PathBuf::from(KEYMAP_FIXTURE)),
             byte_range:         0..1,
             line:               1,
             column:             1,
@@ -138,7 +194,7 @@ mod tests {
 
         let diagnostic = &keymap_load_failures.diagnostics[0];
         let _: &Range<usize> = &diagnostic.byte_range;
-        let _: &String = &diagnostic.source_path;
+        let _: &DiagnosticSource = &diagnostic.source;
         let _: &String = &diagnostic.context;
         let _: &String = &diagnostic.original_keystroke;
         let _: &String = &diagnostic.command_id;
@@ -148,6 +204,23 @@ mod tests {
         let _: &Vec<String> = &diagnostic.suggestions;
         let _: &Vec<Diagnostic> = &keymap_load_failures.diagnostics;
         assert_eq!(keymap_load_failures.all_diagnostics().count(), 1);
+    }
+
+    #[test]
+    fn every_diagnostic_source_renders_a_distinct_label() {
+        let labels = [
+            DiagnosticSource::KeymapFile(PathBuf::from(KEYMAP_FIXTURE)),
+            DiagnosticSource::KeymapDirectory(PathBuf::from(KEYMAP_DIRECTORY_FIXTURE)),
+            DiagnosticSource::EmbeddedDefaults,
+            DiagnosticSource::ContextRegistration,
+            DiagnosticSource::CommandRegistration,
+            DiagnosticSource::DiskWorker,
+            DiagnosticSource::PathsUnavailable(KeymapPathFailure::AppNameNotConfigured),
+        ]
+        .map(|diagnostic_source| diagnostic_source.to_string());
+
+        assert_eq!(labels[0], KEYMAP_FIXTURE);
+        assert_eq!(labels.iter().collect::<HashSet<_>>().len(), labels.len());
     }
 
     #[test]

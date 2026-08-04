@@ -291,6 +291,7 @@ impl ContextualModifierHeldBindings {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -304,6 +305,7 @@ mod tests {
     use super::Generation;
     use crate::Capability;
     use crate::CommandRegistry;
+    use crate::DiagnosticSource;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeystrokeSequence;
@@ -312,9 +314,14 @@ mod tests {
     use crate::command::Invocation;
     use crate::condition::ConditionRegistry;
     use crate::keymap::MergedKeymap;
+    use crate::keymap::merged::UserKeymap;
 
     const DEFAULTS_PATH: &str = "defaults.jsonc";
     const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
+
+    fn defaults_keymap_file() -> DiagnosticSource {
+        DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH))
+    }
 
     #[derive(Default, Event, Reflect)]
     #[reflect(Event, KeymapCommand)]
@@ -345,9 +352,9 @@ mod tests {
         let command_registry = command_registry()?;
         let condition_registry = ConditionRegistry::default();
         let (merged_keymap, diagnostics) = MergedKeymap::from_sources(
-            DEFAULTS_PATH,
+            &defaults_keymap_file(),
             r#"{ "bindings": [{ "bindings": { "g": "compiled::global" } }] }"#,
-            None,
+            &UserKeymap::DefaultsOnly,
             &command_registry,
             &condition_registry,
             &[],

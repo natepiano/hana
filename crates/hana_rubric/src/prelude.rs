@@ -13,6 +13,7 @@ pub use super::DerivedContext;
 pub use super::Diagnostic;
 pub use super::DiagnosticKind;
 pub use super::DiagnosticSeverity;
+pub use super::DiagnosticSource;
 pub use super::EmptyKeystrokeSequenceError;
 pub use super::HeldCommandLookupOutcome;
 pub use super::HoldPhase;

@@ -18,6 +18,7 @@ use super::watch::TestWatcher;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::DiagnosticSource;
 use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
 
 /// A complete user-keymap state produced by the disk worker.
@@ -213,29 +214,32 @@ pub(super) enum WorkerControl {
 }
 
 pub(super) fn disk_error_diagnostic(path: &Path, action: &str, error: &Error) -> Diagnostic {
-    disk_diagnostic(path, &format!("{action}: {error}"))
+    disk_diagnostic(
+        DiagnosticSource::KeymapFile(path.to_path_buf()),
+        &format!("{action}: {error}"),
+    )
 }
 
-pub(super) fn disk_diagnostic(path: &Path, message: &str) -> Diagnostic {
+pub(super) fn disk_diagnostic(source: DiagnosticSource, message: &str) -> Diagnostic {
     Diagnostic {
-        source_path:        path.display().to_string(),
-        byte_range:         0..0,
-        line:               0,
-        column:             0,
-        block_index:        0,
-        context:            String::new(),
+        source,
+        byte_range: 0..0,
+        line: 0,
+        column: 0,
+        block_index: 0,
+        context: String::new(),
         original_keystroke: String::new(),
-        command_id:         String::new(),
-        kind:               DiagnosticKind::Disk,
-        severity:           DiagnosticSeverity::Failure,
-        message:            message.to_owned(),
-        suggestions:        Vec::new(),
+        command_id: String::new(),
+        kind: DiagnosticKind::Disk,
+        severity: DiagnosticSeverity::Failure,
+        message: message.to_owned(),
+        suggestions: Vec::new(),
     }
 }
 
 fn discarded_diagnostics_diagnostic(discarded_diagnostics: usize) -> Diagnostic {
     disk_diagnostic(
-        Path::new("disk worker"),
+        DiagnosticSource::DiskWorker,
         &format!("{discarded_diagnostics} older disk diagnostics were discarded before delivery."),
     )
 }
@@ -252,6 +256,7 @@ mod tests {
     use super::DiskSnapshot;
     use super::DiskWorkerMessage;
     use super::disk_diagnostic;
+    use crate::DiagnosticSource;
     use crate::disk::KeymapPathAvailability;
     use crate::disk::KeymapPaths;
     use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
@@ -303,7 +308,7 @@ mod tests {
             slot.publish(DiskWorkerMessage {
                 snapshot:              None,
                 diagnostics:           vec![disk_diagnostic(
-                    paths.user_keymap(),
+                    DiagnosticSource::KeymapFile(paths.user_keymap().to_path_buf()),
                     &format!("distinct disk diagnostic {index}"),
                 )],
                 discarded_diagnostics: 0,

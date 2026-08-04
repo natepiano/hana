@@ -20,6 +20,7 @@ use super::ReflectKeymapCommand;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
 use crate::DiagnosticSeverity;
+use crate::DiagnosticSource;
 use crate::keymap;
 use crate::keymap::KeymapRuntime;
 
@@ -414,7 +415,7 @@ fn validate_declarations(
 
 fn registry_diagnostic(kind: DiagnosticKind, command_id: &str, message: String) -> Diagnostic {
     Diagnostic {
-        source_path: String::new(),
+        source: DiagnosticSource::CommandRegistration,
         byte_range: 0..0,
         line: 0,
         column: 0,
@@ -462,6 +463,7 @@ mod tests {
     use crate::Capability;
     use crate::CommandId;
     use crate::DiagnosticKind;
+    use crate::DiagnosticSource;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::ReflectKeymapCommand;
@@ -598,6 +600,7 @@ mod tests {
 
         assert!(diagnostics.iter().any(|diagnostic| {
             diagnostic.kind == DiagnosticKind::DuplicateCommandId
+                && diagnostic.source == DiagnosticSource::CommandRegistration
                 && diagnostic.message.contains("registry::duplicate")
                 && diagnostic.message.contains(type_name::<DuplicateSecond>())
         }));
