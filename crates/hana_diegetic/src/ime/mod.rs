@@ -29,6 +29,7 @@ pub use buffer::ImePreeditBoundary;
 pub use buffer::ImeSelectionSnapshot;
 pub(crate) use editor::ImeBlurIntent;
 pub(crate) use editor::ImeEditorState;
+pub use editor::ImeReplacePanelTree;
 use editor::PendingImePanelAnchor;
 pub(crate) use editor::classify_widget_click;
 #[cfg(test)]
@@ -136,6 +137,7 @@ impl Plugin for ImePlugin {
             .add_observer(input::continue_widget_traversal_after_apply)
             .add_observer(input::clear_widget_traversal_after_rejection)
             .add_observer(input::clear_widget_traversal_after_cancel)
+            .add_observer(editor::replace_panel_tree)
             .add_observer(editor::update_editor_from_text_changed)
             .add_observer(editor::update_editor_validation)
             .add_observer(editor::close_editor_on_cancel)

@@ -14,6 +14,7 @@ use crate::OrdinaryKey;
 use crate::condition::ConditionHandle;
 use crate::keymap::ActiveKeymapScope;
 use crate::keymap::Generation;
+use crate::keymap::KeystrokeRouting;
 
 /// How many physical keys can own an entry in `KeymapRuntime::physical_sources` at once.
 ///
@@ -54,6 +55,7 @@ pub(crate) struct KeymapRuntime {
     clock:              Clock,
     generation:         Option<Generation>,
     active_matcher:     ActiveMatcher,
+    keystroke_routing:  KeystrokeRouting,
     held_sources:       HashMap<CustomInput, HeldSources>,
     physical_sources:   HashMap<KeyCode, HeldPhysicalSource>,
     inhibited:          HashSet<KeyCode>,
@@ -66,6 +68,7 @@ impl Default for KeymapRuntime {
             clock:              Clock::System,
             generation:         None,
             active_matcher:     ActiveMatcher::Uninitialized,
+            keystroke_routing:  KeystrokeRouting::default(),
             held_sources:       HashMap::with_capacity(ROUTING_HELD_CUSTOM_INPUTS),
             physical_sources:   HashMap::with_capacity(ROUTABLE_PHYSICAL_KEYS),
             inhibited:          HashSet::with_capacity(INHIBITED_KEYS_AT_A_KEYMAP_SWAP),
@@ -93,6 +96,20 @@ impl KeymapRuntime {
     ) {
         self.generation = Some(generation);
         self.active_matcher = ActiveMatcher::from(active_keymap_scope);
+    }
+
+    /// Records the routing this pass runs under and reports whether the
+    /// keyboard changed hands since the previous pass.
+    pub(super) fn observe_routing(
+        &mut self,
+        keystroke_routing: &KeystrokeRouting,
+    ) -> KeyboardHandover {
+        if self.keystroke_routing == *keystroke_routing {
+            return KeyboardHandover::Unchanged;
+        }
+        self.keystroke_routing = keystroke_routing.clone();
+
+        KeyboardHandover::Crossed
     }
 
     pub(super) fn inhibit(&mut self, pressed: impl Iterator<Item = KeyCode>) {
@@ -236,6 +253,13 @@ impl KeymapRuntime {
 
     #[cfg(test)]
     pub(super) const fn set_test_clock(&mut self, now: Instant) { self.clock = Clock::Test(now); }
+}
+
+/// Whether [`KeystrokeRouting`] moved the keyboard between the keymap and a text
+/// field since the previous routing pass.
+pub(super) enum KeyboardHandover {
+    Crossed,
+    Unchanged,
 }
 
 pub(super) enum PhysicalSourceReleaseProgress {

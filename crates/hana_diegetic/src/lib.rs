@@ -141,6 +141,7 @@ pub use ime::ImePreedit;
 pub use ime::ImePreeditBoundary;
 pub use ime::ImeRejectCommit;
 pub use ime::ImeRejection;
+pub use ime::ImeReplacePanelTree;
 pub use ime::ImeRequestCancel;
 pub use ime::ImeRequestCommit;
 pub use ime::ImeSelectionSnapshot;
@@ -186,6 +187,7 @@ pub use layout::LayoutBuilder;
 pub use layout::LayoutContentBuilder;
 pub use layout::LayoutOnly;
 pub use layout::LayoutTree;
+pub use layout::LayoutTreeChange;
 pub use layout::Lighting;
 pub use layout::LineStyle;
 /// Function signature for custom text measurement. Takes a text string and

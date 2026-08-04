@@ -102,6 +102,28 @@ application that does not depend on Fairy Dust.
   the camera helper. Every example has translucent geometry (ground plane,
   panels, `WorldText`), so this is unconditional.
 - `.with_camera_control_panel()` — bottom-right camera controls HUD.
+- `.with_command_palette()` — opt-in search box over the command registry,
+  opened with `Cmd+P` (`Ctrl+P` off macOS). Each row prints the keystroke the
+  live keymap runs that command from, and nothing at all when it is unbound. It
+  installs `hana_rubric`'s `KeymapPlugin` with Fairy Dust's embedded default
+  keymap — which binds nothing but `palette::open` — and **no application
+  name**, so nothing is read from or written to the developer's config
+  directory; the palette reports the unresolved configuration directory as a
+  failure row above the input field.
+
+  An example that declares its own commands owns its own keymap document,
+  because a document naming an id the registry has not declared is rejected
+  whole and leaves the palette unopenable:
+  `.with_command_palette_keymap(CommandPaletteKeymap::new(include_str!(
+  "my_example.keymap.jsonc")).for_application("my_example"))`. Configuring an
+  application name is also what clears the unresolved-directory row. Call one of
+  the two methods once — a second call carrying a different keymap panics.
+
+  Only commands declared `OneShot` or `Unremappable` are listed — held commands
+  run from their binding, not from the box. See
+  `crates/fairy_dust/examples/command_palette.rs`, which configures an
+  application name and then misspells one keymap block member on purpose so the
+  palette still shows what an authoring mistake looks like.
 - `.with_title_bar(TitleBar::new()...)` — top-left chip bar listing the
   example's keyboard shortcuts. Always set `.with_title(...)` to the example's
   display name, e.g. `"Zoom to Fit"` or `"Render to Texture"`. Title and chip

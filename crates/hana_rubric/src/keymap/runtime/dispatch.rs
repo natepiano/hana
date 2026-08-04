@@ -9,6 +9,7 @@ use bevy_enhanced_input::prelude::CustomInputs;
 use super::held::ActiveMatcher;
 use super::held::CustomInputTransition;
 use super::held::HeldChordPhysicalOwnership;
+use super::held::KeyboardHandover;
 use super::held::KeymapRuntime;
 use super::held::PhysicalSourceReleaseProgress;
 use super::key_edge;
@@ -25,6 +26,7 @@ use crate::command::Invocation;
 use crate::keymap::ActiveKeymapScope;
 use crate::keymap::CommandHandle;
 use crate::keymap::CompiledKeymap;
+use crate::keymap::KeystrokeRouting;
 use crate::keymap::ModifierFamilyHeldBinding;
 use crate::keymap::constants::SEQUENCE_TIMEOUT;
 
@@ -77,16 +79,30 @@ pub(crate) fn route_input(world: &mut World) {
     };
     world.init_resource::<KeymapRuntime>();
     world.init_resource::<CustomInputs>();
+    let keystroke_routing = world
+        .get_resource::<KeystrokeRouting>()
+        .cloned()
+        .unwrap_or_default();
+    if matches!(
+        world
+            .resource_mut::<KeymapRuntime>()
+            .observe_routing(&keystroke_routing),
+        KeyboardHandover::Crossed
+    ) {
+        reset_physical_input(world);
+    }
 
-    let routed_commands = synchronize_and_resolve_timeout(world, active_keymap_scope);
+    let routed_commands =
+        synchronize_and_resolve_timeout(world, active_keymap_scope, &keystroke_routing);
     dispatch_all(world, routed_commands);
     route_releases(world);
-    route_presses(world, active_keymap_scope);
+    route_presses(world, active_keymap_scope, &keystroke_routing);
 }
 
 fn synchronize_and_resolve_timeout(
     world: &mut World,
     active_keymap_scope: ActiveKeymapScope,
+    keystroke_routing: &KeystrokeRouting,
 ) -> RoutedCommands {
     let reset_required = world.resource_scope::<CompiledKeymap, _>(|world, mut compiled_keymap| {
         let mut keymap_runtime = world.resource_mut::<KeymapRuntime>();
@@ -125,9 +141,11 @@ fn synchronize_and_resolve_timeout(
             });
 
         match timeout_outcome {
-            TimeoutOutcome::Resolved(command_handle) => {
-                RoutedCommands::from(routed_command(&compiled_keymap, command_handle))
-            },
+            TimeoutOutcome::Resolved(command_handle) => RoutedCommands::from(routed_command(
+                &compiled_keymap,
+                command_handle,
+                keystroke_routing,
+            )),
             TimeoutOutcome::DiscardedPartialPrefix
             | TimeoutOutcome::AwaitingKeystroke
             | TimeoutOutcome::NoPendingSequence => RoutedCommands::default(),
@@ -153,7 +171,11 @@ fn route_releases(world: &mut World) {
     }
 }
 
-fn route_presses(world: &mut World, active_keymap_scope: ActiveKeymapScope) {
+fn route_presses(
+    world: &mut World,
+    active_keymap_scope: ActiveKeymapScope,
+    keystroke_routing: &KeystrokeRouting,
+) {
     clear_processed_keycodes(world);
     let primary_trigger_ownership = world.get_resource::<ButtonInput<KeyCode>>().map_or(
         PrimaryTriggerOwnership::Unclaimed,
@@ -163,22 +185,30 @@ fn route_presses(world: &mut World, active_keymap_scope: ActiveKeymapScope) {
     match primary_trigger_ownership {
         PrimaryTriggerOwnership::Unclaimed => {},
         PrimaryTriggerOwnership::ModifierFamilies => {
-            activate_modifier_family_held_bindings(world, active_keymap_scope);
+            activate_modifier_family_held_bindings(world, active_keymap_scope, keystroke_routing);
         },
         PrimaryTriggerOwnership::OrdinaryKeys(ordinary_key_routing_state) => {
             suspend_modifier_family_held_bindings(world);
-            route_ordinary_key_presses(world, active_keymap_scope);
+            route_ordinary_key_presses(world, active_keymap_scope, keystroke_routing);
             match ordinary_key_routing_state {
                 OrdinaryKeyRoutingState::Held => {},
                 OrdinaryKeyRoutingState::PressEdgesOnly => {
-                    activate_modifier_family_held_bindings(world, active_keymap_scope);
+                    activate_modifier_family_held_bindings(
+                        world,
+                        active_keymap_scope,
+                        keystroke_routing,
+                    );
                 },
             }
         },
     }
 }
 
-fn route_ordinary_key_presses(world: &mut World, active_keymap_scope: ActiveKeymapScope) {
+fn route_ordinary_key_presses(
+    world: &mut World,
+    active_keymap_scope: ActiveKeymapScope,
+    keystroke_routing: &KeystrokeRouting,
+) {
     while let Some(key) = next_pressed_key(world) {
         world.resource_mut::<KeymapRuntime>().mark_processed(key);
         if world.resource::<KeymapRuntime>().is_inhibited(key) {
@@ -196,7 +226,8 @@ fn route_ordinary_key_presses(world: &mut World, active_keymap_scope: ActiveKeym
         };
         let held_chord_physical_ownership =
             HeldChordPhysicalOwnership::new(key, keystroke.modifiers());
-        let routed_commands = route_keystroke(world, active_keymap_scope, keystroke);
+        let routed_commands =
+            route_keystroke(world, active_keymap_scope, keystroke, keystroke_routing);
         claim_held_chords(world, routed_commands, held_chord_physical_ownership);
         release_physical_if_no_longer_pressed(world, key);
         dispatch_all(world, routed_commands);
@@ -242,10 +273,17 @@ fn release_physical_if_no_longer_pressed(world: &mut World, key: KeyCode) {
     release_chords_missing_modifiers(world, pressed_modifiers);
 }
 
+/// Activates the bare-modifier held bindings of the keymap, unless a text field
+/// owns the keyboard — a held modifier is never the command that closes a field,
+/// so no exemption reaches this path.
 fn activate_modifier_family_held_bindings(
     world: &mut World,
     active_keymap_scope: ActiveKeymapScope,
+    keystroke_routing: &KeystrokeRouting,
 ) {
+    if matches!(keystroke_routing, KeystrokeRouting::TextEntry { .. }) {
+        return;
+    }
     for key in key_edge::PHYSICAL_MODIFIER_KEYS {
         let is_pressed = world
             .get_resource::<ButtonInput<KeyCode>>()
@@ -305,6 +343,7 @@ fn route_keystroke(
     world: &mut World,
     active_keymap_scope: ActiveKeymapScope,
     keystroke: crate::Keystroke,
+    keystroke_routing: &KeystrokeRouting,
 ) -> RoutedCommands {
     world.resource_scope::<CompiledKeymap, _>(|world, mut compiled_keymap| {
         let now = world.resource::<KeymapRuntime>().now();
@@ -321,6 +360,7 @@ fn route_keystroke(
             active_keymap_scope,
             now,
             match_outcome,
+            keystroke_routing,
             &mut routed_commands,
         );
 
@@ -333,35 +373,57 @@ fn route_match_outcome(
     active_keymap_scope: ActiveKeymapScope,
     now: Instant,
     match_outcome: MatchOutcome<CommandHandle>,
+    keystroke_routing: &KeystrokeRouting,
     routed_commands: &mut RoutedCommands,
 ) {
     match match_outcome {
         MatchOutcome::Matched(command_handle) => {
-            routed_commands.push(routed_command(compiled_keymap, command_handle));
+            routed_commands.push(routed_command(
+                compiled_keymap,
+                command_handle,
+                keystroke_routing,
+            ));
         },
         MatchOutcome::Reprocess {
             deferred,
             keystroke,
         } => {
             if let Some(command_handle) = deferred {
-                routed_commands.push(routed_command(compiled_keymap, command_handle));
+                routed_commands.push(routed_command(
+                    compiled_keymap,
+                    command_handle,
+                    keystroke_routing,
+                ));
             }
             if let Some(MatchOutcome::Matched(command_handle)) =
                 matcher(compiled_keymap, active_keymap_scope).map(|sequence_matcher| {
                     sequence_matcher.match_keystroke(keystroke, now, SEQUENCE_TIMEOUT)
                 })
             {
-                routed_commands.push(routed_command(compiled_keymap, command_handle));
+                routed_commands.push(routed_command(
+                    compiled_keymap,
+                    command_handle,
+                    keystroke_routing,
+                ));
             }
         },
         MatchOutcome::Deferred(_) | MatchOutcome::NoMatch | MatchOutcome::Pending => {},
     }
 }
 
+/// Resolves what a matched keystroke does, which is nothing at all while a text
+/// field owns the keyboard and the matched command is not one it exempts.
 fn routed_command(
     compiled_keymap: &CompiledKeymap,
     command_handle: CommandHandle,
+    keystroke_routing: &KeystrokeRouting,
 ) -> RoutedCommand {
+    if !compiled_keymap
+        .command_id(command_handle)
+        .is_some_and(|command_id| keystroke_routing.routes(command_id))
+    {
+        return RoutedCommand::Nothing;
+    }
     match compiled_keymap.invocation(command_handle) {
         Some(Invocation::Held(custom_input)) => RoutedCommand::HoldChord(custom_input),
         Some(Invocation::OneShot | Invocation::Unremappable) => compiled_keymap
@@ -538,6 +600,7 @@ mod tests {
     use super::KeymapRuntime;
     use super::route_input;
     use crate::ActiveCondition;
+    use crate::CommandId;
     use crate::CommandRegistry;
     use crate::DiagnosticOrigin;
     use crate::HoldPhase;
@@ -554,6 +617,7 @@ mod tests {
     use crate::keymap::CommandHandle;
     use crate::keymap::CompiledKeymap;
     use crate::keymap::Generation;
+    use crate::keymap::KeystrokeRouting;
     use crate::keymap::MergedKeymap;
     use crate::keymap::merged::UserKeymap;
 
@@ -766,6 +830,74 @@ mod tests {
             app.world().resource::<CustomInputs>().get(&custom_input),
             Some(&ActionValue::Bool(false))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_key_released_while_a_text_field_owns_the_keyboard_does_not_stay_held() -> Result<(), String>
+    {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::KeyG);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry([]));
+        route_input(app.world_mut());
+        release(&mut app, KeyCode::KeyG);
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::EveryBinding);
+        route_input(app.world_mut());
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+
+        press(&mut app, KeyCode::KeyG);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        release(&mut app, KeyCode::KeyG);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn text_entry_routes_the_commands_it_exempts_and_no_others() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeOneShot::ID), ("h", RuntimeTwoStroke::ID)]),
+            FIRST_GENERATION,
+        )?;
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry([CommandId::declared::<
+                RuntimeOneShot,
+            >()]));
+        route_input(app.world_mut());
+
+        press(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyG);
+        press(&mut app, KeyCode::KeyH);
+        release(&mut app, KeyCode::KeyH);
+
+        let dispatch_counts = app.world().resource::<DispatchCounts>();
+        assert_eq!(dispatch_counts.one_shot, 1);
+        assert_eq!(dispatch_counts.two_stroke, 0);
         Ok(())
     }
 
@@ -1457,7 +1589,7 @@ mod tests {
             .resource::<CompiledKeymap>()
             .commands
             .iter()
-            .position(|command_entry| {
+            .position(|(_, command_entry)| {
                 matches!(command_entry.invocation(), Invocation::Unremappable)
             })
             .map(CommandHandle::from_index)
@@ -1793,7 +1925,7 @@ mod tests {
         compiled_keymap
             .commands
             .iter()
-            .find_map(|command_entry| match command_entry.invocation() {
+            .find_map(|(_, command_entry)| match command_entry.invocation() {
                 Invocation::Held(custom_input) => Some(custom_input),
                 Invocation::OneShot | Invocation::Unremappable => None,
             })

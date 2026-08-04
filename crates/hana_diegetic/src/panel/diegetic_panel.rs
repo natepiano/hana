@@ -1936,6 +1936,28 @@ impl DiegeticPanel {
         *position = ScreenPosition::At(screen_position);
         true
     }
+
+    /// Resizes this screen-space panel, taking the same [`Sizing`] pair its
+    /// builder's [`size`](DiegeticPanelBuilder::size) took.
+    ///
+    /// The screen-space systems resolve both axes against the target window
+    /// every frame, so an application that derives its dimensions from the
+    /// window sends the recomputed sizing here after a resize. Returns `false`
+    /// for world-space panels.
+    #[must_use]
+    pub const fn set_screen_size(&mut self, width: Sizing, height: Sizing) -> bool {
+        let CoordinateSpace::Screen {
+            width: width_sizing,
+            height: height_sizing,
+            ..
+        } = &mut self.coordinate_space
+        else {
+            return false;
+        };
+        *width_sizing = width;
+        *height_sizing = height;
+        true
+    }
 }
 
 #[cfg(test)]

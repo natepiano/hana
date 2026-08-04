@@ -317,6 +317,60 @@ struct ImeBlurClassification {
 #[derive(Component, Debug)]
 struct ImeEditorPanel;
 
+/// Hands a rebuilt panel tree to whichever inline IME session is editing a
+/// field inside that panel.
+///
+/// An application that re-renders a panel while one of its fields is being
+/// edited — a command palette filtering its rows as the reader types — must
+/// publish the new tree through this event rather than through
+/// [`DiegeticPanelCommands::set_tree`](crate::DiegeticPanelCommands::set_tree).
+/// The editor holds its own copy of the panel tree and rewrites the field's
+/// descendants into it to draw the caret and the selection; a direct `set_tree`
+/// from the application lands after that rewrite and erases both. Sending the
+/// tree here replaces the copy the editor rewrites, so the application's
+/// content and the editor's caret survive together.
+///
+/// With no session editing that panel the event is an ordinary tree
+/// replacement, so a caller never has to ask whether a session is open.
+#[derive(Clone, Debug, Event)]
+pub struct ImeReplacePanelTree {
+    /// The panel whose tree is replaced.
+    pub panel: Entity,
+    /// The application's new tree for that panel, without any editing content.
+    pub tree:  LayoutTree,
+}
+
+pub(super) fn replace_panel_tree(
+    event: On<ImeReplacePanelTree>,
+    mut editor_state: ResMut<ImeEditorState>,
+    mut commands: Commands,
+) {
+    let event = event.event();
+    let edits_this_panel = editor_state.active().is_some_and(|editor| {
+        matches!(editor.surface, ImeEditorSurface::Inline { panel, .. } if panel == event.panel)
+    });
+    if !edits_this_panel {
+        if let Err(error) = commands.set_tree(event.panel, event.tree.clone()) {
+            warn!("failed to replace an unedited panel's tree: {error}");
+        }
+        return;
+    }
+
+    let Some(editor) = editor_state.active_mut() else {
+        return;
+    };
+    if let ImeEditorSurface::Inline {
+        authoritative_tree, ..
+    } = &mut editor.surface
+    {
+        *authoritative_tree = event.tree.clone();
+    }
+    let Some(editor) = editor_state.active() else {
+        return;
+    };
+    update_editor_tree(editor, &mut commands);
+}
+
 pub(super) fn observe_panel_clicks(trigger: On<Add, DiegeticPanel>, mut commands: Commands) {
     commands
         .entity(trigger.event_target())

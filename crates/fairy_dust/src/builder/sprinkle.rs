@@ -29,6 +29,8 @@ use crate::camera_control_panel::CameraControlPanelBackground;
 use crate::camera_control_panel::CameraPresetSwitching;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
+use crate::command_palette;
+use crate::command_palette::CommandPaletteKeymap;
 use crate::cube_spin;
 use crate::cube_spin::CubeSpinConfig;
 use crate::environment_map;
@@ -175,6 +177,48 @@ impl<S, Baseline> SprinkleBuilder<S, Baseline> {
     pub fn with_camera_control_panel(self) -> SprinkleBuilder<S> {
         let mut builder = self.into_installed();
         camera_control_panel::install(&mut builder.app);
+        builder
+    }
+
+    /// Enable the command palette: a searchable box listing every declared
+    /// keymap command, opened with `Cmd+P` on macOS and `Ctrl+P` elsewhere.
+    ///
+    /// This installs `hana_rubric`'s `KeymapPlugin` with Fairy Dust's shipped
+    /// keymap, which binds nothing but the palette's own `palette::open`, and no
+    /// application name, so no keymap disk worker starts and nothing writes to
+    /// the developer's configuration directory. Keymap failures render as rows
+    /// above the palette's query field, including the row reporting that no
+    /// configuration directory was resolved.
+    ///
+    /// An application that declares its own commands, or that wants the user's
+    /// keymap read from disk, supplies its own
+    /// [`CommandPaletteKeymap`](crate::CommandPaletteKeymap) with
+    /// [`with_command_palette_keymap`](Self::with_command_palette_keymap).
+    ///
+    /// Call this or `with_command_palette_keymap` once. A second call carrying a
+    /// different keymap panics rather than silently keeping the first, because
+    /// an application running bindings it never asked for is worse than a
+    /// crash at startup.
+    #[must_use]
+    pub fn with_command_palette(self) -> SprinkleBuilder<S> {
+        self.with_command_palette_keymap(CommandPaletteKeymap::new(
+            command_palette::FAIRY_DUST_DEFAULT_KEYMAP,
+        ))
+    }
+
+    /// Enable the command palette against `keymap` instead of Fairy Dust's
+    /// shipped defaults. Use this when the application declares its own
+    /// commands, so the embedded document binds only ids the command registry
+    /// knows — a document naming an unregistered id is rejected whole, which
+    /// leaves the palette unopenable.
+    ///
+    /// Call this or [`with_command_palette`](Self::with_command_palette) once. A
+    /// second call carrying a different keymap panics rather than silently
+    /// keeping the first.
+    #[must_use]
+    pub fn with_command_palette_keymap(self, keymap: CommandPaletteKeymap) -> SprinkleBuilder<S> {
+        let mut builder = self.into_installed();
+        command_palette::install(&mut builder.app, keymap);
         builder
     }
 

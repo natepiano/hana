@@ -24,6 +24,8 @@ use std::any::TypeId;
 
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+use hana_diegetic::ImeInputBlocker;
 
 use crate::constants::MODIFIER_KEYS;
 
@@ -75,7 +77,23 @@ pub(crate) fn install(app: &mut App) {
     }
     app.insert_resource(ShortcutsInstalled);
     app.add_systems(Startup, assert_no_reserved_collisions);
-    app.add_systems(Update, run_shortcuts);
+    app.add_systems(Update, run_shortcuts.run_if(no_text_entry_in_progress));
+}
+
+/// Whether the window is free of a text editor, which is the condition every
+/// registered shortcut runs under.
+///
+/// While the command palette's query field holds the window's IME lease, its
+/// keystrokes are text. Running them as shortcuts too would home the camera
+/// every time the reader typed `h`.
+pub(crate) fn no_text_entry_in_progress(
+    ime_input_blocker: Option<Res<ImeInputBlocker>>,
+    windows: Query<Entity, With<PrimaryWindow>>,
+) -> bool {
+    let (Some(ime_input_blocker), Ok(window)) = (ime_input_blocker, windows.single()) else {
+        return true;
+    };
+    !ime_input_blocker.blocks_window(window)
 }
 
 /// Records `key` to run `system_id` once each time it is pressed.
@@ -175,12 +193,60 @@ mod tests {
     use std::panic::AssertUnwindSafe;
 
     use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
+    use hana_diegetic::DiegeticTextMeasurer;
+    use hana_diegetic::HeadlessDiegeticUiPlugin;
+    use hana_diegetic::ImeAppOwnedFieldSpec;
+    use hana_diegetic::ImeEditableFieldSpec;
+    use hana_diegetic::ImeOpenSession;
+    use hana_diegetic::ImeTarget;
 
     use super::ReservedKeys;
+    use super::install;
+    use super::register_press;
     use super::reserve_key;
 
     struct FirstCapability;
     struct SecondCapability;
+
+    #[derive(Default, Resource)]
+    struct ShortcutRuns(usize);
+
+    /// A key bound as an example shortcut is text while the palette's query
+    /// field holds the window's IME lease, so the shortcut must not run.
+    #[test]
+    fn a_bound_key_does_not_fire_while_an_editor_holds_the_lease() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DiegeticTextMeasurer::default())
+            .add_plugins(HeadlessDiegeticUiPlugin);
+        app.init_resource::<ShortcutRuns>();
+        let window = app.world_mut().spawn(PrimaryWindow).id();
+        let system_id = app.register_system(|mut runs: ResMut<ShortcutRuns>| runs.0 += 1);
+        install(&mut app);
+        register_press(&mut app, KeyCode::KeyH, system_id);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyH);
+
+        app.update();
+        let ran_before_the_lease = app.world().resource::<ShortcutRuns>().0;
+
+        app.world_mut().trigger(ImeOpenSession {
+            target: ImeTarget::AppOwned {
+                owner:    window,
+                field_id: "query".into(),
+            },
+            window,
+            initial_text: String::new(),
+            field_spec: ImeEditableFieldSpec::AppOwned(ImeAppOwnedFieldSpec::new("query")),
+            anchor: None,
+        });
+        app.update();
+
+        assert_eq!(ran_before_the_lease, 1);
+        assert_eq!(app.world().resource::<ShortcutRuns>().0, 1);
+    }
 
     #[test]
     fn same_capability_key_reservation_is_idempotent() {

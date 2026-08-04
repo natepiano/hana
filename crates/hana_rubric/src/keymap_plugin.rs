@@ -109,8 +109,17 @@ impl KeymapPlugin {
 
     pub(crate) fn install(&self, app: &mut App) {
         Self::install_runtime(app);
-        if app.world().contains_resource::<KeymapPluginConfiguration>() || !self.has_configuration()
-        {
+        if !self.has_configuration() {
+            return;
+        }
+        if let Some(installed) = app.world().get_resource::<KeymapPluginConfiguration>() {
+            assert!(
+                *installed == KeymapPluginConfiguration::from(self),
+                "hana_rubric: `KeymapPlugin` is already installed with different defaults, an \
+                 application name, or protected keystrokes. Keeping the first configuration would \
+                 run bindings the second caller never asked for, so configure one plugin and \
+                 install it once."
+            );
             return;
         }
 
@@ -126,6 +135,8 @@ impl KeymapPlugin {
             .init_resource::<ConditionRegistry>()
             .init_resource::<ActiveCondition>()
             .init_resource::<KeymapLoadFailures>()
+            .init_resource::<keymap::KeystrokeRouting>()
+            .init_resource::<keymap::KeymapBindings>()
             .init_resource::<PendingReload>()
             .init_resource::<KeymapRuntime>()
             .configure_sets(
@@ -273,7 +284,7 @@ pub enum DefaultKeymapSource {
     NotSupplied,
 }
 
-#[derive(Clone, Resource)]
+#[derive(Clone, Eq, PartialEq, Resource)]
 struct KeymapPluginConfiguration {
     app_name:             Option<String>,
     defaults:             DefaultKeymapSource,

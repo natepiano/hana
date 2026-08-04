@@ -132,7 +132,9 @@ pub enum ActiveConditionState {
 /// A condition's compact registry identity.
 ///
 /// The value is meaningful only to the [`ConditionRegistry`] that issued it.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// Handles order by the sequence the registry issued them in, which is what
+/// gives readers of a condition-keyed map a deterministic iteration order.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ConditionHandle(usize);
 
 impl ConditionHandle {

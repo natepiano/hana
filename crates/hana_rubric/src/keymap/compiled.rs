@@ -11,6 +11,7 @@ use bevy::prelude::World;
 use bevy_enhanced_input::prelude::CustomInput;
 
 use super::MergedKeymap;
+use crate::CommandId;
 use crate::CommandRegistry;
 use crate::KeystrokeSequence;
 use crate::ModifierFamily;
@@ -45,7 +46,7 @@ pub(crate) enum ActiveKeymapScope {
 pub(crate) struct CompiledKeymap {
     pub(super) generation:  Generation,
     pub(super) global:      SequenceMatcher<CommandHandle>,
-    pub(super) commands:    Vec<CommandEntry>,
+    pub(super) commands:    Vec<(CommandId, CommandEntry)>,
     pub(super) matchers:    HashMap<ConditionHandle, SequenceMatcher<CommandHandle>>,
     modifier_held_bindings: ContextualModifierHeldBindings,
 }
@@ -90,18 +91,20 @@ impl CompiledKeymap {
                 (*condition_handle, SequenceMatcher::new(sequences))
             })
             .collect();
-        let commands = command_entries
-            .into_iter()
-            .map(|(_, command_entry)| command_entry)
-            .collect();
-
         Self {
             generation,
             global,
-            commands,
+            commands: command_entries,
             matchers,
             modifier_held_bindings,
         }
+    }
+
+    /// The declared id of the command `command_handle` was issued for.
+    pub(super) fn command_id(&self, command_handle: CommandHandle) -> Option<&CommandId> {
+        self.commands
+            .get(command_handle.0)
+            .map(|(command_id, _)| command_id)
     }
 
     pub(super) fn modifier_family_held_binding(
@@ -117,13 +120,13 @@ impl CompiledKeymap {
     pub(crate) fn invocation(&self, command_handle: CommandHandle) -> Option<Invocation> {
         self.commands
             .get(command_handle.0)
-            .map(CommandEntry::invocation)
+            .map(|(_, command_entry)| command_entry.invocation())
     }
 
     pub(crate) fn dispatch(&self, command_handle: CommandHandle) -> Option<fn(&mut World)> {
         self.commands
             .get(command_handle.0)
-            .map(CommandEntry::dispatch)
+            .map(|(_, command_entry)| command_entry.dispatch())
     }
 
     #[cfg(test)]

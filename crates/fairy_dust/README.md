@@ -20,6 +20,34 @@ fairy_dust::sprinkle_example()
     .run();
 ```
 
+`.with_command_palette()` adds a searchable box over every command declared with
+`hana_rubric`'s `command!` macro, opened with `Cmd+P` (`Ctrl+P` off macOS).
+Typing matches a command's authored title or its raw id, and the selected row is
+dispatched through `CommandRegistry`. Each row prints the keystroke the live
+keymap runs that command from, or nothing when the command is unbound.
+
+It installs `KeymapPlugin` with Fairy Dust's embedded default keymap — which
+binds nothing but the palette's own `palette::open` — and no application name,
+so no keymap file is read from or written to the developer's config directory,
+and the palette reports the unresolved configuration directory as a row above
+the query field.
+
+An application that declares its own commands owns its own document, because a
+keymap naming an id the registry has not declared is rejected whole and leaves
+the palette unopenable:
+
+```rust
+.with_command_palette_keymap(
+    CommandPaletteKeymap::new(include_str!("my_app.keymap.jsonc"))
+        .for_application("my_app"),
+)
+```
+
+`.for_application` is what makes the user's own `keymap.jsonc` readable and
+writable, which also clears the unresolved-configuration-directory row. Call
+`with_command_palette` or `with_command_palette_keymap` once — a second call
+carrying a different keymap panics rather than silently keeping the first.
+
 When `.with_camera_home()` is installed, the home fit can be positioned in the
 viewport with `.anchor(Anchor::TopLeft)` and adjusted with
 `.offset_px(Vec2::new(x, y))`. The default remains centered with no pixel

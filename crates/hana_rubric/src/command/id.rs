@@ -20,6 +20,13 @@ pub struct CommandId(String);
 impl CommandId {
     const NAMESPACE_SEPARATOR_BYTE: u8 = b':';
 
+    /// The id of a command declared through [`KeymapCommand`](crate::KeymapCommand).
+    ///
+    /// No parse can fail here: the `command!` declaration already asserted
+    /// [`Self::is_valid`] on `C::ID` at compile time.
+    #[must_use]
+    pub fn declared<C: crate::KeymapCommand>() -> Self { Self(C::ID.to_owned()) }
+
     /// Returns whether `value` is a valid namespaced snake-case command ID.
     ///
     /// This `const fn` is the validation path used by both compile-time command

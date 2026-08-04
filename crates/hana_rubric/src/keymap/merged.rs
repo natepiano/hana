@@ -864,6 +864,25 @@ impl MergedKeymap {
 
     pub(super) fn global(&self) -> &[(KeystrokeSequence, CommandId)] { &self.global }
 
+    /// Every resolved binding, global bindings first and then each condition's
+    /// bindings in the order the condition registry issued its handles.
+    ///
+    /// A command bound both globally and inside a condition therefore reports
+    /// its global keystroke, and a command bound only under two conditions
+    /// reports the one registered first rather than whichever the condition map
+    /// happened to hash ahead of the other.
+    pub(super) fn bindings(&self) -> impl Iterator<Item = (&KeystrokeSequence, &CommandId)> {
+        let mut condition_handles = self.conditions.keys().copied().collect::<Vec<_>>();
+        condition_handles.sort_unstable();
+
+        self.global
+            .iter()
+            .chain(condition_handles.into_iter().flat_map(|condition_handle| {
+                self.conditions.get(&condition_handle).into_iter().flatten()
+            }))
+            .map(|(keystroke_sequence, command_id)| (keystroke_sequence, command_id))
+    }
+
     #[cfg(test)]
     pub(super) fn for_condition(
         &self,
@@ -962,6 +981,13 @@ mod tests {
     enum TestContext {
         #[strum(message = "While a dimension lock is active")]
         DimensionLock,
+    }
+
+    #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]
+    #[strum(serialize_all = "snake_case")]
+    enum TestPaletteContext {
+        #[strum(message = "While the command palette is open")]
+        PaletteOpen,
     }
 
     #[derive(Default, Event, Reflect)]
@@ -1114,6 +1140,87 @@ mod tests {
         merged_keymap
             .for_condition(condition_handle)
             .ok_or_else(|| String::from("condition matcher bindings were not compiled"))
+    }
+
+    fn keystroke_sequence(source: &str) -> Result<KeystrokeSequence, String> {
+        source
+            .parse::<KeystrokeSequence>()
+            .map_err(|error| format!("invalid test sequence: {error}"))
+    }
+
+    /// The keystroke [`MergedKeymap::bindings`] reports first for `camera::home`,
+    /// which the defaults bind under two conditions and nowhere globally.
+    fn first_reported_home_keystroke(
+        condition_registry: &ConditionRegistry,
+    ) -> Result<KeystrokeSequence, String> {
+        let defaults = r#"{
+            "bindings": [
+                { "context": "dimension_lock", "bindings": { "space": "camera::home" }},
+                { "context": "palette_open", "bindings": { "enter": "camera::home" }}
+            ]
+        }"#;
+        let command_registry = command_registry()?;
+        let (merged_keymap, _) = MergedKeymap::from_sources(
+            &defaults_keymap_file(),
+            defaults,
+            &UserKeymap::DefaultsOnly,
+            &command_registry,
+            condition_registry,
+            &[],
+        )
+        .map_err(|diagnostics| format!("keymap parse errors: {diagnostics:?}"))?;
+
+        merged_keymap
+            .bindings()
+            .find(|(_, command_id)| command_id.as_str() == CameraHome::ID)
+            .map(|(keystroke_sequence, _)| keystroke_sequence.clone())
+            .ok_or_else(|| String::from("camera::home was not reported by any binding"))
+    }
+
+    #[test]
+    fn a_command_bound_only_under_conditions_reports_the_first_registered_condition()
+    -> Result<(), String> {
+        let mut dimension_lock_first = ConditionRegistry::default();
+        dimension_lock_first
+            .register::<TestContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+        dimension_lock_first
+            .register::<TestPaletteContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+        let mut palette_open_first = ConditionRegistry::default();
+        palette_open_first
+            .register::<TestPaletteContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+        palette_open_first
+            .register::<TestContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+
+        assert_eq!(
+            first_reported_home_keystroke(&dimension_lock_first)?,
+            keystroke_sequence("space")?
+        );
+        assert_eq!(
+            first_reported_home_keystroke(&palette_open_first)?,
+            keystroke_sequence("enter")?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_construction_reports_the_same_conditioned_keystroke() -> Result<(), String> {
+        let mut condition_registry = ConditionRegistry::default();
+        condition_registry
+            .register::<TestContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+        condition_registry
+            .register::<TestPaletteContext>()
+            .map_err(|diagnostics| format!("condition registry errors: {diagnostics:?}"))?;
+
+        assert_eq!(
+            first_reported_home_keystroke(&condition_registry)?,
+            first_reported_home_keystroke(&condition_registry)?
+        );
+        Ok(())
     }
 
     #[test]

@@ -1,0 +1,23 @@
+// Fairy Dust's shipped default keymap for the command palette capability.
+//
+// It binds only `palette::open`, the one command Fairy Dust itself declares, so every
+// consumer of `with_command_palette` gets a document whose ids the command registry
+// knows. A document that names an unregistered id is rejected whole, which would leave
+// the palette unopenable.
+//
+// `secondary-` resolves per platform: Cmd on macOS, Ctrl everywhere else. The bare keys
+// Fairy Dust reserves (H home, P cube spin or fold play) are deliberately left alone, so
+// nothing here shadows an example's own shortcut.
+//
+// An application that declares its own commands supplies its own document with
+// `with_command_palette_keymap`, which replaces this one — so that document binds
+// `palette::open` as well as its own ids.
+{
+  "bindings": [
+    {
+      "bindings": {
+        "secondary-p": "palette::open"
+      }
+    }
+  ]
+}

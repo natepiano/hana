@@ -9,6 +9,7 @@ use bevy::prelude::Resource;
 
 use super::CompiledKeymap;
 use super::Generation;
+use super::KeymapBindings;
 use super::MergedKeymap;
 use super::merged::UserKeymap;
 use crate::CommandRegistry;
@@ -170,6 +171,7 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
         merged_keymap.compile(generation, &command_registry)
     });
     world.insert_resource(compiled_keymap);
+    world.insert_resource(KeymapBindings::from_bindings(merged_keymap.bindings()));
     record_load_diagnostics(world, diagnostics);
 
     CommitOutcome::Committed
