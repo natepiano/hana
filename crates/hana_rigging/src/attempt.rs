@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::platform::time::Instant;
 use bevy::prelude::Reflect;
 
@@ -5,8 +7,11 @@ use crate::ApplyPermit;
 use crate::DeviceAccessError;
 use crate::DeviceEndpoint;
 use crate::DeviceId;
-use crate::RiggingRevision;
+use crate::DeviceRevision;
+use crate::DeviceRevisionLookup;
+use crate::RetryOn;
 use crate::RoleKey;
+use crate::reconcile::FrameClockReading;
 
 /// Identifier issued from the attempt registry's monotonic counter.
 ///
@@ -25,15 +30,14 @@ impl AttemptId {
     ///
     /// Private to the crate because only `crate::Attempts` issues identifiers; a driver that could
     /// mint one would be claiming an authorization the kernel never granted.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "its only caller, `Attempts::issue`, is itself unused until applies are wired \
-                      up"
-        )
-    )]
     pub(crate) const fn new(value: u64) -> Self { Self(value) }
+
+    /// Read back the counter value this identifier wraps.
+    ///
+    /// Crate-private and used by `crate::Attempts` alone, so the registry can reclaim an identifier
+    /// it minted for a dispatch that never committed. Nothing outside the registry has a reason to
+    /// see the number: comparing identifiers is what every other caller does.
+    pub(crate) const fn value(self) -> u64 { self.0 }
 }
 
 /// One in-flight endpoint operation and the authorization it was started under.
@@ -58,13 +62,13 @@ pub struct Attempt {
     /// The identity this attempt was authorised against.
     /// Re-checked on every poll; a mismatch invalidates it.
     pub expected_device_id: DeviceId,
-    /// Global rigging revision at authorisation. A newer revision invalidates.
+    /// This device's own revision at authorisation. A newer one invalidates.
     ///
-    /// This is `RiggingRevision`, not `ReporterRevision`: a co-reported device has several
-    /// contributing reporters, so one reporter's counter cannot say whether the topology that made
-    /// this target valid still holds, and the driver need not be the reporter whose scan validated
-    /// it.
-    pub rigging_revision:   RiggingRevision,
+    /// Per device rather than `crate::RiggingRevision`: the global counter advances on every pass
+    /// in which any reporter completed a scan, so validating against it would let one
+    /// reporter's routine scan abandon every attempt in the kernel, including attempts on
+    /// devices that reporter never names.
+    pub device_revision:    DeviceRevision,
     /// Bounds the attempt end to end, not per step.
     ///
     /// `bevy_platform::time::Instant` rather than `std::time::Instant` because this record is
@@ -100,6 +104,92 @@ pub enum AttemptOutcome {
     Aborted,
     /// The provider reached a different device or endpoint than the one the attempt addressed.
     Substituted,
+}
+
+/// Where one attempt stands against its own deadline and the kernel's bounded overrun budget.
+///
+/// A named result rather than an overdue `bool`: a bare flag collapses "still inside its deadline",
+/// "overdue but still converging", and "no such attempt" into one bit, and the abort branch cannot
+/// tell a healthy attempt from a handle that names nothing. Being overdue is neither an error nor a
+/// failure, so the two overdue variants are separate states rather than one error case.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+pub enum AttemptDeadlineStatus {
+    /// The registry retains no attempt for this identifier, so it either finished or was never
+    /// issued. A caller that read this as "not overdue" would keep polling a driver forever.
+    NoSuchAttempt,
+    /// The attempt is inside its own deadline, or the real-time clock has not advanced past
+    /// application startup and no elapsed time exists to judge it against.
+    WithinDeadline,
+    /// The attempt passed its deadline and is still inside `crate::RiggingLimits::apply_overrun`.
+    /// The kernel keeps polling: a projector that is genuinely converging deserves the slack.
+    OverdueWithinOverrun {
+        /// How far past its own deadline the attempt has run, which is the reading a diagnostic
+        /// needs to tell a device that is nearly there from one that has barely started.
+        past_deadline: Duration,
+    },
+    /// The attempt passed `deadline + crate::RiggingLimits::apply_overrun`, so the kernel stops
+    /// asking and finishes it `AttemptOutcome::Aborted`.
+    OverrunExhausted {
+        /// How far past its own deadline the attempt ran before the kernel abandoned it.
+        past_deadline: Duration,
+    },
+}
+
+/// What one role is waiting for before another apply may be dispatched after a failure.
+///
+/// Stored rather than recomputed from `crate::RetryOn` at each dispatch, because the two paced
+/// policies measure different things: one counts completed scans and the other counts real time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetryGate {
+    /// `crate::RetryOn::NewRevision` — no attempt runs until this role's own device changes, so a
+    /// permanently unavailable display cannot issue attempts against an unchanged report while a
+    /// scan naming some other device cannot wake it either.
+    ///
+    /// The whole reading is stamped, not just the counter: a key that leaves the reported set and
+    /// returns receives a freshly issued handle whose revision restarts, so an ordering comparison
+    /// would leave the gate shut for the rest of the process. Two readings that differ is what
+    /// "this device changed" means, and a departure and a return each produce one.
+    AwaitingRevision(DeviceRevisionLookup),
+    /// `crate::RetryOn::Interval` — no attempt runs before this instant, so a camera another
+    /// application holds open is retried at a cadence rather than at frame rate.
+    AwaitingInstant(Instant),
+}
+
+impl RetryGate {
+    /// Build the gate one failed role waits behind from its authored retry policy.
+    ///
+    /// An interval policy on a frame whose real-time clock has not advanced falls back to the
+    /// revision gate: with no clock reading there is no instant to wait until, and waiting for the
+    /// device's next change is the conservative pacing of the two.
+    pub(crate) fn from_policy(
+        retry: RetryOn,
+        device_revision: DeviceRevisionLookup,
+        now: FrameClockReading,
+    ) -> Self {
+        match (retry, now) {
+            (RetryOn::Interval(interval), FrameClockReading::Measurable(now)) => {
+                Self::AwaitingInstant(now + interval)
+            },
+            (RetryOn::Interval(_) | RetryOn::NewRevision, _) => {
+                Self::AwaitingRevision(device_revision)
+            },
+        }
+    }
+
+    /// Report whether the paced wait this gate describes has elapsed.
+    pub(crate) fn opened(
+        self,
+        device_revision: DeviceRevisionLookup,
+        now: FrameClockReading,
+    ) -> bool {
+        match self {
+            Self::AwaitingRevision(failed_at) => device_revision != failed_at,
+            Self::AwaitingInstant(retry_at) => match now {
+                FrameClockReading::Measurable(now) => now >= retry_at,
+                FrameClockReading::NotYetAdvanced => false,
+            },
+        }
+    }
 }
 
 /// The most recent configuration a safe readback established on one endpoint.

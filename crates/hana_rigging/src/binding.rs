@@ -21,6 +21,7 @@ use crate::AttemptOutcome;
 use crate::CaptureOutcome;
 use crate::DeviceEndpoint;
 use crate::DeviceKey;
+use crate::DeviceRevisionLookup;
 use crate::DriverId;
 use crate::LastKnownGoodConfiguration;
 use crate::OnAbort;
@@ -29,7 +30,10 @@ use crate::RecoveryPolicy;
 use crate::RetryOn;
 use crate::RoleKey;
 use crate::RoleState;
+use crate::attempt::RetryGate;
+use crate::reconcile::FrameClockReading;
 
+const CONSECUTIVE_FAILURE_LIMIT: u32 = 3;
 const DEFAULT_PENDING_TRANSITION_CAPACITY: usize = 4_096;
 
 /// One authored role binding, including its durable endpoint and driver-specific configuration.
@@ -123,6 +127,31 @@ pub struct Bindings {
     /// returning device holding the wrong configuration.
     #[reflect(ignore, default = "default_applying_source")]
     applying_source:           HashMap<RoleKey, ApplyConfigurationSource>,
+    /// Consecutive failed attempts per role, reset only by a successful attempt.
+    ///
+    /// Two failures followed by a third is three, not a fresh start: the count follows the role's
+    /// run of failures, which is why it is kernel state and not something a driver reporting
+    /// arrival evidence could keep.
+    #[reflect(ignore, default = "default_failure_counts")]
+    attempt_failures:          HashMap<RoleKey, u32>,
+    /// Consecutive failed safe readbacks per role, reset by the first successful one.
+    ///
+    /// Without it a driver whose readback is permanently broken is dispatched at frame rate
+    /// forever, because a failed readback leaves `LastKnownGoodConfiguration::NotEstablished` and
+    /// re-qualifies the role on the next pass.
+    #[reflect(ignore, default = "default_failure_counts")]
+    capture_failures:          HashMap<RoleKey, u32>,
+    /// What each role that failed is waiting for before another attempt may be dispatched.
+    #[reflect(ignore, default = "default_retry_gates")]
+    retry_gates:               HashMap<RoleKey, RetryGate>,
+    /// How each stopped role's endpoint last read, so a reacquisition can be told from a device
+    /// that never left.
+    ///
+    /// A role the kernel stopped after three failures only gets another attempt once its device
+    /// has actually gone and come back; without the previous reading, a device that stayed present
+    /// the whole time would look like a return on every frame and the stop would mean nothing.
+    #[reflect(ignore, default = "default_stopped_role_endpoints")]
+    stopped_role_endpoints:    HashMap<RoleKey, EndpointAvailability>,
     #[reflect(ignore, default = "PendingBindingTransitions::default")]
     pending_transitions:       PendingBindingTransitions,
     #[reflect(ignore, default = "default_transition_sequence")]
@@ -143,6 +172,12 @@ fn default_waiting_work() -> HashMap<RoleKey, WaitingWork> { HashMap::new() }
 
 fn default_applying_source() -> HashMap<RoleKey, ApplyConfigurationSource> { HashMap::new() }
 
+fn default_failure_counts() -> HashMap<RoleKey, u32> { HashMap::new() }
+
+fn default_retry_gates() -> HashMap<RoleKey, RetryGate> { HashMap::new() }
+
+fn default_stopped_role_endpoints() -> HashMap<RoleKey, EndpointAvailability> { HashMap::new() }
+
 /// What a waiting role is owed, distinct from why it is waiting.
 ///
 /// Stored rather than derived: the attempt systems select requested intent versus a restore from
@@ -158,6 +193,19 @@ pub enum WaitingWork {
     /// suppressed until it completes, because reading a value back before the owed one has been
     /// reapplied would record the endpoint's current state as the last one known to work.
     RestorationOwed,
+    /// The device departed and this role's `crate::RecoveryPolicy` does not reapply on return, so
+    /// the kernel starts nothing until application code acts.
+    ///
+    /// Reconciliation records this on departure for `crate::RecoveryPolicy::{Retain,
+    /// ReapplyOnRequest, Forget}`. It is what makes those three differ from `ReapplyOnReturn`:
+    /// without it a departed role returns to `Nothing`, reaches `WaitingRole::ForHardware`, and
+    /// has its authored request dispatched automatically — which is the one thing `Retain`
+    /// promises never happens.
+    ///
+    /// A role's *first* apply is unaffected: a newly registered binding has no recorded work, so it
+    /// answers `Nothing` and reaches `WaitingRole::ForHardware` as before. This state is only ever
+    /// recorded on departure.
+    ApplicationRequestOwed,
 }
 
 /// Whether the kernel may still ask a driver to read one role's endpoint configuration back.
@@ -323,6 +371,10 @@ impl Bindings {
         self.configuration_readability.remove(&role);
         self.waiting_work.remove(&role);
         self.applying_source.remove(&role);
+        self.attempt_failures.remove(&role);
+        self.capture_failures.remove(&role);
+        self.retry_gates.remove(&role);
+        self.stopped_role_endpoints.remove(&role);
         self.enqueue(BindingTransitionKind::Replaced, role, reserved_transition);
 
         Ok(displaced)
@@ -350,6 +402,10 @@ impl Bindings {
         self.configuration_readability.remove(role);
         self.waiting_work.remove(role);
         self.applying_source.remove(role);
+        self.attempt_failures.remove(role);
+        self.capture_failures.remove(role);
+        self.retry_gates.remove(role);
+        self.stopped_role_endpoints.remove(role);
         binding.state = RoleState::Retired;
         self.enqueue(
             BindingTransitionKind::Retired,
@@ -403,16 +459,19 @@ impl Bindings {
                     binding,
                     applying_source,
                 }),
+                WaitingWork::ApplicationRequestOwed => WaitingRole::ForApplication,
             }),
             RoleState::Ready => RoleView::Ready(ReadyRole {
                 binding,
                 configuration_readability,
+                capture_failures: &mut self.capture_failures,
             }),
             RoleState::Applying(_) => RoleView::Applying(ApplyingRole {
                 binding,
                 waiting_work: &mut self.waiting_work,
                 applying_source,
             }),
+            RoleState::StoppedAfterRepeatedFailures => RoleView::StoppedAfterRepeatedFailures,
             RoleState::Retired => RoleView::Retired,
         })
     }
@@ -433,9 +492,179 @@ impl Bindings {
             WaitingWork::Nothing => {
                 self.waiting_work.remove(role);
             },
-            WaitingWork::RestorationOwed => {
+            WaitingWork::RestorationOwed | WaitingWork::ApplicationRequestOwed => {
                 self.waiting_work.insert(role.clone(), waiting_work);
             },
+        }
+    }
+
+    /// Discard the configuration this role last applied successfully.
+    ///
+    /// A role whose `crate::RecoveryPolicy` is `crate::RecoveryPolicy::Forget` keeps no saved value
+    /// across a departure, so the value is dropped at the departure rather than left to be read by
+    /// a later restore.
+    pub(crate) fn forget_last_known_good(&mut self, role: &RoleKey) {
+        if let Some(binding) = self.by_role.get_mut(role) {
+            binding.last_known_good = LastKnownGoodConfiguration::NotEstablished;
+        }
+    }
+
+    /// Record how one attempt ended and escalate or clear this role's run of failures.
+    ///
+    /// `AttemptOutcome::Aborted` is terminal: it never counts toward escalation, because an attempt
+    /// the kernel abandoned lost its authorization rather than its device. It still closes a retry
+    /// gate, and that gate is what makes "terminal" true — the abort systems, the poll, and the
+    /// dispatch all run inside one `crate::RiggingSystems::Apply` chain, so a role left ungated
+    /// would be restarted later in the very frame that abandoned it, against the conditions that
+    /// just invalidated it. The gate is stamped with the device revision that invalidated the
+    /// attempt, so under `crate::RetryOn::NewRevision` the change that caused the abort cannot also
+    /// open the retry.
+    ///
+    /// A success clears the count outright — that is what "self-clears on recovery" means.
+    pub(crate) fn record_attempt_ending(
+        &mut self,
+        role: &RoleKey,
+        outcome: AttemptOutcome,
+        device_revision: DeviceRevisionLookup,
+        now: FrameClockReading,
+    ) {
+        match outcome {
+            AttemptOutcome::Succeeded | AttemptOutcome::Substituted => {
+                self.attempt_failures.remove(role);
+                self.retry_gates.remove(role);
+                self.stopped_role_endpoints.remove(role);
+            },
+            AttemptOutcome::Aborted => {
+                if let Some(binding) = self.by_role.get(role) {
+                    let retry_gate = RetryGate::from_policy(binding.retry, device_revision, now);
+                    self.retry_gates.insert(role.clone(), retry_gate);
+                }
+            },
+            AttemptOutcome::Failed(_) => {
+                let consecutive = self
+                    .attempt_failures
+                    .get(role)
+                    .copied()
+                    .unwrap_or_default()
+                    .saturating_add(1);
+                self.attempt_failures.insert(role.clone(), consecutive);
+                if consecutive >= CONSECUTIVE_FAILURE_LIMIT {
+                    self.retry_gates.remove(role);
+                    if let Some(binding) = self.by_role.get_mut(role) {
+                        binding.state = RoleState::StoppedAfterRepeatedFailures;
+                    }
+                } else if let Some(binding) = self.by_role.get(role) {
+                    let retry_gate = RetryGate::from_policy(binding.retry, device_revision, now);
+                    self.retry_gates.insert(role.clone(), retry_gate);
+                }
+            },
+        }
+    }
+
+    /// Pace the next dispatch for a role whose apply never reached a working driver.
+    ///
+    /// An unregistered driver and a configuration-contract mismatch are not attempt failures — no
+    /// attempt ran, nothing touched the device — so they neither escalate the role nor clear its
+    /// run. They still have to be paced: the role stays `crate::RoleState::Waiting`, so without a
+    /// gate the kernel would re-dispatch and be re-refused on every frame for the life of the
+    /// binding, which is the same unbounded retry `crate::RetryOn` exists to stop.
+    pub(crate) fn record_dispatch_refused(
+        &mut self,
+        role: &RoleKey,
+        device_revision: DeviceRevisionLookup,
+        now: FrameClockReading,
+    ) {
+        if let Some(binding) = self.by_role.get(role) {
+            let retry_gate = RetryGate::from_policy(binding.retry, device_revision, now);
+            self.retry_gates.insert(role.clone(), retry_gate);
+        }
+    }
+
+    /// Read what one role is waiting for before another attempt may be dispatched.
+    pub(crate) fn retry_pacing(&self, role: &RoleKey) -> RetryPacing {
+        self.retry_gates
+            .get(role)
+            .copied()
+            .map_or(RetryPacing::Ready, RetryPacing::AwaitingGate)
+    }
+
+    /// Dispatch for a role the kernel stopped after three consecutive failures.
+    ///
+    /// The explicit half of the rule: the other way out is a successful attempt after
+    /// reacquisition. Restarting clears the failure count so the role gets a full run again rather
+    /// than stopping on its next single failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BindingError::RoleNotBound` when the role has no retained binding, and
+    /// `BindingError::RoleNotStopped` when it was never stopped, so a mistaken restart cannot
+    /// silently cancel an in-flight attempt.
+    pub fn restart_after_repeated_failures(&mut self, role: &RoleKey) -> Result<(), BindingError> {
+        let binding = self
+            .by_role
+            .get_mut(role)
+            .ok_or_else(|| BindingError::RoleNotBound { role: role.clone() })?;
+        if binding.state != RoleState::StoppedAfterRepeatedFailures {
+            return Err(BindingError::RoleNotStopped { role: role.clone() });
+        }
+        binding.state = RoleState::Waiting;
+        self.attempt_failures.remove(role);
+        self.retry_gates.remove(role);
+        self.stopped_role_endpoints.remove(role);
+
+        Ok(())
+    }
+
+    /// Record how a stopped role's endpoint reads this frame and re-arm it once its device returns.
+    ///
+    /// This is the other half of the escalation rule: a role stopped after three consecutive
+    /// failures leaves that state on an explicit
+    /// `Self::restart_after_repeated_failures`, or on a successful attempt after reacquisition.
+    /// Reacquisition is what this method watches for — the endpoint has to have gone
+    /// `EndpointAvailability::Gone` and come back before another attempt is dispatched, so a wedged
+    /// device that never leaves is not retried at frame rate. The failure count is deliberately
+    /// left standing, so the returning device gets exactly one more attempt: it succeeds and clears
+    /// the run, or it fails and the role stops again without a fourth dispatch.
+    ///
+    /// Roles in any other state are ignored, so a caller can pass every registered role.
+    pub(crate) fn observe_stopped_role_endpoint(
+        &mut self,
+        role: &RoleKey,
+        endpoint_availability: EndpointAvailability,
+    ) {
+        if self
+            .by_role
+            .get(role)
+            .is_none_or(|binding| binding.state != RoleState::StoppedAfterRepeatedFailures)
+        {
+            return;
+        }
+        let previous = self
+            .stopped_role_endpoints
+            .insert(role.clone(), endpoint_availability);
+        if previous != Some(EndpointAvailability::Gone)
+            || endpoint_availability != EndpointAvailability::Available
+        {
+            return;
+        }
+        self.stopped_role_endpoints.remove(role);
+        self.retry_gates.remove(role);
+        if let Some(binding) = self.by_role.get_mut(role) {
+            binding.state = RoleState::Waiting;
+        }
+    }
+
+    /// Read whether the kernel may still dispatch a safe readback for one role.
+    ///
+    /// Separate from `Self::configuration_readability`, which records a driver's permanent refusal:
+    /// a run of read failures is transient and clears on the first readback that succeeds.
+    #[must_use]
+    pub fn capture_dispatch(&self, role: &RoleKey) -> CaptureDispatch {
+        if self.capture_failures.get(role).copied().unwrap_or_default() >= CONSECUTIVE_FAILURE_LIMIT
+        {
+            CaptureDispatch::SuspendedAfterRepeatedFailures
+        } else {
+            CaptureDispatch::Eligible
         }
     }
 
@@ -616,6 +845,13 @@ pub enum BindingError {
         /// Durable key whose authored offline mode blocks operational requests.
         device_key: DeviceKey,
     },
+    /// A restart was requested for a role the kernel had not stopped, which would have cancelled
+    /// whatever that role was doing instead.
+    #[error("role `{role}` was not stopped after repeated failures")]
+    RoleNotStopped {
+        /// Role whose lifecycle state is not `crate::RoleState::StoppedAfterRepeatedFailures`.
+        role: RoleKey,
+    },
     /// A driver previously established that this endpoint cannot provide a safe configuration.
     #[error("role `{role}` has no readable endpoint configuration")]
     ConfigurationNotReadable {
@@ -645,6 +881,9 @@ pub enum RoleView<'a> {
     Ready(ReadyRole<'a>),
     /// The role has an in-flight driver operation and may poll, abort, or finish it.
     Applying(ApplyingRole<'a>),
+    /// Three consecutive attempts failed, so nothing is dispatched until the role is restarted or
+    /// a later attempt succeeds.
+    StoppedAfterRepeatedFailures,
     /// The role was retired, so no driver operation can be issued.
     Retired,
 }
@@ -661,6 +900,9 @@ pub enum WaitingRole<'a> {
     ForHardware(RequestingRole<'a>),
     /// A last-known-good restoration is owed and runs as soon as the role is authorized.
     ForRestoration(RestoringRole<'a>),
+    /// The role's `crate::RecoveryPolicy` refused an automatic reapply after its device departed.
+    /// It carries no view because there is nothing to mint: the kernel waits for application code.
+    ForApplication,
 }
 
 /// View of a waiting role that owes nothing and may reach for its authored target.
@@ -669,13 +911,6 @@ pub struct RequestingRole<'a> {
     applying_source: &'a mut HashMap<RoleKey, ApplyConfigurationSource>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "authored applies start from this view, and applies are not wired up yet"
-    )
-)]
 impl<'a> RequestingRole<'a> {
     /// Start an authorized apply from the binding's authored requested configuration.
     ///
@@ -689,7 +924,16 @@ impl<'a> RequestingRole<'a> {
         permit: ApplyPermit,
         hardware_inventory: &HardwareInventory,
     ) -> Result<StartApplyRequest<'a>, BindingError> {
-        if !permit.allows_in_service_use() {
+        // A restore-only permit may drive authored intent in exactly one case: no safe readback has
+        // established anything to restore, so applying the request is the only way a `RestoreOnly`
+        // device ever reaches a state a later capture can read back. Once a value is established,
+        // authored intent needs the in-service permit again.
+        if !permit.allows_in_service_use()
+            && !matches!(
+                self.binding.last_known_good,
+                LastKnownGoodConfiguration::NotEstablished
+            )
+        {
             return Err(BindingError::RequestedConfigurationRequiresInServicePermit);
         }
         hardware_inventory.ensure_operational(&self.binding.endpoint.device)?;
@@ -712,13 +956,6 @@ pub struct RestoringRole<'a> {
     applying_source: &'a mut HashMap<RoleKey, ApplyConfigurationSource>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "owed restorations start from this view, and applies are not wired up yet"
-    )
-)]
 impl<'a> RestoringRole<'a> {
     /// Start an authorized restore from the value a safe readback previously established.
     ///
@@ -759,6 +996,7 @@ impl<'a> RestoringRole<'a> {
 pub struct ReadyRole<'a> {
     binding:                   &'a mut Binding,
     configuration_readability: &'a mut HashMap<RoleKey, ConfigurationReadability>,
+    capture_failures:          &'a mut HashMap<RoleKey, u32>,
 }
 
 impl<'a> ReadyRole<'a> {
@@ -809,6 +1047,7 @@ impl<'a> ReadyRole<'a> {
                 {
                     self.binding.last_known_good = last_known_good;
                 }
+                self.capture_failures.remove(&self.binding.role);
             },
             CaptureOutcome::NotReadable => {
                 if self
@@ -824,32 +1063,27 @@ impl<'a> ReadyRole<'a> {
                     );
                 }
             },
-            CaptureOutcome::ReadFailed(_) => {},
+            CaptureOutcome::ReadFailed(_) => {
+                let consecutive = self
+                    .capture_failures
+                    .get(&self.binding.role)
+                    .copied()
+                    .unwrap_or_default()
+                    .saturating_add(1);
+                self.capture_failures
+                    .insert(self.binding.role.clone(), consecutive);
+            },
         }
     }
 }
 
 /// View of a role whose driver operation is in flight.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 11 attempt systems poll abort and finish applying roles"
-    )
-)]
 pub struct ApplyingRole<'a> {
     binding:         &'a mut Binding,
     waiting_work:    &'a mut HashMap<RoleKey, WaitingWork>,
     applying_source: &'a mut HashMap<RoleKey, ApplyConfigurationSource>,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 11 attempt systems poll abort and finish applying roles"
-    )
-)]
 impl<'a> ApplyingRole<'a> {
     /// Mint the only poll request accepted by driver dispatch for this in-flight attempt.
     ///
@@ -881,7 +1115,18 @@ impl<'a> ApplyingRole<'a> {
     /// dispatch decides that again from the request it mints.
     pub(crate) fn abort(&mut self) {
         self.binding.state = RoleState::Waiting;
-        self.applying_source.remove(&self.binding.role);
+        self.take_applying_source();
+    }
+
+    /// Take the record of which configuration the ending apply was dispatched from.
+    ///
+    /// Taken rather than read, because the record describes an apply that is over: leaving it
+    /// behind would let the next ending on this role read a source no dispatch of its own recorded.
+    fn take_applying_source(&mut self) -> ApplySourceLookup {
+        self.applying_source.remove(&self.binding.role).map_or(
+            ApplySourceLookup::NotDispatched,
+            ApplySourceLookup::Dispatched,
+        )
     }
 
     /// Finish the in-flight operation, making only a successful apply ready for safe readback.
@@ -896,8 +1141,7 @@ impl<'a> ApplyingRole<'a> {
             AttemptOutcome::Succeeded | AttemptOutcome::Substituted => RoleState::Ready,
             AttemptOutcome::Failed(_) | AttemptOutcome::Aborted => RoleState::Waiting,
         };
-        let restoration_completed = self.applying_source.remove(&self.binding.role)
-            == Some(ApplyConfigurationSource::LastKnownGood);
+        let restoration_completed = self.take_applying_source().restored_last_known_good();
         if self.binding.state == RoleState::Ready
             && restoration_completed
             && self
@@ -909,6 +1153,80 @@ impl<'a> ApplyingRole<'a> {
         {
             self.waiting_work
                 .insert(self.binding.role.clone(), WaitingWork::Nothing);
+        }
+    }
+}
+
+/// Whether the kernel may still ask a driver to read one role's endpoint configuration back.
+///
+/// The transient half of readback eligibility. A driver whose readback keeps failing is stopped
+/// after three consecutive attempts instead of being dispatched once per frame for as long as the
+/// binding lives, and the first successful readback resumes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum CaptureDispatch {
+    /// Fewer than three consecutive readbacks have failed, so capture stays eligible.
+    #[default]
+    Eligible,
+    /// Three consecutive readbacks failed, so the kernel stops asking until one succeeds.
+    SuspendedAfterRepeatedFailures,
+}
+
+/// Whether one role's durable endpoint currently resolves to a device the kernel may drive.
+///
+/// A named reading rather than a `bool`, because it is the reacquisition signal a stopped role
+/// waits on: `Gone` covers an endpoint that resolves to nothing and one whose device is retained
+/// but no longer present, and both are the same fact for that decision — the unit the role was
+/// failing against is not the unit it would be dispatched against next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EndpointAvailability {
+    /// The endpoint resolves to a device the current reconcile pass reads as present.
+    Available,
+    /// The endpoint resolves to nothing, or to a device that is no longer present.
+    Gone,
+}
+
+/// Which configuration source the apply now ending drew from.
+///
+/// A named result rather than a bare `Option`: absence means "no dispatch recorded a source for
+/// this role", which is not the same as "the role restored its last-known-good value", and reading
+/// it as the latter would settle a restoration debt nothing paid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApplySourceLookup {
+    /// No in-flight apply recorded a configuration source for this role.
+    NotDispatched,
+    /// The in-flight apply was dispatched from this source.
+    Dispatched(ApplyConfigurationSource),
+}
+
+impl ApplySourceLookup {
+    /// Report whether the ending apply was the last-known-good restoration a debt is settled by.
+    pub(crate) const fn restored_last_known_good(self) -> bool {
+        matches!(
+            self,
+            Self::Dispatched(ApplyConfigurationSource::LastKnownGood)
+        )
+    }
+}
+
+/// What one role is waiting for before another attempt may be dispatched after a failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetryPacing {
+    /// Nothing paces this role: it has not failed, or its last attempt succeeded.
+    Ready,
+    /// The role failed and this gate has not opened yet.
+    AwaitingGate(RetryGate),
+}
+
+impl RetryPacing {
+    /// Report whether an attempt may be dispatched for this role on this frame.
+    pub(crate) fn permits_dispatch(
+        self,
+        device_revision: DeviceRevisionLookup,
+        now: FrameClockReading,
+    ) -> bool {
+        match self {
+            Self::Ready => true,
+            Self::AwaitingGate(retry_gate) => retry_gate.opened(device_revision, now),
         }
     }
 }
@@ -936,25 +1254,11 @@ pub struct StartApplyRequest<'a> {
 
 /// Configuration source paired with the authorization purpose that permits its dispatch.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 11 attempt systems dispatch state-issued apply configuration sources"
-    )
-)]
 pub(crate) enum ApplyConfigurationSource {
     Requested,
     LastKnownGood,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 11 attempt systems borrow state-issued apply configurations"
-    )
-)]
 impl ApplyConfigurationSource {
     pub(crate) fn configuration(self, binding: &Binding) -> Result<&dyn Reflect, BindingError> {
         match self {
@@ -973,16 +1277,8 @@ impl ApplyConfigurationSource {
 /// The request retains the role and endpoint even though the driver trait polls by attempt id,
 /// so reconciliation can compare the token with current resolution before dispatch.
 pub struct PollRequest<'a> {
-    #[expect(
-        dead_code,
-        reason = "phase 11 attempt processing compares the poll request role with resolution"
-    )]
     pub(crate) role:     &'a RoleKey,
     pub(crate) driver:   DriverId,
-    #[expect(
-        dead_code,
-        reason = "phase 11 attempt processing compares the poll request endpoint with resolution"
-    )]
     pub(crate) endpoint: &'a DeviceEndpoint,
     pub(crate) attempt:  AttemptId,
 }
@@ -1880,7 +2176,10 @@ mod tests {
             applied_configurations: Arc::clone(&applied_configurations),
         });
         assert_eq!(driver, DriverId(0));
-        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+        let mut configured_binding = binding(role.clone(), display_endpoint("studio-display")?);
+        configured_binding.last_known_good =
+            LastKnownGoodConfiguration::known(TestConfiguration(1));
+        bindings.register(configured_binding)?;
 
         assert!(matches!(bindings.role_view(&role)?, RoleView::Waiting(_)));
         assert!(matches!(
@@ -2742,18 +3041,20 @@ mod tests {
         let (mut app, role) = app_with_role("window/main")?;
         let late_role = RoleKey::new("window/late")?;
         app.world_mut().resource_mut::<Bindings>().retire(&role)?;
+        // The batch lives only inside the frame that drained it, so the sequences have to be read
+        // from a system rather than from the world once the frame has ended.
+        app.init_resource::<ObservedBatches>().add_systems(
+            Update,
+            observe_batch
+                .after(project_binding_entities)
+                .before(crate::reconcile::reconcile),
+        );
 
         app.update();
 
-        let batch = app.world().resource::<BindingTransitionBatch>();
-        let sequences: Vec<u64> = batch
-            .transitions()
+        let sequences: Vec<u64> = app.world().resource::<ObservedBatches>().0[0]
             .iter()
-            .map(|binding_transition| match binding_transition {
-                BindingTransition::Registered { sequence, .. }
-                | BindingTransition::Replaced { sequence, .. }
-                | BindingTransition::Retired { sequence, .. } => sequence.get(),
-            })
+            .map(|sequence| sequence.get())
             .collect();
         assert_eq!(sequences, vec![0, 1]);
         assert!(
@@ -2777,13 +3078,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(
-            app.world()
-                .resource::<BindingTransitionBatch>()
-                .transitions()
-                .len(),
-            1
-        );
+        assert_eq!(app.world().resource::<ObservedBatches>().0[1].len(), 1);
         assert!(matches!(
             app.world().resource::<BindingEntities>().entity(&late_role),
             BindingEntityLookup::Registered(_)
@@ -2873,17 +3168,8 @@ mod tests {
                 .all(|observed| observed == &observed_batches.0[0])
         );
         assert_eq!(observed_batches.0[0].len(), 1);
-        // The batch survives its final consumer and is replaced only by the next frame's drain.
-        assert_eq!(
-            app.world()
-                .resource::<BindingTransitionBatch>()
-                .transitions()
-                .len(),
-            1
-        );
-
-        app.update();
-
+        // The batch survives every consumer inside the frame and is emptied by the clearing system
+        // ordered after `crate::RiggingSystems::Apply`, so no later frame reads a stale transition.
         assert!(
             app.world()
                 .resource::<BindingTransitionBatch>()
@@ -3058,5 +3344,366 @@ mod tests {
         }
 
         drop(type_registry);
+    }
+
+    /// A different reading of the same role's device, which is what opens a gate waiting on one.
+    fn changed(device_revision: crate::DeviceRevisionLookup) -> crate::DeviceRevisionLookup {
+        match device_revision {
+            crate::DeviceRevisionLookup::Retired => {
+                crate::DeviceRevisionLookup::Retained(crate::DeviceRevision::default())
+            },
+            crate::DeviceRevisionLookup::Retained(device_revision) => {
+                crate::DeviceRevisionLookup::Retained(device_revision.advanced())
+            },
+        }
+    }
+
+    fn blocked() -> DeviceAccessError {
+        DeviceAccessError::Blocked {
+            detail: "the platform refused access".to_owned(),
+        }
+    }
+
+    fn measurable() -> crate::reconcile::FrameClockReading {
+        crate::reconcile::FrameClockReading::Measurable(bevy::platform::time::Instant::now())
+    }
+
+    #[test]
+    fn an_aborted_attempt_gates_its_retry_without_counting_toward_escalation()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let mut bindings = Bindings::default();
+        let device_revision =
+            crate::DeviceRevisionLookup::Retained(crate::DeviceRevision::default());
+        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+
+        bindings.record_attempt_ending(
+            &role,
+            AttemptOutcome::Aborted,
+            device_revision,
+            measurable(),
+        );
+        // The abort is terminal for this frame: the same revision that invalidated the attempt
+        // cannot also open its retry, so the dispatch later in this very chain finds no work.
+        assert!(
+            !bindings
+                .retry_pacing(&role)
+                .permits_dispatch(device_revision, measurable())
+        );
+        assert!(
+            bindings
+                .retry_pacing(&role)
+                .permits_dispatch(changed(device_revision), measurable())
+        );
+        // Three aborts in a row still leave the role dispatchable: only failures escalate.
+        for _ in 0..2 {
+            bindings.record_attempt_ending(
+                &role,
+                AttemptOutcome::Aborted,
+                device_revision,
+                measurable(),
+            );
+        }
+        assert_eq!(bindings.binding(&role)?.state, RoleState::Waiting);
+
+        bindings.record_attempt_ending(
+            &role,
+            AttemptOutcome::Failed(blocked()),
+            device_revision,
+            measurable(),
+        );
+        let super::RetryPacing::AwaitingGate(retry_gate) = bindings.retry_pacing(&role) else {
+            return Err("a failed attempt under RetryOn::NewRevision must install a gate".into());
+        };
+        assert!(!retry_gate.opened(device_revision, measurable()));
+        assert!(retry_gate.opened(changed(device_revision), measurable()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn an_interval_retry_policy_waits_on_the_clock_rather_than_on_a_new_revision()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let mut bindings = Bindings::default();
+        let device_revision =
+            crate::DeviceRevisionLookup::Retained(crate::DeviceRevision::default());
+        let mut configured_binding = binding(role.clone(), display_endpoint("studio-display")?);
+        configured_binding.retry = RetryOn::Interval(std::time::Duration::from_hours(1));
+        bindings.register(configured_binding)?;
+
+        bindings.record_attempt_ending(
+            &role,
+            AttemptOutcome::Failed(blocked()),
+            device_revision,
+            measurable(),
+        );
+
+        // A new revision does not shorten an interval: the two policies measure different things.
+        assert!(
+            !bindings
+                .retry_pacing(&role)
+                .permits_dispatch(changed(device_revision), measurable())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn three_consecutive_failures_stop_dispatch_until_a_restart_or_a_success()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let mut bindings = Bindings::default();
+        let mut device_revision =
+            crate::DeviceRevisionLookup::Retained(crate::DeviceRevision::default());
+        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+
+        for _ in 0..2 {
+            bindings.record_attempt_ending(
+                &role,
+                AttemptOutcome::Failed(blocked()),
+                device_revision,
+                measurable(),
+            );
+            device_revision = changed(device_revision);
+            assert_eq!(bindings.binding(&role)?.state, RoleState::Waiting);
+        }
+        bindings.record_attempt_ending(
+            &role,
+            AttemptOutcome::Failed(blocked()),
+            device_revision,
+            measurable(),
+        );
+
+        assert_eq!(
+            bindings.binding(&role)?.state,
+            RoleState::StoppedAfterRepeatedFailures
+        );
+        // A stopped role selects no waiting view, so no fourth attempt can be dispatched.
+        assert!(matches!(
+            bindings.role_view(&role)?,
+            RoleView::StoppedAfterRepeatedFailures
+        ));
+
+        bindings.restart_after_repeated_failures(&role)?;
+
+        assert_eq!(bindings.binding(&role)?.state, RoleState::Waiting);
+        assert_eq!(bindings.retry_pacing(&role), super::RetryPacing::Ready);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_stopped_role_waits_for_its_device_to_leave_and_return_before_another_attempt()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let mut bindings = Bindings::default();
+        let device_revision =
+            crate::DeviceRevisionLookup::Retained(crate::DeviceRevision::default());
+        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+        for _ in 0..3 {
+            bindings.record_attempt_ending(
+                &role,
+                AttemptOutcome::Failed(blocked()),
+                device_revision,
+                measurable(),
+            );
+        }
+        assert_eq!(
+            bindings.binding(&role)?.state,
+            RoleState::StoppedAfterRepeatedFailures
+        );
+
+        // A device that never leaves is never retried, however many frames read it as available.
+        for _ in 0..3 {
+            bindings.observe_stopped_role_endpoint(&role, super::EndpointAvailability::Available);
+        }
+        assert_eq!(
+            bindings.binding(&role)?.state,
+            RoleState::StoppedAfterRepeatedFailures
+        );
+
+        bindings.observe_stopped_role_endpoint(&role, super::EndpointAvailability::Gone);
+        assert_eq!(
+            bindings.binding(&role)?.state,
+            RoleState::StoppedAfterRepeatedFailures
+        );
+
+        bindings.observe_stopped_role_endpoint(&role, super::EndpointAvailability::Available);
+
+        // Reacquired: one more attempt is dispatched, and the run of failures is still standing, so
+        // a further failure stops the role again without a second dispatch.
+        assert_eq!(bindings.binding(&role)?.state, RoleState::Waiting);
+        assert_eq!(bindings.retry_pacing(&role), super::RetryPacing::Ready);
+
+        bindings.record_attempt_ending(
+            &role,
+            AttemptOutcome::Succeeded,
+            device_revision,
+            measurable(),
+        );
+
+        for _ in 0..2 {
+            bindings.record_attempt_ending(
+                &role,
+                AttemptOutcome::Failed(blocked()),
+                device_revision,
+                measurable(),
+            );
+        }
+        // The success cleared the run, so two later failures are two and not five.
+        assert_eq!(bindings.binding(&role)?.state, RoleState::Waiting);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_successful_attempt_clears_the_failures_counted_before_it() -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let mut bindings = Bindings::default();
+        let device_revision =
+            crate::DeviceRevisionLookup::Retained(crate::DeviceRevision::default());
+        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+
+        for _ in 0..2 {
+            bindings.record_attempt_ending(
+                &role,
+                AttemptOutcome::Failed(blocked()),
+                device_revision,
+                measurable(),
+            );
+        }
+        bindings.record_attempt_ending(
+            &role,
+            AttemptOutcome::Succeeded,
+            device_revision,
+            measurable(),
+        );
+        for _ in 0..2 {
+            bindings.record_attempt_ending(
+                &role,
+                AttemptOutcome::Failed(blocked()),
+                device_revision,
+                measurable(),
+            );
+        }
+
+        // Two failures after the recovery is two, not five: the count is consecutive.
+        assert_eq!(bindings.binding(&role)?.state, RoleState::Waiting);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_restart_is_refused_for_a_role_that_was_never_stopped() -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let mut bindings = Bindings::default();
+        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+
+        assert!(matches!(
+            bindings.restart_after_repeated_failures(&role),
+            Err(BindingError::RoleNotStopped { .. })
+        ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn three_failed_readbacks_suspend_capture_until_one_succeeds() -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let hardware_inventory = HardwareInventory::default();
+        let mut drivers = Drivers::default();
+        let driver = drivers.add(RecordingDriver {
+            applied_configurations: Arc::new(Mutex::new(Vec::new())),
+        });
+        let mut bindings = Bindings::default();
+        let mut configured_binding = binding(role.clone(), display_endpoint("studio-display")?);
+        configured_binding.driver = driver;
+        bindings.register(configured_binding)?;
+        // Registration always starts a role waiting, so the ready state is reached the only way it
+        // ever is: through one successful apply.
+        let start_apply_request = match bindings.role_view(&role)? {
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::in_service(),
+                    &hardware_inventory,
+                )?,
+            _ => return Err("a new binding must select the waiting view".into()),
+        };
+        drivers.start_apply(&mut World::new(), start_apply_request)?;
+        match bindings.role_view(&role)? {
+            RoleView::Applying(mut applying_role) => {
+                applying_role.finish(AttemptOutcome::Succeeded);
+            },
+            _ => return Err("a dispatched apply must select the applying view".into()),
+        }
+
+        for _ in 0..2 {
+            match bindings.role_view(&role)? {
+                RoleView::Ready(mut ready_role) => {
+                    ready_role.record_capture(CaptureOutcome::ReadFailed(blocked()));
+                },
+                _ => return Err("a ready role must select the ready view".into()),
+            }
+            assert_eq!(
+                bindings.capture_dispatch(&role),
+                super::CaptureDispatch::Eligible
+            );
+        }
+        match bindings.role_view(&role)? {
+            RoleView::Ready(mut ready_role) => {
+                ready_role.record_capture(CaptureOutcome::ReadFailed(blocked()));
+            },
+            _ => return Err("a ready role must select the ready view".into()),
+        }
+
+        assert_eq!(
+            bindings.capture_dispatch(&role),
+            super::CaptureDispatch::SuspendedAfterRepeatedFailures
+        );
+
+        match bindings.role_view(&role)? {
+            RoleView::Ready(mut ready_role) => {
+                ready_role.record_capture(CaptureOutcome::Read(LastKnownGoodConfiguration::known(
+                    TestConfiguration(7),
+                )));
+            },
+            _ => return Err("a ready role must select the ready view".into()),
+        }
+
+        assert_eq!(
+            bindings.capture_dispatch(&role),
+            super::CaptureDispatch::Eligible
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_restore_only_permit_drives_authored_intent_only_until_a_readback_establishes_one()
+    -> Result<(), Box<dyn Error>> {
+        let role = RoleKey::new("primary-window")?;
+        let hardware_inventory = HardwareInventory::default();
+        let mut bindings = Bindings::default();
+        bindings.register(binding(role.clone(), display_endpoint("studio-display")?))?;
+
+        // Nothing established: the restore-only permit is the only authorization a RestoreOnly
+        // device ever offers, and refusing it here would leave that device permanently unapplied.
+        let start_apply_request = match bindings.role_view(&role)? {
+            RoleView::Waiting(WaitingRole::ForHardware(requesting_role)) => requesting_role
+                .start_requested_apply(
+                    AttemptId::default(),
+                    ApplyPermit::restore_only(),
+                    &hardware_inventory,
+                )?,
+            _ => return Err("a new binding must select the waiting view".into()),
+        };
+        assert_eq!(
+            start_apply_request.configuration_source,
+            super::ApplyConfigurationSource::Requested
+        );
+
+        Ok(())
     }
 }

@@ -35,6 +35,19 @@ pub enum RoleState {
     /// Deadline status is not stored here because polling continues after the deadline. The
     /// attempt registry calculates overdue status from this identifier and the current time.
     Applying(AttemptId),
+    /// Three consecutive attempts failed, so the kernel stopped dispatching for this role.
+    ///
+    /// Counting attempts rather than frames is what makes this kernel work: a driver reporting
+    /// arrival evidence cannot know which of its calls belong to one role's run of failures.
+    ///
+    /// There are two ways out and no third. An explicit
+    /// `crate::Bindings::restart_after_repeated_failures` returns the role to `Self::Waiting` and
+    /// clears the run outright. Otherwise the kernel waits for reacquisition: once the role's
+    /// endpoint has gone unresolvable or not present and then come back, the role returns to
+    /// `Self::Waiting` for exactly one more attempt, still carrying its run of failures — a success
+    /// clears it, a failure stops the role again with nothing further dispatched. A wedged camera
+    /// that never leaves is therefore never reopened on its own.
+    StoppedAfterRepeatedFailures,
     /// The application retired this role, so later device reports cannot reactivate its binding.
     Retired,
 }

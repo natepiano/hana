@@ -10,7 +10,6 @@
 
 use std::error::Error;
 use std::process::ExitCode;
-use std::time::Duration;
 
 use bevy::MinimalPlugins;
 use bevy::app::App;
@@ -18,7 +17,10 @@ use bevy::ecs::reflect::ReflectComponent;
 use bevy::ecs::relationship::Relationship;
 use bevy::ecs::relationship::RelationshipTarget;
 use bevy::prelude::Component;
+use bevy::prelude::On;
 use bevy::prelude::Reflect;
+use bevy::prelude::ResMut;
+use bevy::prelude::Resource;
 use bevy::prelude::World;
 use hana_rigging::prelude::*;
 
@@ -77,14 +79,16 @@ impl DeviceReporter for FixedSetReporter {
     }
 }
 
-/// Endpoint driver registered only so the panel role has a real `DriverId` to name.
+/// Endpoint driver that records what the kernel asked it to apply and reports the apply converged
+/// on the first poll.
 ///
-/// This example drives no hardware and nothing here dispatches to a driver, so every method
-/// reports the outcome that says "this endpoint gave the kernel nothing" rather than pretending an
-/// apply succeeded.
-struct UnimplementedDriver;
+/// It touches no hardware. The point is to run one attempt the whole way from authorization to a
+/// terminal outcome, so the example can show that the kernel dispatched the role's authored
+/// placement and not some configuration of its own choosing. Readback stays unavailable, which is
+/// what a driver whose platform exposes no query answers.
+struct PanelDriver;
 
-impl EndpointDriver for UnimplementedDriver {
+impl EndpointDriver for PanelDriver {
     type Configuration = PanelPlacement;
 
     fn capture(
@@ -97,17 +101,60 @@ impl EndpointDriver for UnimplementedDriver {
 
     fn start_apply(
         &mut self,
-        _: &mut World,
+        world: &mut World,
         _: &DeviceEndpoint,
-        _: &Self::Configuration,
+        configuration: &Self::Configuration,
         _: AttemptId,
         _: ApplyPermit,
     ) {
+        world.resource_mut::<AppliedPlacements>().0.push(format!(
+            "left {} top {}",
+            configuration.left_pixels, configuration.top_pixels
+        ));
     }
 
     fn poll(&mut self, _: &mut World, _: AttemptId) -> AttemptProgress {
-        AttemptProgress::Finished(AttemptOutcome::Aborted)
+        AttemptProgress::Finished(AttemptOutcome::Succeeded)
     }
+}
+
+/// Every placement `PanelDriver` was handed, in dispatch order.
+///
+/// The driver writes it through the `World` it is given rather than keeping it in the driver value,
+/// because the driver itself lives inside the kernel's registry and the example never sees it again
+/// after registration.
+#[derive(Default, Resource)]
+struct AppliedPlacements(Vec<String>);
+
+/// One terminal attempt outcome an observer saw, in arrival order.
+struct ObservedAttemptEnding {
+    role:    RoleKey,
+    attempt: AttemptId,
+    outcome: AttemptOutcome,
+}
+
+/// Every attempt ending observed on a binding entity this run.
+#[derive(Default, Resource)]
+struct ObservedAttemptEndings(Vec<ObservedAttemptEnding>);
+
+/// Record one attempt ending that reached a live role's binding entity.
+fn observe_attempt_ending(
+    attempt_finished: On<AttemptFinished>,
+    mut observed_attempt_endings: ResMut<ObservedAttemptEndings>,
+) {
+    observed_attempt_endings.0.push(ObservedAttemptEnding {
+        role:    attempt_finished.role.clone(),
+        attempt: attempt_finished.attempt,
+        outcome: attempt_finished.outcome.clone(),
+    });
+}
+
+/// How the bounded wait for a successful apply on the panel role ended.
+enum AttemptRun {
+    /// An attempt succeeded, this many frames after the reporters completed.
+    Succeeded { frames: u32 },
+    /// The frame ceiling arrived before an attempt succeeded.
+    CeilingReached,
 }
 
 /// Placement this example's role would ask its driver for, standing in for a window rectangle.
@@ -157,8 +204,9 @@ fn main() -> ExitCode {
         Ok(SmokeCheck::Matched) => {
             println!(
                 "OK — three reconciled devices, the shared panel carries two contributing \
-                 reporters and a live ResolvedToDevice link, no duplicate keys, and the withdrawn \
-                 desk monitor departed and left its authored inventory entry reading Absent"
+                 reporters and a live ResolvedToDevice link, no duplicate keys, the panel role's \
+                 apply attempt succeeded and left the role Ready, and the withdrawn desk monitor \
+                 departed and left its authored inventory entry reading Absent"
             );
             ExitCode::SUCCESS
         },
@@ -173,6 +221,32 @@ fn main() -> ExitCode {
     }
 }
 
+/// The three reported displays the run checks, with how many reporters each one is expected to
+/// reach the reconciled set through.
+fn reported_displays(
+    shared_panel: DeviceKey,
+    desk_monitor: DeviceKey,
+    stage_projector: DeviceKey,
+) -> Vec<ReportedDisplay> {
+    vec![
+        ReportedDisplay {
+            key:                   shared_panel,
+            label:                 "built-in panel (reported by both)",
+            expected_contributors: 2,
+        },
+        ReportedDisplay {
+            key:                   desk_monitor,
+            label:                 "desk monitor (window-system only)",
+            expected_contributors: 1,
+        },
+        ReportedDisplay {
+            key:                   stage_projector,
+            label:                 "stage projector (color-management only)",
+            expected_contributors: 1,
+        },
+    ]
+}
+
 fn run() -> Result<SmokeCheck, Box<dyn Error>> {
     let shared_panel = reported_display_key(SHARED_PANEL)?;
     let desk_monitor = reported_display_key(DESK_MONITOR)?;
@@ -183,12 +257,15 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
     // keys name is registered before any reporter can report one.
     app.add_plugins(MinimalPlugins)
         .add_plugins(RiggingPlugin)
-        .register_device_scheme(SchemeName::new(DISPLAY_SCHEME)?);
+        .register_device_scheme(SchemeName::new(DISPLAY_SCHEME)?)
+        .init_resource::<AppliedPlacements>()
+        .init_resource::<ObservedAttemptEndings>()
+        .add_observer(observe_attempt_ending);
 
     // Binding registration is application work, not discovery work: this role is registered before
     // any reporter has run, and its binding entity is spawned by the first frame regardless.
     let panel_role = RoleKey::new(PANEL_ROLE)?;
-    let panel_driver = app.add_endpoint_driver(UnimplementedDriver);
+    let panel_driver = app.add_endpoint_driver(PanelDriver);
     app.world_mut()
         .resource_mut::<Bindings>()
         .register(panel_binding(
@@ -220,7 +297,7 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
                     },
                     completed_scans: 0,
                 },
-                every_frame_registration()?,
+                on_demand_registration()?,
             ),
         },
         NamedReporter {
@@ -231,28 +308,12 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
                     withdrawal:      KeyWithdrawal::Never,
                     completed_scans: 0,
                 },
-                every_frame_registration()?,
+                on_demand_registration()?,
             ),
         },
     ];
 
-    let displays = vec![
-        ReportedDisplay {
-            key:                   shared_panel,
-            label:                 "built-in panel (reported by both)",
-            expected_contributors: 2,
-        },
-        ReportedDisplay {
-            key:                   desk_monitor.clone(),
-            label:                 "desk monitor (window-system only)",
-            expected_contributors: 1,
-        },
-        ReportedDisplay {
-            key:                   stage_projector,
-            label:                 "stage projector (color-management only)",
-            expected_contributors: 1,
-        },
-    ];
+    let displays = reported_displays(shared_panel, desk_monitor.clone(), stage_projector);
 
     for named_reporter in &reporters {
         println!(
@@ -277,7 +338,15 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
             print_binding(app.world(), &panel_role, &mut smoke_check);
             print_connection(app.world(), &desk_monitor, "before the unplug");
 
-            provoke_departure(&mut app, &desk_monitor, &displays, &mut smoke_check);
+            report_attempt(&mut app, &panel_role, &mut smoke_check);
+
+            provoke_departure(
+                &mut app,
+                &reporters,
+                &desk_monitor,
+                &displays,
+                &mut smoke_check,
+            );
 
             Ok(smoke_check)
         },
@@ -291,11 +360,13 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
 /// `Present` to `Absent` because the reporter that omitted it enumerates its identity space.
 fn provoke_departure(
     app: &mut App,
+    reporters: &[NamedReporter],
     departing: &DeviceKey,
     displays: &[ReportedDisplay],
     smoke_check: &mut SmokeCheck,
 ) {
     for frame in 1..=FRAME_CEILING {
+        request_one_scan(app, reporters, smoke_check);
         app.update();
         if app.world().resource::<Devices>().resolve(departing) == DeviceResolution::NotResolved {
             println!("frames until the withdrawn key left the reconciled set: {frame}");
@@ -346,6 +417,122 @@ fn provoke_departure(
     );
 }
 
+/// Drive frames until an apply on the panel role succeeds, then print what the attempts did.
+///
+/// Nothing in the example dispatches the apply: the kernel authorizes it once reconciliation
+/// resolves the role's durable endpoint to a present device, and every terminal outcome arrives as
+/// an event on the binding entity rather than as a return value. Earlier attempts can end
+/// `Aborted` while the reported set is still settling, because an attempt authorized against one
+/// rigging revision is abandoned rather than continued once a later scan advances it.
+fn report_attempt(app: &mut App, role: &RoleKey, smoke_check: &mut SmokeCheck) {
+    let AttemptRun::Succeeded { frames } = run_until_attempt_succeeded(app) else {
+        record_mismatch(
+            smoke_check,
+            format!(
+                "reached the {FRAME_CEILING}-frame ceiling before an apply on role `{role}` \
+                 succeeded"
+            ),
+        );
+        return;
+    };
+
+    println!("frames until an apply on the panel role succeeded: {frames}");
+    println!(
+        "placements dispatched to the driver: {}",
+        app.world().resource::<AppliedPlacements>().0.join(", ")
+    );
+    for observed_attempt_ending in &app.world().resource::<ObservedAttemptEndings>().0 {
+        println!(
+            "  attempt ending | role `{}` | {:?} | {:?}",
+            observed_attempt_ending.role,
+            observed_attempt_ending.attempt,
+            observed_attempt_ending.outcome
+        );
+    }
+
+    let succeeded = app
+        .world()
+        .resource::<ObservedAttemptEndings>()
+        .0
+        .iter()
+        .find(|observed_attempt_ending| {
+            observed_attempt_ending.outcome == AttemptOutcome::Succeeded
+        })
+        .map(|observed_attempt_ending| observed_attempt_ending.role.clone());
+    match succeeded {
+        None => record_mismatch(
+            smoke_check,
+            format!("role `{role}`'s successful attempt never reached its binding entity"),
+        ),
+        Some(succeeded_role) if succeeded_role != *role => record_mismatch(
+            smoke_check,
+            format!(
+                "expected the successful attempt to name role `{role}`, got `{succeeded_role}`"
+            ),
+        ),
+        Some(_) => {},
+    }
+    if app.world().resource::<AppliedPlacements>().0.is_empty() {
+        record_mismatch(
+            smoke_check,
+            format!("role `{role}` reported a successful apply the driver was never handed"),
+        );
+    }
+    match app.world().resource::<Bindings>().binding(role) {
+        Ok(binding) if binding.state == RoleState::Ready => {},
+        Ok(binding) => record_mismatch(
+            smoke_check,
+            format!(
+                "expected role `{role}` to be Ready after a successful apply, got {:?}",
+                binding.state
+            ),
+        ),
+        Err(error) => record_mismatch(
+            smoke_check,
+            format!("role `{role}` is no longer bound after its apply: {error}"),
+        ),
+    }
+}
+
+/// Drive frames until a successful attempt ending has been observed, or the ceiling arrives.
+fn run_until_attempt_succeeded(app: &mut App) -> AttemptRun {
+    for frame in 0..FRAME_CEILING {
+        if app
+            .world()
+            .resource::<ObservedAttemptEndings>()
+            .0
+            .iter()
+            .any(|observed_attempt_ending| {
+                observed_attempt_ending.outcome == AttemptOutcome::Succeeded
+            })
+        {
+            return AttemptRun::Succeeded { frames: frame };
+        }
+        app.update();
+    }
+
+    AttemptRun::CeilingReached
+}
+
+/// Ask every registered reporter for one more run.
+///
+/// The reporters are on demand, so nothing runs them on a timer: an integration that refreshes on a
+/// notification or a button press asks for a run exactly like this.
+fn request_one_scan(app: &mut App, reporters: &[NamedReporter], smoke_check: &mut SmokeCheck) {
+    let mut discovery_control = app.world_mut().resource_mut::<DiscoveryControl>();
+    for named_reporter in reporters {
+        if let Err(error) = discovery_control.request(named_reporter.id) {
+            record_mismatch(
+                smoke_check,
+                format!(
+                    "the kernel refused a discovery run for reporter {}: {error}",
+                    named_reporter.name
+                ),
+            );
+        }
+    }
+}
+
 /// Print what passive evidence currently says about one authored inventory key.
 fn print_connection(world: &World, device_key: &DeviceKey, when: &str) {
     match world.resource::<HardwareInventory>().connection(device_key) {
@@ -379,16 +566,19 @@ fn panel_binding(role: RoleKey, device: DeviceKey, driver: DriverId) -> Binding 
     }
 }
 
-/// Register a reporter that is due on every frame and whose first complete scan gates readiness.
+/// Register a reporter that runs only when this example asks it to, and whose first complete scan
+/// gates readiness.
+///
+/// On demand rather than periodic so the run is deterministic and frame-rate independent: this
+/// example asks for exactly the scans whose results it goes on to print, where a reporter
+/// submitting a set on every frame would let the frame rate decide which stage each line describes.
 ///
 /// The coverage is authoritative for this example's identity space: without it a reporter leaving a
 /// key out of a complete scan would prove nothing, and the authored inventory entry could never
 /// move off `NotObserved`.
-fn every_frame_registration() -> Result<ReporterRegistration, Box<dyn Error>> {
+fn on_demand_registration() -> Result<ReporterRegistration, Box<dyn Error>> {
     Ok(ReporterRegistration::required(
-        DiscoveryCadence::Periodic {
-            interval: Duration::ZERO,
-        },
+        DiscoveryCadence::OnDemand,
         ReporterCoverage::EstablishesAbsence(AuthoritativeReporterCoverage::one(
             CoveredDeviceIdentitySpace::ReportedScheme {
                 kind:   DeviceKind::Display,
@@ -592,7 +782,7 @@ fn print_binding(world: &World, role: &RoleKey, smoke_check: &mut SmokeCheck) {
                     let device = resolved_to_device.get();
                     let resolved_bindings = world
                         .get::<ResolvedBindings>(device)
-                        .map_or(0, |resolved_bindings| resolved_bindings.len());
+                        .map_or(0, RelationshipTarget::len);
                     println!(
                         "  role `{role}` | ResolvedToDevice({device}) | that device carries \
                          {resolved_bindings} resolved binding(s)"

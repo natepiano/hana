@@ -18,6 +18,10 @@ use crate::HardwareInventory;
 use crate::RegisteredSchemes;
 use crate::RiggingLimits;
 use crate::RiggingRevision;
+use crate::apply::abort_invalidated_attempts;
+use crate::apply::clear_binding_transitions;
+use crate::apply::poll_attempts;
+use crate::apply::start_authorized_applies;
 use crate::binding::BindingTransitionBatch;
 use crate::binding::drain_binding_transitions;
 use crate::binding::project_binding_entities;
@@ -94,6 +98,14 @@ impl Plugin for RiggingPlugin {
                     project_device_entities
                         .after(reconcile)
                         .in_set(RiggingSystems::Reconcile),
+                    (
+                        abort_invalidated_attempts,
+                        poll_attempts,
+                        start_authorized_applies,
+                    )
+                        .chain()
+                        .in_set(RiggingSystems::Apply),
+                    clear_binding_transitions.after(RiggingSystems::Apply),
                 ),
             );
     }

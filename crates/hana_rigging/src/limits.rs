@@ -4,6 +4,7 @@ use bevy::ecs::reflect::ReflectResource;
 use bevy::prelude::Reflect;
 use bevy::prelude::Resource;
 
+const DEFAULT_APPLY_DEADLINE: Duration = Duration::from_secs(10);
 const DEFAULT_APPLY_OVERRUN: Duration = Duration::from_secs(5);
 const DEFAULT_REPORT_GRACE: Duration = Duration::from_secs(30);
 
@@ -17,6 +18,15 @@ const DEFAULT_REPORT_GRACE: Duration = Duration::from_secs(30);
 #[derive(Clone, Debug, PartialEq, Eq, Resource, Reflect)]
 #[reflect(Resource)]
 pub struct RiggingLimits {
+    /// How long one attempt has to reach its target, measured end to end rather than per step.
+    ///
+    /// End to end because a driver that must reset a panel and then render to it has both steps
+    /// inside one attempt with one settle result, and a per-step budget would let it report done
+    /// between them.
+    ///
+    /// Defaults to 10 seconds, which covers a display mode change and a camera stream open without
+    /// making a wedged device hold a role for a visible age.
+    pub apply_deadline: Duration,
     /// How far past an attempt's own deadline the kernel lets it keep running before abandoning
     /// it.
     ///
@@ -25,7 +35,7 @@ pub struct RiggingLimits {
     ///
     /// Defaults to 5 seconds — small next to any realistic hardware deadline, large enough to
     /// cover one slow poll.
-    pub apply_overrun: Duration,
+    pub apply_overrun:  Duration,
     /// How far past its **own declared cadence** a reporter may fall before the kernel stops
     /// trusting it.
     ///
@@ -40,14 +50,15 @@ pub struct RiggingLimits {
     ///
     /// Defaults to 30 seconds, which puts a two-second camera reporter's lease at 32 seconds and
     /// a ten-second HID reporter's at 40, so one slow cycle does not trip it.
-    pub report_grace:  Duration,
+    pub report_grace:   Duration,
 }
 
 impl Default for RiggingLimits {
     fn default() -> Self {
         Self {
-            apply_overrun: DEFAULT_APPLY_OVERRUN,
-            report_grace:  DEFAULT_REPORT_GRACE,
+            apply_deadline: DEFAULT_APPLY_DEADLINE,
+            apply_overrun:  DEFAULT_APPLY_OVERRUN,
+            report_grace:   DEFAULT_REPORT_GRACE,
         }
     }
 }
@@ -60,6 +71,7 @@ mod tests {
     use bevy::ecs::reflect::AppTypeRegistry;
     use bevy::ecs::reflect::ReflectResource;
 
+    use super::DEFAULT_APPLY_DEADLINE;
     use super::DEFAULT_APPLY_OVERRUN;
     use super::DEFAULT_REPORT_GRACE;
     use super::RiggingLimits;
@@ -68,6 +80,7 @@ mod tests {
     fn default_limits_use_the_documented_overrun_and_grace() {
         let rigging_limits = RiggingLimits::default();
 
+        assert_eq!(rigging_limits.apply_deadline, DEFAULT_APPLY_DEADLINE);
         assert_eq!(rigging_limits.apply_overrun, DEFAULT_APPLY_OVERRUN);
         assert_eq!(rigging_limits.report_grace, DEFAULT_REPORT_GRACE);
     }

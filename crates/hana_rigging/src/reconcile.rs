@@ -24,6 +24,7 @@ use crate::BindingEntities;
 use crate::BindingEntityLookup;
 use crate::Bindings;
 use crate::CapabilitiesDisputed;
+use crate::CaptureDispatch;
 use crate::Claim;
 use crate::ConfigurationReadability;
 use crate::ConfiguredDeviceConnection;
@@ -113,7 +114,7 @@ enum ReconcilePass {
 /// Real time rather than the game clock, because hardware does not pause when the application
 /// does: a paused app must not conclude an hour later that a monitor is still fresh.
 #[derive(Clone, Copy, Debug)]
-enum FrameClockReading {
+pub(crate) enum FrameClockReading {
     /// The real-time clock has advanced at least once, so silence can be measured against it.
     Measurable(Instant),
     /// The real-time clock has not advanced past application startup, so no elapsed time exists to
@@ -1075,7 +1076,7 @@ pub(crate) fn project_device_entities(world: &mut World) {
     // Every mutable path to `Bindings` marks the resource changed, so a pass with no departure
     // must not open one: a once-per-change consumer would otherwise fire on every frame.
     if !reconciled_device_changes.departed.is_empty() {
-        owe_restorations(
+        owe_departure_work(
             &mut world.resource_mut::<Bindings>(),
             &reconciled_device_changes.departed,
         );
@@ -1097,8 +1098,14 @@ pub(crate) fn project_device_entities(world: &mut World) {
     mirror_last_known_good(world, &type_registry);
 }
 
-/// Record a restoration against every role whose device left while its policy says the saved value
-/// returns with the unit.
+/// Record what each role bound to a departed device is owed, as its `RecoveryPolicy` defines it.
+///
+/// `RecoveryPolicy::ReapplyOnReturn` owes a restoration, which is what makes the saved value return
+/// with the unit. The other three owe an application request instead: without that record a
+/// departed role falls back to `WaitingWork::Nothing`, reaches `WaitingRole::ForHardware`, and has
+/// its authored request dispatched automatically on the device's return — the one thing
+/// `RecoveryPolicy::Retain` promises never happens. `RecoveryPolicy::Forget` additionally drops the
+/// saved value at the departure rather than leaving it for a later restore.
 ///
 /// Nothing else records it: a role that owes a restoration must not have its endpoint read back
 /// first, because that would record the state the departure left behind as the value last known to
@@ -1107,20 +1114,30 @@ pub(crate) fn project_device_entities(world: &mut World) {
 /// Both departure causes count. A unit whose key left the reconciled set and a retained unit that
 /// stopped being present are the same event for the role bound to it: the endpoint the saved value
 /// belongs on is gone, and the value returns with the unit.
-fn owe_restorations(bindings: &mut Bindings, departed: &[DepartedDevice]) {
+fn owe_departure_work(bindings: &mut Bindings, departed: &[DepartedDevice]) {
     for departed_device in departed {
         let roles: Vec<RoleKey> = bindings.roles_for(&departed_device.key).cloned().collect();
         for role in roles {
             let Ok(binding) = bindings.binding(&role) else {
                 continue;
             };
-            if binding.recovery == RecoveryPolicy::ReapplyOnReturn
-                && matches!(
-                    binding.last_known_good,
-                    LastKnownGoodConfiguration::Known(_)
-                )
-            {
-                bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
+            let recovery = binding.recovery;
+            let established = matches!(
+                binding.last_known_good,
+                LastKnownGoodConfiguration::Known(_)
+            );
+            match recovery {
+                RecoveryPolicy::ReapplyOnReturn if established => {
+                    bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
+                },
+                RecoveryPolicy::ReapplyOnReturn => {},
+                RecoveryPolicy::Retain | RecoveryPolicy::ReapplyOnRequest => {
+                    bindings.set_waiting_work(&role, WaitingWork::ApplicationRequestOwed);
+                },
+                RecoveryPolicy::Forget => {
+                    bindings.forget_last_known_good(&role);
+                    bindings.set_waiting_work(&role, WaitingWork::ApplicationRequestOwed);
+                },
             }
         }
     }
@@ -1569,6 +1586,7 @@ fn roles_with_a_safe_capture_opportunity(world: &World, devices: &Devices) -> Ve
         .registered_roles()
         .filter(|role| {
             bindings.waiting_work(role) == WaitingWork::Nothing
+                && bindings.capture_dispatch(role) == CaptureDispatch::Eligible
                 && bindings.configuration_readability(role) == ConfigurationReadability::Readable
                 && bindings.binding(role).is_ok_and(|binding| {
                     binding.state == RoleState::Ready
@@ -3852,6 +3870,112 @@ mod tests {
             app.world().resource::<Devices>().resolve(&panel),
             DeviceResolution::Resolved(_)
         ));
+
+        Ok(())
+    }
+
+    /// Drive one binding under `recovery` to an established last-known-good value, make its unit
+    /// absent, and read back what the departure recorded and whether the saved value survived.
+    fn depart_under(recovery: RecoveryPolicy) -> Result<(WaitingWork, bool), Box<dyn Error>> {
+        let mut app = app_with_scheme();
+        let panel = key("panel-a");
+        let role = RoleKey::new("primary-window")?;
+        let captures = Arc::new(AtomicUsize::new(0));
+        let driver = app
+            .world_mut()
+            .resource_mut::<Drivers>()
+            .add(CountingCaptureDriver(Arc::clone(&captures)));
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .register(Binding {
+                recovery,
+                ..panel_binding(role.clone(), panel.clone(), driver)
+            })?;
+        let reported_units = add_set_reporter(
+            &mut app,
+            vec![unit(panel.clone())],
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
+
+        run_until_reconciled(&mut app);
+        reach_ready(&mut app, &role, ApplyPermit::in_service());
+        app.update();
+        assert_eq!(captures.load(Ordering::Relaxed), 1);
+
+        let mut absent = unit(panel);
+        absent.presence = Presence::Absent;
+        rewrite(&reported_units, vec![absent]);
+        run_until_reconciled(&mut app);
+
+        let bindings = app.world().resource::<Bindings>();
+        Ok((
+            bindings.waiting_work(&role),
+            matches!(
+                bindings.binding(&role)?.last_known_good,
+                LastKnownGoodConfiguration::Known(_)
+            ),
+        ))
+    }
+
+    #[test]
+    fn each_recovery_policy_records_its_own_departure_work() -> Result<(), Box<dyn Error>> {
+        // `ReapplyOnReturn` is the only policy that reapplies without being asked, so it is the
+        // only one that owes a restoration. The other three owe an application request: without
+        // that record a departed role falls back to `WaitingWork::Nothing`, reaches
+        // `WaitingRole::ForHardware`, and has its authored request dispatched automatically when
+        // the unit returns.
+        assert_eq!(
+            depart_under(RecoveryPolicy::ReapplyOnReturn)?,
+            (WaitingWork::RestorationOwed, true)
+        );
+        assert_eq!(
+            depart_under(RecoveryPolicy::Retain)?,
+            (WaitingWork::ApplicationRequestOwed, true)
+        );
+        assert_eq!(
+            depart_under(RecoveryPolicy::ReapplyOnRequest)?,
+            (WaitingWork::ApplicationRequestOwed, true)
+        );
+        // `Forget` drops the saved value at the departure rather than leaving it for a later
+        // restore.
+        assert_eq!(
+            depart_under(RecoveryPolicy::Forget)?,
+            (WaitingWork::ApplicationRequestOwed, false)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_first_apply_is_unaffected_by_the_default_recovery_policy() -> Result<(), Box<dyn Error>> {
+        // `RecoveryPolicy` governs a saved value's treatment after a departure, never a role's
+        // first apply. Under the `Forget` default a newly registered binding has no recorded
+        // work, so it still reaches the view that dispatches its authored request.
+        let mut app = app_with_scheme();
+        let panel = key("panel-a");
+        let role = RoleKey::new("primary-window")?;
+        let driver = app
+            .world_mut()
+            .resource_mut::<Drivers>()
+            .add(CountingCaptureDriver(Arc::new(AtomicUsize::new(0))));
+        let binding = panel_binding(role.clone(), panel.clone(), driver);
+        assert_eq!(binding.recovery, RecoveryPolicy::default());
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .register(binding)?;
+        add_set_reporter(
+            &mut app,
+            vec![unit(panel)],
+            ReporterCoverage::MatchingEvidenceOnly,
+        );
+
+        run_until_reconciled(&mut app);
+
+        let mut bindings = app.world_mut().resource_mut::<Bindings>();
+        assert_eq!(bindings.waiting_work(&role), WaitingWork::Nothing);
+        let Ok(RoleView::Waiting(WaitingRole::ForHardware(_))) = bindings.role_view(&role) else {
+            return Err("a newly registered role waits for hardware".into());
+        };
 
         Ok(())
     }

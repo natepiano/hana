@@ -1,5 +1,6 @@
 //! Device identity and recovery policy for providers that report device sets to Bevy.
 
+mod apply;
 mod attempt;
 mod binding;
 mod capabilities;
@@ -24,6 +25,7 @@ mod scheme;
 mod verdict;
 
 pub use attempt::Attempt;
+pub use attempt::AttemptDeadlineStatus;
 pub use attempt::AttemptId;
 pub use attempt::AttemptOutcome;
 pub use attempt::AttemptProgress;
@@ -38,6 +40,7 @@ pub use binding::BindingError;
 pub use binding::BindingTransition;
 pub use binding::BindingTransitionSequence;
 pub use binding::Bindings;
+pub use binding::CaptureDispatch;
 pub use binding::CaptureRequest;
 pub use binding::ConfigurationReadability;
 pub use binding::ConfiguredDevice;
@@ -78,11 +81,14 @@ pub use devices::Attempts;
 pub use devices::Device;
 pub use devices::DeviceEntityLookup;
 pub use devices::DeviceResolution;
+pub use devices::DeviceRevision;
+pub use devices::DeviceRevisionLookup;
 pub use devices::DeviceStateLookup;
 pub use devices::Devices;
 pub use devices::PresentWithUsableClaim;
 pub use devices::ReconciledDeviceState;
 pub use devices::RiggingRevision;
+pub use devices::RoleAttemptLookup;
 pub use discovery::AuthoritativeReporterCoverage;
 pub use discovery::AuthoritativeReporterCoverageError;
 pub use discovery::CoveredDeviceIdentitySpace;
@@ -107,7 +113,9 @@ pub use endpoint::DeviceEndpoint;
 pub use endpoint::EndpointId;
 pub use endpoint::PartName;
 pub use endpoint::PartNameError;
+pub use events::AttemptFinished;
 pub use events::CapabilitiesDisputed;
+pub use events::RetiredRoleAttemptEnded;
 pub use evidence::AttachmentPath;
 pub use evidence::DeviceDescriptor;
 pub use evidence::OsDeviceId;
@@ -159,6 +167,8 @@ pub mod prelude {
     pub use crate::ApplyingRole;
     pub use crate::AttachmentPath;
     pub use crate::Attempt;
+    pub use crate::AttemptDeadlineStatus;
+    pub use crate::AttemptFinished;
     pub use crate::AttemptId;
     pub use crate::AttemptLookup;
     pub use crate::AttemptOutcome;
@@ -180,6 +190,7 @@ pub mod prelude {
     pub use crate::Capabilities;
     pub use crate::CapabilitiesDisputed;
     pub use crate::CapabilityAttachError;
+    pub use crate::CaptureDispatch;
     pub use crate::CaptureOutcome;
     pub use crate::CaptureRequest;
     pub use crate::Claim;
@@ -201,6 +212,8 @@ pub mod prelude {
     pub use crate::DeviceRecord;
     pub use crate::DeviceReporter;
     pub use crate::DeviceResolution;
+    pub use crate::DeviceRevision;
+    pub use crate::DeviceRevisionLookup;
     pub use crate::DeviceScan;
     pub use crate::DeviceSet;
     pub use crate::DeviceStateLookup;
@@ -259,6 +272,7 @@ pub mod prelude {
     pub use crate::RequestedConfiguration;
     pub use crate::ResolvedBindings;
     pub use crate::ResolvedToDevice;
+    pub use crate::RetiredRoleAttemptEnded;
     pub use crate::RetirementOutcome;
     pub use crate::RetryOn;
     pub use crate::RiggingAppExt;
@@ -266,6 +280,7 @@ pub mod prelude {
     pub use crate::RiggingPlugin;
     pub use crate::RiggingRevision;
     pub use crate::RiggingSystems;
+    pub use crate::RoleAttemptLookup;
     pub use crate::RoleKey;
     pub use crate::RoleKeyError;
     pub use crate::RoleState;

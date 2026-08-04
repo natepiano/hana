@@ -1,6 +1,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::time::Duration;
 
 use bevy::ecs::entity::Entity;
 use bevy::ecs::reflect::ReflectComponent;
@@ -13,6 +14,7 @@ use thiserror::Error;
 use crate::ApplyPermit;
 use crate::AttachmentPath;
 use crate::Attempt;
+use crate::AttemptDeadlineStatus;
 use crate::AttemptId;
 use crate::Claim;
 use crate::ConfiguredDeviceConnection;
@@ -24,7 +26,10 @@ use crate::IdentityVerdict;
 use crate::Presence;
 use crate::ReportedParent;
 use crate::ReporterId;
+use crate::RoleKey;
 use crate::SchemeName;
+use crate::binding::Bindings;
+use crate::reconcile::FrameClockReading;
 
 /// First identifier `Attempts` issues, chosen so no issued value equals `AttemptId::default()`.
 const FIRST_ISSUED_ATTEMPT: u64 = 1;
@@ -63,6 +68,13 @@ pub struct PresentWithUsableClaim;
 pub struct Devices {
     ids:                  HashMap<DeviceKey, DeviceId>,
     state:                HashMap<DeviceId, ReconciledDeviceState>,
+    /// How many times each retained device's reconciled state has actually changed.
+    ///
+    /// Kept beside `Self::state` rather than on `ReconciledDeviceState` because the counter
+    /// describes the history of a handle, not what the current pass concluded about the unit: a
+    /// state a reporter supplies has no revision to carry, and the comparison that advances the
+    /// counter would otherwise have to exclude a field of the value it is comparing.
+    revision:             HashMap<DeviceId, DeviceRevision>,
     entity:               HashMap<DeviceId, Entity>,
     /// Issues `DeviceId`. Monotonic, never reused within a process, so a retired handle dangles
     /// instead of denoting a later device.
@@ -92,6 +104,19 @@ impl Devices {
         self.state
             .get(&device_id)
             .map_or(DeviceStateLookup::Retired, DeviceStateLookup::Retained)
+    }
+
+    /// Read how many times the latest reconcile passes have changed one handle's state.
+    ///
+    /// This is the counter an in-flight attempt is re-validated against, so a reporter's scan can
+    /// only abandon attempts on the devices that scan actually changed.
+    #[must_use]
+    pub fn revision(&self, device_id: DeviceId) -> DeviceRevisionLookup {
+        self.revision
+            .get(&device_id)
+            .map_or(DeviceRevisionLookup::Retired, |device_revision| {
+                DeviceRevisionLookup::Retained(*device_revision)
+            })
     }
 
     /// How many devices the latest reconcile pass retained.
@@ -135,6 +160,7 @@ impl Devices {
     ) -> ReconciledDeviceChanges {
         let mut ids = HashMap::with_capacity(reconciled.len());
         let mut state = HashMap::with_capacity(reconciled.len());
+        let mut revision = HashMap::with_capacity(reconciled.len());
         let mut changes = ReconciledDeviceChanges::default();
 
         for reconciled_device_state in reconciled {
@@ -143,6 +169,10 @@ impl Devices {
                 .get(&reconciled_device_state.key)
                 .copied()
                 .unwrap_or_else(|| self.issue());
+            revision.insert(
+                device_id,
+                self.advanced_revision(device_id, &reconciled_device_state),
+            );
             let dispute_changed = self
                 .state
                 .get(&device_id)
@@ -185,6 +215,7 @@ impl Devices {
         });
         self.ids = ids;
         self.state = state;
+        self.revision = revision;
         self.duplicate_keys = duplicate_keys;
         self.unregistered_schemes = unregistered_schemes;
 
@@ -339,6 +370,28 @@ impl Devices {
         Ok(reconciled_device_state)
     }
 
+    /// Carry one handle's revision into this pass, advancing it only for a device that moved.
+    ///
+    /// A device the kernel is meeting for the first time starts at `DeviceRevision::default()`:
+    /// there is no retained state for the incoming one to differ from, so nothing has changed yet.
+    /// A pass that reports a retained device exactly as it already stands hands back the same
+    /// counter, which is what keeps routine scanning from abandoning the attempts in flight on it.
+    fn advanced_revision(
+        &self,
+        device_id: DeviceId,
+        reported: &ReconciledDeviceState,
+    ) -> DeviceRevision {
+        let Some(retained) = self.state.get(&device_id) else {
+            return DeviceRevision::default();
+        };
+        let device_revision = self.revision.get(&device_id).copied().unwrap_or_default();
+        if retained.holds_same_facts(reported) {
+            device_revision
+        } else {
+            device_revision.advanced()
+        }
+    }
+
     const fn issue(&mut self) -> DeviceId {
         let device_id = DeviceId::new(self.next);
         self.next += 1;
@@ -412,6 +465,29 @@ pub struct ReconciledDeviceState {
     /// payload is neither clonable nor reflectable and copying it would create a second
     /// authoritative record that can drift from the reporter's.
     pub disputed:      HashSet<TypeId>,
+}
+
+impl ReconciledDeviceState {
+    /// Report whether a newly reported state says the same thing about this device as the retained
+    /// one, which is what decides whether its `DeviceRevision` advances.
+    ///
+    /// `Self::presence` is compared by variant for the reason its own documentation gives:
+    /// `Presence::Unreachable` carries an elapsed time that grows on every scan, so comparing
+    /// values would report a change every pass and advance the counter at scan rate — which is the
+    /// kernel-wide abandonment the per-device counter exists to stop.
+    fn holds_same_facts(&self, reported: &Self) -> bool {
+        self.key == reported.key
+            && self.verdict == reported.verdict
+            && self.decision_owed == reported.decision_owed
+            && self.mode == reported.mode
+            && self.attachment == reported.attachment
+            && self.parent == reported.parent
+            && self.presence.is_same_variant(reported.presence)
+            && self.claim == reported.claim
+            && self.contributors == reported.contributors
+            && self.declared == reported.declared
+            && self.disputed == reported.disputed
+    }
 }
 
 /// What the latest reconcile pass changed about the retained device set, held until the entity
@@ -570,13 +646,16 @@ pub enum DeviceStateLookup<'a> {
     Retained(&'a ReconciledDeviceState),
 }
 
-/// One global revision, folded from every reporter's own revision.
+/// One global revision, combining every reporter's own revision.
 ///
 /// It advances once per reconcile pass in which any reporter returned a complete scan, whether or
-/// not the contents changed. Counting completed scans rather than content changes is what makes a
-/// rapid absent-then-present cycle observable across consecutive passes: the set looks identical at
+/// not the contents changed. Counting completed scans rather than content changes keeps a rapid
+/// absent-then-present cycle visible to a consumer watching this value: the set looks identical at
 /// both ends, so a content hash would report no change and a panel watching the revision would
 /// stay blank.
+///
+/// Reacquisition does not read this counter. It compares each device's presence reading from one
+/// pass to the next, and attempt staleness keys on the per-device [`DeviceRevision`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Resource, Reflect)]
 #[reflect(opaque)]
 #[reflect(Resource)]
@@ -588,6 +667,43 @@ impl RiggingRevision {
     pub const fn get(self) -> u64 { self.0 }
 
     pub(crate) const fn advance(&mut self) { self.0 += 1; }
+}
+
+/// How many times one device's own reconciled state has changed since the kernel issued its handle.
+///
+/// Separate from `RiggingRevision` because the two answer different questions: the global counter
+/// says how many scans have landed anywhere, which is a fact about the reporters, while this says
+/// whether *this* unit moved. An attempt validated against the global counter is abandoned by any
+/// reporter's routine scan, including one that never names its device; validated against this
+/// counter it survives every pass that reports it unchanged.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Reflect)]
+#[reflect(opaque)]
+pub struct DeviceRevision(u64);
+
+impl DeviceRevision {
+    /// Report how many reconcile passes changed this device's reconciled state.
+    #[must_use]
+    pub const fn get(self) -> u64 { self.0 }
+
+    /// The counter one pass that found a real change hands to the next.
+    ///
+    /// Returned rather than mutated in place because `Devices::replace_reconciled` builds the next
+    /// pass's map beside the retained one instead of editing it.
+    pub(crate) const fn advanced(self) -> Self { Self(self.0 + 1) }
+}
+
+/// Result of reading how many times one device has changed.
+///
+/// A named result rather than an `Option<DeviceRevision>`: a retired handle has no revision at all,
+/// and reading that absence as revision zero would say the device is at its original state when in
+/// fact there is no device. A retry gate that stamped zero for a departed unit would then never
+/// reopen, because the fresh handle a returning unit receives also starts at zero.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeviceRevisionLookup {
+    /// The handle addresses no retained device, so nothing has a revision to report.
+    Retired,
+    /// The kernel retains this device and its state has changed this many times.
+    Retained(DeviceRevision),
 }
 
 /// In-flight endpoint attempts, keyed by the identifier this registry issued.
@@ -603,15 +719,23 @@ impl RiggingRevision {
 #[derive(Debug, Resource, Reflect)]
 #[reflect(Resource)]
 pub struct Attempts {
-    in_flight: HashMap<AttemptId, Attempt>,
-    next:      u64,
+    in_flight:       HashMap<AttemptId, Attempt>,
+    /// Which attempt each role currently has in flight.
+    ///
+    /// Retirement and replacement both destroy the `crate::RoleState::Applying` that named the
+    /// in-flight attempt before the abort path runs, and `crate::BindingTransition` carries only
+    /// the role. Without this index an abandoned attempt would keep polling a driver for a
+    /// role that no longer exists.
+    attempt_by_role: HashMap<RoleKey, AttemptId>,
+    next:            u64,
 }
 
 impl Default for Attempts {
     fn default() -> Self {
         Self {
-            in_flight: HashMap::new(),
-            next:      FIRST_ISSUED_ATTEMPT,
+            in_flight:       HashMap::new(),
+            attempt_by_role: HashMap::new(),
+            next:            FIRST_ISSUED_ATTEMPT,
         }
     }
 }
@@ -632,14 +756,6 @@ impl Attempts {
     /// Returns `AttemptIssueError::SequenceExhausted` when the counter cannot advance without
     /// wrapping back to `AttemptId::default()` and reusing identifiers a late driver poll could
     /// still resolve.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "attempt identifiers are minted before a driver apply starts, and applies are \
-                      not wired up yet"
-        )
-    )]
     pub(crate) fn issue(&mut self) -> Result<AttemptId, AttemptIssueError> {
         let next = self
             .next
@@ -651,6 +767,25 @@ impl Attempts {
         Ok(attempt)
     }
 
+    /// Hand back an identifier whose dispatch never committed, so the counter does not advance.
+    ///
+    /// Minting has to happen before erased dispatch, because the request the driver receives
+    /// carries the identifier — but a driver that is unregistered or refuses the configuration
+    /// contract returns without ever seeing it. Without this, a role whose driver refuses would
+    /// consume one identifier on every dispatch, and the sequence guarding against reuse would be
+    /// spent by attempts that never ran.
+    ///
+    /// Only the most recently issued identifier is reclaimed, and only while it is not retained:
+    /// rewinding past a retained attempt would reissue an identifier a driver may still poll.
+    pub(crate) fn release(&mut self, attempt: AttemptId) {
+        if self.in_flight.contains_key(&attempt) {
+            return;
+        }
+        if self.next == attempt.value().saturating_add(1) {
+            self.next = attempt.value();
+        }
+    }
+
     /// How many attempts are still in flight.
     #[must_use]
     pub fn len(&self) -> usize { self.in_flight.len() }
@@ -659,18 +794,99 @@ impl Attempts {
     #[must_use]
     pub fn is_empty(&self) -> bool { self.in_flight.is_empty() }
 
-    /// Retain one attempt record until its driver reports a terminal outcome.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "started attempts are retained here for per-poll re-checks, and applies are \
-                      not wired up yet"
-        )
-    )]
-    pub(crate) fn retain(&mut self, attempt: Attempt) {
+    /// Begin retaining one attempt record until its driver reports a terminal outcome.
+    ///
+    /// Named for the act rather than for the storage: every other `retain` in this crate filters a
+    /// collection, and a reader meeting `Attempts::retain` would expect this call to drop records.
+    pub(crate) fn begin(&mut self, attempt: Attempt) {
+        self.attempt_by_role
+            .insert(attempt.role.clone(), attempt.id);
         self.in_flight.insert(attempt.id, attempt);
     }
+
+    /// Stop retaining one attempt, whether it succeeded, failed, or was abandoned.
+    ///
+    /// Removing the role index here rather than at each ending site is what keeps a later poll from
+    /// resolving a role to an attempt the kernel already finished.
+    pub(crate) fn end(&mut self, attempt: AttemptId) {
+        if let Some(ended) = self.in_flight.remove(&attempt)
+            && self.attempt_by_role.get(&ended.role) == Some(&attempt)
+        {
+            self.attempt_by_role.remove(&ended.role);
+        }
+    }
+
+    /// Iterate every attempt the kernel currently retains.
+    ///
+    /// The apply systems re-validate each one before any driver poll, so the registry has to be
+    /// walkable rather than only addressable by identifier.
+    pub(crate) fn in_flight_attempts(&self) -> impl Iterator<Item = &Attempt> {
+        self.in_flight.values()
+    }
+
+    /// Ask which attempt is in flight for one application role.
+    ///
+    /// `bindings` is consulted only to separate a bound role that happens to be idle from a role
+    /// that has no binding at all: an abort path that conflated the two would silently do nothing
+    /// for a role whose registration failed.
+    #[must_use]
+    pub fn in_flight_for(&self, role: &RoleKey, bindings: &Bindings) -> RoleAttemptLookup {
+        self.attempt_by_role.get(role).copied().map_or_else(
+            || {
+                if bindings.binding(role).is_ok() {
+                    RoleAttemptLookup::Idle
+                } else {
+                    RoleAttemptLookup::NoSuchRole
+                }
+            },
+            RoleAttemptLookup::InFlight,
+        )
+    }
+
+    /// Report where one attempt stands against its own deadline and the bounded overrun budget.
+    ///
+    /// Being overdue is neither an error nor a failure, so the kernel keeps polling through
+    /// `AttemptDeadlineStatus::OverdueWithinOverrun` and only abandons the attempt once the budget
+    /// is spent. A clock that has not advanced past application startup answers
+    /// `AttemptDeadlineStatus::WithinDeadline`, because a first frame carries no elapsed time an
+    /// overrun could be computed from.
+    #[must_use]
+    pub(crate) fn deadline_status(
+        &self,
+        attempt: AttemptId,
+        now: FrameClockReading,
+        apply_overrun: Duration,
+    ) -> AttemptDeadlineStatus {
+        let Some(retained) = self.in_flight.get(&attempt) else {
+            return AttemptDeadlineStatus::NoSuchAttempt;
+        };
+        let FrameClockReading::Measurable(now) = now else {
+            return AttemptDeadlineStatus::WithinDeadline;
+        };
+        if now <= retained.deadline {
+            return AttemptDeadlineStatus::WithinDeadline;
+        }
+        let past_deadline = now.duration_since(retained.deadline);
+        if past_deadline > apply_overrun {
+            AttemptDeadlineStatus::OverrunExhausted { past_deadline }
+        } else {
+            AttemptDeadlineStatus::OverdueWithinOverrun { past_deadline }
+        }
+    }
+}
+
+/// Result of asking which attempt one application role currently has in flight.
+///
+/// A named result rather than an optional identifier: an abort that could not tell "this role is
+/// bound and idle" from "there is no such role" would treat a failed registration as a settled one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RoleAttemptLookup {
+    /// No binding exists for this role, so nothing could have been in flight for it.
+    NoSuchRole,
+    /// The role is bound and has no driver operation in flight.
+    Idle,
+    /// This attempt is in flight for the role and is the one an abort must end.
+    InFlight(AttemptId),
 }
 
 /// Result of looking one issued identifier up in the attempt registry.
@@ -704,6 +920,7 @@ mod tests {
     use std::any::TypeId;
     use std::collections::HashSet;
     use std::error::Error;
+    use std::time::Duration;
 
     use bevy::app::App;
     use bevy::ecs::reflect::AppTypeRegistry;
@@ -720,6 +937,8 @@ mod tests {
     use super::Device;
     use super::DeviceDeparture;
     use super::DeviceResolution;
+    use super::DeviceRevision;
+    use super::DeviceRevisionLookup;
     use super::DeviceStateLookup;
     use super::Devices;
     use super::PresentWithUsableClaim;
@@ -803,6 +1022,85 @@ mod tests {
             DeviceStateLookup::Retained(state) if state.key == key
         ));
         assert_eq!(devices.resolve(&absent_key), DeviceResolution::NotResolved);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_rescan_reporting_the_same_state_leaves_the_device_revision_alone()
+    -> Result<(), Box<dyn Error>> {
+        let key = reported_key("DELL-U2723QE-9J4K2H3")?;
+        let mut devices = Devices::default();
+        devices.replace_reconciled(
+            vec![reconciled(key.clone())],
+            HashSet::new(),
+            HashSet::new(),
+        );
+        let DeviceResolution::Resolved(device_id) = devices.resolve(&key) else {
+            panic!("an ingested key must resolve to the handle the registry issued");
+        };
+        let issued = devices.revision(device_id);
+        assert_eq!(
+            issued,
+            DeviceRevisionLookup::Retained(DeviceRevision::default())
+        );
+
+        for _ in 0..3 {
+            devices.replace_reconciled(
+                vec![reconciled(key.clone())],
+                HashSet::new(),
+                HashSet::new(),
+            );
+        }
+
+        // The whole point of counting real changes: a reporter that keeps reporting the same unit
+        // is not a reason to abandon the attempts running against it.
+        assert_eq!(devices.revision(device_id), issued);
+
+        let mut unreachable = reconciled(key.clone());
+        unreachable.presence = Presence::Unreachable {
+            since: Duration::from_secs(9),
+        };
+        devices.replace_reconciled(vec![unreachable], HashSet::new(), HashSet::new());
+
+        assert_eq!(
+            devices.revision(device_id),
+            DeviceRevisionLookup::Retained(DeviceRevision::default().advanced())
+        );
+
+        // `Presence::Unreachable` carries an elapsed time that grows on every scan, so a device
+        // that stays unreachable would advance forever if presence were compared by value.
+        let mut later = reconciled(key);
+        later.presence = Presence::Unreachable {
+            since: Duration::from_secs(30),
+        };
+        devices.replace_reconciled(vec![later], HashSet::new(), HashSet::new());
+
+        assert_eq!(
+            devices.revision(device_id),
+            DeviceRevisionLookup::Retained(DeviceRevision::default().advanced())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_retired_handle_reports_no_revision_rather_than_a_first_one() -> Result<(), Box<dyn Error>>
+    {
+        let key = reported_key("DELL-U2723QE-9J4K2H3")?;
+        let mut devices = Devices::default();
+        devices.replace_reconciled(
+            vec![reconciled(key.clone())],
+            HashSet::new(),
+            HashSet::new(),
+        );
+        let DeviceResolution::Resolved(device_id) = devices.resolve(&key) else {
+            panic!("an ingested key must resolve to the handle the registry issued");
+        };
+
+        devices.replace_reconciled(Vec::new(), HashSet::new(), HashSet::new());
+
+        assert_eq!(devices.revision(device_id), DeviceRevisionLookup::Retired);
 
         Ok(())
     }
@@ -1133,12 +1431,45 @@ mod tests {
     }
 
     #[test]
+    fn an_identifier_whose_dispatch_never_committed_goes_back_on_offer() {
+        let mut attempts = Attempts::default();
+        let first = attempts
+            .issue()
+            .expect("a fresh registry can issue an identifier");
+
+        attempts.release(first);
+
+        assert_eq!(
+            attempts
+                .issue()
+                .expect("the released identifier is on offer again"),
+            first
+        );
+
+        // A retained attempt is never reclaimed, because a driver may still poll it, and neither is
+        // an identifier the counter has already moved past.
+        let retained = attempts
+            .issue()
+            .expect("a fresh registry can issue a second identifier");
+        attempts.begin(test_attempt(retained, bevy::platform::time::Instant::now()));
+        attempts.release(retained);
+        attempts.release(first);
+
+        assert_ne!(
+            attempts
+                .issue()
+                .expect("the registry can still issue after two refused releases"),
+            retained
+        );
+    }
+
+    #[test]
     fn a_retained_attempt_is_in_flight_while_an_unissued_identifier_is_finished() {
         let mut attempts = Attempts::default();
         let attempt = attempts
             .issue()
             .expect("a fresh registry can issue an identifier");
-        attempts.retain(Attempt {
+        attempts.begin(Attempt {
             id:                 attempt,
             role:               crate::RoleKey::new("window/main")
                 .expect("`window/main` is a valid role handle"),
@@ -1154,7 +1485,7 @@ mod tests {
             },
             permit:             crate::ApplyPermit::in_service(),
             expected_device_id: DeviceId::new(0),
-            rigging_revision:   RiggingRevision::default(),
+            device_revision:    DeviceRevision::default(),
             deadline:           bevy::platform::time::Instant::now(),
         });
 
@@ -1183,4 +1514,143 @@ mod tests {
 
         drop(type_registry);
     }
+
+    fn test_attempt(id: AttemptId, deadline: bevy::platform::time::Instant) -> Attempt {
+        Attempt {
+            id,
+            role: crate::RoleKey::new("window/main").expect("`window/main` is a valid role handle"),
+            endpoint: test_endpoint(),
+            permit: crate::ApplyPermit::in_service(),
+            expected_device_id: DeviceId::new(0),
+            device_revision: DeviceRevision::default(),
+            deadline,
+        }
+    }
+
+    fn test_endpoint() -> crate::DeviceEndpoint {
+        crate::DeviceEndpoint {
+            device: DeviceKey {
+                kind: crate::DeviceKind::Display,
+                id:   crate::DeviceIdSource::Authored {
+                    value: crate::AuthoredId::new("panel")
+                        .expect("`panel` is a valid authored identifier"),
+                },
+            },
+            id:     crate::EndpointId::Whole,
+        }
+    }
+
+    #[test]
+    fn the_deadline_query_separates_healthy_overdue_exhausted_and_unknown_attempts() {
+        let mut attempts = Attempts::default();
+        let attempt = attempts
+            .issue()
+            .expect("a fresh registry can issue an identifier");
+        let now = bevy::platform::time::Instant::now();
+        let overrun = Duration::from_secs(5);
+        attempts.begin(test_attempt(attempt, now + Duration::from_secs(10)));
+        let reading = |elapsed| {
+            crate::reconcile::FrameClockReading::Measurable(now + Duration::from_secs(elapsed))
+        };
+
+        assert_eq!(
+            attempts.deadline_status(attempt, reading(1), overrun),
+            crate::AttemptDeadlineStatus::WithinDeadline
+        );
+        assert_eq!(
+            attempts.deadline_status(attempt, reading(12), overrun),
+            crate::AttemptDeadlineStatus::OverdueWithinOverrun {
+                past_deadline: Duration::from_secs(2),
+            }
+        );
+        assert_eq!(
+            attempts.deadline_status(attempt, reading(20), overrun),
+            crate::AttemptDeadlineStatus::OverrunExhausted {
+                past_deadline: Duration::from_secs(10),
+            }
+        );
+        assert_eq!(
+            attempts.deadline_status(AttemptId::default(), reading(20), overrun),
+            crate::AttemptDeadlineStatus::NoSuchAttempt
+        );
+    }
+
+    #[test]
+    fn a_clock_that_has_not_advanced_never_reports_an_attempt_overdue() {
+        let mut attempts = Attempts::default();
+        let attempt = attempts
+            .issue()
+            .expect("a fresh registry can issue an identifier");
+        // A deadline already in the past: only the missing clock reading keeps this within it.
+        let long_past = bevy::platform::time::Instant::now()
+            .checked_sub(Duration::from_mins(1))
+            .expect("the process started after the clock's origin");
+        attempts.begin(test_attempt(attempt, long_past));
+
+        assert_eq!(
+            attempts.deadline_status(
+                attempt,
+                crate::reconcile::FrameClockReading::NotYetAdvanced,
+                Duration::ZERO,
+            ),
+            crate::AttemptDeadlineStatus::WithinDeadline
+        );
+    }
+
+    #[test]
+    fn the_role_keyed_lookup_separates_an_unbound_role_from_an_idle_and_a_working_one()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let role = crate::RoleKey::new("window/main")?;
+        let mut attempts = Attempts::default();
+        let mut bindings = crate::binding::Bindings::default();
+
+        assert_eq!(
+            attempts.in_flight_for(&role, &bindings),
+            crate::RoleAttemptLookup::NoSuchRole
+        );
+
+        bindings.register(crate::Binding {
+            role:            role.clone(),
+            endpoint:        test_endpoint(),
+            driver:          crate::DriverId(0),
+            recovery:        crate::RecoveryPolicy::Forget,
+            retry:           crate::RetryOn::NewRevision,
+            on_abort:        crate::OnAbort::default(),
+            on_loss:         crate::OnSessionLoss::default(),
+            state:           crate::RoleState::default(),
+            requested:       crate::RequestedConfiguration::new(RoleAttemptTestConfiguration(3)),
+            last_known_good: crate::LastKnownGoodConfiguration::default(),
+        })?;
+
+        assert_eq!(
+            attempts.in_flight_for(&role, &bindings),
+            crate::RoleAttemptLookup::Idle
+        );
+
+        let attempt = attempts
+            .issue()
+            .expect("a fresh registry can issue an identifier");
+        attempts.begin(test_attempt(attempt, bevy::platform::time::Instant::now()));
+
+        assert_eq!(
+            attempts.in_flight_for(&role, &bindings),
+            crate::RoleAttemptLookup::InFlight(attempt)
+        );
+
+        // Retirement takes the binding while the driver is still working. The lookup is keyed by
+        // role and not by binding for exactly this case: the kernel has to be able to find the
+        // orphaned attempt in order to abandon it deliberately.
+        bindings.retire(&role)?;
+
+        assert_eq!(
+            attempts.in_flight_for(&role, &bindings),
+            crate::RoleAttemptLookup::InFlight(attempt)
+        );
+
+        Ok(())
+    }
+
+    #[derive(Component, Reflect)]
+    #[reflect(Component)]
+    struct RoleAttemptTestConfiguration(u32);
 }

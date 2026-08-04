@@ -962,10 +962,6 @@ impl Drivers {
     /// Returns `DriverContractError::DriverNotRegistered` when `driver_id` is not in this
     /// process's registry, or `DriverContractError::ConfigurationTypeMismatch` when the erased
     /// configuration belongs to a different driver's concrete type.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the phase 10/11 kernel dispatch")
-    )]
     pub(crate) fn start_apply(
         &mut self,
         world: &mut World,
@@ -1006,10 +1002,6 @@ impl Drivers {
     /// Returns `DriverContractError::DriverNotRegistered` when `driver_id` is not in this
     /// process's registry, or another `DriverContractError` when erased dispatch cannot recover
     /// the typed driver boundary.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "used by the phase 10/11 kernel dispatch")
-    )]
     pub(crate) fn poll(
         &mut self,
         world: &mut World,
