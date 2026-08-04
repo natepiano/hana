@@ -11,14 +11,17 @@ use std::time::Duration;
 
 use bevy::MinimalPlugins;
 use bevy::app::App;
+use bevy::ecs::change_detection::DetectChanges;
 use bevy::ecs::reflect::AppTypeRegistry;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::Component;
 use bevy::prelude::On;
 use bevy::prelude::Reflect;
+use bevy::prelude::Res;
 use bevy::prelude::ResMut;
 use bevy::prelude::Resource;
 use bevy::prelude::World;
+use bevy::reflect::structs::Struct;
 use bevy::time::Real;
 use bevy::time::Time;
 use hana_rigging::prelude::*;
@@ -126,18 +129,30 @@ struct ObservedEvents {
     connections:        Vec<(DeviceKey, ConfiguredDeviceConnection)>,
     attempt_outcomes:   Vec<AttemptOutcome>,
     startup:            Vec<StartupDiscoveryState>,
-    reporter_progress:  Vec<(DiscoveryBatchId, ReporterId, DiscoveryProgress)>,
-    hardware_progress:  Vec<ObservedDiscoveryCounts>,
+    discovery_progress: Vec<ObservedDiscoveryProgress>,
     discovery_finished: Vec<(DiscoveryBatchId, ReporterId, CompletedDiscoveryOutcome)>,
 }
 
-/// The aggregate counts one `HardwareDiscoveryProgress` carried.
+/// Every identity question raised or expired, in arrival order.
+///
+/// Kept apart from `ObservedEvents` because the identity-question events are the two stated
+/// exceptions to the derived-from-mirrored-components rule, and a suite that reads them out of the
+/// same record as the derived events would blur that line.
+#[derive(Default, Resource)]
+struct ObservedQuestions {
+    raised:  Vec<(RoleKey, DeviceKey)>,
+    expired: Vec<(RoleKey, DeviceKey)>,
+}
+
+/// What one `DiscoveryProgressChanged` carried.
 ///
 /// Kept as a named record rather than a tuple because the four counts are all `usize` and a test
 /// comparing them positionally would pass with any two of them swapped.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ObservedDiscoveryCounts {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ObservedDiscoveryProgress {
     batch:     DiscoveryBatchId,
+    reporter:  ReporterId,
+    progress:  DiscoveryProgress,
     completed: usize,
     total:     usize,
     running:   usize,
@@ -187,21 +202,14 @@ fn observe_startup(event: On<StartupDiscoveryChanged>, mut observed: ResMut<Obse
     observed.startup.push(event.state.clone());
 }
 
-fn observe_reporter_progress(
+fn observe_discovery_progress(
     event: On<DiscoveryProgressChanged>,
     mut observed: ResMut<ObservedEvents>,
 ) {
-    observed
-        .reporter_progress
-        .push((event.batch, event.reporter, event.progress.clone()));
-}
-
-fn observe_hardware_progress(
-    event: On<HardwareDiscoveryProgress>,
-    mut observed: ResMut<ObservedEvents>,
-) {
-    observed.hardware_progress.push(ObservedDiscoveryCounts {
+    observed.discovery_progress.push(ObservedDiscoveryProgress {
         batch:     event.batch,
+        reporter:  event.reporter,
+        progress:  event.progress.clone(),
         completed: event.completed,
         total:     event.total,
         running:   event.running,
@@ -213,6 +221,24 @@ fn observe_discovery_finished(event: On<DiscoveryFinished>, mut observed: ResMut
     observed
         .discovery_finished
         .push((event.batch, event.reporter, event.outcome.clone()));
+}
+
+fn observe_question_raised(
+    event: On<IdentityQuestionRaised>,
+    mut observed: ResMut<ObservedQuestions>,
+) {
+    observed
+        .raised
+        .push((event.role.clone(), event.candidate.clone()));
+}
+
+fn observe_question_expired(
+    event: On<IdentityQuestionExpired>,
+    mut observed: ResMut<ObservedQuestions>,
+) {
+    observed
+        .expired
+        .push((event.role.clone(), event.candidate.clone()));
 }
 
 /// Build an app with the kernel, the observers, and one scripted reporter that establishes absence.
@@ -252,6 +278,7 @@ fn observing_app() -> Result<App, Box<dyn Error>> {
         .add_plugins(RiggingPlugin)
         .init_resource::<DriverCalls>()
         .init_resource::<ObservedEvents>()
+        .init_resource::<ObservedQuestions>()
         .register_device_scheme(SchemeName::new(PANEL_SCHEME)?)
         .add_observer(observe_presence)
         .add_observer(observe_claim)
@@ -262,9 +289,10 @@ fn observing_app() -> Result<App, Box<dyn Error>> {
         .add_observer(observe_connection)
         .add_observer(observe_attempt_finished)
         .add_observer(observe_startup)
-        .add_observer(observe_reporter_progress)
-        .add_observer(observe_hardware_progress)
-        .add_observer(observe_discovery_finished);
+        .add_observer(observe_discovery_progress)
+        .add_observer(observe_discovery_finished)
+        .add_observer(observe_question_raised)
+        .add_observer(observe_question_expired);
 
     Ok(app)
 }
@@ -599,8 +627,7 @@ fn discovery_progress_waits_for_its_delay_then_agrees_across_both_views()
 
     {
         let observed = app.world().resource::<ObservedEvents>();
-        assert!(observed.reporter_progress.is_empty());
-        assert!(observed.hardware_progress.is_empty());
+        assert!(observed.discovery_progress.is_empty());
     }
 
     app.world_mut()
@@ -610,21 +637,15 @@ fn discovery_progress_waits_for_its_delay_then_agrees_across_both_views()
 
     {
         let observed = app.world().resource::<ObservedEvents>();
-        assert!(!observed.reporter_progress.is_empty());
-        assert_eq!(
-            observed.reporter_progress.len(),
-            observed.hardware_progress.len()
-        );
-        for ((batch, progressed_by, progress), counts) in observed
-            .reporter_progress
-            .iter()
-            .zip(&observed.hardware_progress)
-        {
-            assert_eq!(*progressed_by, reporter);
-            assert_eq!(*progress, scripted_progress);
-            assert_eq!(counts.batch, *batch);
-            assert_eq!(counts.total, 1);
-            assert_eq!(counts.completed + counts.running + counts.queued, 1);
+        assert!(!observed.discovery_progress.is_empty());
+        for observed_progress in &observed.discovery_progress {
+            assert_eq!(observed_progress.reporter, reporter);
+            assert_eq!(observed_progress.progress, scripted_progress);
+            assert_eq!(observed_progress.total, 1);
+            assert_eq!(
+                observed_progress.completed + observed_progress.running + observed_progress.queued,
+                1
+            );
         }
     }
 
@@ -906,7 +927,6 @@ fn every_event_type_resolves_through_the_type_registry() {
         std::any::TypeId::of::<RetiredRoleAttemptEnded>(),
         std::any::TypeId::of::<CapabilitiesDisputed>(),
         std::any::TypeId::of::<DiscoveryProgressChanged>(),
-        std::any::TypeId::of::<HardwareDiscoveryProgress>(),
         std::any::TypeId::of::<DiscoveryFinished>(),
         std::any::TypeId::of::<StartupDiscoveryChanged>(),
     ] {
@@ -925,4 +945,532 @@ fn observed_counts(app: &App) -> (usize, usize, usize, usize, usize) {
         observed.departures.len(),
         observed.role_state.len(),
     )
+}
+
+/// Transport address the saved unit and every candidate are reported at, which is what makes an
+/// arriving unit look like it took the departed one's place.
+const SHARED_SLOT: &str = "usb-bus-1-port-4";
+
+/// One unit reported at the address every identity question in this suite turns on.
+fn at_shared_slot(device_key: DeviceKey) -> Result<ScriptedDevice, Box<dyn Error>> {
+    Ok(ScriptedDevice::present(device_key)
+        .with_attachment(AttachmentPath::Reported(ReportedId::new(SHARED_SLOT)?)))
+}
+
+/// Register a role against a scripted panel with the settings the identity cases share.
+fn register_panel_role(
+    app: &mut App,
+    role: &RoleKey,
+    device: DeviceKey,
+) -> Result<(), Box<dyn Error>> {
+    register_role(
+        app,
+        role,
+        device,
+        RecoveryPolicy::ReapplyOnReturn,
+        RetryOn::NewRevision,
+        ApplyDeadline::ProcessDefault,
+    )
+}
+
+/// Drive the saved unit in, then a candidate into the address it left, with a role bound to the
+/// saved key throughout — the one situation that raises an identity question.
+fn displaced_app() -> Result<(App, ReporterId, RoleKey, DeviceKey, DeviceKey), Box<dyn Error>> {
+    let saved = panel_key("SAVED-UNIT")?;
+    let candidate = panel_key("CANDIDATE-UNIT")?;
+    let (mut app, reporter) = scripted_app(vec![
+        ScriptedScan::Complete(vec![at_shared_slot(saved.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate.clone())?]),
+    ])?;
+    let role = RoleKey::new("panel")?;
+    register_panel_role(&mut app, &role, saved.clone())?;
+    advance_reporter(&mut app, reporter)?;
+    advance_reporter(&mut app, reporter)?;
+
+    Ok((app, reporter, role, saved, candidate))
+}
+
+fn questions(app: &App) -> &[IdentityQuestion] {
+    app.world().resource::<IdentityDecisions>().questions()
+}
+
+fn observed_questions(app: &App) -> &ObservedQuestions {
+    app.world().resource::<ObservedQuestions>()
+}
+
+fn bound_device(app: &App, role: &RoleKey) -> Result<DeviceKey, Box<dyn Error>> {
+    Ok(app
+        .world()
+        .resource::<Bindings>()
+        .binding(role)?
+        .endpoint
+        .device
+        .clone())
+}
+
+/// A saved key that stops matching while a same-kind unit holds its attachment is the whole
+/// premise of the register, and re-raising it every pass would make it unanswerable.
+#[test]
+fn a_displaced_saved_key_raises_one_question_and_never_raises_it_again()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, reporter, role, saved, candidate) = displaced_app()?;
+
+    assert_eq!(questions(&app).len(), 1);
+    let question = &questions(&app)[0];
+    assert_eq!(question.role, role);
+    assert_eq!(question.saved, saved);
+    assert_eq!(question.candidate, candidate);
+    assert_eq!(question.state, IdentityQuestionState::Unseen);
+    assert_eq!(observed_questions(&app).raised.len(), 1);
+
+    advance_reporter(&mut app, reporter)?;
+    app.update();
+
+    assert_eq!(questions(&app).len(), 1);
+    assert_eq!(observed_questions(&app).raised.len(), 1);
+    assert!(observed_questions(&app).expired.is_empty());
+
+    Ok(())
+}
+
+/// An adoption that moved the binding but left the authored entry behind would leave the operator
+/// configuring one unit and driving another.
+#[test]
+fn adopting_rewrites_the_binding_endpoint_and_the_authored_entry_together()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, _, role, saved, candidate) = displaced_app()?;
+    app.world_mut()
+        .resource_mut::<HardwareInventory>()
+        .configure(ConfiguredDevice {
+            key:  saved.clone(),
+            mode: ConfiguredDeviceMode::Managed,
+        });
+
+    let outcome = app.world_mut().resource_mut::<IdentityDecisions>().answer(
+        &role,
+        &candidate,
+        IdentityAnswer::Adopt,
+    );
+    assert_eq!(outcome, AdoptionOutcome::Adopted);
+
+    app.update();
+
+    assert_eq!(bound_device(&app, &role)?, candidate);
+    let inventory = app.world().resource::<HardwareInventory>();
+    assert!(inventory.configured_device(&candidate).is_ok());
+    assert!(inventory.configured_device(&saved).is_err());
+    assert!(questions(&app).is_empty());
+
+    // `Bindings::readdress` puts the role back in `RoleState::Waiting`, so the binding entity's
+    // resolved-device link catches up on the following frame rather than inside the adoption.
+    app.update();
+
+    assert!(matches!(
+        resolved_device(&app, &role),
+        RoleDeviceResolution::Resolved(resolved) if resolved == candidate
+    ));
+
+    Ok(())
+}
+
+/// How the role a question was answered for resolves once the adoption has been applied.
+///
+/// A named result rather than an optional key: a role whose binding never moved and a role whose
+/// endpoint moved onto a unit the kernel does not retain are different failures, and a test reading
+/// "no key" as one of them would pass for the other.
+#[derive(Debug, PartialEq, Eq)]
+enum RoleDeviceResolution {
+    /// The role's endpoint names a key the kernel does not currently retain.
+    NotResolved,
+    /// The role's endpoint names this retained key.
+    Resolved(DeviceKey),
+}
+
+/// Read which retained device one role's binding currently addresses.
+fn resolved_device(app: &App, role: &RoleKey) -> RoleDeviceResolution {
+    let Ok(binding) = app.world().resource::<Bindings>().binding(role) else {
+        return RoleDeviceResolution::NotResolved;
+    };
+    let device = binding.endpoint.device.clone();
+    match app.world().resource::<Devices>().resolve(&device) {
+        DeviceResolution::NotResolved => RoleDeviceResolution::NotResolved,
+        DeviceResolution::Resolved(_) => RoleDeviceResolution::Resolved(device),
+    }
+}
+
+/// A unit that displaces a key nobody bound a role to is the case the register cannot ask about, so
+/// pinning it would leave hardware unusable for the life of the process with no question to answer.
+#[test]
+fn a_displaced_unit_no_role_addresses_is_authorizable_without_an_answer()
+-> Result<(), Box<dyn Error>> {
+    let saved = panel_key("SAVED-UNIT")?;
+    let candidate = panel_key("CANDIDATE-UNIT")?;
+    let (mut app, reporter) = scripted_app(vec![
+        ScriptedScan::Complete(vec![at_shared_slot(saved)?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate.clone())?]),
+    ])?;
+    advance_reporter(&mut app, reporter)?;
+    advance_reporter(&mut app, reporter)?;
+
+    // The discharge clears the debt; the verdict it was standing in for is concluded again by the
+    // merge, so the pass that follows is the one that reads the unit as itself.
+    advance_reporter(&mut app, reporter)?;
+
+    assert!(questions(&app).is_empty());
+    assert!(observed_questions(&app).raised.is_empty());
+    let devices = app.world().resource::<Devices>();
+    let DeviceResolution::Resolved(device_id) = devices.resolve(&candidate) else {
+        return Err("the arriving unit must resolve".into());
+    };
+    devices.authorize_service(device_id)?;
+
+    Ok(())
+}
+
+/// A reporter that stops reporting a unit present keeps its key in the identity map, so a question
+/// about it would otherwise stand forever and an adoption onto absent hardware would stay possible.
+#[test]
+fn a_question_expires_when_its_candidate_stops_being_present() -> Result<(), Box<dyn Error>> {
+    let saved = panel_key("SAVED-UNIT")?;
+    let candidate = panel_key("CANDIDATE-UNIT")?;
+    let (mut app, reporter) = scripted_app(vec![
+        ScriptedScan::Complete(vec![at_shared_slot(saved.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate.clone())?]),
+        ScriptedScan::Complete(vec![ScriptedDevice::absent(candidate.clone())]),
+    ])?;
+    let role = RoleKey::new("panel")?;
+    register_panel_role(&mut app, &role, saved)?;
+    advance_reporter(&mut app, reporter)?;
+    advance_reporter(&mut app, reporter)?;
+    assert_eq!(questions(&app).len(), 1);
+
+    advance_reporter(&mut app, reporter)?;
+
+    // The key is still in the identity map — this is the retained-but-not-present departure, not an
+    // unplugged one — so only a presence read can tell the question it has nothing left to answer.
+    assert!(matches!(
+        app.world().resource::<Devices>().resolve(&candidate),
+        DeviceResolution::Resolved(_)
+    ));
+    assert!(questions(&app).is_empty());
+    assert_eq!(observed_questions(&app).expired, vec![(role, candidate)]);
+
+    Ok(())
+}
+
+/// One entry per frame in which a register a settled frame must not touch was written.
+#[derive(Default, Debug, PartialEq, Eq, Resource)]
+struct SettledRegisterWrites {
+    devices:            usize,
+    identity_decisions: usize,
+}
+
+fn count_settled_register_writes(
+    devices: Res<Devices>,
+    identity_decisions: Res<IdentityDecisions>,
+    mut settled_register_writes: ResMut<SettledRegisterWrites>,
+) {
+    settled_register_writes.devices += usize::from(devices.is_changed());
+    settled_register_writes.identity_decisions += usize::from(identity_decisions.is_changed());
+}
+
+/// An answer is the one thing that leaves a permanent record behind, so it is where a register that
+/// re-offers its own history would start marking itself changed on every later frame.
+#[test]
+fn frames_after_an_answer_write_neither_register() -> Result<(), Box<dyn Error>> {
+    let (mut app, _, role, _, candidate) = displaced_app()?;
+    app.init_resource::<SettledRegisterWrites>()
+        .add_systems(bevy::app::PostUpdate, count_settled_register_writes);
+
+    app.world_mut().resource_mut::<IdentityDecisions>().answer(
+        &role,
+        &candidate,
+        IdentityAnswer::Reject,
+    );
+    for _ in 0..3 {
+        app.update();
+    }
+    *app.world_mut().resource_mut::<SettledRegisterWrites>() = SettledRegisterWrites::default();
+    for _ in 0..3 {
+        app.update();
+    }
+
+    assert_eq!(
+        *app.world().resource::<SettledRegisterWrites>(),
+        SettledRegisterWrites::default()
+    );
+
+    Ok(())
+}
+
+/// Two roles on one endpoint is the invariant `Bindings` exists to hold, so an adoption cannot be
+/// the one move allowed to break it.
+#[test]
+fn adopting_an_endpoint_another_role_owns_changes_nothing_and_names_the_owner()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, reporter, role, saved, candidate) = displaced_app()?;
+    let owner = RoleKey::new("owning-panel")?;
+    register_panel_role(&mut app, &owner, candidate.clone())?;
+    advance_reporter(&mut app, reporter)?;
+
+    let outcome = app.world_mut().resource_mut::<IdentityDecisions>().answer(
+        &role,
+        &candidate,
+        IdentityAnswer::Adopt,
+    );
+
+    assert_eq!(
+        outcome,
+        AdoptionOutcome::CandidateEndpointOwned { by: owner }
+    );
+    assert_eq!(questions(&app).len(), 1);
+    assert_eq!(bound_device(&app, &role)?, saved);
+
+    Ok(())
+}
+
+/// A refusal has to be permanent for the unit it names and silent about every other unit, or the
+/// operator answers the same question forever.
+#[test]
+fn rejecting_removes_the_entry_and_a_third_unit_raises_a_new_question() -> Result<(), Box<dyn Error>>
+{
+    let saved = panel_key("SAVED-UNIT")?;
+    let candidate = panel_key("CANDIDATE-UNIT")?;
+    let third = panel_key("THIRD-UNIT")?;
+    let (mut app, reporter) = scripted_app(vec![
+        ScriptedScan::Complete(vec![at_shared_slot(saved.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(third.clone())?]),
+    ])?;
+    let role = RoleKey::new("panel")?;
+    register_panel_role(&mut app, &role, saved)?;
+    advance_reporter(&mut app, reporter)?;
+    advance_reporter(&mut app, reporter)?;
+
+    let outcome = app.world_mut().resource_mut::<IdentityDecisions>().answer(
+        &role,
+        &candidate,
+        IdentityAnswer::Reject,
+    );
+    assert_eq!(outcome, AdoptionOutcome::Refused);
+    app.update();
+    assert!(questions(&app).is_empty());
+
+    advance_reporter(&mut app, reporter)?;
+
+    assert_eq!(questions(&app).len(), 1);
+    assert_eq!(questions(&app)[0].candidate, third);
+    assert_eq!(observed_questions(&app).raised.len(), 2);
+
+    Ok(())
+}
+
+/// Deferring is the answer "not now", which has to stop the prompt without discarding the question.
+#[test]
+fn a_deferred_question_stays_in_the_register_and_stops_being_re_raised()
+-> Result<(), Box<dyn Error>> {
+    let (mut app, reporter, role, _, candidate) = displaced_app()?;
+
+    let deferred = matches!(
+        app.world_mut()
+            .resource_mut::<IdentityDecisions>()
+            .defer(&role, &candidate),
+        IdentityQuestionLookup::Pending(_)
+    );
+    assert!(deferred);
+
+    advance_reporter(&mut app, reporter)?;
+
+    assert_eq!(questions(&app).len(), 1);
+    assert_eq!(questions(&app)[0].state, IdentityQuestionState::Deferred);
+    assert_eq!(observed_questions(&app).raised.len(), 1);
+
+    Ok(())
+}
+
+/// A question about a unit that left names a candidate nobody can adopt.
+#[test]
+fn a_question_expires_when_the_candidate_unit_departs() -> Result<(), Box<dyn Error>> {
+    let saved = panel_key("SAVED-UNIT")?;
+    let candidate = panel_key("CANDIDATE-UNIT")?;
+    let (mut app, reporter) = scripted_app(vec![
+        ScriptedScan::Complete(vec![at_shared_slot(saved.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate.clone())?]),
+        ScriptedScan::Complete(Vec::new()),
+    ])?;
+    let role = RoleKey::new("panel")?;
+    register_panel_role(&mut app, &role, saved)?;
+    advance_reporter(&mut app, reporter)?;
+    advance_reporter(&mut app, reporter)?;
+    assert_eq!(questions(&app).len(), 1);
+
+    advance_reporter(&mut app, reporter)?;
+
+    assert!(questions(&app).is_empty());
+    assert_eq!(observed_questions(&app).expired, vec![(role, candidate)]);
+
+    Ok(())
+}
+
+/// A retired role has no endpoint to rebind, so its question has nothing left to answer.
+#[test]
+fn a_question_expires_when_its_role_is_retired() -> Result<(), Box<dyn Error>> {
+    let (mut app, _, role, _, candidate) = displaced_app()?;
+
+    app.world_mut().resource_mut::<Bindings>().retire(&role)?;
+    app.update();
+
+    assert!(questions(&app).is_empty());
+    assert_eq!(observed_questions(&app).expired, vec![(role, candidate)]);
+
+    Ok(())
+}
+
+/// Expiry means "nobody can answer this", which an answered question is not.
+#[test]
+fn an_answered_question_expires_nothing() -> Result<(), Box<dyn Error>> {
+    let (mut app, _, role, _, candidate) = displaced_app()?;
+
+    app.world_mut().resource_mut::<IdentityDecisions>().answer(
+        &role,
+        &candidate,
+        IdentityAnswer::Adopt,
+    );
+    app.update();
+
+    assert!(questions(&app).is_empty());
+    assert!(observed_questions(&app).expired.is_empty());
+
+    Ok(())
+}
+
+/// A synthesized key was never a claim about the unit's own identity, so its failure to match says
+/// nothing an operator could rule on — and the device must not be pinned waiting for one.
+#[test]
+fn a_synthesized_saved_key_raises_no_question() -> Result<(), Box<dyn Error>> {
+    let saved = DeviceKey {
+        kind: DeviceKind::HidPanel,
+        id:   DeviceIdSource::Synthesized {
+            digest: Digest::new(0x5AFE_D001),
+        },
+    };
+    let candidate = panel_key("CANDIDATE-UNIT")?;
+    let (mut app, reporter) = scripted_app(vec![
+        ScriptedScan::Complete(vec![at_shared_slot(saved.clone())?]),
+        ScriptedScan::Complete(vec![at_shared_slot(candidate)?]),
+    ])?;
+    let role = RoleKey::new("panel")?;
+    register_panel_role(&mut app, &role, saved)?;
+    advance_reporter(&mut app, reporter)?;
+    advance_reporter(&mut app, reporter)?;
+    app.update();
+
+    assert!(questions(&app).is_empty());
+    assert!(observed_questions(&app).raised.is_empty());
+
+    Ok(())
+}
+
+/// An answer written against a question that already expired must not move a binding the
+/// application no longer has any reason to think it is talking about.
+#[test]
+fn an_answer_written_after_the_question_expired_changes_nothing() -> Result<(), Box<dyn Error>> {
+    let (mut app, _, role, saved, candidate) = displaced_app()?;
+    app.world_mut().resource_mut::<Bindings>().retire(&role)?;
+    app.update();
+    register_panel_role(&mut app, &role, saved.clone())?;
+
+    let outcome = app.world_mut().resource_mut::<IdentityDecisions>().answer(
+        &role,
+        &candidate,
+        IdentityAnswer::Adopt,
+    );
+    app.update();
+
+    assert_eq!(outcome, AdoptionOutcome::NoSuchQuestion);
+    assert_eq!(bound_device(&app, &role)?, saved);
+
+    Ok(())
+}
+
+/// A role with nothing outstanding reads as a named state rather than an absent one.
+#[test]
+fn a_role_with_nothing_outstanding_reads_as_having_no_question() -> Result<(), Box<dyn Error>> {
+    let (app, _) = scripted_app(Vec::new())?;
+    let role = RoleKey::new("panel")?;
+
+    assert!(matches!(
+        app.world().resource::<IdentityDecisions>().question(&role),
+        IdentityQuestionLookup::NoQuestion
+    ));
+
+    Ok(())
+}
+
+/// Every reflectable register type has to reach an inspector the same way the rest of the kernel
+/// does. `IdentityQuestionLookup` is absent because it borrows the register and cannot derive
+/// `Reflect`.
+#[test]
+fn every_register_type_resolves_through_the_type_registry() -> Result<(), Box<dyn Error>> {
+    let (app, _) = scripted_app(Vec::new())?;
+
+    let missing: Vec<&str> = {
+        let app_type_registry = app.world().resource::<AppTypeRegistry>().read();
+        [
+            "hana_rigging::identity_decisions::AdoptionOutcome",
+            "hana_rigging::identity_decisions::IdentityAnswer",
+            "hana_rigging::identity_decisions::IdentityDecisions",
+            "hana_rigging::identity_decisions::IdentityQuestion",
+            "hana_rigging::identity_decisions::IdentityQuestionState",
+            "hana_rigging::events::IdentityQuestionExpired",
+            "hana_rigging::events::IdentityQuestionRaised",
+        ]
+        .into_iter()
+        .filter(|type_path| app_type_registry.get_with_type_path(type_path).is_none())
+        .collect()
+    };
+
+    assert!(
+        missing.is_empty(),
+        "missing from the type registry: {missing:?}"
+    );
+
+    Ok(())
+}
+
+/// Nothing mirrors the register onto an entity, so the resource is the only path an inspector or
+/// the Bevy Remote Protocol has to the standing questions.
+#[test]
+fn the_standing_questions_are_readable_through_reflection() -> Result<(), Box<dyn Error>> {
+    let (app, _, role, _, candidate) = displaced_app()?;
+
+    let identity_decisions: &dyn Struct = app.world().resource::<IdentityDecisions>();
+    let Some(questions) = identity_decisions
+        .field("questions")
+        .and_then(|field| field.reflect_ref().as_list().ok())
+    else {
+        return Err("the register must reflect its standing questions".into());
+    };
+    assert_eq!(questions.len(), 1);
+    let Some(question) = questions
+        .get(0)
+        .and_then(|question| question.reflect_ref().as_struct().ok())
+    else {
+        return Err("a standing question must reflect as a struct".into());
+    };
+    assert_eq!(
+        question
+            .field("role")
+            .and_then(|field| field.try_downcast_ref::<RoleKey>()),
+        Some(&role)
+    );
+    assert_eq!(
+        question
+            .field("candidate")
+            .and_then(|field| field.try_downcast_ref::<DeviceKey>()),
+        Some(&candidate)
+    );
+
+    Ok(())
 }

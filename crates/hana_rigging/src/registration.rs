@@ -201,6 +201,12 @@ impl Reporters {
         }
     }
 
+    /// Report whether any reporter has completed a scan since the last reconcile pass.
+    ///
+    /// The reconcile pass asks this before it decides to merge, so the queue is left in place for
+    /// `Self::take_changed_reporters` to drain once the merge is actually going to happen.
+    pub(crate) const fn any_reporter_changed(&self) -> bool { !self.changed.is_empty() }
+
     pub(crate) fn take_changed_reporters(&mut self) -> Vec<ReporterId> {
         std::mem::take(&mut self.changed)
     }

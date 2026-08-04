@@ -32,7 +32,6 @@ use crate::DeviceResolution;
 use crate::Devices;
 use crate::DiscoveryFinished;
 use crate::DiscoveryProgressChanged;
-use crate::HardwareDiscoveryProgress;
 use crate::IdentityChanged;
 use crate::IdentityVerdict;
 use crate::Presence;
@@ -245,9 +244,9 @@ pub(crate) fn on_reapply_configuration(
 /// conclusions before the discovery bookkeeping that produced them. Draining here is what keeps the
 /// journal bounded — it is a record of one frame's transitions, never a history.
 ///
-/// `crate::DiscoveryProgressChanged` and `crate::HardwareDiscoveryProgress` come from one recorded
-/// transition rather than from two reads of the retained status, so the per-reporter and the
-/// aggregate view cannot disagree about the same batch.
+/// `crate::DiscoveryProgressChanged` carries the reporter's own report and its batch counts from
+/// one recorded transition rather than from two reads of the retained status, so the per-reporter
+/// and the aggregate view cannot disagree about the same batch.
 pub(crate) fn announce_discovery_transitions(
     mut commands: Commands,
     mut discovery_transition_journal: ResMut<DiscoveryTransitionJournal>,
@@ -267,9 +266,6 @@ pub(crate) fn announce_discovery_transitions(
                     batch,
                     reporter,
                     progress,
-                });
-                commands.trigger(HardwareDiscoveryProgress {
-                    batch,
                     completed,
                     total,
                     running,

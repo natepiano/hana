@@ -3345,6 +3345,9 @@ name = "hana_rigging"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "fairy_dust",
+ "hana_diegetic",
+ "hana_lagrange",
  "hana_rigging_scripted",
  "ron",
  "serde",

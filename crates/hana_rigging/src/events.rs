@@ -17,12 +17,18 @@
 //! # Two axes deliberately outside the derivation
 //!
 //! `crate::WaitingWork` is not on the binding entity and `crate::IdentityDecisionOwed` is not on
-//! the device entity, so neither is mirrored and neither emits. A consumer reading only entities or
-//! the Bevy Remote Protocol therefore cannot see that a role owes a restoration or that a human
-//! owes an identity decision; both are read from the resources instead —
-//! `crate::Bindings::waiting_work` and `crate::ReconciledDeviceState::decision_owed`. This is
-//! stated rather than left implicit so that surfacing either one later is a decision somebody
-//! makes, not a hole somebody finds.
+//! the device entity, so neither is mirrored. A consumer reading only entities or the Bevy Remote
+//! Protocol therefore cannot see that a role owes a restoration or that a human owes an identity
+//! decision; both are read from the resources instead — `crate::Bindings::waiting_work` and
+//! `crate::ReconciledDeviceState::decision_owed`. This is stated rather than left implicit so that
+//! surfacing either one is a decision somebody makes, not a hole somebody finds.
+//!
+//! `IdentityQuestionRaised` and `IdentityQuestionExpired` are that decision, taken for the identity
+//! debt and for nothing else. Every other axis the kernel reports is state an application can read
+//! whenever it gets around to it, whereas an identity question exists to make a human act, and one
+//! that is never noticed leaves a device unusable. A consumer that only polls
+//! `crate::IdentityDecisions` cannot see a question that arrived and expired between two reads, and
+//! a dialog it opened has no signal that the entry vanished underneath it.
 //!
 //! # Why some events target an entity and some are global
 //!
@@ -176,6 +182,40 @@ pub struct IdentityChanged {
     pub verdict: IdentityVerdict,
 }
 
+/// The kernel added a question to `crate::IdentityDecisions` that only a human can settle.
+///
+/// A stated exception to the derivation above: `crate::IdentityDecisionOwed` has no mirrored axis,
+/// and this event exists because a question nobody notices leaves a device unusable for the life of
+/// the process. What an application does with it is its own — a notification that expands into the
+/// register, an attention marker on the mesh representing that hardware.
+///
+/// Global rather than entity-targeted because it names two sides at once: the role's binding entity
+/// may not exist while its device is absent, and the candidate's device entity is not what the
+/// operator is being asked about.
+#[derive(Debug, Event, Reflect)]
+pub struct IdentityQuestionRaised {
+    /// Application role whose saved key the candidate may replace.
+    pub role:      RoleKey,
+    /// Durable key of the unit that arrived into the attachment the saved one left. With `role` it
+    /// names the register entry, so an observer can correlate this arrival with the
+    /// `IdentityQuestionExpired` that cancels it.
+    pub candidate: DeviceKey,
+}
+
+/// A standing identity question went away without being answered.
+///
+/// The other half of the stated exception `IdentityQuestionRaised` documents. It fires when the
+/// candidate device departs or the role is retired, and never for an entry an answer removed: a
+/// dialog the operator is looking at needs to know the question underneath it is gone, and an
+/// application that answered already knows.
+#[derive(Debug, Event, Reflect)]
+pub struct IdentityQuestionExpired {
+    /// Application role the expired question was about.
+    pub role:      RoleKey,
+    /// Durable key of the candidate whose question expired.
+    pub candidate: DeviceKey,
+}
+
 /// A role's lifecycle state moved.
 ///
 /// Emitted from `crate::RiggingSystems::Apply` beside `AttemptFinished`, not from the entity
@@ -311,33 +351,28 @@ pub struct UnregisteredSchemeReported {
     pub scheme: SchemeName,
 }
 
-/// One reporter's running discovery job reported movement.
+/// One reporter's running discovery job reported movement, and where that leaves its batch.
 ///
 /// Global because a discovery run belongs to a reporter, not to any device: the run is what
 /// decides which devices exist, so at the moment it is running there may be no entity for it to
 /// address. Suppressed until the run has been going for `crate::DiscoveryLimits::progress_after`,
 /// so a scan that finishes quickly produces no progress traffic and an application does not flash a
 /// spinner for a run that was over before a human could read it.
+///
+/// The reporter's own report and the batch counts ride the same event because they are read from
+/// one recorded transition: splitting them into two events made a consumer correlate two callbacks
+/// that could never arrive apart, and left the aggregate free to disagree with the report that
+/// produced it. A progress indicator reads the four counts, since one reporter's `Measured` count
+/// says nothing about whether the application can proceed; a per-reporter view reads `reporter` and
+/// `progress`. Neither needs a second observer.
 #[derive(Debug, Event, Reflect)]
 pub struct DiscoveryProgressChanged {
     /// Batch the run belongs to, shared by every reporter that became due in the same pass.
-    pub batch:    DiscoveryBatchId,
-    /// Reporter whose own job reported this.
-    pub reporter: ReporterId,
-    /// What the job reported, including the explicitly uncountable case.
-    pub progress: DiscoveryProgress,
-}
-
-/// How far a whole batch of discovery runs has got.
-///
-/// The aggregate a progress indicator is actually built from: one reporter's `Measured` count says
-/// nothing about whether the application can proceed, while these four counts do. Emitted from the
-/// same recorded transition as the `DiscoveryProgressChanged` beside it, so the two cannot report
-/// different states of the same moment.
-#[derive(Debug, Event, Reflect)]
-pub struct HardwareDiscoveryProgress {
-    /// Batch these counts describe.
     pub batch:     DiscoveryBatchId,
+    /// Reporter whose own job reported this.
+    pub reporter:  ReporterId,
+    /// What the job reported, including the explicitly uncountable case.
+    pub progress:  DiscoveryProgress,
     /// Reporters in this batch that have finished, whether they succeeded or failed.
     pub completed: usize,
     /// Reporters the batch queued in the first place.

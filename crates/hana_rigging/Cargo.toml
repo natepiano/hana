@@ -21,6 +21,9 @@ thiserror.workspace = true
 
 [dev-dependencies]
 bevy = { workspace = true, features = ["bevy_world_serialization"] }
+fairy_dust.workspace = true
+hana_diegetic.workspace = true
+hana_lagrange.workspace = true
 hana_rigging_scripted.workspace = true
 ron.workspace = true
 trybuild.workspace = true

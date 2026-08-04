@@ -235,6 +235,23 @@ impl Devices {
     /// order reporters supplied should key off `ReconciledDeviceState::key` instead.
     pub fn states(&self) -> impl Iterator<Item = &ReconciledDeviceState> { self.state.values() }
 
+    /// Clear the identity debt one unit carries, because a human answered the question about it.
+    ///
+    /// `crate::IdentityDecisions` is the only caller. Until the debt is cleared, every later pass
+    /// reports `crate::IdentityVerdict::Displaced` or `crate::IdentityVerdict::WrongUnit` again
+    /// from the retained value, and both refuse every authorization — which is what made a
+    /// displaced unit unusable for the life of the process. Clearing it lets the next pass
+    /// conclude the unit's verdict from its own durable key, which is what it has been all
+    /// along.
+    pub(crate) fn discharge_identity_decision(&mut self, key: &DeviceKey) {
+        let Some(device_id) = self.ids.get(key) else {
+            return;
+        };
+        if let Some(reconciled_device_state) = self.state.get_mut(device_id) {
+            reconciled_device_state.decision_owed = IdentityDecisionOwed::Nothing;
+        }
+    }
+
     /// Find the entity mirroring one handle, so a caller holding a durable key can reach the
     /// components the projection inserted without scanning every device entity.
     #[must_use]

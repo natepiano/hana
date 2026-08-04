@@ -445,6 +445,112 @@ impl Bindings {
         Ok(displaced)
     }
 
+    /// Move one role's endpoint onto an adopted device key, keeping the endpoint's own address.
+    ///
+    /// The adoption path for `crate::IdentityDecisions`: a human has decided the unit that arrived
+    /// into the departed one's attachment *is* the unit this role should address, and the durable
+    /// key indexed in `Self::owner_by_endpoint` and `Self::roles_by_device` has to move with that
+    /// decision. Rewriting only the saved key elsewhere would leave the role resolving
+    /// `crate::DeviceResolution::NotResolved` for good.
+    ///
+    /// This applies `Self::replace`'s ownership rule without asking for a whole replacement
+    /// `Binding`: the value is not `Clone`, so an adoption that had to hand one over could not keep
+    /// the role's authored request and last-known-good configuration. Everything else follows
+    /// `Self::replace` — the role goes back to `crate::RoleState::Waiting` and its per-role failure
+    /// and readability history is dropped, because that history describes the unit the role is no
+    /// longer addressing.
+    ///
+    /// # Errors
+    ///
+    /// Returns `BindingError::EndpointAlreadyOwned` when another role already holds the adopted
+    /// endpoint, `BindingError::RoleNotBound` when the role was retired, and
+    /// `BindingError::PendingTransitionCapacityReached` when the transition handoff is full.
+    pub(crate) fn readdress(
+        &mut self,
+        role: &RoleKey,
+        device: DeviceKey,
+    ) -> Result<(), BindingError> {
+        let binding = self
+            .by_role
+            .get(role)
+            .ok_or_else(|| BindingError::RoleNotBound { role: role.clone() })?;
+        let old_endpoint = binding.endpoint.clone();
+        let new_endpoint = DeviceEndpoint {
+            device,
+            id: old_endpoint.id.clone(),
+        };
+        if let Some(owner) = self.owner_by_endpoint.get(&new_endpoint)
+            && owner != role
+        {
+            return Err(BindingError::EndpointAlreadyOwned {
+                endpoint: new_endpoint,
+                owner:    owner.clone(),
+            });
+        }
+        if old_endpoint == new_endpoint {
+            return Ok(());
+        }
+        let reserved_transition = self.reserve_transition()?;
+
+        let binding = self
+            .by_role
+            .get_mut(role)
+            .ok_or_else(|| BindingError::RoleNotBound { role: role.clone() })?;
+        binding.endpoint = new_endpoint.clone();
+        binding.state = RoleState::Waiting;
+        let new_device_key = new_endpoint.device.clone();
+        self.owner_by_endpoint.remove(&old_endpoint);
+        self.remove_role_from_device(&old_endpoint.device, role);
+        self.owner_by_endpoint.insert(new_endpoint, role.clone());
+        self.roles_by_device
+            .entry(new_device_key)
+            .or_default()
+            .push(role.clone());
+        self.configuration_readability.remove(role);
+        self.waiting_work.remove(role);
+        self.applying_source.remove(role);
+        self.attempt_failures.remove(role);
+        self.capture_failures.remove(role);
+        self.retry_gates.remove(role);
+        self.stopped_role_endpoints.remove(role);
+        self.enqueue(
+            BindingTransitionKind::Replaced,
+            role.clone(),
+            reserved_transition,
+        );
+
+        Ok(())
+    }
+
+    /// Report which other role, if any, already holds the endpoint an adoption would move `role`
+    /// onto.
+    ///
+    /// `crate::IdentityDecisions` caches this answer on each standing question, because application
+    /// code answering a question holds only that resource and an adoption that quietly took an
+    /// endpoint from another role is the outcome the register must never produce. A role that is
+    /// unbound, or that already owns the endpoint itself, reads as `EndpointOwner::Unowned`:
+    /// neither is a conflict an operator has to resolve.
+    pub(crate) fn candidate_endpoint_owner(
+        &self,
+        role: &RoleKey,
+        candidate: &DeviceKey,
+    ) -> EndpointOwner {
+        let Some(binding) = self.by_role.get(role) else {
+            return EndpointOwner::Unowned;
+        };
+        let candidate_endpoint = DeviceEndpoint {
+            device: candidate.clone(),
+            id:     binding.endpoint.id.clone(),
+        };
+
+        self.owner_by_endpoint
+            .get(&candidate_endpoint)
+            .filter(|owner| *owner != role)
+            .map_or(EndpointOwner::Unowned, |owner| {
+                EndpointOwner::OwnedBy(owner.clone())
+            })
+    }
+
     /// Retire an authored role and remove every ownership index entry that selected it.
     ///
     /// # Errors
@@ -1401,6 +1507,19 @@ pub enum ConfiguredDeviceMode {
     Offline,
 }
 
+/// Which role already holds one endpoint, kept as a named state rather than an absent role.
+///
+/// Read by `crate::IdentityDecisions` before it records an adoption, where "nobody owns it" and
+/// "another role owns it" lead to opposite answers for the operator.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Reflect)]
+pub(crate) enum EndpointOwner {
+    /// No other role owns the endpoint, so an adoption may move onto it.
+    #[default]
+    Unowned,
+    /// This role owns the endpoint, so an adoption would have to take it away and does not.
+    OwnedBy(RoleKey),
+}
+
 /// Authored device inventory entry that exists independently of reporter activation and entities.
 #[derive(Clone, Debug, PartialEq, Eq, Reflect)]
 pub struct ConfiguredDevice {
@@ -1452,6 +1571,27 @@ impl HardwareInventory {
         self.connections
             .entry(device_key)
             .or_insert(ConfiguredDeviceConnection::NotObserved);
+    }
+
+    /// Move one authored entry and its connection conclusion onto an adopted durable key.
+    ///
+    /// Called with the binding rewrite in `Bindings::readdress`, because the two are keyed the same
+    /// way: an adoption that moved the binding and left inventory holding the old key would leave
+    /// the authored operation mode attached to a unit nothing addresses any more.
+    ///
+    /// A saved key nobody authored has nothing to move, which is not a failure — inventory records
+    /// the application's decisions, and having made none is not one.
+    pub(crate) fn readdress(&mut self, saved: &DeviceKey, candidate: DeviceKey) {
+        let Some(mut configured_device) = self.configured.remove(saved) else {
+            return;
+        };
+        let connection = self
+            .connections
+            .remove(saved)
+            .unwrap_or(ConfiguredDeviceConnection::NotObserved);
+        configured_device.key = candidate.clone();
+        self.configured.insert(candidate.clone(), configured_device);
+        self.connections.insert(candidate, connection);
     }
 
     /// Borrow one configured device and its authored operation mode.

@@ -5,6 +5,9 @@ use std::collections::hash_map::Entry;
 use std::time::Duration;
 use std::time::Instant;
 
+use bevy::ecs::change_detection::DetectChanges;
+use bevy::ecs::change_detection::DetectChangesMut;
+use bevy::ecs::change_detection::Tick;
 use bevy::ecs::component::Component;
 use bevy::ecs::reflect::AppTypeRegistry;
 use bevy::ecs::reflect::ReflectComponent;
@@ -75,8 +78,13 @@ use crate::registration::Reporters;
 
 /// Merge every contributing reporter's latest whole set into one device set, once per tick.
 ///
-/// The system itself only reads the frame's real-time clock and hands the resources to
-/// `reconcile_devices`, which is where the settled-frame return lives.
+/// The system reads the frame's real-time clock, asks `reconcile_work` whether the frame has
+/// anything to merge, and only then hands the resources to `reconcile_devices`.
+///
+/// The settled decision is taken here, from immutable borrows, rather than left to the
+/// settled-frame return inside `reconcile_devices`: passing `ResMut<Devices>` on as `&mut Devices`
+/// dereferences it mutably, and that alone marks the device set changed for every consumer
+/// downstream, on a frame where nothing about it changed.
 pub(crate) fn reconcile(
     mut reporters: ResMut<Reporters>,
     mut devices: ResMut<Devices>,
@@ -87,6 +95,17 @@ pub(crate) fn reconcile(
     hardware_inventory: Res<HardwareInventory>,
     time: Res<Time<Real>>,
 ) {
+    let freshness_lease = FreshnessLease {
+        rigging_limits: &rigging_limits,
+        clock:          FrameClockReading::from(&*time),
+    };
+    if reconcile_work(&reporters, &devices, freshness_lease) == ReconcileWork::Settled {
+        // The queue is drained even here: a failure leaves every retained device alone, so the
+        // record of it is the one thing a settled frame would otherwise let grow.
+        drop(reporters.take_reporter_failures());
+        return;
+    }
+
     if let ReconcilePass::Merged(changes) = reconcile_devices(
         &mut reporters,
         &mut devices,
@@ -337,7 +356,6 @@ fn reconcile_devices(
     hardware_inventory: &HardwareInventory,
     clock: FrameClockReading,
 ) -> ReconcilePass {
-    let changed_reporters = reporters.take_changed_reporters();
     // `DiscoveryStatus` holds each failure's error, and a failed scan retains the preceding whole
     // set and revision, so a failure changes no device state here. Draining keeps the queue from
     // growing; the attempt lifecycle aborts what a failure invalidates.
@@ -351,11 +369,10 @@ fn reconcile_devices(
         clock,
     };
 
-    if changed_reporters.is_empty()
-        && lease_work(devices, reporters, freshness_lease) == FreshnessLeaseWork::Settled
-    {
+    if reconcile_work(reporters, devices, freshness_lease) == ReconcileWork::Settled {
         return ReconcilePass::Settled;
     }
+    let changed_reporters = reporters.take_changed_reporters();
 
     let reconciled_device_changes = ingest(
         reporters,
@@ -370,6 +387,35 @@ fn reconcile_devices(
     }
 
     ReconcilePass::Merged(reconciled_device_changes)
+}
+
+/// Whether this frame reaches the merge at all.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ReconcileWork {
+    /// No reporter completed a scan and no lease has anything left to apply, so the retained
+    /// device set already says what this frame would conclude.
+    Settled,
+    /// Either new evidence arrived or a lease expired, so the device set has to be rebuilt.
+    Merges,
+}
+
+/// Decide whether the frame has reconcile work, without consuming any of the evidence that says so.
+///
+/// Separate from `reconcile_devices` so the answer is available before `Devices` is borrowed
+/// mutably, and shared with it so the settled frame is defined in exactly one place.
+fn reconcile_work(
+    reporters: &Reporters,
+    devices: &Devices,
+    freshness_lease: FreshnessLease<'_>,
+) -> ReconcileWork {
+    if reporters.any_reporter_changed()
+        || lease_work(devices, reporters, freshness_lease)
+            == FreshnessLeaseWork::MarksDevicesUnreachable
+    {
+        return ReconcileWork::Merges;
+    }
+
+    ReconcileWork::Settled
 }
 
 /// Report whether an expired lease would still change any retained device.
@@ -1095,9 +1141,10 @@ pub(crate) fn project_device_entities(world: &mut World) {
             .append(&mut reconciled_device_changes.connections);
     }
 
-    world.resource_scope::<Devices, _>(|world, mut devices| {
-        world.resource_scope::<Reporters, _>(|world, reporters| {
-            mirror_device_entities(world, &mut devices, &reporters, &type_registry);
+    let device_set_write = world.resource_scope::<Devices, _>(|world, mut devices| {
+        let entered = devices.last_changed();
+        let device_set_projection = world.resource_scope::<Reporters, _>(|world, reporters| {
+            mirror_device_entities(world, &mut devices, &reporters, &type_registry)
         });
         resolve_binding_links(world, &devices);
         capture_ready_configurations(world, &devices);
@@ -1107,7 +1154,19 @@ pub(crate) fn project_device_entities(world: &mut World) {
             &reconciled_device_changes.disputes_changed,
             &type_registry,
         );
+
+        match device_set_projection {
+            DeviceSetProjection::Projected => DeviceSetWrite::Written,
+            DeviceSetProjection::Unwritten => DeviceSetWrite::Unwritten(entered),
+        }
     });
+    if let DeviceSetWrite::Unwritten(entered) = device_set_write {
+        // `World::resource_scope` takes the resource out and puts it back under the current tick,
+        // so borrowing the device set to read it announces a change to every consumer downstream.
+        // Putting the tick the frame started with back is what keeps a frame that only read the
+        // device set from reading as one that rewrote it.
+        world.resource_mut::<Devices>().set_last_changed(entered);
+    }
     mirror_last_known_good(world, &type_registry);
 }
 
@@ -1173,7 +1232,8 @@ fn mirror_device_entities(
     devices: &mut Devices,
     reporters: &Reporters,
     type_registry: &TypeRegistry,
-) {
+) -> DeviceSetProjection {
+    let mut device_set_projection = DeviceSetProjection::Unwritten;
     let mirrored: Vec<MirroredDevice> = devices
         .states()
         .filter_map(|reconciled_device_state| {
@@ -1199,6 +1259,7 @@ fn mirror_device_entities(
             _ => {
                 let entity = world.spawn(Device).id();
                 devices.project_entity(mirrored_device.device_id, entity);
+                device_set_projection = DeviceSetProjection::Projected;
 
                 entity
             },
@@ -1267,6 +1328,29 @@ fn mirror_device_entities(
             );
         }
     }
+
+    device_set_projection
+}
+
+/// What the projection pass leaves behind on the device set's change tick.
+enum DeviceSetWrite {
+    /// The pass only read the device set; this is the tick it carried before the pass borrowed it.
+    Unwritten(Tick),
+    /// The pass recorded a projection, so the tick the scope reinserted under is the true one.
+    Written,
+}
+
+/// Whether the projection recorded a new device entity in `Devices` itself.
+///
+/// Reported rather than read back off the resource's change tick: the pass takes `&mut Devices` to
+/// reach `Devices::project_entity`, and the mutable dereference marks the resource changed whether
+/// or not a projection followed it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DeviceSetProjection {
+    /// Every retained device already had a live entity, so the device set itself was only read.
+    Unwritten,
+    /// At least one device was given an entity, which `Devices` now holds.
+    Projected,
 }
 
 /// The conclusions one device's entity carries, copied out of the registry so the projection can
@@ -2858,8 +2942,27 @@ mod tests {
         );
     }
 
+    /// Bind one role to the key a displacement is about, so the debt has a human to owe an answer
+    /// to.
+    ///
+    /// Without a bound role no question can be raised about the saved key at all, and
+    /// `crate::identity_decisions` discharges a debt nobody can be asked about rather than pinning
+    /// the unit for the life of the process.
+    fn bind_displaced_role(app: &mut App, device: DeviceKey) -> Result<RoleKey, Box<dyn Error>> {
+        let role = RoleKey::new("displaced-panel")?;
+        let driver = app
+            .world_mut()
+            .resource_mut::<Drivers>()
+            .add(CountingCaptureDriver(Arc::new(AtomicUsize::new(0))));
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .register(panel_binding(role.clone(), device, driver))?;
+
+        Ok(role)
+    }
+
     #[test]
-    fn a_displaced_verdict_stays_until_a_human_decides_it() {
+    fn a_displaced_verdict_stays_until_a_human_decides_it() -> Result<(), Box<dyn Error>> {
         let mut app = app_with_scheme();
         let departing = key("panel-a");
         let arriving = key("panel-b");
@@ -2868,6 +2971,7 @@ mod tests {
         departing_unit.attachment = occupied_slot.clone();
         let mut arriving_unit = unit(arriving.clone());
         arriving_unit.attachment = occupied_slot;
+        bind_displaced_role(&mut app, departing.clone())?;
         let reported_units = add_set_reporter(
             &mut app,
             vec![departing_unit],
@@ -2893,10 +2997,13 @@ mod tests {
             panic!("the arriving unit stays retained across the later passes");
         };
         assert!(devices.authorize_service(device_id).is_err());
+
+        Ok(())
     }
 
     #[test]
-    fn a_duplicated_key_stays_recomputed_while_a_displacement_is_carried() {
+    fn a_duplicated_key_stays_recomputed_while_a_displacement_is_carried()
+    -> Result<(), Box<dyn Error>> {
         let mut app = app_with_scheme();
         let departing = key("panel-a");
         let arriving = key("panel-b");
@@ -2905,6 +3012,7 @@ mod tests {
         departing_unit.attachment = occupied_slot.clone();
         let mut arriving_unit = unit(arriving.clone());
         arriving_unit.attachment = occupied_slot;
+        bind_displaced_role(&mut app, departing.clone())?;
         let reported_units = add_set_reporter(
             &mut app,
             vec![departing_unit],
@@ -2944,6 +3052,8 @@ mod tests {
             panic!("the arriving unit stays retained across the duplicate episode");
         };
         assert!(devices.authorize_service(device_id).is_err());
+
+        Ok(())
     }
 
     #[test]
@@ -3771,22 +3881,30 @@ mod tests {
     }
 
     /// One entry per frame in which the kernel state a settled frame must not touch was written.
+    ///
+    /// `Devices` is absent because no frame here is settled for it: the reporter this test drives
+    /// re-completes its scan every frame, so every frame reaches the merge and rebuilds the
+    /// reconciled set. The device set's idle-frame silence is covered where the reporter scans on
+    /// demand — `frames_after_an_answer_write_neither_register` in `tests/scripted.rs`.
     #[derive(Default, Debug, PartialEq, Eq, Resource)]
     struct SettledFrameWrites {
         bindings:           usize,
         drivers:            usize,
         hardware_inventory: usize,
+        identity_decisions: usize,
     }
 
     fn count_settled_frame_writes(
         bindings: bevy::prelude::Res<Bindings>,
         drivers: bevy::prelude::Res<Drivers>,
         hardware_inventory: bevy::prelude::Res<HardwareInventory>,
+        identity_decisions: bevy::prelude::Res<crate::IdentityDecisions>,
         mut settled_frame_writes: ResMut<SettledFrameWrites>,
     ) {
         settled_frame_writes.bindings += usize::from(bindings.is_changed());
         settled_frame_writes.drivers += usize::from(drivers.is_changed());
         settled_frame_writes.hardware_inventory += usize::from(hardware_inventory.is_changed());
+        settled_frame_writes.identity_decisions += usize::from(identity_decisions.is_changed());
     }
 
     #[test]

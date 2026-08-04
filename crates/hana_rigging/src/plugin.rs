@@ -15,6 +15,7 @@ use crate::DiscoveryControl;
 use crate::DiscoveryLimits;
 use crate::DiscoveryStatus;
 use crate::HardwareInventory;
+use crate::IdentityDecisions;
 use crate::RegisteredSchemes;
 use crate::RiggingLimits;
 use crate::RiggingRevision;
@@ -36,6 +37,7 @@ use crate::emit::announce_reconciled_facts;
 use crate::emit::announce_role_availability;
 use crate::emit::on_reapply_configuration;
 use crate::emit::on_retire_role;
+use crate::identity_decisions::adjudicate_identity_questions;
 use crate::reconcile::project_device_entities;
 use crate::reconcile::reconcile;
 use crate::registration::Drivers;
@@ -84,6 +86,7 @@ impl Plugin for RiggingPlugin {
             .init_resource::<DiscoveryStatus>()
             .init_resource::<DiscoveryTransitionJournal>()
             .init_resource::<HardwareInventory>()
+            .init_resource::<IdentityDecisions>()
             .init_resource::<ReconciledDeviceChanges>()
             .init_resource::<RegisteredSchemes>()
             .init_resource::<Reporters>()
@@ -110,6 +113,10 @@ impl Plugin for RiggingPlugin {
                     reconcile.in_set(RiggingSystems::Reconcile),
                     project_device_entities
                         .after(reconcile)
+                        .in_set(RiggingSystems::Reconcile),
+                    adjudicate_identity_questions
+                        .after(project_device_entities)
+                        .before(announce_role_availability)
                         .in_set(RiggingSystems::Reconcile),
                     (
                         announce_device_changes,

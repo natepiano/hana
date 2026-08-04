@@ -448,25 +448,6 @@ impl Default for DiscoveryLimits {
 }
 
 impl DiscoveryLimits {
-    /// Author capacity and progress timing other than the process defaults.
-    ///
-    /// The fields stay private so a caller cannot write a zero job or completion capacity, which
-    /// would stop discovery entirely while reading as a configuration choice. Without this
-    /// constructor the defaults are the only limits an application can ever run under, because
-    /// `Default` is the sole way to build the resource and every field is unreachable afterwards.
-    #[must_use]
-    pub const fn new(
-        max_concurrent_jobs: NonZeroUsize,
-        max_completions_per_frame: NonZeroUsize,
-        progress_after: Duration,
-    ) -> Self {
-        Self {
-            max_concurrent_jobs,
-            max_completions_per_frame,
-            progress_after,
-        }
-    }
-
     /// Return the configured background-discovery capacity before I/O-pool reservation applies.
     #[must_use]
     pub const fn max_concurrent_jobs(&self) -> NonZeroUsize { self.max_concurrent_jobs }
