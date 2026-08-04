@@ -243,6 +243,30 @@ impl PanelText<'_, '_> {
         .set_text(text);
         true
     }
+
+    /// Sets the authored style of the lone run of a one-element panel (a
+    /// [`DiegeticText`](crate::DiegeticText)), no id needed. Returns whether a
+    /// single run was found.
+    ///
+    /// A [`DiegeticText`](crate::DiegeticText)'s run is anonymous — it is minted
+    /// a crate-internal [`PanelElementId::Auto`] id that a caller cannot build —
+    /// so this is the only way to restyle one such label. See
+    /// [`Self::set_style`] for why the write goes to the tree rather than to the
+    /// reified run child.
+    pub fn set_sole_style(&mut self, panel: Entity, style: TextStyle) -> bool {
+        let Some(child) = self.sole_run_entity(panel) else {
+            return false;
+        };
+        let Ok(layout) = self.layouts.get(child) else {
+            return false;
+        };
+        let element_idx = layout.element_idx;
+        let Ok((mut data, _, _)) = self.panels.get_mut(panel) else {
+            return false;
+        };
+        data.restyle_run(element_idx, style);
+        true
+    }
 }
 
 /// Resolves a run `id` to a live entity against `data`'s `id → Entity` index,
