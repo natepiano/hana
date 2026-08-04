@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 use bevy::ecs::entity::Entity;
 use bevy::ecs::reflect::ReflectComponent;
@@ -28,6 +29,7 @@ use crate::OnAbort;
 use crate::OnSessionLoss;
 use crate::RecoveryPolicy;
 use crate::RetryOn;
+use crate::RiggingLimits;
 use crate::RoleKey;
 use crate::RoleState;
 use crate::attempt::RetryGate;
@@ -64,6 +66,69 @@ pub struct Binding {
     pub requested:       RequestedConfiguration,
     /// Driver value a safe readback most recently proved was on this endpoint.
     pub last_known_good: LastKnownGoodConfiguration,
+    /// How long an attempt for this role may run before the kernel abandons it.
+    ///
+    /// Authored per binding because one process drives endpoints with genuinely different costs: a
+    /// window move lands in milliseconds while opening a screen-capture stream can take seconds,
+    /// and a single process-wide bound either abandons the capture or lets the window hang.
+    /// The default keeps the process-wide value, so a binding that has no reason to differ
+    /// says nothing.
+    pub apply_deadline:  ApplyDeadline,
+}
+
+/// How long one role's attempts may run, and whether the binding chose that itself.
+///
+/// A named enum rather than an optional `std::time::Duration` because the two cases lead to
+/// different behaviour when `crate::RiggingLimits::apply_deadline` is later retuned: a
+/// `Self::ProcessDefault` binding follows the new value and a `Self::Authored` one deliberately
+/// does not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Reflect)]
+pub enum ApplyDeadline {
+    /// Use `crate::RiggingLimits::apply_deadline`, the bound every role shares.
+    ///
+    /// The default, so that adding this field asked nothing of a binding whose endpoint has no
+    /// reason to be timed differently from the rest of the process.
+    #[default]
+    ProcessDefault,
+    /// Use this role's own bound instead of the process-wide one.
+    Authored(Duration),
+}
+
+impl ApplyDeadline {
+    /// Resolve the authored choice against the process-wide bound.
+    ///
+    /// The result names which of the two supplied the value rather than returning a bare duration,
+    /// so a caller reading a stamped attempt back can tell a role that chose five seconds from one
+    /// that inherited five seconds from the process.
+    #[must_use]
+    pub const fn resolve(self, rigging_limits: &RiggingLimits) -> ApplyDeadlineLookup {
+        match self {
+            Self::ProcessDefault => {
+                ApplyDeadlineLookup::ProcessDefault(rigging_limits.apply_deadline)
+            },
+            Self::Authored(apply_deadline) => ApplyDeadlineLookup::Authored(apply_deadline),
+        }
+    }
+}
+
+/// Which bound an attempt was stamped with, and where it came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+pub enum ApplyDeadlineLookup {
+    /// The binding authored nothing, so the attempt carries the process-wide bound.
+    ProcessDefault(Duration),
+    /// The binding authored its own bound, which a later change to
+    /// `crate::RiggingLimits::apply_deadline` will not move.
+    Authored(Duration),
+}
+
+impl ApplyDeadlineLookup {
+    /// The bound itself, once the caller no longer needs to know which side supplied it.
+    #[must_use]
+    pub const fn duration(self) -> Duration {
+        match self {
+            Self::ProcessDefault(apply_deadline) | Self::Authored(apply_deadline) => apply_deadline,
+        }
+    }
 }
 
 /// Authored driver configuration held without exposing the concrete configuration type to the
@@ -486,6 +551,28 @@ impl Bindings {
         self.waiting_work.get(role).copied().unwrap_or_default()
     }
 
+    /// Return a role whose device departed to `RoleState::Waiting`.
+    ///
+    /// Without this the work `Self::set_waiting_work` records is unreachable: `WaitingWork` is only
+    /// ever consulted through `RoleView::Waiting`, so a role left in `RoleState::Ready` after its
+    /// unit left never reaches `WaitingRole::ForRestoration` or `WaitingRole::ForApplication`, and
+    /// every `crate::RecoveryPolicy` variant behaves identically — the departed unit's return
+    /// applies nothing at all.
+    ///
+    /// Only `RoleState::Ready` moves, because it is the one state whose meaning the departure
+    /// falsified: the role no longer has a present usable unit. `RoleState::Applying` is ended by
+    /// the abort path, which writes `RoleState::Waiting` itself;
+    /// `RoleState::StoppedAfterRepeatedFailures` is re-armed by
+    /// `Self::observe_stopped_role_endpoint`, which needs the departure to stay visible for one
+    /// more pass; and `RoleState::Retired` never reactivates.
+    pub(crate) fn await_departed_device(&mut self, role: &RoleKey) {
+        if let Some(binding) = self.by_role.get_mut(role)
+            && binding.state == RoleState::Ready
+        {
+            binding.state = RoleState::Waiting;
+        }
+    }
+
     /// Record what one role is owed while it waits.
     pub(crate) fn set_waiting_work(&mut self, role: &RoleKey, waiting_work: WaitingWork) {
         match waiting_work {
@@ -503,6 +590,28 @@ impl Bindings {
     /// A role whose `crate::RecoveryPolicy` is `crate::RecoveryPolicy::Forget` keeps no saved value
     /// across a departure, so the value is dropped at the departure rather than left to be read by
     /// a later restore.
+    /// Clear a role's owed application request by turning it into the restoration it asked for.
+    ///
+    /// Only `crate::RecoveryPolicy::ReapplyOnRequest` reaches here; the caller enforces that,
+    /// because the refusal for the other policies is a statement about the policy rather than about
+    /// the binding. A role with no saved value falls back to `WaitingWork::Nothing`, which lets its
+    /// authored request dispatch: the application asked for the endpoint to be driven, and the only
+    /// thing left to drive it with is what the application authored.
+    pub(crate) fn request_reapply(&mut self, role: &RoleKey) {
+        let established = self.by_role.get(role).is_some_and(|binding| {
+            matches!(
+                binding.last_known_good,
+                LastKnownGoodConfiguration::Known(_)
+            )
+        });
+        let waiting_work = if established {
+            WaitingWork::RestorationOwed
+        } else {
+            WaitingWork::Nothing
+        };
+        self.set_waiting_work(role, waiting_work);
+    }
+
     pub(crate) fn forget_last_known_good(&mut self, role: &RoleKey) {
         if let Some(binding) = self.by_role.get_mut(role) {
             binding.last_known_good = LastKnownGoodConfiguration::NotEstablished;
@@ -1673,6 +1782,7 @@ mod tests {
     use bevy::prelude::Resource;
     use bevy::prelude::World;
 
+    use super::ApplyDeadline;
     use super::AvailableConfiguration;
     use super::Binding;
     use super::BindingCapacityError;
@@ -2870,6 +2980,7 @@ mod tests {
             state: RoleState::Ready,
             requested: RequestedConfiguration::new(TestConfiguration(3)),
             last_known_good: LastKnownGoodConfiguration::default(),
+            apply_deadline: ApplyDeadline::ProcessDefault,
         }
     }
 
@@ -2927,6 +3038,7 @@ mod tests {
             state: RoleState::default(),
             requested: RequestedConfiguration::new(()),
             last_known_good: LastKnownGoodConfiguration::default(),
+            apply_deadline: ApplyDeadline::ProcessDefault,
         }
     }
 

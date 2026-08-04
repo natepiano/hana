@@ -29,6 +29,7 @@ use crate::RegisteredSchemes;
 use crate::ReporterActivation;
 use crate::ReporterActivity;
 use crate::ReporterCoverage;
+use crate::ReporterDiscoveryStatus;
 use crate::ReporterId;
 use crate::ReporterRegistration;
 use crate::ReporterRevision;
@@ -39,9 +40,13 @@ use crate::contract::DiscoveryProgressReceiver;
 use crate::contract::DriverEntry;
 use crate::contract::EndpointDriver;
 use crate::contract::PendingDiscoveryProgress;
+use crate::discovery::CompletedDiscoveryOutcome;
 use crate::discovery::DiscoveryDirtyState;
 use crate::discovery::DiscoveryRequest;
+use crate::discovery::DiscoveryTransition;
+use crate::discovery::DiscoveryTransitionJournal;
 use crate::discovery::StartupRequirement;
+use crate::discovery::discovery_transition_capacity;
 
 /// Process-local driver handle that the driver registry issues in registration order.
 ///
@@ -151,16 +156,24 @@ impl Reporters {
         discovery_control: &mut DiscoveryControl,
         discovery_limits: &DiscoveryLimits,
         discovery_status: &mut DiscoveryStatus,
+        journal: &mut DiscoveryTransitionJournal,
     ) {
         let now = Instant::now();
+        let capacity = discovery_transition_capacity(self.entries.len(), discovery_limits);
         self.poll_running(now);
-        self.accept_completed(discovery_control, discovery_limits, discovery_status);
-        self.refresh_startup(discovery_status);
+        self.accept_completed(
+            discovery_control,
+            discovery_limits,
+            discovery_status,
+            journal,
+            capacity,
+        );
+        self.refresh_startup(discovery_status, journal, capacity);
         self.sync_activation(discovery_control);
         self.queue_due(now, discovery_control, discovery_status);
         self.admit(world, discovery_control, discovery_limits, discovery_status);
-        self.refresh_startup(discovery_status);
-        self.refresh_activity(now, discovery_status);
+        self.refresh_startup(discovery_status, journal, capacity);
+        self.refresh_activity(now, discovery_limits, discovery_status, journal, capacity);
     }
 
     #[cfg_attr(
@@ -251,6 +264,8 @@ impl Reporters {
         discovery_control: &DiscoveryControl,
         discovery_limits: &DiscoveryLimits,
         discovery_status: &mut DiscoveryStatus,
+        journal: &mut DiscoveryTransitionJournal,
+        capacity: usize,
     ) {
         let mut completed = Vec::new();
         for (index, reporter_entry) in self.entries.iter().enumerate() {
@@ -294,22 +309,43 @@ impl Reporters {
                         completed_at: completed_discovery.completed_at,
                     };
                     self.changed.push(reporter_id);
+                    let duration = completed_discovery
+                        .completed_at
+                        .duration_since(completed_discovery.started_at);
                     reporter_discovery_status.last_outcome = LastDiscoveryOutcome::Succeeded {
-                        batch:    completed_discovery.batch,
-                        duration: completed_discovery
-                            .completed_at
-                            .duration_since(completed_discovery.started_at),
+                        batch: completed_discovery.batch,
+                        duration,
                     };
+                    journal.record(
+                        capacity,
+                        DiscoveryTransition::Finished {
+                            batch:    completed_discovery.batch,
+                            reporter: reporter_id,
+                            outcome:  CompletedDiscoveryOutcome::Succeeded { duration },
+                        },
+                    );
                     reporter_entry.schedule_after_completion(completed_discovery.completed_at);
                 },
                 DeviceScan::Failed(error) => {
+                    let duration = completed_discovery
+                        .completed_at
+                        .duration_since(completed_discovery.started_at);
                     reporter_discovery_status.last_outcome = LastDiscoveryOutcome::Failed {
-                        batch:    completed_discovery.batch,
-                        duration: completed_discovery
-                            .completed_at
-                            .duration_since(completed_discovery.started_at),
-                        error:    error.clone(),
+                        batch: completed_discovery.batch,
+                        duration,
+                        error: error.clone(),
                     };
+                    journal.record(
+                        capacity,
+                        DiscoveryTransition::Finished {
+                            batch:    completed_discovery.batch,
+                            reporter: reporter_id,
+                            outcome:  CompletedDiscoveryOutcome::Failed {
+                                duration,
+                                error: error.clone(),
+                            },
+                        },
+                    );
                     self.failures.push(ReporterFailure {
                         reporter: reporter_id,
                         error,
@@ -458,7 +494,13 @@ impl Reporters {
             .count()
     }
 
-    fn refresh_startup(&self, discovery_status: &mut DiscoveryStatus) {
+    fn refresh_startup(
+        &self,
+        discovery_status: &mut DiscoveryStatus,
+        journal: &mut DiscoveryTransitionJournal,
+        capacity: usize,
+    ) {
+        let startup_before = discovery_status.startup.clone();
         for reporter_entry in self
             .entries
             .iter()
@@ -476,6 +518,7 @@ impl Reporters {
                     reporter: reporter_id,
                     error:    error.clone(),
                 };
+                record_startup_edge(&startup_before, discovery_status, journal, capacity);
                 return;
             }
         }
@@ -502,17 +545,175 @@ impl Reporters {
         } else {
             StartupDiscoveryState::Discovering
         };
+        record_startup_edge(&startup_before, discovery_status, journal, capacity);
     }
 
-    fn refresh_activity(&self, now: Instant, discovery_status: &mut DiscoveryStatus) {
+    /// Write every reporter's current activity, recording the progress edges a consumer may see.
+    ///
+    /// A progress transition is recorded only for a run that has already been going for
+    /// `DiscoveryLimits::progress_after` and whose reported progress differs from what the previous
+    /// pass retained. Both conditions are the point: a run that finishes inside the delay produces
+    /// no progress traffic at all, and a job that keeps reporting the same count produces one edge
+    /// rather than one per frame.
+    fn refresh_activity(
+        &self,
+        now: Instant,
+        discovery_limits: &DiscoveryLimits,
+        discovery_status: &mut DiscoveryStatus,
+        journal: &mut DiscoveryTransitionJournal,
+        capacity: usize,
+    ) {
+        let batch_counts = self.batch_counts(now, discovery_status);
         for reporter_entry in &self.entries {
-            if let Ok(reporter_discovery_status) =
+            let activity = reporter_entry.activity(now);
+            let Ok(reporter_discovery_status) =
                 discovery_status.reporter_status_mut(reporter_entry.reporter_id)
-            {
-                reporter_discovery_status.activity = reporter_entry.activity(now);
+            else {
+                continue;
+            };
+            let moved = reporter_discovery_status.activity != activity;
+            reporter_discovery_status.activity = activity;
+            let ReporterActivity::Running {
+                batch,
+                elapsed,
+                progress,
+            } = &reporter_discovery_status.activity
+            else {
+                continue;
+            };
+            if !moved || *elapsed < discovery_limits.progress_after() {
+                continue;
             }
+            let DiscoveryBatchCounts {
+                completed,
+                total,
+                running,
+                queued,
+                ..
+            } = batch_counts
+                .iter()
+                .find(|batch_counts| batch_counts.batch == *batch)
+                .copied()
+                .unwrap_or_else(|| DiscoveryBatchCounts::empty(*batch));
+            journal.record(
+                capacity,
+                DiscoveryTransition::Progressed {
+                    batch: *batch,
+                    reporter: reporter_entry.reporter_id,
+                    progress: progress.clone(),
+                    completed,
+                    total,
+                    running,
+                    queued,
+                },
+            );
         }
     }
+
+    /// Count how far each batch with a reporter still in it has got.
+    ///
+    /// A reporter's membership comes from its current activity while the batch is live and from its
+    /// retained `LastDiscoveryOutcome` once it is not: a reporter that finished stops naming the
+    /// batch in its activity, and the finished count is exactly the reporters that did so.
+    fn batch_counts(
+        &self,
+        now: Instant,
+        discovery_status: &DiscoveryStatus,
+    ) -> Vec<DiscoveryBatchCounts> {
+        let mut batch_counts: Vec<DiscoveryBatchCounts> = Vec::new();
+        for reporter_entry in &self.entries {
+            let membership = match reporter_entry.activity(now) {
+                ReporterActivity::Queued { batch } => (batch, BatchMembership::Queued),
+                ReporterActivity::Running { batch, .. } => (batch, BatchMembership::Running),
+                ReporterActivity::Disabled | ReporterActivity::Idle => {
+                    match discovery_status.reporter_status(reporter_entry.reporter_id) {
+                        Ok(ReporterDiscoveryStatus {
+                            last_outcome:
+                                LastDiscoveryOutcome::Succeeded { batch, .. }
+                                | LastDiscoveryOutcome::Failed { batch, .. },
+                            ..
+                        }) => (*batch, BatchMembership::Finished),
+                        _ => continue,
+                    }
+                },
+            };
+            let (batch, batch_membership) = membership;
+            if !batch_counts
+                .iter()
+                .any(|discovery_batch_counts| discovery_batch_counts.batch == batch)
+            {
+                batch_counts.push(DiscoveryBatchCounts::empty(batch));
+            }
+            let Some(discovery_batch_counts) = batch_counts
+                .iter_mut()
+                .find(|discovery_batch_counts| discovery_batch_counts.batch == batch)
+            else {
+                continue;
+            };
+            discovery_batch_counts.total += 1;
+            match batch_membership {
+                BatchMembership::Queued => discovery_batch_counts.queued += 1,
+                BatchMembership::Running => discovery_batch_counts.running += 1,
+                BatchMembership::Finished => discovery_batch_counts.completed += 1,
+            }
+        }
+
+        batch_counts
+    }
+}
+
+/// How far one batch of discovery runs has got, counted over the reporters that belong to it.
+#[derive(Clone, Copy)]
+struct DiscoveryBatchCounts {
+    batch:     DiscoveryBatchId,
+    completed: usize,
+    total:     usize,
+    running:   usize,
+    queued:    usize,
+}
+
+impl DiscoveryBatchCounts {
+    const fn empty(batch: DiscoveryBatchId) -> Self {
+        Self {
+            batch,
+            completed: 0,
+            total: 0,
+            running: 0,
+            queued: 0,
+        }
+    }
+}
+
+/// Which count one reporter contributes to its batch.
+#[derive(Clone, Copy)]
+enum BatchMembership {
+    /// Waiting for a job slot.
+    Queued,
+    /// Enumerating hardware now.
+    Running,
+    /// Its run ended, whether it succeeded or failed.
+    Finished,
+}
+
+/// Record the startup gate's move, and nothing at all when it did not move.
+///
+/// `Reporters::collect` refreshes the gate twice per pass, before and after admission, so an
+/// unconditional record would emit two identical events every frame the gate stayed put.
+fn record_startup_edge(
+    startup_before: &StartupDiscoveryState,
+    discovery_status: &DiscoveryStatus,
+    journal: &mut DiscoveryTransitionJournal,
+    capacity: usize,
+) {
+    if &discovery_status.startup == startup_before {
+        return;
+    }
+    journal.record(
+        capacity,
+        DiscoveryTransition::StartupChanged {
+            startup: discovery_status.startup.clone(),
+        },
+    );
 }
 
 /// Failure queue entry retained for reconciliation and later user-interface event emission.
@@ -1210,6 +1411,8 @@ mod tests {
     use crate::WaitingRole;
     use crate::discovery::DiscoveryDirtyState;
     use crate::discovery::DiscoveryRequest;
+    use crate::discovery::DiscoveryTransitionJournal;
+    use crate::discovery::discovery_transition_capacity;
 
     struct CountingReporter {
         scans: Arc<AtomicUsize>,
@@ -1498,11 +1701,46 @@ mod tests {
         }
     }
 
+    /// A journal these cases collect transitions into and then drop.
+    ///
+    /// The cases here assert on retained `DiscoveryStatus`, which is the query surface; the
+    /// transitions are asserted end to end in `tests/scripted.rs`, through the events the journal
+    /// produces. Sized by the same rule the scheduler uses so a case never silently loses a
+    /// recording to a capacity a test invented.
+    fn discarded_journal(
+        reporters: &Reporters,
+        discovery_limits: &DiscoveryLimits,
+    ) -> (DiscoveryTransitionJournal, usize) {
+        (
+            DiscoveryTransitionJournal::default(),
+            discovery_transition_capacity(reporters.entries.len(), discovery_limits),
+        )
+    }
+
+    /// Put one reporter's run in the queued-with-a-finished-scan state acceptance reads.
+    fn queue_completed_scan(
+        reporter_entry: &mut ReporterEntry,
+        batch: u64,
+        queued_at: Instant,
+        completed_at: Instant,
+    ) {
+        reporter_entry.state = ReporterRunState::Queued {
+            batch: DiscoveryBatchId(batch),
+            queued_at,
+            rerun: RerunRequest::NotRequested,
+            pending: PendingDiscovery::Completed {
+                scan: DeviceScan::Complete(Vec::new()),
+                completed_at,
+            },
+        };
+    }
+
     fn admit_without_polling_running_jobs(app: &mut App) {
         app.world_mut()
             .resource_scope::<Reporters, _>(|world, mut reporters| {
                 let now = Instant::now();
                 let discovery_limits = world.resource::<DiscoveryLimits>().clone();
+                let (mut journal, capacity) = discarded_journal(&reporters, &discovery_limits);
                 world.resource_scope::<DiscoveryControl, _>(|world, discovery_control| {
                     world.resource_scope::<DiscoveryStatus, _>(|world, mut discovery_status| {
                         reporters.admit(
@@ -1511,7 +1749,13 @@ mod tests {
                             &discovery_limits,
                             &mut discovery_status,
                         );
-                        reporters.refresh_activity(now, &mut discovery_status);
+                        reporters.refresh_activity(
+                            now,
+                            &discovery_limits,
+                            &mut discovery_status,
+                            &mut journal,
+                            capacity,
+                        );
                     });
                 });
             });
@@ -1524,21 +1768,30 @@ mod tests {
                 reporters.entries[reporter_index].drain_progress();
                 reporters.entries[reporter_index].poll(now);
                 let discovery_limits = world.resource::<DiscoveryLimits>().clone();
+                let (mut journal, capacity) = discarded_journal(&reporters, &discovery_limits);
                 world.resource_scope::<DiscoveryControl, _>(|world, discovery_control| {
                     world.resource_scope::<DiscoveryStatus, _>(|world, mut discovery_status| {
                         reporters.accept_completed(
                             &discovery_control,
                             &discovery_limits,
                             &mut discovery_status,
+                            &mut journal,
+                            capacity,
                         );
-                        reporters.refresh_startup(&mut discovery_status);
+                        reporters.refresh_startup(&mut discovery_status, &mut journal, capacity);
                         reporters.admit(
                             world,
                             &discovery_control,
                             &discovery_limits,
                             &mut discovery_status,
                         );
-                        reporters.refresh_activity(now, &mut discovery_status);
+                        reporters.refresh_activity(
+                            now,
+                            &discovery_limits,
+                            &mut discovery_status,
+                            &mut journal,
+                            capacity,
+                        );
                     });
                 });
             });
@@ -1551,8 +1804,16 @@ mod tests {
                 for reporter_entry in &mut reporters.entries {
                     reporter_entry.drain_progress();
                 }
+                let discovery_limits = world.resource::<DiscoveryLimits>().clone();
+                let (mut journal, capacity) = discarded_journal(&reporters, &discovery_limits);
                 let mut discovery_status = world.resource_mut::<DiscoveryStatus>();
-                reporters.refresh_activity(now, &mut discovery_status);
+                reporters.refresh_activity(
+                    now,
+                    &discovery_limits,
+                    &mut discovery_status,
+                    &mut journal,
+                    capacity,
+                );
             });
     }
 
@@ -2794,26 +3055,22 @@ mod tests {
         let first_completed_at = started_at + Duration::from_secs(1);
         let delayed_completed_at = started_at + Duration::from_secs(2);
         let delayed_accepted_at = delayed_completed_at + Duration::from_secs(40);
-        reporters.entries[0].state = ReporterRunState::Queued {
-            batch:     DiscoveryBatchId(0),
-            queued_at: started_at,
-            rerun:     RerunRequest::NotRequested,
-            pending:   PendingDiscovery::Completed {
-                scan:         DeviceScan::Complete(Vec::new()),
-                completed_at: first_completed_at,
-            },
-        };
-        reporters.entries[1].state = ReporterRunState::Queued {
-            batch:     DiscoveryBatchId(1),
-            queued_at: started_at,
-            rerun:     RerunRequest::NotRequested,
-            pending:   PendingDiscovery::Completed {
-                scan:         DeviceScan::Complete(Vec::new()),
-                completed_at: delayed_completed_at,
-            },
-        };
+        queue_completed_scan(&mut reporters.entries[0], 0, started_at, first_completed_at);
+        queue_completed_scan(
+            &mut reporters.entries[1],
+            1,
+            started_at,
+            delayed_completed_at,
+        );
 
-        reporters.accept_completed(&discovery_control, &discovery_limits, &mut discovery_status);
+        let (mut journal, capacity) = discarded_journal(&reporters, &discovery_limits);
+        reporters.accept_completed(
+            &discovery_control,
+            &discovery_limits,
+            &mut discovery_status,
+            &mut journal,
+            capacity,
+        );
         assert!(matches!(
             discovery_status
                 .reporter_status(first)
@@ -2829,7 +3086,13 @@ mod tests {
             LastDiscoveryOutcome::NotCompleted
         ));
 
-        reporters.accept_completed(&discovery_control, &discovery_limits, &mut discovery_status);
+        reporters.accept_completed(
+            &discovery_control,
+            &discovery_limits,
+            &mut discovery_status,
+            &mut journal,
+            capacity,
+        );
 
         let expected_duration = delayed_completed_at.duration_since(started_at);
         assert!(matches!(
@@ -3419,6 +3682,7 @@ mod tests {
             state: RoleState::default(),
             requested: RequestedConfiguration::new(TestConfiguration),
             last_known_good: LastKnownGoodConfiguration::default(),
+            apply_deadline: crate::ApplyDeadline::ProcessDefault,
         })?;
 
         let start_apply_request = match bindings.role_view(&role)? {

@@ -3345,10 +3345,20 @@ name = "hana_rigging"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "hana_rigging_scripted",
  "ron",
  "serde",
  "thiserror 2.0.19",
  "trybuild",
+]
+
+[[package]]
+name = "hana_rigging_scripted"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "hana_rigging",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

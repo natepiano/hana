@@ -35,6 +35,8 @@ use crate::RetiredRoleAttemptEnded;
 use crate::RiggingLimits;
 use crate::RoleAttemptLookup;
 use crate::RoleKey;
+use crate::RoleState;
+use crate::RoleStateChanged;
 use crate::RoleView;
 use crate::WaitingRole;
 use crate::WaitingWork;
@@ -138,6 +140,7 @@ pub(crate) fn abort_invalidated_attempts(world: &mut World) {
     // never run.
     for (role, attempt) in endings {
         announce_attempt_ending(world, &role, attempt, AttemptOutcome::Aborted);
+        announce_role_state(world, &role);
     }
 }
 
@@ -328,6 +331,33 @@ fn announce_attempt_ending(
     }
 }
 
+/// Report one role's new lifecycle state to whichever binding entity can still receive it.
+///
+/// Called from `crate::RiggingSystems::Apply` rather than derived from the entity mirror, which
+/// refreshes a full system set earlier: the three apply systems can move one role
+/// `Applying -> Waiting -> Applying` inside a single frame, and a mirror-derived event would arrive
+/// next frame carrying only the final state, leaving a consumer unable to count attempts from
+/// events. A role whose binding entity was despawned this frame reports nothing: its ending is
+/// already covered by `crate::RetiredRoleAttemptEnded`.
+fn announce_role_state(world: &mut World, role: &RoleKey) {
+    let BindingEntityLookup::Registered(binding) = world.resource::<BindingEntities>().entity(role)
+    else {
+        return;
+    };
+    let Ok(state) = world
+        .resource::<Bindings>()
+        .binding(role)
+        .map(|binding| binding.state)
+    else {
+        return;
+    };
+    world.trigger(RoleStateChanged {
+        binding,
+        role: role.clone(),
+        state,
+    });
+}
+
 /// Read this frame's accepted lifecycle changes for roles whose binding no longer holds an attempt.
 ///
 /// `crate::BindingTransitionBatch` is still readable throughout `crate::RiggingSystems::Apply`; a
@@ -418,6 +448,7 @@ pub(crate) fn poll_attempts(world: &mut World) {
     // observer declaring a resource the world does not currently hold is skipped, not reported.
     for (role, attempt, attempt_outcome) in endings {
         announce_attempt_ending(world, &role, attempt, attempt_outcome);
+        announce_role_state(world, &role);
     }
 }
 
@@ -433,6 +464,10 @@ pub(crate) fn start_authorized_applies(world: &mut World) {
     if startable.is_empty() {
         return;
     }
+
+    // Recorded before dispatch because only a successful start moves the role, and the announcement
+    // has to distinguish that from the roles this pass tried and left where they were.
+    let states_before = role_states(world, &startable);
 
     world.resource_scope::<Attempts, _>(|world, mut attempts| {
         world.resource_scope::<Bindings, _>(|world, mut bindings| {
@@ -455,6 +490,29 @@ pub(crate) fn start_authorized_applies(world: &mut World) {
             });
         });
     });
+
+    for (role, state_before) in states_before {
+        if role_state(world, &role) != Some(state_before) {
+            announce_role_state(world, &role);
+        }
+    }
+}
+
+/// Read the current recovery state of every named role that still has a binding.
+fn role_states(world: &World, roles: &[RoleKey]) -> Vec<(RoleKey, RoleState)> {
+    roles
+        .iter()
+        .filter_map(|role| role_state(world, role).map(|state| (role.clone(), state)))
+        .collect()
+}
+
+/// Read one role's current recovery state, or `None` when the role no longer has a binding.
+fn role_state(world: &World, role: &RoleKey) -> Option<RoleState> {
+    world
+        .resource::<Bindings>()
+        .binding(role)
+        .ok()
+        .map(|binding| binding.state)
 }
 
 /// Return every role the kernel stopped after repeated failures whose device has since returned.
@@ -618,7 +676,14 @@ fn start_one_apply(
     let FrameClockReading::Measurable(measured) = now else {
         return;
     };
-    let deadline = measured + world.resource::<RiggingLimits>().apply_deadline;
+    // The role's own bound when it authored one, the process-wide bound otherwise: one process
+    // drives endpoints with genuinely different costs, and a single bound either abandons the slow
+    // one or lets the fast one hang.
+    let deadline = measured
+        + binding
+            .apply_deadline
+            .resolve(world.resource::<RiggingLimits>())
+            .duration();
     let Ok(attempt) = attempts.issue() else {
         return;
     };
@@ -1163,6 +1228,7 @@ mod tests {
             state: RoleState::default(),
             requested: RequestedConfiguration::new(TestConfiguration(3)),
             last_known_good: LastKnownGoodConfiguration::default(),
+            apply_deadline: crate::ApplyDeadline::ProcessDefault,
         }
     }
 

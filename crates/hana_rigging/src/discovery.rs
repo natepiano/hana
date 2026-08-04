@@ -448,6 +448,25 @@ impl Default for DiscoveryLimits {
 }
 
 impl DiscoveryLimits {
+    /// Author capacity and progress timing other than the process defaults.
+    ///
+    /// The fields stay private so a caller cannot write a zero job or completion capacity, which
+    /// would stop discovery entirely while reading as a configuration choice. Without this
+    /// constructor the defaults are the only limits an application can ever run under, because
+    /// `Default` is the sole way to build the resource and every field is unreachable afterwards.
+    #[must_use]
+    pub const fn new(
+        max_concurrent_jobs: NonZeroUsize,
+        max_completions_per_frame: NonZeroUsize,
+        progress_after: Duration,
+    ) -> Self {
+        Self {
+            max_concurrent_jobs,
+            max_completions_per_frame,
+            progress_after,
+        }
+    }
+
     /// Return the configured background-discovery capacity before I/O-pool reservation applies.
     #[must_use]
     pub const fn max_concurrent_jobs(&self) -> NonZeroUsize { self.max_concurrent_jobs }
@@ -681,6 +700,103 @@ pub enum StartupDiscoveryState {
         /// Failure retained instead of replacing the reporter's prior complete set.
         error:    DeviceAccessError,
     },
+}
+
+/// How one discovery run ended, as `crate::DiscoveryFinished` reports it.
+///
+/// Separate from `LastDiscoveryOutcome`, which retains `LastDiscoveryOutcome::NotCompleted` for a
+/// reporter that has never finished: that state cannot be reached by a run that just ended, and a
+/// consumer matching on the retained enum would have to write an arm for a case the event can never
+/// carry.
+#[derive(Clone, Debug, PartialEq, Eq, Reflect)]
+pub enum CompletedDiscoveryOutcome {
+    /// The reporter established its whole current set and the kernel accepted it.
+    Succeeded {
+        /// Time from this reporter's submission until the run completed; the later main-thread
+        /// acceptance delay is excluded, because it measures the kernel's own admission budget
+        /// rather than how long the hardware took to answer.
+        duration: Duration,
+    },
+    /// The reporter could not establish its whole set, so its preceding set stays current.
+    Failed {
+        /// Time from this reporter's submission until the run completed.
+        duration: Duration,
+        /// Reporter error preserved so a diagnostic can name what failed rather than only that
+        /// something did.
+        error:    DeviceAccessError,
+    },
+}
+
+/// One authoritative discovery state change, recorded where it happens and emitted once later.
+///
+/// Recorded rather than emitted in place because the scheduler mutates authoritative state inside
+/// `crate::RiggingSystems::Collect`, and triggering public events from there would couple every
+/// future scheduler change to event delivery order. Recorded rather than derived by comparing the
+/// retained `DiscoveryStatus` against a previous copy because `DiscoveryStatus` deliberately keeps
+/// only the current value: two transitions that land between two runs of the event system would
+/// leave one of them undetectable.
+pub(crate) enum DiscoveryTransition {
+    /// A running reporter has been going for at least `DiscoveryLimits::progress_after` and its
+    /// job-reported progress moved. The batch counts travel with it so the per-reporter and the
+    /// aggregate events cannot disagree about the same moment.
+    Progressed {
+        batch:     DiscoveryBatchId,
+        reporter:  ReporterId,
+        progress:  DiscoveryProgress,
+        completed: usize,
+        total:     usize,
+        running:   usize,
+        queued:    usize,
+    },
+    /// One reporter's run reached a terminal outcome and the kernel accepted it.
+    Finished {
+        batch:    DiscoveryBatchId,
+        reporter: ReporterId,
+        outcome:  CompletedDiscoveryOutcome,
+    },
+    /// The required-before-ready startup gate moved to a different state.
+    StartupChanged { startup: StartupDiscoveryState },
+}
+
+/// The bounded record of this frame's discovery transitions, drained once by the event stage.
+///
+/// Bounded by what one frame can actually produce rather than kept as a history: at most one
+/// progress edge per registered reporter, at most `DiscoveryLimits::max_completions_per_frame`
+/// completions, and at most one startup edge. An unbounded queue would grow without limit in any
+/// application that installs the kernel and never runs the event stage.
+#[derive(Default, Resource)]
+pub(crate) struct DiscoveryTransitionJournal {
+    transitions: Vec<DiscoveryTransition>,
+}
+
+impl DiscoveryTransitionJournal {
+    /// Append one transition unless this frame has already produced everything it can.
+    ///
+    /// The bound is passed in by the scheduler because only it knows how many reporters are
+    /// registered. A refused append is not lost work: reaching the bound means the event stage has
+    /// not run since these transitions were recorded, so nothing is listening for another one.
+    pub(crate) fn record(&mut self, capacity: usize, discovery_transition: DiscoveryTransition) {
+        if self.transitions.len() >= capacity {
+            return;
+        }
+        self.transitions.push(discovery_transition);
+    }
+
+    /// Take everything recorded since the last drain, leaving the journal empty.
+    pub(crate) fn drain(&mut self) -> Vec<DiscoveryTransition> {
+        std::mem::take(&mut self.transitions)
+    }
+}
+
+/// The most transitions one frame of discovery scheduling can produce.
+///
+/// At most one progress edge per registered reporter, at most
+/// `DiscoveryLimits::max_completions_per_frame` completions, and at most one startup edge.
+pub(crate) const fn discovery_transition_capacity(
+    reporters: usize,
+    discovery_limits: &DiscoveryLimits,
+) -> usize {
+    reporters + discovery_limits.max_completions_per_frame().get() + 1
 }
 
 /// Run condition that permits hardware-dependent systems only after required discovery succeeds.

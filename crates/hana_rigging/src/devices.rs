@@ -528,25 +528,38 @@ pub(crate) struct ReconciledDeviceChanges {
 #[derive(Debug)]
 pub(crate) struct DepartedDevice {
     pub(crate) key:       DeviceKey,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "restoration is owed for both causes; the retirement half reads \
-                      `orphaned_entities`, which only `KeyLeftTheSet` fills"
-        )
-    )]
     pub(crate) departure: DeviceDeparture,
 }
 
 /// How one device stopped being usable.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum DeviceDeparture {
+///
+/// Public because it is the payload of `crate::DeviceDeparted`: a consumer that must tell an
+/// unplugged unit from one a reporter still enumerates but no longer reports present cannot get
+/// that from the key alone, and after a `Self::KeyLeftTheSet` there is no entity left to read it
+/// from either.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+pub enum DeviceDeparture {
     /// No reporter named the key this pass, so its handle, state, and entity are retired.
     KeyLeftTheSet,
     /// A reporter still names the key but no longer reports the unit present, so everything keyed
     /// to it stays while the hardware itself is gone.
     RetainedButNotPresent,
+}
+
+/// Departures and connection conclusions held for the event stage after the projection consumed
+/// them.
+///
+/// `ReconciledDeviceChanges` is taken whole by the entity projection, which despawns the entities a
+/// departure orphaned; by the time the event stage runs there is nothing left to read. The two
+/// facts a consumer still needs are moved here rather than left in place, because re-reading them
+/// from the projection's own resource would mean the projection could not clear it and a settled
+/// frame would re-announce the last departure forever.
+#[derive(Debug, Default, Resource)]
+pub(crate) struct DepartureAnnouncements {
+    /// Devices that left service this pass, still carrying which of the two departures it was.
+    pub(crate) departed:    Vec<DepartedDevice>,
+    /// Authored inventory keys whose connection conclusion this pass changed.
+    pub(crate) connections: Vec<ConfiguredDeviceConnectionChange>,
 }
 
 /// One authored inventory key and the connection conclusion this pass reached for it.
@@ -1620,6 +1633,7 @@ mod tests {
             state:           crate::RoleState::default(),
             requested:       crate::RequestedConfiguration::new(RoleAttemptTestConfiguration(3)),
             last_known_good: crate::LastKnownGoodConfiguration::default(),
+            apply_deadline:  crate::ApplyDeadline::ProcessDefault,
         })?;
 
         assert_eq!(

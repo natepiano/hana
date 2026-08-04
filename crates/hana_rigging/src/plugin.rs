@@ -25,7 +25,17 @@ use crate::apply::start_authorized_applies;
 use crate::binding::BindingTransitionBatch;
 use crate::binding::drain_binding_transitions;
 use crate::binding::project_binding_entities;
+use crate::devices::DepartureAnnouncements;
 use crate::devices::ReconciledDeviceChanges;
+use crate::discovery::DiscoveryTransitionJournal;
+use crate::emit::AnnouncedEdges;
+use crate::emit::announce_binding_changes;
+use crate::emit::announce_device_changes;
+use crate::emit::announce_discovery_transitions;
+use crate::emit::announce_reconciled_facts;
+use crate::emit::announce_role_availability;
+use crate::emit::on_reapply_configuration;
+use crate::emit::on_retire_role;
 use crate::reconcile::project_device_entities;
 use crate::reconcile::reconcile;
 use crate::registration::Drivers;
@@ -64,12 +74,15 @@ impl Plugin for RiggingPlugin {
             .init_resource::<Attempts>()
             .init_resource::<Drivers>()
             .init_resource::<BindingEntities>()
+            .init_resource::<AnnouncedEdges>()
             .init_resource::<BindingTransitionBatch>()
             .init_resource::<Bindings>()
+            .init_resource::<DepartureAnnouncements>()
             .init_resource::<Devices>()
             .init_resource::<DiscoveryControl>()
             .init_resource::<DiscoveryLimits>()
             .init_resource::<DiscoveryStatus>()
+            .init_resource::<DiscoveryTransitionJournal>()
             .init_resource::<HardwareInventory>()
             .init_resource::<ReconciledDeviceChanges>()
             .init_resource::<RegisteredSchemes>()
@@ -99,6 +112,17 @@ impl Plugin for RiggingPlugin {
                         .after(reconcile)
                         .in_set(RiggingSystems::Reconcile),
                     (
+                        announce_device_changes,
+                        announce_binding_changes,
+                        announce_reconciled_facts,
+                        announce_role_availability,
+                    )
+                        .after(project_device_entities)
+                        .in_set(RiggingSystems::Reconcile),
+                    announce_discovery_transitions
+                        .after(announce_role_availability)
+                        .in_set(RiggingSystems::Reconcile),
+                    (
                         abort_invalidated_attempts,
                         poll_attempts,
                         start_authorized_applies,
@@ -107,7 +131,9 @@ impl Plugin for RiggingPlugin {
                         .in_set(RiggingSystems::Apply),
                     clear_binding_transitions.after(RiggingSystems::Apply),
                 ),
-            );
+            )
+            .add_observer(on_retire_role)
+            .add_observer(on_reapply_configuration);
     }
 }
 
@@ -116,11 +142,16 @@ fn collect(world: &mut World) {
         let discovery_limits = world.resource::<DiscoveryLimits>().clone();
         world.resource_scope::<DiscoveryControl, _>(|world, mut discovery_control| {
             world.resource_scope::<DiscoveryStatus, _>(|world, mut discovery_status| {
-                reporters.collect(
-                    world,
-                    &mut discovery_control,
-                    &discovery_limits,
-                    &mut discovery_status,
+                world.resource_scope::<DiscoveryTransitionJournal, _>(
+                    |world, mut discovery_transition_journal| {
+                        reporters.collect(
+                            world,
+                            &mut discovery_control,
+                            &discovery_limits,
+                            &mut discovery_status,
+                            &mut discovery_transition_journal,
+                        );
+                    },
                 );
             });
         });

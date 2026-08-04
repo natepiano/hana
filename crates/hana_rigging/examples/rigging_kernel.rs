@@ -149,6 +149,119 @@ fn observe_attempt_ending(
     });
 }
 
+/// One kernel lifecycle event this run observed, in arrival order.
+///
+/// The kernel reports every state change as an event, so a consumer that wants to react to a
+/// display arriving, a claim moving, or a role losing its device writes an observer instead of
+/// polling a resource. This example collects them into one list so the run can print the whole
+/// lifecycle in the order it happened.
+struct ObservedLifecycleEvent {
+    /// Which axis moved, such as `presence` or `role state`.
+    axis:  &'static str,
+    /// What the axis moved to, and which device or role it belongs to.
+    moved: String,
+}
+
+/// Every lifecycle event observed this run.
+#[derive(Default, Resource)]
+struct ObservedLifecycle(Vec<ObservedLifecycleEvent>);
+
+impl ObservedLifecycle {
+    fn record(&mut self, axis: &'static str, moved: String) {
+        self.0.push(ObservedLifecycleEvent { axis, moved });
+    }
+
+    /// Report whether any event on `axis` reached this run.
+    fn saw(&self, axis: &str) -> bool {
+        self.0
+            .iter()
+            .any(|observed_lifecycle_event| observed_lifecycle_event.axis == axis)
+    }
+}
+
+fn observe_device_arrived(
+    device_arrived: On<DeviceArrived>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = describe_key(&device_arrived.key);
+    observed_lifecycle.record("arrival", moved);
+}
+
+fn observe_presence_changed(
+    presence_changed: On<PresenceChanged>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!("{:?}", presence_changed.presence);
+    observed_lifecycle.record("presence", moved);
+}
+
+fn observe_claim_changed(
+    claim_changed: On<ClaimChanged>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!("{:?}", claim_changed.claim);
+    observed_lifecycle.record("claim", moved);
+}
+
+fn observe_identity_changed(
+    identity_changed: On<IdentityChanged>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!("{:?}", identity_changed.verdict);
+    observed_lifecycle.record("identity", moved);
+}
+
+fn observe_device_departed(
+    device_departed: On<DeviceDeparted>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!(
+        "{} | {:?}",
+        describe_key(&device_departed.key),
+        device_departed.departure
+    );
+    observed_lifecycle.record("departure", moved);
+}
+
+fn observe_connection_changed(
+    connection_changed: On<ConfiguredDeviceConnectionChanged>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!(
+        "{} | {:?}",
+        describe_key(&connection_changed.key),
+        connection_changed.connection
+    );
+    observed_lifecycle.record("authored connection", moved);
+}
+
+fn observe_role_state_changed(
+    role_state_changed: On<RoleStateChanged>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!(
+        "role `{}` | {:?}",
+        role_state_changed.role, role_state_changed.state
+    );
+    observed_lifecycle.record("role state", moved);
+}
+
+fn observe_role_awaiting(
+    role_awaiting: On<RoleAwaiting>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!("role `{}` has no live device", role_awaiting.role);
+    observed_lifecycle.record("role availability", moved);
+}
+
+fn observe_role_available(
+    role_available: On<RoleAvailable>,
+    mut observed_lifecycle: ResMut<ObservedLifecycle>,
+) {
+    let moved = format!("role `{}` resolved to a live device", role_available.role);
+    observed_lifecycle.record("role availability", moved);
+}
+
 /// How the bounded wait for a successful apply on the panel role ended.
 enum AttemptRun {
     /// An attempt succeeded, this many frames after the reporters completed.
@@ -260,7 +373,17 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
         .register_device_scheme(SchemeName::new(DISPLAY_SCHEME)?)
         .init_resource::<AppliedPlacements>()
         .init_resource::<ObservedAttemptEndings>()
-        .add_observer(observe_attempt_ending);
+        .init_resource::<ObservedLifecycle>()
+        .add_observer(observe_attempt_ending)
+        .add_observer(observe_device_arrived)
+        .add_observer(observe_presence_changed)
+        .add_observer(observe_claim_changed)
+        .add_observer(observe_identity_changed)
+        .add_observer(observe_device_departed)
+        .add_observer(observe_connection_changed)
+        .add_observer(observe_role_state_changed)
+        .add_observer(observe_role_awaiting)
+        .add_observer(observe_role_available);
 
     // Binding registration is application work, not discovery work: this role is registered before
     // any reporter has run, and its binding entity is spawned by the first frame regardless.
@@ -347,6 +470,7 @@ fn run() -> Result<SmokeCheck, Box<dyn Error>> {
                 &displays,
                 &mut smoke_check,
             );
+            report_lifecycle(app.world(), &mut smoke_check);
 
             Ok(smoke_check)
         },
@@ -563,6 +687,7 @@ fn panel_binding(role: RoleKey, device: DeviceKey, driver: DriverId) -> Binding 
             top_pixels:  0,
         }),
         last_known_good: LastKnownGoodConfiguration::default(),
+        apply_deadline: ApplyDeadline::ProcessDefault,
     }
 }
 
@@ -790,6 +915,32 @@ fn print_binding(world: &World, role: &RoleKey, smoke_check: &mut SmokeCheck) {
                 },
             }
         },
+    }
+}
+
+/// Print every lifecycle event this run observed, and fail the run if an expected axis was silent.
+///
+/// The four axes checked here are the ones this run definitely moves: a display arrives, its
+/// reachability is established, the panel role reaches a live device and applies, and the desk
+/// monitor is unplugged. An axis that stayed silent means a consumer watching only events would
+/// have missed a change the resources went on to report, which is the defect the derived event list
+/// exists to prevent.
+fn report_lifecycle(world: &World, smoke_check: &mut SmokeCheck) {
+    println!("kernel lifecycle events, in arrival order:");
+    let observed_lifecycle = world.resource::<ObservedLifecycle>();
+    for observed_lifecycle_event in &observed_lifecycle.0 {
+        println!(
+            "  {} | {}",
+            observed_lifecycle_event.axis, observed_lifecycle_event.moved
+        );
+    }
+    for axis in ["arrival", "presence", "role state", "departure"] {
+        if !observed_lifecycle.saw(axis) {
+            record_mismatch(
+                smoke_check,
+                format!("no {axis} event reached an observer during this run"),
+            );
+        }
     }
 }
 

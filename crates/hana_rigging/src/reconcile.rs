@@ -66,6 +66,7 @@ use crate::capabilities::detach_declarations;
 use crate::capabilities::reflect_component_for;
 use crate::devices::ConfiguredDeviceConnectionChange;
 use crate::devices::DepartedDevice;
+use crate::devices::DepartureAnnouncements;
 use crate::devices::ReconciledDeviceChanges;
 use crate::registration::Drivers;
 use crate::registration::RegisteredReporter;
@@ -1053,7 +1054,7 @@ fn disputed_capabilities(capabilities: &CoReportView<'_>) -> HashSet<TypeId> {
 pub(crate) fn project_device_entities(world: &mut World) {
     let app_type_registry = world.resource::<AppTypeRegistry>().clone();
     let type_registry = app_type_registry.read();
-    let reconciled_device_changes =
+    let mut reconciled_device_changes =
         std::mem::take(&mut *world.resource_mut::<ReconciledDeviceChanges>());
 
     for orphaned_entity in reconciled_device_changes.orphaned_entities {
@@ -1080,6 +1081,18 @@ pub(crate) fn project_device_entities(world: &mut World) {
             &mut world.resource_mut::<Bindings>(),
             &reconciled_device_changes.departed,
         );
+    }
+
+    // The two facts with no mirrored component behind them are moved to the event stage before the
+    // rest of this pass consumes them; nothing else retains a departure once the entities are gone.
+    {
+        let mut departure_announcements = world.resource_mut::<DepartureAnnouncements>();
+        departure_announcements
+            .departed
+            .append(&mut reconciled_device_changes.departed);
+        departure_announcements
+            .connections
+            .append(&mut reconciled_device_changes.connections);
     }
 
     world.resource_scope::<Devices, _>(|world, mut devices| {
@@ -1126,6 +1139,10 @@ fn owe_departure_work(bindings: &mut Bindings, departed: &[DepartedDevice]) {
                 binding.last_known_good,
                 LastKnownGoodConfiguration::Known(_)
             );
+            // The recorded work is only ever read through `RoleView::Waiting`, so a role the
+            // departure left in `RoleState::Ready` would never reach it and every policy would
+            // behave the same.
+            bindings.await_departed_device(&role);
             match recovery {
                 RecoveryPolicy::ReapplyOnReturn if established => {
                     bindings.set_waiting_work(&role, WaitingWork::RestorationOwed);
@@ -3232,6 +3249,7 @@ mod tests {
                 state:           crate::RoleState::default(),
                 requested:       crate::RequestedConfiguration::new(()),
                 last_known_good: crate::LastKnownGoodConfiguration::default(),
+                apply_deadline:  crate::ApplyDeadline::ProcessDefault,
             })?;
         let reported_units = add_set_reporter(
             &mut app,
@@ -3298,6 +3316,7 @@ mod tests {
             state: RoleState::default(),
             requested: RequestedConfiguration::new(PanelConfiguration(3)),
             last_known_good: LastKnownGoodConfiguration::default(),
+            apply_deadline: crate::ApplyDeadline::ProcessDefault,
         }
     }
 

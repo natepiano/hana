@@ -48,6 +48,7 @@ bytemuck = "1"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 hana_conduit = { path = "crates/hana_conduit" }
 hana_rigging = { version = "0.1", path = "crates/hana_rigging" }
+hana_rigging_scripted = { path = "crates/hana_rigging_scripted" }
 hana_works = { version = "0.1", path = "crates/hana_works" }
 image = { version = "0.25", default-features = false }
 nonmax = "0.5"
