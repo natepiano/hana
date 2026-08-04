@@ -15,8 +15,8 @@ use crate::CommandId;
 use crate::ConditionName;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
-use crate::DiagnosticSource;
 use crate::KeystrokeSequence;
 use crate::KeystrokeSequenceParseError;
 
@@ -30,14 +30,14 @@ pub(crate) struct KeymapDocument {
         reason = "the parsed schema reference is intentionally unread after validation"
     )]
     pub(super) schema:            Option<String>,
-    pub(super) diagnostic_source: DiagnosticSource,
+    pub(super) diagnostic_origin: DiagnosticOrigin,
     pub(super) blocks:            Vec<KeymapBlock>,
 }
 
 impl KeymapDocument {
     /// Parses one JSONC keymap document and retains each binding's authored source location.
     pub(crate) fn parse(
-        diagnostic_source: &DiagnosticSource,
+        diagnostic_origin: &DiagnosticOrigin,
         source: &str,
     ) -> Result<(Self, Vec<Diagnostic>), Vec<Diagnostic>> {
         let wire_document = match serde_json_lenient::from_str::<WireDocument>(source) {
@@ -45,7 +45,7 @@ impl KeymapDocument {
             Err(error) => {
                 if root_value_starts_with_array(source) {
                     return Err(vec![document_diagnostic(
-                        diagnostic_source,
+                        diagnostic_origin,
                         source,
                         root_value_offset(source),
                         DiagnosticKind::Syntax,
@@ -54,14 +54,14 @@ impl KeymapDocument {
                     )]);
                 }
 
-                return Err(vec![serde_diagnostic(diagnostic_source, source, error)]);
+                return Err(vec![serde_diagnostic(diagnostic_origin, source, error)]);
             },
         };
         let source_index = match SourceIndex::parse(source) {
             Ok(source_index) => source_index,
             Err(error) => {
                 return Err(vec![document_diagnostic(
-                    diagnostic_source,
+                    diagnostic_origin,
                     source,
                     error.offset,
                     DiagnosticKind::Syntax,
@@ -76,10 +76,10 @@ impl KeymapDocument {
         } = source_index;
         let mut diagnostics = unrecognized_root_members
             .into_iter()
-            .map(|member| root_member_diagnostic(diagnostic_source, member))
+            .map(|member| root_member_diagnostic(diagnostic_origin, member))
             .collect();
         let blocks = parse_blocks(
-            diagnostic_source,
+            diagnostic_origin,
             source,
             wire_document.bindings,
             indexed_blocks,
@@ -89,7 +89,7 @@ impl KeymapDocument {
         Ok((
             Self {
                 schema: wire_document.schema,
-                diagnostic_source: diagnostic_source.clone(),
+                diagnostic_origin: diagnostic_origin.clone(),
                 blocks,
             },
             diagnostics,
@@ -98,7 +98,7 @@ impl KeymapDocument {
 }
 
 fn root_member_diagnostic(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     member: IndexedRootMember,
 ) -> Diagnostic {
     let suggestion = RECOGNIZED_ROOT_MEMBERS
@@ -110,7 +110,7 @@ fn root_member_diagnostic(
         .unwrap_or("bindings");
 
     Diagnostic {
-        source:             diagnostic_source.clone(),
+        origin:             diagnostic_origin.clone(),
         byte_range:         member.location.byte_range,
         line:               member.location.line,
         column:             member.location.column,
@@ -147,7 +147,7 @@ fn levenshtein_distance(left: &str, right: &str) -> usize {
 }
 
 fn parse_blocks(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     source: &str,
     wire_blocks: Vec<WireBlock>,
     indexed_blocks: Vec<IndexedBlock>,
@@ -155,7 +155,7 @@ fn parse_blocks(
 ) -> Result<Vec<KeymapBlock>, Vec<Diagnostic>> {
     if wire_blocks.len() != indexed_blocks.len() {
         return Err(vec![document_diagnostic(
-            diagnostic_source,
+            diagnostic_origin,
             source,
             0,
             DiagnosticKind::Syntax,
@@ -174,7 +174,7 @@ fn parse_blocks(
         wire_blocks.into_iter().zip(indexed_blocks).enumerate()
     {
         blocks.push(parse_block(
-            diagnostic_source,
+            diagnostic_origin,
             source,
             wire_block,
             indexed_block,
@@ -188,7 +188,7 @@ fn parse_blocks(
 }
 
 fn parse_block(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     source: &str,
     wire_block: WireBlock,
     indexed_block: IndexedBlock,
@@ -202,7 +202,7 @@ fn parse_block(
         unrecognized_members,
     } = indexed_block;
     let (context, context_source) = parse_context(
-        diagnostic_source,
+        diagnostic_origin,
         wire_block.context,
         indexed_context,
         block_index,
@@ -216,7 +216,7 @@ fn parse_block(
                 ContextExpr::Name(condition_name) => condition_name.as_str().to_owned(),
             });
     let bindings = parse_bindings(
-        diagnostic_source,
+        diagnostic_origin,
         source,
         wire_block.bindings,
         indexed_bindings,
@@ -244,7 +244,7 @@ fn parse_block(
 }
 
 fn parse_context(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     wire_context: WireContext,
     indexed_context: Option<SourceLocation>,
     block_index: usize,
@@ -256,7 +256,7 @@ fn parse_context(
         WireContext::Absent => return (None, None),
         WireContext::Null => {
             diagnostics.push(context_diagnostic(
-                diagnostic_source,
+                diagnostic_origin,
                 context_source.as_ref(),
                 block_index,
                 String::new(),
@@ -271,7 +271,7 @@ fn parse_context(
 
     if !condition_names.insert(context.clone()) {
         diagnostics.push(context_diagnostic(
-            diagnostic_source,
+            diagnostic_origin,
             context_source.as_ref(),
             block_index,
             context.clone(),
@@ -288,7 +288,7 @@ fn parse_context(
 }
 
 fn parse_bindings(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     source: &str,
     wire_bindings: WireBindings,
     locations: Vec<IndexedBinding>,
@@ -298,7 +298,7 @@ fn parse_bindings(
 ) -> Result<Vec<Binding>, Vec<Diagnostic>> {
     if wire_bindings.0.len() != locations.len() {
         return Err(vec![document_diagnostic(
-            diagnostic_source,
+            diagnostic_origin,
             source,
             0,
             DiagnosticKind::Syntax,
@@ -325,7 +325,7 @@ fn parse_bindings(
 
         if !binding_names.insert(original_keystroke.clone()) {
             diagnostics.push(binding_source.diagnostic(
-                diagnostic_source,
+                diagnostic_origin,
                 String::new(),
                 DiagnosticKind::Syntax,
                 DiagnosticSeverity::Advisory,
@@ -339,14 +339,14 @@ fn parse_bindings(
             Ok(keystroke_sequence) => keystroke_sequence,
             Err(error) => {
                 diagnostics.push(binding_source.keystroke_diagnostic(
-                    diagnostic_source,
+                    diagnostic_origin,
                     source,
                     &error,
                 ));
                 continue;
             },
         };
-        let edit = match parse_binding_edit(diagnostic_source, &binding_source, wire_value) {
+        let edit = match parse_binding_edit(diagnostic_origin, &binding_source, wire_value) {
             BindingEditResult::Edit(edit) => edit,
             BindingEditResult::Diagnostic(diagnostic) => {
                 diagnostics.push(diagnostic);
@@ -459,7 +459,7 @@ impl BindingSource {
 
     pub(super) fn diagnostic(
         &self,
-        diagnostic_source: &DiagnosticSource,
+        diagnostic_origin: &DiagnosticOrigin,
         command_id: String,
         kind: DiagnosticKind,
         severity: DiagnosticSeverity,
@@ -467,7 +467,7 @@ impl BindingSource {
     ) -> Diagnostic {
         self.diagnostic_at(
             &self.key,
-            diagnostic_source,
+            diagnostic_origin,
             command_id,
             kind,
             severity,
@@ -477,7 +477,7 @@ impl BindingSource {
 
     pub(super) fn command_diagnostic(
         &self,
-        diagnostic_source: &DiagnosticSource,
+        diagnostic_origin: &DiagnosticOrigin,
         command_id: String,
         kind: DiagnosticKind,
         severity: DiagnosticSeverity,
@@ -485,7 +485,7 @@ impl BindingSource {
     ) -> Diagnostic {
         self.diagnostic_at(
             &self.value,
-            diagnostic_source,
+            diagnostic_origin,
             command_id,
             kind,
             severity,
@@ -496,14 +496,14 @@ impl BindingSource {
     fn diagnostic_at(
         &self,
         location: &SourceLocation,
-        diagnostic_source: &DiagnosticSource,
+        diagnostic_origin: &DiagnosticOrigin,
         command_id: String,
         kind: DiagnosticKind,
         severity: DiagnosticSeverity,
         message: String,
     ) -> Diagnostic {
         Diagnostic {
-            source: diagnostic_source.clone(),
+            origin: diagnostic_origin.clone(),
             byte_range: location.byte_range.clone(),
             line: location.line,
             column: location.column,
@@ -520,13 +520,13 @@ impl BindingSource {
 
     fn keystroke_diagnostic(
         &self,
-        diagnostic_source: &DiagnosticSource,
+        diagnostic_origin: &DiagnosticOrigin,
         source: &str,
         error: &KeystrokeSequenceParseError,
     ) -> Diagnostic {
         match error {
             KeystrokeSequenceParseError::Empty(_) => self.diagnostic(
-                diagnostic_source,
+                diagnostic_origin,
                 String::new(),
                 DiagnosticKind::Keystroke,
                 DiagnosticSeverity::Failure,
@@ -539,7 +539,7 @@ impl BindingSource {
                 let (line, column) = line_and_column(source, start);
 
                 Diagnostic {
-                    source: diagnostic_source.clone(),
+                    origin: diagnostic_origin.clone(),
                     byte_range,
                     line,
                     column,
@@ -563,7 +563,7 @@ enum BindingEditResult {
 }
 
 fn parse_binding_edit(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     binding_source: &BindingSource,
     wire_value: Value,
 ) -> BindingEditResult {
@@ -571,7 +571,7 @@ fn parse_binding_edit(
         Value::String(command_id) => match CommandId::try_from(command_id.as_str()) {
             Ok(command_id) => BindingEditResult::Edit(BindingEdit::Bind(command_id)),
             Err(_) => BindingEditResult::Diagnostic(binding_source.command_diagnostic(
-                diagnostic_source,
+                diagnostic_origin,
                 command_id.clone(),
                 DiagnosticKind::Command,
                 DiagnosticSeverity::Failure,
@@ -582,14 +582,14 @@ fn parse_binding_edit(
         },
         Value::Null => BindingEditResult::Edit(BindingEdit::Unbind),
         Value::Array(_) => BindingEditResult::Diagnostic(binding_source.diagnostic(
-            diagnostic_source,
+            diagnostic_origin,
             String::new(),
             DiagnosticKind::Syntax,
             DiagnosticSeverity::Failure,
             "Binding arguments are not yet supported.".to_owned(),
         )),
         _ => BindingEditResult::Diagnostic(binding_source.diagnostic(
-            diagnostic_source,
+            diagnostic_origin,
             String::new(),
             DiagnosticKind::Syntax,
             DiagnosticSeverity::Failure,
@@ -599,7 +599,7 @@ fn parse_binding_edit(
 }
 
 fn context_diagnostic(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     context_source: Option<&ContextSource>,
     block_index: usize,
     context: String,
@@ -620,7 +620,7 @@ fn context_diagnostic(
     );
 
     Diagnostic {
-        source: diagnostic_source.clone(),
+        origin: diagnostic_origin.clone(),
         byte_range,
         line,
         column,
@@ -636,14 +636,14 @@ fn context_diagnostic(
 }
 
 fn serde_diagnostic(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     source: &str,
     error: Error,
 ) -> Diagnostic {
     let byte_offset = byte_offset(source, error.line(), error.column());
 
     document_diagnostic(
-        diagnostic_source,
+        diagnostic_origin,
         source,
         byte_offset,
         DiagnosticKind::Syntax,
@@ -652,7 +652,7 @@ fn serde_diagnostic(
 }
 
 fn document_diagnostic(
-    diagnostic_source: &DiagnosticSource,
+    diagnostic_origin: &DiagnosticOrigin,
     source: &str,
     byte_offset: usize,
     kind: DiagnosticKind,
@@ -661,7 +661,7 @@ fn document_diagnostic(
     let (line, column) = line_and_column(source, byte_offset);
 
     Diagnostic {
-        source: diagnostic_source.clone(),
+        origin: diagnostic_origin.clone(),
         byte_range: byte_offset..byte_offset,
         line,
         column,
@@ -1259,14 +1259,14 @@ mod tests {
     use super::BindingEdit;
     use super::ContextExpr;
     use super::DiagnosticKind;
-    use super::DiagnosticSource;
+    use super::DiagnosticOrigin;
     use super::KeymapDocument;
     use super::SourceIndex;
 
     const SOURCE_PATH: &str = "keymap.jsonc";
 
-    fn keymap_file() -> DiagnosticSource {
-        DiagnosticSource::KeymapFile(PathBuf::from(SOURCE_PATH))
+    fn keymap_file() -> DiagnosticOrigin {
+        DiagnosticOrigin::KeymapFile(PathBuf::from(SOURCE_PATH))
     }
 
     fn assert_binding_key_slice(source: &str, binding_index: usize, expected_key: &str) {

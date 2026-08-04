@@ -17,8 +17,8 @@ use crate::CommandRegistry;
 use crate::DerivedContext;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
-use crate::DiagnosticSource;
 use crate::KeymapContext;
 use crate::KeymapLoadFailures;
 use crate::Keystroke;
@@ -200,7 +200,7 @@ impl KeymapPlugin {
         let allow_default_failures = app.world().contains_resource::<RegistryValidationFailed>();
         app.world_mut()
             .insert_resource(keymap::ReloadConfiguration::new(
-                DiagnosticSource::EmbeddedDefaults,
+                DiagnosticOrigin::EmbeddedDefaults,
                 published_defaults.clone(),
                 keymap_plugin_configuration.protected_keystrokes,
                 allow_default_failures,
@@ -230,7 +230,7 @@ impl KeymapPlugin {
                 record_startup_diagnostics(
                     app,
                     &[startup_diagnostic(
-                        DiagnosticSource::KeymapFile(paths.schema().to_path_buf()),
+                        DiagnosticOrigin::KeymapFile(paths.schema().to_path_buf()),
                         DiagnosticKind::Companion,
                         &format!("Could not generate the keymap schema: {error}"),
                     )],
@@ -368,7 +368,7 @@ fn record_unconfigured_keymap_plugin(app: &mut App) {
     record_startup_diagnostics(
         app,
         &[startup_diagnostic(
-            DiagnosticSource::EmbeddedDefaults,
+            DiagnosticOrigin::EmbeddedDefaults,
             DiagnosticKind::UnconfiguredKeymapPlugin,
             "Could not compile any bindings because the keymap plugin was added without an \
              application name, an embedded default keymap, or a protected keystroke.",
@@ -380,7 +380,7 @@ fn record_missing_default_keymap(app: &mut App) {
     record_startup_diagnostics(
         app,
         &[startup_diagnostic(
-            DiagnosticSource::EmbeddedDefaults,
+            DiagnosticOrigin::EmbeddedDefaults,
             DiagnosticKind::MissingDefaultKeymap,
             "Could not compile any bindings because the keymap plugin was configured without an \
              embedded default keymap.",
@@ -392,16 +392,16 @@ fn record_unavailable_keymap_paths(app: &mut App, keymap_path_failure: KeymapPat
     record_startup_diagnostics(
         app,
         &[startup_diagnostic(
-            DiagnosticSource::PathsUnavailable(keymap_path_failure),
+            DiagnosticOrigin::PathsUnavailable(keymap_path_failure),
             DiagnosticKind::Disk,
             keymap_path_failure.reason(),
         )],
     );
 }
 
-fn startup_diagnostic(source: DiagnosticSource, kind: DiagnosticKind, message: &str) -> Diagnostic {
+fn startup_diagnostic(origin: DiagnosticOrigin, kind: DiagnosticKind, message: &str) -> Diagnostic {
     Diagnostic {
-        source,
+        origin,
         byte_range: 0..0,
         line: 0,
         column: 0,
@@ -485,7 +485,7 @@ mod tests {
     use crate::ActiveConditionState;
     use crate::Capability;
     use crate::DiagnosticKind;
-    use crate::DiagnosticSource;
+    use crate::DiagnosticOrigin;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeymapLoadFailures;
@@ -637,7 +637,7 @@ mod tests {
                 .all_diagnostics()
                 .any(|diagnostic| {
                     diagnostic.kind == DiagnosticKind::MissingDefaultKeymap
-                        && diagnostic.source == DiagnosticSource::EmbeddedDefaults
+                        && diagnostic.origin == DiagnosticOrigin::EmbeddedDefaults
                 })
         );
         assert!(!app.world().contains_resource::<CompiledKeymap>());
@@ -732,7 +732,7 @@ mod tests {
                 .all_diagnostics()
                 .any(|diagnostic| {
                     diagnostic.kind == DiagnosticKind::UnconfiguredKeymapPlugin
-                        && diagnostic.source == DiagnosticSource::EmbeddedDefaults
+                        && diagnostic.origin == DiagnosticOrigin::EmbeddedDefaults
                 })
         );
         assert_eq!(
@@ -1182,8 +1182,8 @@ mod tests {
                 .retained_diagnostics
                 .iter()
                 .any(|diagnostic| {
-                    diagnostic.source
-                        == DiagnosticSource::PathsUnavailable(
+                    diagnostic.origin
+                        == DiagnosticOrigin::PathsUnavailable(
                             KeymapPathFailure::NoPlatformConfigurationDirectory,
                         )
                         && diagnostic.message
@@ -1210,7 +1210,7 @@ mod tests {
         super::record_startup_diagnostics(
             &mut app,
             &[super::startup_diagnostic(
-                DiagnosticSource::KeymapFile(PathBuf::from(UNCREATABLE_KEYMAP_DIRECTORY)),
+                DiagnosticOrigin::KeymapFile(PathBuf::from(UNCREATABLE_KEYMAP_DIRECTORY)),
                 DiagnosticKind::Disk,
                 "The keymap directory could not be created.",
             )],

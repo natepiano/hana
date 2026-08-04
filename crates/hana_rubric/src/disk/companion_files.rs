@@ -17,8 +17,8 @@ use super::constants::TEMPORARY_FILE_ATTEMPTS;
 use super::paths::KeymapPaths;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
-use crate::DiagnosticSource;
 
 static NEXT_TEMPORARY_FILE_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -29,7 +29,7 @@ pub(super) fn publish_companion_files(
 ) -> Vec<Diagnostic> {
     if let Err(error) = fs::create_dir_all(paths.config_directory()) {
         return vec![companion_diagnostic(
-            DiagnosticSource::KeymapDirectory(paths.config_directory().to_path_buf()),
+            DiagnosticOrigin::KeymapDirectory(paths.config_directory().to_path_buf()),
             error,
         )];
     }
@@ -43,7 +43,7 @@ pub(super) fn publish_companion_files(
     for (path, contents) in companions {
         if let Err(error) = publish_companion_file(path, contents) {
             diagnostics.push(companion_diagnostic(
-                DiagnosticSource::KeymapFile(path.to_path_buf()),
+                DiagnosticOrigin::KeymapFile(path.to_path_buf()),
                 error,
             ));
         }
@@ -152,9 +152,9 @@ fn replace_file(temporary_path: &Path, destination: &Path) -> io::Result<()> {
 
 fn remove_temporary_file(temporary_path: &Path) { let _ = fs::remove_file(temporary_path); }
 
-fn companion_diagnostic(source: DiagnosticSource, error: Error) -> Diagnostic {
+fn companion_diagnostic(origin: DiagnosticOrigin, error: Error) -> Diagnostic {
     Diagnostic {
-        source,
+        origin,
         byte_range: 0..0,
         line: 0,
         column: 0,

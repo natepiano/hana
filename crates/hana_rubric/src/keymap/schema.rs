@@ -194,7 +194,7 @@ mod tests {
 
     use crate::Capability;
     use crate::CommandRegistry;
-    use crate::DiagnosticSource;
+    use crate::DiagnosticOrigin;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::Keystroke;
@@ -207,8 +207,8 @@ mod tests {
 
     const PUBLISHED_DEFAULTS_PATH: &str = "published-defaults.jsonc";
 
-    fn published_defaults_keymap_file() -> DiagnosticSource {
-        DiagnosticSource::KeymapFile(PathBuf::from(PUBLISHED_DEFAULTS_PATH))
+    fn published_defaults_keymap_file() -> DiagnosticOrigin {
+        DiagnosticOrigin::KeymapFile(PathBuf::from(PUBLISHED_DEFAULTS_PATH))
     }
 
     #[derive(AsRefStr, Clone, Copy, Debug, EnumIter, EnumMessage, Eq, PartialEq)]

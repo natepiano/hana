@@ -14,8 +14,8 @@ use super::merged::UserKeymap;
 use crate::CommandRegistry;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
-use crate::DiagnosticSource;
 use crate::KeymapLoadFailures;
 use crate::Keystroke;
 use crate::condition::ConditionRegistry;
@@ -24,7 +24,7 @@ use crate::disk::MAX_RETAINED_DIAGNOSTICS;
 /// Sources shared by every keymap replacement transaction.
 #[derive(Clone, Resource)]
 pub(crate) struct ReloadConfiguration {
-    defaults_diagnostic_source: DiagnosticSource,
+    defaults_diagnostic_origin: DiagnosticOrigin,
     published_defaults:         String,
     protected_keystrokes:       Vec<Keystroke>,
     allow_default_failures:     bool,
@@ -32,13 +32,13 @@ pub(crate) struct ReloadConfiguration {
 
 impl ReloadConfiguration {
     pub(crate) const fn new(
-        defaults_diagnostic_source: DiagnosticSource,
+        defaults_diagnostic_origin: DiagnosticOrigin,
         published_defaults: String,
         protected_keystrokes: Vec<Keystroke>,
         allow_default_failures: bool,
     ) -> Self {
         Self {
-            defaults_diagnostic_source,
+            defaults_diagnostic_origin,
             published_defaults,
             protected_keystrokes,
             allow_default_failures,
@@ -114,7 +114,7 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
             UserKeymapContents::Read(contents) => {
                 let user_keymap = match str::from_utf8(&contents) {
                     Ok(source) => UserKeymap::Layered {
-                        origin:   DiagnosticSource::KeymapFile(source_path),
+                        origin:   DiagnosticOrigin::KeymapFile(source_path),
                         contents: source.to_owned(),
                     },
                     Err(error) => {
@@ -138,7 +138,7 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
     let merged_keymap = world.resource_scope::<CommandRegistry, _>(|world, command_registry| {
         let condition_registry = world.resource::<ConditionRegistry>();
         MergedKeymap::from_sources(
-            &reload_configuration.defaults_diagnostic_source,
+            &reload_configuration.defaults_diagnostic_origin,
             &reload_configuration.published_defaults,
             &user_keymap,
             &command_registry,
@@ -157,7 +157,7 @@ fn commit_request(world: &mut World, request: ReloadRequest) -> CommitOutcome {
 
     let defaults_failed = validates_defaults
         && diagnostics.iter().any(|diagnostic| {
-            diagnostic.source == reload_configuration.defaults_diagnostic_source
+            diagnostic.origin == reload_configuration.defaults_diagnostic_origin
                 && diagnostic.severity == DiagnosticSeverity::Failure
         });
     if defaults_failed && !reload_configuration.allow_default_failures {
@@ -185,7 +185,7 @@ fn next_generation(world: &World) -> Generation {
 
 fn utf8_diagnostic(source_path: PathBuf, error: Utf8Error) -> Diagnostic {
     Diagnostic {
-        source:             DiagnosticSource::KeymapFile(source_path),
+        origin:             DiagnosticOrigin::KeymapFile(source_path),
         byte_range:         0..0,
         line:               0,
         column:             0,
@@ -281,7 +281,7 @@ mod tests {
     use crate::Capability;
     use crate::CommandId;
     use crate::CommandRegistry;
-    use crate::DiagnosticSource;
+    use crate::DiagnosticOrigin;
     use crate::HeldCommandLookupOutcome;
     use crate::HoldPhase;
     use crate::KeymapCommand;
@@ -365,7 +365,7 @@ mod tests {
             .init_resource::<PendingReload>()
             .init_resource::<ReloadDispatchCount>()
             .insert_resource(ReloadConfiguration::new(
-                DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH)),
+                DiagnosticOrigin::KeymapFile(PathBuf::from(DEFAULTS_PATH)),
                 defaults.to_owned(),
                 Vec::new(),
                 false,
@@ -484,8 +484,8 @@ mod tests {
                 .diagnostics
                 .iter()
                 .any(|diagnostic| {
-                    diagnostic.source
-                        == DiagnosticSource::KeymapFile(PathBuf::from(USER_KEYMAP_FIXTURE))
+                    diagnostic.origin
+                        == DiagnosticOrigin::KeymapFile(PathBuf::from(USER_KEYMAP_FIXTURE))
                 })
         );
         Ok(())

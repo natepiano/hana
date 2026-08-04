@@ -17,8 +17,8 @@ use std::thread::JoinHandle;
 use super::watch::TestWatcher;
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
-use crate::DiagnosticSource;
 use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
 
 /// A complete user-keymap state produced by the disk worker.
@@ -215,14 +215,14 @@ pub(super) enum WorkerControl {
 
 pub(super) fn disk_error_diagnostic(path: &Path, action: &str, error: &Error) -> Diagnostic {
     disk_diagnostic(
-        DiagnosticSource::KeymapFile(path.to_path_buf()),
+        DiagnosticOrigin::KeymapFile(path.to_path_buf()),
         &format!("{action}: {error}"),
     )
 }
 
-pub(super) fn disk_diagnostic(source: DiagnosticSource, message: &str) -> Diagnostic {
+pub(super) fn disk_diagnostic(origin: DiagnosticOrigin, message: &str) -> Diagnostic {
     Diagnostic {
-        source,
+        origin,
         byte_range: 0..0,
         line: 0,
         column: 0,
@@ -239,7 +239,7 @@ pub(super) fn disk_diagnostic(source: DiagnosticSource, message: &str) -> Diagno
 
 fn discarded_diagnostics_diagnostic(discarded_diagnostics: usize) -> Diagnostic {
     disk_diagnostic(
-        DiagnosticSource::DiskWorker,
+        DiagnosticOrigin::DiskWorker,
         &format!("{discarded_diagnostics} older disk diagnostics were discarded before delivery."),
     )
 }
@@ -256,7 +256,7 @@ mod tests {
     use super::DiskSnapshot;
     use super::DiskWorkerMessage;
     use super::disk_diagnostic;
-    use crate::DiagnosticSource;
+    use crate::DiagnosticOrigin;
     use crate::disk::KeymapPathAvailability;
     use crate::disk::KeymapPaths;
     use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
@@ -308,7 +308,7 @@ mod tests {
             slot.publish(DiskWorkerMessage {
                 snapshot:              None,
                 diagnostics:           vec![disk_diagnostic(
-                    DiagnosticSource::KeymapFile(paths.user_keymap().to_path_buf()),
+                    DiagnosticOrigin::KeymapFile(paths.user_keymap().to_path_buf()),
                     &format!("distinct disk diagnostic {index}"),
                 )],
                 discarded_diagnostics: 0,

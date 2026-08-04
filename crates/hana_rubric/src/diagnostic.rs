@@ -49,10 +49,10 @@ pub enum DiagnosticKind {
     UnconfiguredKeymapPlugin,
 }
 
-/// What produced a [`Diagnostic`]. Only [`DiagnosticSource::KeymapFile`] names a keymap source
+/// What produced a [`Diagnostic`]. Only [`DiagnosticOrigin::KeymapFile`] names a keymap source
 /// file; a consumer picks its rendering from the variant and never inspects the path's form.
 #[derive(Clone, Debug, Eq, PartialEq, Reflect)]
-pub enum DiagnosticSource {
+pub enum DiagnosticOrigin {
     /// A keymap file read from disk, named by the path it was read from.
     KeymapFile(PathBuf),
     /// The keymap configuration directory itself, for failures that belong to no single file —
@@ -72,7 +72,7 @@ pub enum DiagnosticSource {
     PathsUnavailable(KeymapPathFailure),
 }
 
-impl fmt::Display for DiagnosticSource {
+impl fmt::Display for DiagnosticOrigin {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::KeymapFile(path) | Self::KeymapDirectory(path) => {
@@ -106,8 +106,8 @@ pub enum DiagnosticSeverity {
 #[derive(Clone, Debug, Eq, PartialEq, Reflect)]
 pub struct Diagnostic {
     /// What produced this diagnostic.
-    pub source:             DiagnosticSource,
-    /// Byte range within the contents of [`Self::source`] that identifies
+    pub origin:             DiagnosticOrigin,
+    /// Byte range within the contents of [`Self::origin`] that identifies
     /// the problem.
     pub byte_range:         Range<usize>,
     /// One-based source line containing [`Self::byte_range`].
@@ -163,8 +163,8 @@ mod tests {
 
     use super::Diagnostic;
     use super::DiagnosticKind;
+    use super::DiagnosticOrigin;
     use super::DiagnosticSeverity;
-    use super::DiagnosticSource;
     use super::KeymapLoadFailures;
     use crate::KeymapPathFailure;
 
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn diagnostic_fields_use_only_stable_data_types() {
         let diagnostic = Diagnostic {
-            source:             DiagnosticSource::KeymapFile(PathBuf::from(KEYMAP_FIXTURE)),
+            origin:             DiagnosticOrigin::KeymapFile(PathBuf::from(KEYMAP_FIXTURE)),
             byte_range:         0..1,
             line:               1,
             column:             1,
@@ -194,7 +194,7 @@ mod tests {
 
         let diagnostic = &keymap_load_failures.diagnostics[0];
         let _: &Range<usize> = &diagnostic.byte_range;
-        let _: &DiagnosticSource = &diagnostic.source;
+        let _: &DiagnosticOrigin = &diagnostic.origin;
         let _: &String = &diagnostic.context;
         let _: &String = &diagnostic.original_keystroke;
         let _: &String = &diagnostic.command_id;
@@ -207,17 +207,17 @@ mod tests {
     }
 
     #[test]
-    fn every_diagnostic_source_renders_a_distinct_label() {
+    fn every_diagnostic_origin_renders_a_distinct_label() {
         let labels = [
-            DiagnosticSource::KeymapFile(PathBuf::from(KEYMAP_FIXTURE)),
-            DiagnosticSource::KeymapDirectory(PathBuf::from(KEYMAP_DIRECTORY_FIXTURE)),
-            DiagnosticSource::EmbeddedDefaults,
-            DiagnosticSource::ContextRegistration,
-            DiagnosticSource::CommandRegistration,
-            DiagnosticSource::DiskWorker,
-            DiagnosticSource::PathsUnavailable(KeymapPathFailure::AppNameNotConfigured),
+            DiagnosticOrigin::KeymapFile(PathBuf::from(KEYMAP_FIXTURE)),
+            DiagnosticOrigin::KeymapDirectory(PathBuf::from(KEYMAP_DIRECTORY_FIXTURE)),
+            DiagnosticOrigin::EmbeddedDefaults,
+            DiagnosticOrigin::ContextRegistration,
+            DiagnosticOrigin::CommandRegistration,
+            DiagnosticOrigin::DiskWorker,
+            DiagnosticOrigin::PathsUnavailable(KeymapPathFailure::AppNameNotConfigured),
         ]
-        .map(|diagnostic_source| diagnostic_source.to_string());
+        .map(|diagnostic_origin| diagnostic_origin.to_string());
 
         assert_eq!(labels[0], KEYMAP_FIXTURE);
         assert_eq!(labels.iter().collect::<HashSet<_>>().len(), labels.len());

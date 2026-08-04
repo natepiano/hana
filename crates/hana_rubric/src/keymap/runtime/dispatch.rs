@@ -539,7 +539,7 @@ mod tests {
     use super::route_input;
     use crate::ActiveCondition;
     use crate::CommandRegistry;
-    use crate::DiagnosticSource;
+    use crate::DiagnosticOrigin;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeymapPlugin;
@@ -561,8 +561,8 @@ mod tests {
     const FIRST_GENERATION: Generation = Generation(1);
     const SECOND_GENERATION: Generation = Generation(2);
 
-    fn defaults_keymap_file() -> DiagnosticSource {
-        DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH))
+    fn defaults_keymap_file() -> DiagnosticOrigin {
+        DiagnosticOrigin::KeymapFile(PathBuf::from(DEFAULTS_PATH))
     }
 
     crate::command! {

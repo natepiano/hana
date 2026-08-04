@@ -24,8 +24,8 @@ use strum::IntoEnumIterator;
 
 use crate::Diagnostic;
 use crate::DiagnosticKind;
+use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
-use crate::DiagnosticSource;
 use crate::KeymapLoadFailures;
 use crate::KeymapSystems;
 use crate::keymap_plugin::RegistryValidationFailed;
@@ -309,7 +309,7 @@ pub(crate) fn condition_diagnostic(
     message: String,
 ) -> Diagnostic {
     Diagnostic {
-        source: DiagnosticSource::ContextRegistration,
+        origin: DiagnosticOrigin::ContextRegistration,
         byte_range: 0..0,
         line: 0,
         column: 0,
@@ -491,8 +491,8 @@ mod tests {
     use super::KeymapContext;
     use super::sync_resource_condition;
     use crate::DiagnosticKind;
+    use crate::DiagnosticOrigin;
     use crate::DiagnosticSeverity;
-    use crate::DiagnosticSource;
     use crate::KeymapPlugin;
 
     /// Frames the allocation test runs before measuring, so every routing structure the sync
@@ -557,7 +557,7 @@ mod tests {
             String::from("Duplicate keymap context name."),
         );
 
-        assert_eq!(diagnostic.source, DiagnosticSource::ContextRegistration);
+        assert_eq!(diagnostic.origin, DiagnosticOrigin::ContextRegistration);
     }
 
     #[test]

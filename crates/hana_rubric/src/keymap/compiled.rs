@@ -305,7 +305,7 @@ mod tests {
     use super::Generation;
     use crate::Capability;
     use crate::CommandRegistry;
-    use crate::DiagnosticSource;
+    use crate::DiagnosticOrigin;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeystrokeSequence;
@@ -319,8 +319,8 @@ mod tests {
     const DEFAULTS_PATH: &str = "defaults.jsonc";
     const MATCH_TIMEOUT: Duration = Duration::from_secs(1);
 
-    fn defaults_keymap_file() -> DiagnosticSource {
-        DiagnosticSource::KeymapFile(PathBuf::from(DEFAULTS_PATH))
+    fn defaults_keymap_file() -> DiagnosticOrigin {
+        DiagnosticOrigin::KeymapFile(PathBuf::from(DEFAULTS_PATH))
     }
 
     #[derive(Default, Event, Reflect)]
