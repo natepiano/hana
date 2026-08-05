@@ -6,9 +6,8 @@ use hana_lagrange::FreeCamInputMode;
 use hana_lagrange::FreeCamLookPitch;
 use hana_lagrange::FreeCamPreset;
 use hana_lagrange::ResolvedCameraInputRoute;
-use hana_rubric::action;
-use hana_rubric::bind_action_system;
-use hana_rubric::event;
+use hana_rubric::ReflectKeymapCommand;
+use hana_rubric::command;
 
 use super::CameraGuidancePanel;
 use crate::ensure_plugin;
@@ -29,11 +28,13 @@ impl Default for FreeCamLookPitchPreference {
     fn default() -> Self { Self(FreeCamLookPitch::Inverted) }
 }
 
-#[derive(Component)]
-struct FairyDustFreeCamSettingsContext;
-
-action!(ToggleFreeCamLookPitch);
-event!(ToggleFreeCamLookPitchEvent);
+command! {
+    action:      ToggleFreeCamLookPitch,
+    event:       ToggleFreeCamLookPitchEvent,
+    id:          "fairy_dust::toggle_free_cam_look_pitch",
+    title:       "Toggle Free Camera Look Pitch",
+    description: "Swap the free camera between inverted and standard mouse pitch.",
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookPitchUpdate {
@@ -44,14 +45,7 @@ enum LookPitchUpdate {
 pub(super) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
     app.init_resource::<FreeCamLookPitchPreference>();
-    app.add_input_context::<FairyDustFreeCamSettingsContext>();
-    app.add_systems(Startup, spawn_settings_action);
-    bind_action_system!(
-        app,
-        ToggleFreeCamLookPitch,
-        ToggleFreeCamLookPitchEvent,
-        toggle_look_pitch
-    );
+    app.add_observer(toggle_look_pitch);
 }
 
 pub(super) const fn preset_with_look_pitch(
@@ -66,19 +60,8 @@ pub(super) const fn preset_with_look_pitch(
     }
 }
 
-fn spawn_settings_action(mut commands: Commands) {
-    commands.spawn((
-        FairyDustFreeCamSettingsContext,
-        actions!(FairyDustFreeCamSettingsContext[
-            (
-                Action::<ToggleFreeCamLookPitch>::new(),
-                bindings![KeyCode::KeyI.with_mod_keys(ModKeys::ALT)],
-            ),
-        ]),
-    ));
-}
-
 fn toggle_look_pitch(
+    _: On<ToggleFreeCamLookPitchEvent>,
     route: Res<ResolvedCameraInputRoute>,
     panels: Query<&CameraGuidancePanel>,
     mut preference: ResMut<FreeCamLookPitchPreference>,

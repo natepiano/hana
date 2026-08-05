@@ -49,6 +49,7 @@ use hana_lagrange::OrbitCamInteractionState;
 use hana_lagrange::ResolvedCameraInputRoute;
 use layout::build_guidance_tree;
 pub(crate) use preset_switch::CameraPresetSwitching;
+pub(crate) use preset_switch::CyclePresetEvent;
 use snapshot::CameraGuidanceSnapshot;
 use snapshot::resolve_guidance_snapshot;
 

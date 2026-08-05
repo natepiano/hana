@@ -244,6 +244,7 @@ impl KeymapPlugin {
                         DiagnosticOrigin::KeymapFile(paths.schema().to_path_buf()),
                         DiagnosticKind::Companion,
                         &format!("Could not generate the keymap schema: {error}"),
+                        DiagnosticSeverity::Failure,
                     )],
                 );
                 None
@@ -348,7 +349,10 @@ fn collect_disk_reload(
 
 fn record_startup_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
     for diagnostic in diagnostics {
-        bevy::log::error!("{}", diagnostic.message);
+        match diagnostic.severity {
+            DiagnosticSeverity::Failure => bevy::log::error!("{}", diagnostic.message),
+            DiagnosticSeverity::Advisory => bevy::log::warn!("{}", diagnostic.message),
+        }
     }
     app.world_mut()
         .resource_mut::<KeymapLoadFailures>()
@@ -383,6 +387,7 @@ fn record_unconfigured_keymap_plugin(app: &mut App) {
             DiagnosticKind::UnconfiguredKeymapPlugin,
             "Could not compile any bindings because the keymap plugin was added without an \
              application name, an embedded default keymap, or a protected keystroke.",
+            DiagnosticSeverity::Failure,
         )],
     );
 }
@@ -395,22 +400,39 @@ fn record_missing_default_keymap(app: &mut App) {
             DiagnosticKind::MissingDefaultKeymap,
             "Could not compile any bindings because the keymap plugin was configured without an \
              embedded default keymap.",
+            DiagnosticSeverity::Failure,
         )],
     );
 }
 
+/// Reports the configuration directory the keymap could not resolve.
+///
+/// An application that never named one asked for nothing and is refused nothing,
+/// so that case is advisory. An application that named one and still has no
+/// directory cannot read or write the user's keymap, which is a failure.
 fn record_unavailable_keymap_paths(app: &mut App, keymap_path_failure: KeymapPathFailure) {
+    let severity = match keymap_path_failure {
+        KeymapPathFailure::AppNameNotConfigured => DiagnosticSeverity::Advisory,
+        KeymapPathFailure::AppNameNotOnePathComponent
+        | KeymapPathFailure::NoPlatformConfigurationDirectory => DiagnosticSeverity::Failure,
+    };
     record_startup_diagnostics(
         app,
         &[startup_diagnostic(
             DiagnosticOrigin::PathsUnavailable(keymap_path_failure),
             DiagnosticKind::Disk,
             keymap_path_failure.reason(),
+            severity,
         )],
     );
 }
 
-fn startup_diagnostic(origin: DiagnosticOrigin, kind: DiagnosticKind, message: &str) -> Diagnostic {
+fn startup_diagnostic(
+    origin: DiagnosticOrigin,
+    kind: DiagnosticKind,
+    message: &str,
+    severity: DiagnosticSeverity,
+) -> Diagnostic {
     Diagnostic {
         origin,
         byte_range: 0..0,
@@ -421,7 +443,7 @@ fn startup_diagnostic(origin: DiagnosticOrigin, kind: DiagnosticKind, message: &
         original_keystroke: String::new(),
         command_id: String::new(),
         kind,
-        severity: DiagnosticSeverity::Failure,
+        severity,
         message: message.to_owned(),
         suggestions: Vec::new(),
     }
@@ -497,6 +519,7 @@ mod tests {
     use crate::Capability;
     use crate::DiagnosticKind;
     use crate::DiagnosticOrigin;
+    use crate::DiagnosticSeverity;
     use crate::HoldPhase;
     use crate::KeymapCommand;
     use crate::KeymapLoadFailures;
@@ -1203,6 +1226,77 @@ mod tests {
         );
     }
 
+    /// An application that never named a configuration directory asked for
+    /// nothing and was refused nothing, so it is advisory. One that named a
+    /// directory and still has none cannot read or write the user's keymap.
+    #[test]
+    fn keymap_path_failure_severity_follows_its_cause() {
+        for (keymap_path_failure, expected_severity) in [
+            (
+                KeymapPathFailure::AppNameNotConfigured,
+                DiagnosticSeverity::Advisory,
+            ),
+            (
+                KeymapPathFailure::AppNameNotOnePathComponent,
+                DiagnosticSeverity::Failure,
+            ),
+            (
+                KeymapPathFailure::NoPlatformConfigurationDirectory,
+                DiagnosticSeverity::Failure,
+            ),
+        ] {
+            let mut app = App::new();
+            app.init_resource::<KeymapLoadFailures>();
+            super::record_unavailable_keymap_paths(&mut app, keymap_path_failure);
+
+            let diagnostic = app
+                .world()
+                .resource::<KeymapLoadFailures>()
+                .retained_diagnostics
+                .first()
+                .cloned()
+                .expect("the unavailable paths are recorded");
+            assert_eq!(diagnostic.severity, expected_severity);
+        }
+    }
+
+    /// The baseline Fairy Dust install names no application, so its startup
+    /// report must not read as a failure the developer has to repair.
+    #[test]
+    fn an_unnamed_application_reports_its_missing_directory_as_advisory() {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("unnamed-advisory").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let mut app = App::new();
+        register_plugin_command(&mut app);
+        app.add_plugins(
+            KeymapPlugin::new()
+                .with_defaults(r#"{ "bindings": [{ "bindings": { "g": "plugin::dispatch" } }] }"#),
+        );
+        app.finish();
+
+        let diagnostic = app
+            .world()
+            .resource::<KeymapLoadFailures>()
+            .all_diagnostics()
+            .find(|diagnostic| {
+                diagnostic.origin
+                    == DiagnosticOrigin::PathsUnavailable(KeymapPathFailure::AppNameNotConfigured)
+            })
+            .cloned()
+            .expect("an unnamed application records its unresolved directory");
+
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Advisory);
+
+        drop(app);
+        drop(xdg_config_home);
+        drop(temporary_directory);
+        drop(environment_lock);
+    }
+
     #[test]
     fn retained_disk_diagnostic_does_not_allow_an_unresolvable_shipped_default() {
         let environment_lock = ENVIRONMENT_LOCK
@@ -1224,6 +1318,7 @@ mod tests {
                 DiagnosticOrigin::KeymapFile(PathBuf::from(UNCREATABLE_KEYMAP_DIRECTORY)),
                 DiagnosticKind::Disk,
                 "The keymap directory could not be created.",
+                DiagnosticSeverity::Failure,
             )],
         );
         assert_isolated_paths(&temporary_directory);

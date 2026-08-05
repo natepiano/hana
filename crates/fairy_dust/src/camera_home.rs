@@ -21,8 +21,10 @@
 use std::time::Duration;
 
 use bevy::camera::primitives::Aabb;
+use bevy::prelude::ReflectEvent;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
+use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::*;
 use hana_diegetic::Anchor;
 use hana_lagrange::AnimateToFit;
@@ -43,9 +45,8 @@ use hana_lagrange::OrbitCamInputMode;
 use hana_lagrange::OrbitCamInteractionStarted;
 use hana_lagrange::OrbitCamPreset;
 use hana_lagrange::OrbitCamPresetKind;
-use hana_rubric::action;
-use hana_rubric::bind_action_system;
-use hana_rubric::event;
+use hana_rubric::ReflectKeymapCommand;
+use hana_rubric::command;
 
 use crate::constants::AABB_CORNER_SIGNS;
 use crate::constants::HOME_AABB_GIZMO_COLOR;
@@ -62,13 +63,15 @@ use crate::screen_panels::HomeTitleBarFlash;
 use crate::screen_panels::TitleBarControlState;
 use crate::shortcuts;
 
-#[derive(Component)]
-struct CameraHomeContext;
-
 type HomeFitCameraFilter = Or<(With<FairyDustOrbitCam>, With<FreeCam>)>;
 
-action!(ToggleHomeAabbGizmo);
-event!(ToggleHomeAabbGizmoEvent);
+command! {
+    action:      ToggleHomeAabbGizmo,
+    event:       ToggleHomeAabbGizmoEvent,
+    id:          "fairy_dust::toggle_home_aabb_gizmo",
+    title:       "Toggle Home Bounds Gizmo",
+    description: "Draw a wireframe of the region the camera home framing fits.",
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum InitialAnimateState {
@@ -136,7 +139,12 @@ struct HomeAabbGizmoVisible(bool);
 /// Flips [`HomeAabbGizmoVisible`] on Ctrl+Shift+A. The gizmo combo is a chord,
 /// not a single key, so it doesn't collide with bare-`A` bindings the caller
 /// may have.
-fn toggle_home_aabb_gizmo(mut visible: ResMut<HomeAabbGizmoVisible>) { visible.0 = !visible.0; }
+fn toggle_home_aabb_gizmo(
+    _: On<ToggleHomeAabbGizmoEvent>,
+    mut visible: ResMut<HomeAabbGizmoVisible>,
+) {
+    visible.0 = !visible.0;
+}
 
 /// Draws a wireframe of the home cube — sized to the union of every
 /// [`CameraHomeTarget`] entity — while [`HomeAabbGizmoVisible`] is on. Lets
@@ -164,9 +172,8 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.insert_resource(config);
     app.init_resource::<AtHome>();
     app.init_resource::<HomeAabbGizmoVisible>();
-    app.add_input_context::<CameraHomeContext>();
-    shortcuts::reserve_key::<CameraHomeContext>(app, HOME_KEY, HOME_CONTROL);
-    app.add_systems(Startup, (spawn_home_marker, spawn_home_debug_actions));
+    shortcuts::reserve_key::<CameraHomeConfig>(app, HOME_KEY, HOME_CONTROL);
+    app.add_systems(Startup, spawn_home_marker);
     app.add_systems(
         PreUpdate,
         fill_camera_home_presets.before(CameraInputPhase::PreInput),
@@ -185,30 +192,13 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     );
     // Ctrl+Shift+A debug toggle — always available, opt-in by keypress.
     app.add_systems(Update, draw_home_aabb_gizmo);
-    bind_action_system!(
-        app,
-        ToggleHomeAabbGizmo,
-        ToggleHomeAabbGizmoEvent,
-        toggle_home_aabb_gizmo
-    );
+    app.add_observer(toggle_home_aabb_gizmo);
     app.add_observer(on_home_animation_begin);
     app.add_observer(on_home_animation_end);
     app.add_observer(on_non_home_animation_begin);
     app.add_observer(on_camera_homed);
     app.add_observer(on_orbit_user_interaction_started);
     app.add_observer(on_free_user_interaction_started);
-}
-
-fn spawn_home_debug_actions(mut commands: Commands) {
-    commands.spawn((
-        CameraHomeContext,
-        actions!(CameraHomeContext[
-            (
-                Action::<ToggleHomeAabbGizmo>::new(),
-                bindings![KeyCode::KeyA.with_mod_keys(ModKeys::CONTROL | ModKeys::SHIFT)],
-            ),
-        ]),
-    ));
 }
 
 pub(crate) fn fill_camera_home_presets(

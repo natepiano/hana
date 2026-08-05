@@ -1,8 +1,8 @@
 //! Capability: Shift+C cycles the routed camera through `OrbitCam` presets,
 //! a `FreeCam` preset, and a hidden camera-control panel state.
 //!
-//! Wired through `bevy_enhanced_input` using the `hana_rubric` macros
-//! (`action!`, `event!`, `bind_action_system!`), modeled on [`crate::restart`].
+//! Declared with `hana_rubric`'s `command!`, modeled on [`crate::restart`], so
+//! the keymap owns the chord and the palette lists it.
 //! Installed alongside the camera control panel, so every panel example gains
 //! the switch. The bound system only acts when the camera is in a built-in
 //! preset mode, leaving `Bindings`/`Manual` cameras untouched. The hidden panel
@@ -29,9 +29,8 @@ use hana_lagrange::OrbitCamInputMode;
 use hana_lagrange::OrbitCamPreset;
 use hana_lagrange::OrbitCamPresetKind;
 use hana_lagrange::ResolvedCameraInputRoute;
-use hana_rubric::action;
-use hana_rubric::bind_action_system;
-use hana_rubric::event;
+use hana_rubric::ReflectKeymapCommand;
+use hana_rubric::command;
 
 use super::CameraGuidancePanel;
 use super::CameraGuidanceRevealPending;
@@ -66,36 +65,28 @@ enum CameraCycleMode {
     FreePreset(FreeCamPresetKind),
 }
 
-#[derive(Component)]
-struct FairyDustPresetContext;
-
-action!(CyclePreset);
-event!(CyclePresetEvent);
+command! {
+    action:      CyclePreset,
+    event:       CyclePresetEvent,
+    id:          "fairy_dust::cycle_camera_preset",
+    title:       "Cycle Camera Preset",
+    description: "Step the active camera to the next input preset in its family.",
+}
 
 pub(super) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
     app.init_resource::<CameraPresetSwitching>();
-    app.add_input_context::<FairyDustPresetContext>();
-    app.add_systems(Startup, spawn_preset_action);
-    bind_action_system!(app, CyclePreset, CyclePresetEvent, cycle_preset);
+    app.add_observer(cycle_preset.run_if(preset_switching_enabled));
 }
 
-fn spawn_preset_action(mut commands: Commands, switching: Res<CameraPresetSwitching>) {
-    if *switching == CameraPresetSwitching::Disabled {
-        return;
-    }
-    commands.spawn((
-        FairyDustPresetContext,
-        actions!(FairyDustPresetContext[
-            (
-                Action::<CyclePreset>::new(),
-                bindings![KeyCode::KeyC.with_mod_keys(ModKeys::SHIFT)],
-            ),
-        ]),
-    ));
+/// Whether [`lock_camera_preset`](crate::SprinkleBuilder::lock_camera_preset) has
+/// pinned the camera to its spawned preset, which suppresses the cycle.
+fn preset_switching_enabled(switching: Res<CameraPresetSwitching>) -> bool {
+    *switching == CameraPresetSwitching::Enabled
 }
 
 fn cycle_preset(
+    _: On<CyclePresetEvent>,
     mut commands: Commands,
     route: Res<ResolvedCameraInputRoute>,
     modes: Query<(
@@ -248,7 +239,6 @@ fn switch_to_free_preset(
 #[cfg(test)]
 mod tests {
     use bevy::camera::RenderTarget;
-    use bevy::ecs::system::RunSystemOnce;
     use bevy::window::WindowRef;
     use bevy_enhanced_input::prelude::Binding;
     use hana_lagrange::AnimationEnd;
@@ -285,6 +275,13 @@ mod tests {
     use crate::constants::HOME_KEY;
 
     const TUNED_SENSITIVITY: f32 = 0.5;
+
+    /// Fires the command the keymap fires, then runs the frame the observer's
+    /// deferred commands land in.
+    fn cycle_preset_once(app: &mut App) {
+        app.world_mut().trigger(CyclePresetEvent);
+        app.update();
+    }
 
     fn camera_preset_kind(app: &App, camera: Entity) -> Option<OrbitCamPresetKind> {
         match app.world().get::<OrbitCamInputMode>(camera)? {
@@ -422,8 +419,8 @@ mod tests {
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
         app.update();
 
-        app.add_systems(Update, cycle_preset);
-        app.update();
+        app.add_observer(cycle_preset);
+        cycle_preset_once(&mut app);
 
         assert_eq!(
             free_camera_preset_kind(&app, camera),
@@ -437,6 +434,48 @@ mod tests {
             app.world().get::<Visibility>(panel),
             Some(&Visibility::Inherited)
         );
+    }
+
+    /// `lock_camera_preset` pins the camera by suppressing the observer's run
+    /// condition, so the test drives the installed path rather than the bare
+    /// observer every other test adds.
+    #[test]
+    fn a_locked_preset_suppresses_the_cycle_the_installed_path_runs() {
+        for (switching, expected_preset_kind) in [
+            (
+                CameraPresetSwitching::Disabled,
+                OrbitCamPresetKind::SimpleMouse,
+            ),
+            (
+                CameraPresetSwitching::Enabled,
+                OrbitCamPresetKind::BlenderLike,
+            ),
+        ] {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, LagrangePlugin));
+            install(&mut app);
+            app.insert_resource(switching);
+            app.finish();
+            let camera = app
+                .world_mut()
+                .spawn((
+                    OrbitCam::default(),
+                    Camera::default(),
+                    RenderTarget::Window(WindowRef::Primary),
+                    OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
+                ))
+                .id();
+            app.world_mut().spawn((
+                CameraGuidancePanel { bound_camera: None },
+                Visibility::Inherited,
+            ));
+            app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+            app.update();
+
+            cycle_preset_once(&mut app);
+
+            assert_eq!(camera_preset_kind(&app, camera), Some(expected_preset_kind));
+        }
     }
 
     #[test]
@@ -471,14 +510,14 @@ mod tests {
             Some(OrbitCamPresetKind::SimpleMouse)
         );
 
-        app.add_systems(Update, cycle_preset);
-        app.update();
+        app.add_observer(cycle_preset);
+        cycle_preset_once(&mut app);
         assert_eq!(
             camera_preset_kind(&app, camera),
             Some(OrbitCamPresetKind::BlenderLike)
         );
 
-        app.update();
+        cycle_preset_once(&mut app);
         assert_eq!(
             free_camera_preset_kind(&app, camera),
             Some(FreeCamPresetKind::KeyboardMouse)
@@ -511,10 +550,8 @@ mod tests {
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
         app.update();
 
-        app.world_mut()
-            .run_system_once(cycle_preset)
-            .map_err(|error| error.to_string())?;
-        app.update();
+        app.add_observer(cycle_preset);
+        cycle_preset_once(&mut app);
 
         assert_eq!(
             camera_preset_kind(&app, camera),
@@ -557,10 +594,8 @@ mod tests {
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
         app.update();
 
-        app.world_mut()
-            .run_system_once(cycle_preset)
-            .map_err(|error| error.to_string())?;
-        app.update();
+        app.add_observer(cycle_preset);
+        cycle_preset_once(&mut app);
 
         let projection = app
             .world()

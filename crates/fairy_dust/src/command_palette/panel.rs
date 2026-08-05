@@ -171,10 +171,7 @@ fn build_failure_row(
         DiagnosticSeverity::Advisory => FAILURE_ADVISORY_COLOR,
     };
     let text = TextStyle::new(FAILURE_TEXT_SIZE).with_color(color);
-    let line = clip(
-        &format!("{} — {}", keymap_failure.location, keymap_failure.message),
-        FAILURE_LINE_MAX_CHARS,
-    );
+    let line = failure_line(keymap_failure);
     builder.with(
         El::row()
             .width(Sizing::GROW)
@@ -215,6 +212,18 @@ fn build_failure_action(
             });
         },
     }
+}
+
+/// Composes one failure row's single line of text.
+///
+/// The message leads and the location trails, because the line is clipped to the
+/// panel width: whatever runs off the end is lost, and a reader who cannot see
+/// what went wrong has nothing to act on.
+fn failure_line(keymap_failure: &KeymapFailureRow) -> String {
+    clip(
+        &format!("{} — {}", keymap_failure.message, keymap_failure.location),
+        FAILURE_LINE_MAX_CHARS,
+    )
 }
 
 /// Shortens `text` to `max_chars`, marking the cut so a clipped row never reads
@@ -388,6 +397,7 @@ mod tests {
     use hana_diegetic::LayoutTreeChange;
     use hana_rubric::DiagnosticSeverity;
 
+    use super::FAILURE_LINE_MAX_CHARS;
     use super::FailureActionRow;
     use super::KeymapFailureAction;
     use super::KeymapFailureActionLabel;
@@ -400,6 +410,7 @@ mod tests {
     use super::clip;
     use super::failure_action_id;
     use super::failure_action_row_index;
+    use super::failure_line;
     use super::palette_panel_origin;
     use super::palette_panel_width;
     use super::palette_tree;
@@ -544,6 +555,28 @@ mod tests {
             message: String::from("Unrecognized keymap block member."),
             action: KeymapFailureAction::NoAction,
         }
+    }
+
+    /// A row long enough to be clipped: a real advisory message next to a real
+    /// `line:column` location.
+    #[test]
+    fn a_clipped_failure_row_keeps_its_whole_message_and_elides_only_the_location() {
+        let mut long_failure = keymap_failure(DiagnosticSeverity::Advisory);
+        long_failure.message =
+            String::from("Unrecognized keymap block member `contxt`; did you mean `context`?");
+        long_failure.location = String::from("command_palette.keymap.jsonc:27:8");
+
+        let line = failure_line(&long_failure);
+
+        assert!(
+            line.chars().count() <= FAILURE_LINE_MAX_CHARS,
+            "the row is one clipped line: {line}"
+        );
+        assert!(
+            line.starts_with(&long_failure.message),
+            "the message must survive the clip whole: {line}"
+        );
+        assert!(line.ends_with('…'), "only the location is elided: {line}");
     }
 
     fn command_row(keystroke: RowKeystroke) -> CommandRow {

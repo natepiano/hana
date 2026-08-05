@@ -26,6 +26,11 @@ use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use hana_diegetic::ImeInputBlocker;
+use hana_rubric::CommandKeystroke;
+use hana_rubric::CommandRegistry;
+use hana_rubric::KeymapBindings;
+use hana_rubric::Modifiers;
+use hana_rubric::PrimaryTrigger;
 
 use crate::constants::MODIFIER_KEYS;
 
@@ -168,24 +173,71 @@ fn run_shortcuts(
 
 /// Fails the run at startup if an example shortcut reuses a key Fairy Dust
 /// already binds bare, turning a silent double-fire into a clear error.
+///
+/// Two registries can claim a bare key. [`ReservedKeys`] holds the ones a
+/// capability wires straight to a [`KeyCode`], and the keymap holds the ones a
+/// document binds to a command — including a user document that moved a Fairy
+/// Dust chord onto a bare letter. This runs in `Startup`, after `finish` has
+/// committed the first keymap generation, so [`KeymapBindings`] is the live
+/// table rather than an empty one.
 fn assert_no_reserved_collisions(
     registrations: Res<ShortcutRegistrations>,
     reserved: Res<ReservedKeys>,
+    command_registry: Option<Res<CommandRegistry>>,
+    keymap_bindings: Option<Res<KeymapBindings>>,
 ) {
     for registration in &registrations.0 {
         let collision = reserved
             .0
             .iter()
-            .find(|reserved| reserved.key == registration.key);
+            .find(|reserved| reserved.key == registration.key)
+            .map(|reserved| reserved.label.to_owned())
+            .or_else(|| {
+                bound_command_on_bare_key(
+                    command_registry.as_deref(),
+                    keymap_bindings.as_deref(),
+                    registration.key,
+                )
+            });
         // `panic!` is denied workspace-wide; `assert!` is the allowed hard-fail.
         assert!(
             collision.is_none(),
             "fairy_dust example shortcut key {:?} collides with the reserved `{}` binding; \
              use the matching Fairy Dust capability or pick a different key",
             registration.key,
-            collision.map_or("", |reserved| reserved.label),
+            collision.unwrap_or_default(),
         );
     }
+}
+
+/// The command the live keymap runs from `key` alone, if any.
+///
+/// Only a one-keystroke, modifier-free binding can double-fire with an example
+/// shortcut: [`run_shortcuts`] stands down while any modifier is held.
+fn bound_command_on_bare_key(
+    command_registry: Option<&CommandRegistry>,
+    keymap_bindings: Option<&KeymapBindings>,
+    key: KeyCode,
+) -> Option<String> {
+    let (command_registry, keymap_bindings) = (command_registry?, keymap_bindings?);
+    command_registry
+        .iter()
+        .find(|command_info| keystroke_on_bare_key(keymap_bindings.keystroke(command_info.id), key))
+        .map(|command_info| command_info.id.to_string())
+}
+
+fn keystroke_on_bare_key(command_keystroke: CommandKeystroke<'_>, key: KeyCode) -> bool {
+    let CommandKeystroke::BoundTo(keystroke_sequence) = command_keystroke else {
+        return false;
+    };
+    let [keystroke] = keystroke_sequence.as_slice() else {
+        return false;
+    };
+    keystroke.modifiers() == Modifiers::none()
+        && matches!(
+            keystroke.primary_trigger(),
+            PrimaryTrigger::OrdinaryKey(ordinary_key) if ordinary_key.key_code() == key
+        )
 }
 
 #[cfg(test)]
@@ -202,9 +254,12 @@ mod tests {
     use hana_diegetic::ImeTarget;
 
     use super::ReservedKeys;
+    use super::ShortcutRegistrations;
+    use super::assert_no_reserved_collisions;
     use super::install;
     use super::register_press;
     use super::reserve_key;
+    use crate::CommandPaletteKeymap;
 
     struct FirstCapability;
     struct SecondCapability;
@@ -265,6 +320,52 @@ mod tests {
 
         let collision = std::panic::catch_unwind(AssertUnwindSafe(|| {
             reserve_key::<SecondCapability>(&mut app, KeyCode::KeyP, "second");
+        }));
+
+        assert!(collision.is_err());
+    }
+
+    /// A user keymap can bind a Fairy Dust command to a bare letter, which the
+    /// hardcoded reservation list knows nothing about. The example shortcut on
+    /// that letter would then double-fire, so the startup check reads the live
+    /// keymap as well.
+    #[test]
+    fn an_example_shortcut_on_a_bare_key_the_keymap_binds_is_rejected_at_startup() {
+        let mut app = App::new();
+        app.init_resource::<ShortcutRegistrations>();
+        app.init_resource::<ReservedKeys>();
+        crate::keymap::configure(
+            &mut app,
+            CommandPaletteKeymap::new(
+                r#"{ "bindings": [{ "bindings": { "h": "fairy_dust::show_help" } }] }"#,
+            ),
+        );
+        crate::keymap::install(&mut app);
+        app.finish();
+        let system_id = app.world_mut().register_system(|| {});
+        register_press(&mut app, KeyCode::KeyH, system_id);
+
+        let collision = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            app.add_systems(Startup, assert_no_reserved_collisions);
+            app.update();
+        }));
+
+        assert!(collision.is_err());
+    }
+
+    /// A bare key reserved by a capability is refused to an example shortcut,
+    /// which would otherwise double-fire against the reserving capability.
+    #[test]
+    fn an_example_shortcut_on_a_reserved_key_is_rejected_at_startup() {
+        let mut app = App::new();
+        app.init_resource::<ShortcutRegistrations>();
+        reserve_key::<FirstCapability>(&mut app, KeyCode::KeyP, "first");
+        let system_id = app.world_mut().register_system(|| {});
+        register_press(&mut app, KeyCode::KeyP, system_id);
+
+        let collision = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            app.add_systems(Startup, assert_no_reserved_collisions);
+            app.update();
         }));
 
         assert!(collision.is_err());

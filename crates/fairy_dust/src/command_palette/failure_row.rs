@@ -86,7 +86,7 @@ fn keymap_failure_row(
 ) -> KeymapFailureRow {
     let (location, action) = match &diagnostic.origin {
         DiagnosticOrigin::KeymapFile(path) => (
-            source_location(diagnostic, &path.display().to_string()),
+            source_location(diagnostic, path),
             open_action_if_present(path),
         ),
         DiagnosticOrigin::KeymapDirectory(path) => (
@@ -98,7 +98,7 @@ fn keymap_failure_row(
             |keymap_paths| {
                 let default_keymap = keymap_paths.default_keymap();
                 (
-                    source_location(diagnostic, &default_keymap.display().to_string()),
+                    source_location(diagnostic, default_keymap),
                     open_action_if_present(default_keymap),
                 )
             },
@@ -122,15 +122,25 @@ fn keymap_failure_row(
     }
 }
 
-/// Appends the source position to `path_text` for a document-backed diagnostic.
+/// Names the document position of a document-backed diagnostic: the file's name
+/// and the source position within it.
+///
+/// The containing directory is dropped. The row is clipped to the panel width,
+/// and an absolute path is long enough to push the message that says what is
+/// wrong off the end of the line; the file name and line number are what a
+/// reader acts on, and the row's repair action opens the file itself.
 ///
 /// A startup diagnostic writes `line: 0`, which means "no location" rather than
-/// line zero, so the path is rendered alone.
-fn source_location(diagnostic: &Diagnostic, path_text: &str) -> String {
+/// line zero, so the file name is rendered alone.
+fn source_location(diagnostic: &Diagnostic, path: &Path) -> String {
+    let file_name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
     if diagnostic.line == 0 {
-        path_text.to_owned()
+        file_name
     } else {
-        format!("{path_text}:{}:{}", diagnostic.line, diagnostic.column)
+        format!("{file_name}:{}:{}", diagnostic.line, diagnostic.column)
     }
 }
 
@@ -174,6 +184,7 @@ mod tests {
     const CONDITION_NAME: &str = "dimension_lock";
     const FAILURE_MESSAGE: &str = "The command is unavailable.";
     const MISSING_KEYMAP: &str = "/tmp/fairy-dust-keymap-that-does-not-exist/keymap.jsonc";
+    const MISSING_KEYMAP_FILE_NAME: &str = "keymap.jsonc";
     const SOURCE_COLUMN: usize = 7;
     const SOURCE_LINE: usize = 12;
 
@@ -218,7 +229,7 @@ mod tests {
         let rows = keymap_failure_rows(&keymap_load_failures, &unavailable());
 
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].location, MISSING_KEYMAP);
+        assert_eq!(rows[0].location, MISSING_KEYMAP_FILE_NAME);
         assert_eq!(rows[1].location, "context registration");
     }
 
@@ -274,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_defaults_report_the_published_default_keymap_path() {
+    fn embedded_defaults_report_the_published_default_keymap_file() {
         let resolved =
             KeymapPathAvailability::for_app_name("fairy_dust_command_palette_failure_row_test");
         let keymap_load_failures = KeymapLoadFailures {
@@ -287,7 +298,11 @@ mod tests {
         match resolved.resolved() {
             Ok(keymap_paths) => assert_eq!(
                 rows[0].location,
-                keymap_paths.default_keymap().display().to_string()
+                keymap_paths
+                    .default_keymap()
+                    .file_name()
+                    .expect("the published default keymap is a file")
+                    .to_string_lossy()
             ),
             Err(_) => assert_eq!(rows[0].location, "embedded defaults"),
         }
@@ -357,8 +372,11 @@ mod tests {
         assert_eq!(rows[0].action, KeymapFailureAction::NoAction);
     }
 
+    /// The row is one clipped line, so the directory is dropped and the file
+    /// name carries the source position. The full path would spend the whole
+    /// line before the message that says what is wrong.
     #[test]
-    fn a_document_backed_diagnostic_appends_its_source_position() {
+    fn a_document_backed_diagnostic_names_its_file_and_source_position() {
         let mut located = diagnostic(DiagnosticOrigin::KeymapFile(PathBuf::from(MISSING_KEYMAP)));
         located.line = SOURCE_LINE;
         located.column = SOURCE_COLUMN;
@@ -371,7 +389,7 @@ mod tests {
 
         assert_eq!(
             rows[0].location,
-            format!("{MISSING_KEYMAP}:{SOURCE_LINE}:{SOURCE_COLUMN}")
+            format!("{MISSING_KEYMAP_FILE_NAME}:{SOURCE_LINE}:{SOURCE_COLUMN}")
         );
     }
 }

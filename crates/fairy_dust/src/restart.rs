@@ -1,7 +1,7 @@
 //! Capability: Ctrl+Shift+R rebuilds and re-launches the example via cargo.
 //!
-//! Wires the keybinding through `bevy_enhanced_input` using the `hana_rubric`
-//! macros (`action!`, `event!`, `bind_action_system!`). The bound system
+//! Declared with `hana_rubric`'s `command!`, so the keymap owns the chord and
+//! the palette lists it. The observing system
 //! relaunches the example as `cargo run --manifest-path <workspace>/Cargo.toml
 //! --example <name>`.
 //!
@@ -26,9 +26,8 @@ use std::process::Command;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 use hana_lagrange::OrbitCam;
-use hana_rubric::action;
-use hana_rubric::bind_action_system;
-use hana_rubric::event;
+use hana_rubric::ReflectKeymapCommand;
+use hana_rubric::command;
 
 use crate::constants::CARGO_BIN;
 use crate::constants::CARGO_EXAMPLE_FLAG;
@@ -44,32 +43,21 @@ use crate::orbit_cam::FairyDustOrbitCam;
 use crate::restart_camera;
 use crate::restart_camera::RestartCameraRestore;
 
-#[derive(Component)]
-struct FairyDustRestartContext;
-
-action!(Restart);
-event!(RestartEvent);
+command! {
+    action:      Restart,
+    event:       RestartEvent,
+    id:          "fairy_dust::restart",
+    title:       "Restart Example",
+    description: "Exit and relaunch this example through cargo, rebuilding any source edits.",
+}
 
 pub(crate) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
-    app.add_input_context::<FairyDustRestartContext>();
-    app.add_systems(Startup, spawn_restart_action);
-    bind_action_system!(app, Restart, RestartEvent, request_restart);
-}
-
-fn spawn_restart_action(mut commands: Commands) {
-    commands.spawn((
-        FairyDustRestartContext,
-        actions!(FairyDustRestartContext[
-            (
-                Action::<Restart>::new(),
-                bindings![KeyCode::KeyR.with_mod_keys(ModKeys::SHIFT | ModKeys::CONTROL)],
-            ),
-        ]),
-    ));
+    app.add_observer(request_restart);
 }
 
 fn request_restart(
+    _: On<RestartEvent>,
     cameras: Query<&OrbitCam, With<FairyDustOrbitCam>>,
     restore_state: Option<Res<RestartCameraRestore>>,
 ) {

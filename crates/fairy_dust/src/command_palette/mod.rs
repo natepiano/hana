@@ -2,7 +2,9 @@
 //! keymap failures that broke the bindings rendered above its query field.
 //!
 //! [`SprinkleBuilder::with_command_palette`](crate::SprinkleBuilder::with_command_palette)
-//! installs `KeymapPlugin` with Fairy Dust's embedded defaults. The query field
+//! adds the box alone. The keymap runtime it lists is installed by every Fairy
+//! Dust app whether or not the box is asked for, because Fairy Dust's own
+//! capabilities are reached through it — see [`crate::keymap`]. The query field
 //! is an editable panel field driven by `hana_diegetic`'s IME session, so the
 //! platform candidate window is positioned at the caret and Fairy Dust's own
 //! keyboard shortcuts stand down while the session holds the window's input
@@ -31,7 +33,6 @@ use bevy::prelude::Reflect;
 use bevy::prelude::ReflectEvent;
 use bevy::prelude::Res;
 use bevy::prelude::ResMut;
-use bevy::prelude::Resource;
 use bevy::prelude::Transform;
 use bevy::prelude::Window;
 use bevy::prelude::With;
@@ -66,7 +67,6 @@ use hana_rubric::CommandRegistry;
 use hana_rubric::KeymapBindings;
 use hana_rubric::KeymapLoadFailures;
 use hana_rubric::KeymapPathAvailability;
-use hana_rubric::KeymapPlugin;
 use hana_rubric::KeymapSystems;
 use hana_rubric::KeystrokeRouting;
 use hana_rubric::ReflectKeymapCommand;
@@ -86,11 +86,6 @@ use self::query::command_rows;
 use self::query::resolve_selection;
 use crate::ensure_plugin;
 
-/// Fairy Dust's shipped default keymap, which binds only the palette's own
-/// command.
-pub(crate) const FAIRY_DUST_DEFAULT_KEYMAP: &str =
-    include_str!("../../assets/keymap.default.jsonc");
-
 command! {
     action:      OpenCommandPalette,
     event:       OpenCommandPaletteEvent,
@@ -99,84 +94,14 @@ command! {
     description: "Search every declared command and run the selected one.",
 }
 
-/// The keymap document the command palette's `KeymapPlugin` is installed with,
-/// and whether that keymap reads and writes a configuration directory.
-///
-/// Configuring an application name is what lets a user keep their own
-/// `keymap.jsonc` next to the published defaults. Without one, no disk worker
-/// starts, nothing is written, and the palette reports the missing
-/// configuration directory as a failure row.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CommandPaletteKeymap {
-    defaults:                &'static str,
-    configuration_directory: KeymapConfigurationDirectory,
-}
-
-/// Where the palette's keymap keeps the user's own document.
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum KeymapConfigurationDirectory {
-    /// Read and write the user's keymap under this application name.
-    ForApplication(&'static str),
-    /// Run from the embedded defaults alone, touching no configuration
-    /// directory.
-    Unconfigured,
-}
-
-impl CommandPaletteKeymap {
-    /// Builds a palette keymap from a JSONC document, normally supplied with
-    /// `include_str!`.
-    ///
-    /// The document replaces Fairy Dust's shipped defaults outright, so it binds
-    /// `palette::open` as well as the application's own command ids. A document
-    /// naming a command the registry does not declare is rejected whole, which
-    /// leaves the palette unopenable.
-    #[must_use]
-    pub const fn new(defaults: &'static str) -> Self {
-        Self {
-            defaults,
-            configuration_directory: KeymapConfigurationDirectory::Unconfigured,
-        }
-    }
-
-    /// Reads and writes the user's own keymap under `app_name` in the platform
-    /// configuration directory.
-    ///
-    /// Without this the palette reports the unavailable configuration directory
-    /// as a failure row, because a keymap the user cannot edit is a real
-    /// limitation rather than a normal state.
-    #[must_use]
-    pub const fn for_application(mut self, app_name: &'static str) -> Self {
-        self.configuration_directory = KeymapConfigurationDirectory::ForApplication(app_name);
-        self
-    }
-
-    fn keymap_plugin(&self) -> KeymapPlugin {
-        let keymap_plugin = KeymapPlugin::new().with_defaults(self.defaults);
-        match self.configuration_directory {
-            KeymapConfigurationDirectory::ForApplication(app_name) => {
-                keymap_plugin.with_app_name(app_name)
-            },
-            KeymapConfigurationDirectory::Unconfigured => keymap_plugin,
-        }
-    }
-}
-
-/// Installs the command palette, its keymap runtime, and the embedded defaults
-/// the registry is built from.
-struct CommandPalettePlugin {
-    keymap: CommandPaletteKeymap,
-}
+/// Installs the searchable box. The keymap runtime it reads is installed by the
+/// baseline (see [`crate::keymap`]), so an application that never opens the
+/// palette still dispatches every declared command.
+struct CommandPalettePlugin;
 
 impl Plugin for CommandPalettePlugin {
     fn build(&self, app: &mut App) {
         ensure_plugin(app, EnhancedInputPlugin);
-        assert!(
-            !app.is_plugin_added::<KeymapPlugin>(),
-            "fairy_dust: the command palette installs `KeymapPlugin` itself, and the application \
-             already installed one. Pass the application's defaults to \
-             `with_command_palette_keymap` and install the plugin once."
-        );
-        app.add_plugins(self.keymap.keymap_plugin());
         app.add_systems(
             PreUpdate,
             hand_keyboard_to_query_field.before(KeymapSystems::Route),
@@ -188,11 +113,6 @@ impl Plugin for CommandPalettePlugin {
             .add_observer(run_failure_action);
     }
 }
-
-/// The keymap the palette was installed with, so a second install request that
-/// disagrees is refused rather than silently ignored.
-#[derive(Resource)]
-struct InstalledCommandPaletteKeymap(CommandPaletteKeymap);
 
 /// Marks the spawned palette box so the observers can rebuild or despawn it.
 #[derive(Component)]
@@ -206,23 +126,13 @@ struct CommandPalettePanel;
 #[derive(Component)]
 struct PaletteFailureActions(Vec<KeymapFailureAction>);
 
-/// Adds the palette to `app` once.
-///
-/// A second request carrying a different keymap is refused: silently keeping the
-/// first document would leave an application running bindings it never asked
-/// for.
-pub(crate) fn install(app: &mut App, keymap: CommandPaletteKeymap) {
-    if let Some(installed) = app.world().get_resource::<InstalledCommandPaletteKeymap>() {
-        assert!(
-            installed.0 == keymap,
-            "fairy_dust: the command palette is already installed with a different keymap. Call \
-             `with_command_palette` or `with_command_palette_keymap` once."
-        );
+/// Adds the palette box to `app` once. The keymap it lists is recorded
+/// separately by [`crate::keymap::configure`].
+pub(crate) fn install(app: &mut App) {
+    if app.is_plugin_added::<CommandPalettePlugin>() {
         return;
     }
-
-    app.insert_resource(InstalledCommandPaletteKeymap(keymap.clone()));
-    app.add_plugins(CommandPalettePlugin { keymap });
+    app.add_plugins(CommandPalettePlugin);
 }
 
 /// Hands the keyboard to the query field for as long as its IME session holds
@@ -547,7 +457,7 @@ pub(crate) mod test_support {
     use hana_rubric::ReflectKeymapCommand;
     use hana_rubric::command;
 
-    use super::FAIRY_DUST_DEFAULT_KEYMAP;
+    use crate::keymap::FAIRY_DUST_DEFAULT_KEYMAP;
 
     pub(crate) const DISPATCH_COMMAND_ID: &str = "palette_test::dispatch";
     pub(crate) const DISPATCH_COMMAND_TITLE: &str = "Palette Test Dispatch";
@@ -642,9 +552,9 @@ mod tests {
         assert_eq!(app.world().resource::<DispatchedCommands>().0, 1);
     }
 
-    /// The shipped document binds only Fairy Dust's own command, so installing
-    /// the palette in an application that declares nothing else still compiles
-    /// a keymap and leaves `palette::open` bound.
+    /// The shipped document binds only ids Fairy Dust itself declares, so
+    /// installing the palette in an application that declares nothing else
+    /// still compiles a keymap and leaves `palette::open` bound.
     #[test]
     fn the_shipped_defaults_bind_the_palette_open_command() {
         let app = palette_test_app();
@@ -672,32 +582,15 @@ mod tests {
         assert_eq!(rows[0].keystroke, self::query::RowKeystroke::Unbound);
     }
 
+    /// Two builder methods can each ask for the box; Bevy panics on a duplicate
+    /// plugin add, so the second request has to be a no-op.
     #[test]
-    fn installing_the_palette_twice_with_the_same_keymap_is_one_install() {
+    fn asking_for_the_palette_twice_installs_it_once() {
         let mut app = App::new();
-        install(
-            &mut app,
-            CommandPaletteKeymap::new(FAIRY_DUST_DEFAULT_KEYMAP),
-        );
-        install(
-            &mut app,
-            CommandPaletteKeymap::new(FAIRY_DUST_DEFAULT_KEYMAP),
-        );
 
-        assert!(
-            app.world()
-                .contains_resource::<InstalledCommandPaletteKeymap>()
-        );
-    }
+        install(&mut app);
+        install(&mut app);
 
-    #[test]
-    #[should_panic(expected = "already installed with a different keymap")]
-    fn installing_the_palette_twice_with_different_keymaps_is_refused() {
-        let mut app = App::new();
-        install(
-            &mut app,
-            CommandPaletteKeymap::new(FAIRY_DUST_DEFAULT_KEYMAP),
-        );
-        install(&mut app, CommandPaletteKeymap::new(r#"{ "bindings": [] }"#));
+        assert!(app.is_plugin_added::<CommandPalettePlugin>());
     }
 }

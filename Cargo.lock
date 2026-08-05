@@ -2838,6 +2838,7 @@ dependencies = [
  "hana_lagrange",
  "hana_rubric",
  "hana_valence",
+ "strum",
  "trybuild",
 ]
 

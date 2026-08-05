@@ -30,12 +30,13 @@ use crate::camera_control_panel::CameraPresetSwitching;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
 use crate::command_palette;
-use crate::command_palette::CommandPaletteKeymap;
 use crate::cube_spin;
 use crate::cube_spin::CubeSpinConfig;
 use crate::environment_map;
 use crate::fold_controls;
 use crate::hdr;
+use crate::keymap;
+use crate::keymap::CommandPaletteKeymap;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
 use crate::orbit_cam::OrbitCamPose;
@@ -183,27 +184,28 @@ impl<S, Baseline> SprinkleBuilder<S, Baseline> {
     /// Enable the command palette: a searchable box listing every declared
     /// keymap command, opened with `Cmd+P` on macOS and `Ctrl+P` elsewhere.
     ///
-    /// This installs `hana_rubric`'s `KeymapPlugin` with Fairy Dust's shipped
-    /// keymap, which binds nothing but the palette's own `palette::open`, and no
-    /// application name, so no keymap disk worker starts and nothing writes to
-    /// the developer's configuration directory. Keymap failures render as rows
-    /// above the palette's query field, including the row reporting that no
-    /// configuration directory was resolved.
+    /// Only the box is added here. `hana_rubric`'s `KeymapPlugin` is installed
+    /// by the baseline either way, because Fairy Dust's own chords — restart,
+    /// the help overlay, the preset cycle — are declared commands the keymap
+    /// dispatches. This names Fairy Dust's shipped document as the keymap
+    /// choice, the same way
+    /// [`with_command_palette_keymap`](Self::with_command_palette_keymap) names
+    /// its own, so calling both with different documents is refused rather than
+    /// silently running one of them. It names no application, so no keymap disk
+    /// worker starts and nothing writes to the developer's configuration
+    /// directory; the palette renders that unresolved configuration directory as
+    /// an advisory row.
     ///
     /// An application that declares its own commands, or that wants the user's
     /// keymap read from disk, supplies its own
     /// [`CommandPaletteKeymap`](crate::CommandPaletteKeymap) with
     /// [`with_command_palette_keymap`](Self::with_command_palette_keymap).
-    ///
-    /// Call this or `with_command_palette_keymap` once. A second call carrying a
-    /// different keymap panics rather than silently keeping the first, because
-    /// an application running bindings it never asked for is worse than a
-    /// crash at startup.
     #[must_use]
     pub fn with_command_palette(self) -> SprinkleBuilder<S> {
-        self.with_command_palette_keymap(CommandPaletteKeymap::new(
-            command_palette::FAIRY_DUST_DEFAULT_KEYMAP,
-        ))
+        let mut builder = self.into_installed();
+        keymap::configure(&mut builder.app, CommandPaletteKeymap::default());
+        command_palette::install(&mut builder.app);
+        builder
     }
 
     /// Enable the command palette against `keymap` instead of Fairy Dust's
@@ -212,13 +214,18 @@ impl<S, Baseline> SprinkleBuilder<S, Baseline> {
     /// knows — a document naming an unregistered id is rejected whole, which
     /// leaves the palette unopenable.
     ///
+    /// The supplied document replaces Fairy Dust's shipped one, so it must bind
+    /// the `fairy_dust::` commands it wants to keep as well as its own ids.
+    ///
     /// Call this or [`with_command_palette`](Self::with_command_palette) once. A
     /// second call carrying a different keymap panics rather than silently
-    /// keeping the first.
+    /// keeping the first, because an application running bindings it never asked
+    /// for is worse than a crash at startup.
     #[must_use]
     pub fn with_command_palette_keymap(self, keymap: CommandPaletteKeymap) -> SprinkleBuilder<S> {
         let mut builder = self.into_installed();
-        command_palette::install(&mut builder.app, keymap);
+        keymap::configure(&mut builder.app, keymap);
+        command_palette::install(&mut builder.app);
         builder
     }
 
@@ -399,6 +406,7 @@ impl<S, Baseline> SprinkleBuilder<S, Baseline> {
     /// will re-exec the current binary before this method returns.
     pub fn run(self) -> AppExit {
         let mut builder = self.into_installed();
+        keymap::install(&mut builder.app);
         let exit = builder.app.run();
         restart::perform_restart_if_requested();
         exit
@@ -762,6 +770,7 @@ mod tests {
     use bevy::asset::AssetServer;
     use hana_lagrange::OrbitCamBlenderLikePreset;
 
+    use super::CommandPaletteKeymap;
     use super::NoOrbitCam;
     use super::SprinkleBuilder;
     use super::WithOrbitCam;
@@ -769,8 +778,10 @@ mod tests {
     use crate::builder::PrimitiveBuilder;
     use crate::builder::StudioLightingBuilder;
     use crate::builder::TitleBarBuilder;
+    use crate::keymap;
 
     const CUSTOM_ASSET_ROOT: &str = "custom-assets";
+    const OTHER_KEYMAP: &str = r#"{ "bindings": [] }"#;
 
     #[derive(bevy::prelude::Resource)]
     struct BaselineTransitionProbe;
@@ -875,5 +886,36 @@ mod tests {
         preset: OrbitCamBlenderLikePreset,
     ) -> SprinkleBuilder<WithOrbitCam> {
         builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    /// Opening the palette names Fairy Dust's shipped document, so naming the
+    /// same one again is the application repeating itself rather than asking for
+    /// two different sets of bindings.
+    #[test]
+    fn the_palette_and_the_shipped_keymap_name_the_same_document() {
+        let builder = crate::sprinkle_example()
+            .with_command_palette()
+            .with_command_palette_keymap(CommandPaletteKeymap::default());
+
+        assert_eq!(
+            keymap::chosen(&builder.app),
+            Some(CommandPaletteKeymap::default())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "already configured with a different document")]
+    fn a_keymap_named_after_the_palette_is_refused() {
+        let _builder = crate::sprinkle_example()
+            .with_command_palette()
+            .with_command_palette_keymap(CommandPaletteKeymap::new(OTHER_KEYMAP));
+    }
+
+    #[test]
+    #[should_panic(expected = "already configured with a different document")]
+    fn a_palette_opened_after_a_keymap_is_refused() {
+        let _builder = crate::sprinkle_example()
+            .with_command_palette_keymap(CommandPaletteKeymap::new(OTHER_KEYMAP))
+            .with_command_palette();
     }
 }

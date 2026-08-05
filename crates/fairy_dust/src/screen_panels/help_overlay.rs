@@ -13,14 +13,19 @@ use hana_diegetic::LayoutBuilder;
 use hana_diegetic::LayoutTree;
 use hana_diegetic::Sizing;
 use hana_diegetic::TextStyle;
+use hana_rubric::CommandId;
+use hana_rubric::CommandKeystroke;
+use hana_rubric::KeymapBindings;
+use hana_rubric::KeymapCommand;
+use hana_rubric::ReflectKeymapCommand;
 use hana_rubric::action;
 use hana_rubric::bind_action_system;
+use hana_rubric::command;
 use hana_rubric::event;
 
 use super::ControlActivation;
 use super::TitleBarControlState;
 use super::constants::BODY_COLOR;
-use super::constants::CAMERA_PRESET_KEYS;
 use super::constants::CAMERA_PRESET_LABEL;
 use super::constants::CLOSE_HINT;
 use super::constants::DIVIDER_COLOR;
@@ -34,23 +39,21 @@ use super::constants::HELP_ROW_GAP;
 use super::constants::HELP_SEPARATOR_HEIGHT;
 use super::constants::HELP_TABLE_COLUMN_GAP;
 use super::constants::HELP_TITLE;
-use super::constants::HOME_AABB_KEYS;
 use super::constants::HOME_AABB_LABEL;
-use super::constants::SCREEN_PANEL_KEYS;
 use super::constants::SCREEN_PANEL_LABEL;
+use super::constants::UNBOUND_KEYS;
 use super::default_inner_background;
 use super::screen_panel_frame;
 use crate::camera_control_panel::CameraGuidancePanel;
 use crate::camera_control_panel::CameraPresetSwitching;
+use crate::camera_control_panel::CyclePresetEvent;
 use crate::camera_home::CameraHomeMarker;
+use crate::camera_home::ToggleHomeAabbGizmoEvent;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 use crate::ensure_plugin;
-
-/// Always-active context holding the Shift+/ toggle.
-#[derive(Component)]
-struct HelpContext;
+use crate::screen_space_lights::ToggleScreenSpacePanelsEvent;
 
 /// Higher-priority context inserted on the `KeyboardShortcutHelp` overlay
 /// entity. It owns the `CloseHelp`/Esc action while that entity exists and
@@ -58,8 +61,17 @@ struct HelpContext;
 #[derive(Component)]
 struct HelpCloseContext;
 
-action!(ShowHelp);
-event!(ShowHelpEvent);
+command! {
+    action:      ShowHelp,
+    event:       ShowHelpEvent,
+    id:          "fairy_dust::show_help",
+    title:       "Show Keyboard Shortcuts",
+    description: "Open the keyboard shortcut overlay, or close it when it is already open.",
+}
+
+// `CloseHelp` stays on the input-action layer: it is bound inside
+// `HelpCloseContext` with `consume_input`, which is what stops Esc from also
+// firing a caller's Esc binding while the overlay is open.
 action!(CloseHelp);
 event!(CloseHelpEvent);
 
@@ -83,39 +95,27 @@ struct HelpShortcuts {
 }
 
 struct HelpRow {
-    keys:  &'static str,
+    keys:  String,
     label: &'static str,
 }
 
 pub(super) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
-    app.add_input_context::<HelpContext>();
     app.add_input_context::<HelpCloseContext>();
-    app.add_systems(Startup, spawn_help_context);
-    bind_action_system!(app, ShowHelp, ShowHelpEvent, show_or_toggle_help);
+    app.add_observer(show_or_toggle_help);
     bind_action_system!(app, CloseHelp, CloseHelpEvent, close_help);
-}
-
-fn spawn_help_context(mut commands: Commands) {
-    commands.spawn((
-        HelpContext,
-        Actions::<HelpContext>::spawn(SpawnWith(|spawner: &mut ActionSpawner<HelpContext>| {
-            spawner.spawn((
-                Action::<ShowHelp>::new(),
-                bindings![KeyCode::Slash.with_mod_keys(ModKeys::SHIFT)],
-            ));
-        })),
-    ));
 }
 
 /// Toggles the overlay on Shift+/: despawns it when open, otherwise spawns it
 /// (reading which optional shortcuts apply).
 fn show_or_toggle_help(
+    _: On<ShowHelpEvent>,
     mut commands: Commands,
     overlay: Query<Entity, With<KeyboardShortcutHelp>>,
     home_markers: Query<Entity, With<CameraHomeMarker>>,
     camera_panels: Query<Entity, With<CameraGuidancePanel>>,
     preset_switching: Option<Res<CameraPresetSwitching>>,
+    keymap_bindings: Res<KeymapBindings>,
     mut bars: Query<&mut TitleBarControlState>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     fonts: Res<FontRegistry>,
@@ -142,10 +142,13 @@ fn show_or_toggle_help(
     };
     spawn_help_overlay(
         &mut commands,
-        HelpShortcuts {
-            home_marker,
-            camera_preset,
-        },
+        shortcut_rows(
+            HelpShortcuts {
+                home_marker,
+                camera_preset,
+            },
+            &keymap_bindings,
+        ),
         &fonts,
         &mut materials,
     );
@@ -174,7 +177,7 @@ fn set_help_chip(bars: &mut Query<&mut TitleBarControlState>, activation: Contro
 
 fn spawn_help_overlay(
     commands: &mut Commands,
-    shortcuts: HelpShortcuts,
+    rows: Vec<HelpRow>,
     fonts: &FontRegistry,
     materials: &mut Assets<StandardMaterial>,
 ) {
@@ -184,7 +187,7 @@ fn spawn_help_overlay(
         .anchor(Anchor::Center)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_help_tree(shortcuts, fonts))
+        .with_tree(build_help_tree(rows, fonts))
         .build();
 
     match panel {
@@ -215,13 +218,13 @@ fn spawn_help_overlay(
     }
 }
 
-fn build_help_tree(shortcuts: HelpShortcuts, fonts: &FontRegistry) -> LayoutTree {
+fn build_help_tree(rows: Vec<HelpRow>, fonts: &FontRegistry) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    build_help_layout(&mut builder, shortcuts, fonts);
+    build_help_layout(&mut builder, rows, fonts);
     builder.build()
 }
 
-fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, fonts: &FontRegistry) {
+fn build_help_layout(builder: &mut LayoutBuilder, rows: Vec<HelpRow>, fonts: &FontRegistry) {
     let title =
         TextStyle::new(super::integral_advance_size(fonts, TITLE_SIZE)).with_color(TITLE_COLOR);
     let hint = TextStyle::new(super::integral_advance_size(fonts, HELP_CLOSE_HINT_SIZE))
@@ -243,7 +246,7 @@ fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, font
                 |builder| {
                     build_title_row(builder, &title, &hint);
                     build_separator(builder);
-                    build_shortcut_table(builder, shortcuts, &label);
+                    build_shortcut_table(builder, rows, &label);
                 },
             );
         },
@@ -287,14 +290,14 @@ fn build_separator(builder: &mut LayoutBuilder) {
     );
 }
 
-fn build_shortcut_table(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, label: &TextStyle) {
+fn build_shortcut_table(builder: &mut LayoutBuilder, rows: Vec<HelpRow>, label: &TextStyle) {
     builder.with(
         El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .gap(HELP_ROW_GAP),
         |builder| {
-            for row in shortcut_rows(shortcuts) {
+            for row in rows {
                 build_shortcut_row(builder, row, label);
             }
         },
@@ -314,7 +317,7 @@ fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &TextSty
                     .width(Sizing::fixed(HELP_KEY_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text((row.keys, label.clone()));
+                    builder.text((row.keys.as_str(), label.clone()));
                 },
             );
             builder.with(
@@ -327,23 +330,78 @@ fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &TextSty
     );
 }
 
-fn shortcut_rows(shortcuts: HelpShortcuts) -> Vec<HelpRow> {
+/// Builds the table from the live keymap rather than from written-out chords, so
+/// a rebound capability prints the keys that now run it.
+fn shortcut_rows(shortcuts: HelpShortcuts, keymap_bindings: &KeymapBindings) -> Vec<HelpRow> {
     let mut rows = Vec::new();
     if shortcuts.home_marker.is_present() {
         rows.push(HelpRow {
-            keys:  HOME_AABB_KEYS,
+            keys:  bound_keys::<ToggleHomeAabbGizmoEvent>(keymap_bindings),
             label: HOME_AABB_LABEL,
         });
     }
     rows.push(HelpRow {
-        keys:  SCREEN_PANEL_KEYS,
+        keys:  bound_keys::<ToggleScreenSpacePanelsEvent>(keymap_bindings),
         label: SCREEN_PANEL_LABEL,
     });
     if shortcuts.camera_preset.is_present() {
         rows.push(HelpRow {
-            keys:  CAMERA_PRESET_KEYS,
+            keys:  bound_keys::<CyclePresetEvent>(keymap_bindings),
             label: CAMERA_PRESET_LABEL,
         });
     }
     rows
+}
+
+/// The keys the live keymap runs `C` from, read when the overlay is built:
+/// [`KeymapBindings`] is replaced on every keymap commit, so a value read once
+/// at startup would print the chord a later user keymap replaced.
+fn bound_keys<C: KeymapCommand>(keymap_bindings: &KeymapBindings) -> String {
+    match keymap_bindings.keystroke(&CommandId::declared::<C>()) {
+        CommandKeystroke::BoundTo(keystroke_sequence) => keystroke_sequence.to_string(),
+        CommandKeystroke::Unbound => UNBOUND_KEYS.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn every_row() -> HelpShortcuts {
+        HelpShortcuts {
+            home_marker:   ShortcutPresence::Present,
+            camera_preset: ShortcutPresence::Present,
+        }
+    }
+
+    /// The overlay prints what the keymap runs, so a user document that rebinds
+    /// a capability moves the printed keys with it.
+    #[test]
+    fn each_row_prints_the_keys_the_live_keymap_binds() {
+        let mut app = App::new();
+        crate::keymap::install(&mut app);
+        app.finish();
+        let keymap_bindings = app.world().resource::<KeymapBindings>();
+
+        let rows = shortcut_rows(every_row(), keymap_bindings);
+
+        assert_eq!(
+            rows.iter().map(|row| row.keys.clone()).collect::<Vec<_>>(),
+            vec![
+                bound_keys::<ToggleHomeAabbGizmoEvent>(keymap_bindings),
+                bound_keys::<ToggleScreenSpacePanelsEvent>(keymap_bindings),
+                bound_keys::<CyclePresetEvent>(keymap_bindings),
+            ]
+        );
+        assert!(rows.iter().all(|row| row.keys != UNBOUND_KEYS));
+    }
+
+    /// A keymap that binds none of them prints the unbound label rather than a
+    /// chord that runs nothing.
+    #[test]
+    fn a_capability_the_keymap_binds_nothing_to_prints_unbound() {
+        let rows = shortcut_rows(every_row(), &KeymapBindings::default());
+
+        assert!(rows.iter().all(|row| row.keys == UNBOUND_KEYS));
+    }
 }

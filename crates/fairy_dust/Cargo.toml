@@ -43,4 +43,5 @@ hana_rubric = { workspace = true }
 hana_valence = { workspace = true }
 
 [dev-dependencies]
+strum.workspace = true
 trybuild.workspace = true

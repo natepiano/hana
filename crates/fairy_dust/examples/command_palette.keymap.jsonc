@@ -1,7 +1,9 @@
 // Keymap document owned by the `command_palette` example.
 //
-// It replaces Fairy Dust's shipped document, so it binds `palette::open` as well as the
-// two `example::` commands the example declares with `command!`.
+// It replaces Fairy Dust's shipped document outright, so it binds every `fairy_dust::`
+// command and `palette::open` as well as the two `example::` commands the example
+// declares with `command!`. Dropping a `fairy_dust::` line here would not fail the load —
+// it would silently kill that hotkey for this example.
 //
 // `example::home` takes `secondary-shift-h` rather than `secondary-h`, because on macOS
 // `secondary` is Cmd and Cmd+H is the system chord that hides the application — the
@@ -17,7 +19,13 @@
       "bindings": {
         "secondary-p": "palette::open",
         "secondary-shift-h": "example::home",
-        "secondary-k": "example::swap_camera"
+        "secondary-k": "example::swap_camera",
+        "ctrl-shift-r": "fairy_dust::restart",
+        "ctrl-shift-l": "fairy_dust::toggle_screen_space_panels",
+        "ctrl-shift-a": "fairy_dust::toggle_home_aabb_gizmo",
+        "shift-slash": "fairy_dust::show_help",
+        "alt-i": "fairy_dust::toggle_free_cam_look_pitch",
+        "shift-c": "fairy_dust::cycle_camera_preset"
       }
     },
     {

@@ -22,7 +22,6 @@ pub(super) const DESCRIPTION_WIDTH: Px = Px(330.0);
 pub(super) const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
 
 // help overlay
-pub(super) const CAMERA_PRESET_KEYS: &str = "shift-C";
 pub(super) const CAMERA_PRESET_LABEL: &str = "Cycle camera presets and panel off";
 pub(super) const CLOSE_HINT: &str = "Esc to close";
 /// One above the default context priority (0) so the help-close Esc is
@@ -37,10 +36,11 @@ pub(super) const HELP_ROW_GAP: Px = Px(6.0);
 pub(super) const HELP_SEPARATOR_HEIGHT: Px = Px(1.0);
 pub(super) const HELP_TABLE_COLUMN_GAP: Px = Px(18.0);
 pub(super) const HELP_TITLE: &str = "Keyboard Shortcuts";
-pub(super) const HOME_AABB_KEYS: &str = "ctrl-shift-A";
 pub(super) const HOME_AABB_LABEL: &str = "Show bounding box for camera home AnimateToFit";
-pub(super) const SCREEN_PANEL_KEYS: &str = "ctrl-shift-L";
 pub(super) const SCREEN_PANEL_LABEL: &str = "Toggle screen space panels off/on";
+/// Printed in the key column for a capability the live keymap binds nothing to,
+/// which a user keymap can produce by rebinding the command away.
+pub(super) const UNBOUND_KEYS: &str = "unbound";
 
 // performance
 pub(super) const GPU_METER_PANEL_WIDTH_FRACTION: f32 = 0.8;

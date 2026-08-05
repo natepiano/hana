@@ -1,15 +1,14 @@
 //! Capability: Ctrl+Shift+L toggles screen-space panel visibility.
 //!
-//! Wired through `bevy_enhanced_input` using the `hana_rubric` macros, modeled on
-//! [`crate::restart`].
+//! Declared with `hana_rubric`'s `command!`, modeled on [`crate::restart`], so
+//! the keymap owns the chord and the palette lists it.
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 use hana_diegetic::ScreenSpaceCamera;
 use hana_diegetic::ScreenSpaceLight;
-use hana_rubric::action;
-use hana_rubric::bind_action_system;
-use hana_rubric::event;
+use hana_rubric::ReflectKeymapCommand;
+use hana_rubric::command;
 
 use crate::ensure_plugin;
 
@@ -32,11 +31,13 @@ impl ScreenSpacePanelsVisibility {
 #[derive(Resource, Default)]
 struct ScreenSpacePanelsEnabled(ScreenSpacePanelsVisibility);
 
-#[derive(Component)]
-struct ScreenSpacePanelsContext;
-
-action!(ToggleScreenSpacePanels);
-event!(ToggleScreenSpacePanelsEvent);
+command! {
+    action:      ToggleScreenSpacePanels,
+    event:       ToggleScreenSpacePanelsEvent,
+    id:          "fairy_dust::toggle_screen_space_panels",
+    title:       "Toggle Screen-Space Panels",
+    description: "Hide or restore the screen-space panel camera and its lights.",
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScreenSpaceCameraState {
@@ -73,30 +74,14 @@ struct ScreenSpaceLightRestore {
 pub(crate) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
     app.init_resource::<ScreenSpacePanelsEnabled>();
-    app.add_input_context::<ScreenSpacePanelsContext>();
-    app.add_systems(Startup, spawn_toggle_action);
     app.add_systems(Update, apply_screen_space_panels);
-    bind_action_system!(
-        app,
-        ToggleScreenSpacePanels,
-        ToggleScreenSpacePanelsEvent,
-        toggle_screen_space_panels
-    );
+    app.add_observer(toggle_screen_space_panels);
 }
 
-fn spawn_toggle_action(mut commands: Commands) {
-    commands.spawn((
-        ScreenSpacePanelsContext,
-        actions!(ScreenSpacePanelsContext[
-            (
-                Action::<ToggleScreenSpacePanels>::new(),
-                bindings![KeyCode::KeyL.with_mod_keys(ModKeys::CONTROL | ModKeys::SHIFT)],
-            ),
-        ]),
-    ));
-}
-
-fn toggle_screen_space_panels(mut enabled: ResMut<ScreenSpacePanelsEnabled>) {
+fn toggle_screen_space_panels(
+    _: On<ToggleScreenSpacePanelsEvent>,
+    mut enabled: ResMut<ScreenSpacePanelsEnabled>,
+) {
     enabled.0 = enabled.0.toggled();
 }
 
@@ -146,5 +131,75 @@ fn apply_screen_space_panels(
             }
             light.illuminance = 0.0;
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "tests should panic on unexpected values"
+)]
+mod tests {
+    use hana_rubric::CommandId;
+    use hana_rubric::CommandKeystroke;
+    use hana_rubric::KeymapBindings;
+    use hana_rubric::PrimaryTrigger;
+
+    use super::*;
+
+    /// Presses the keys the live keymap runs `command_id` from, in one frame, so
+    /// the routed chord is the one the shipped document actually binds.
+    fn press_bound_keystroke(app: &mut App, command_id: &CommandId) {
+        let CommandKeystroke::BoundTo(keystroke_sequence) = app
+            .world()
+            .resource::<KeymapBindings>()
+            .keystroke(command_id)
+        else {
+            panic!("`{command_id}` is unbound in the shipped defaults");
+        };
+        let keystroke = keystroke_sequence.first();
+        let PrimaryTrigger::OrdinaryKey(ordinary_key) = keystroke.primary_trigger() else {
+            panic!("`{command_id}` is bound to a bare modifier family");
+        };
+        let modifiers = keystroke.modifiers();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        if modifiers.has_control() {
+            keys.press(KeyCode::ControlLeft);
+        }
+        if modifiers.has_shift() {
+            keys.press(KeyCode::ShiftLeft);
+        }
+        if modifiers.has_alt() {
+            keys.press(KeyCode::AltLeft);
+        }
+        if modifiers.has_platform() {
+            keys.press(KeyCode::SuperLeft);
+        }
+        keys.press(ordinary_key.key_code());
+    }
+
+    /// The baseline keymap is what dispatches Fairy Dust's own capabilities, so
+    /// an application that never opens the command palette still reaches this
+    /// one from its keystroke.
+    #[test]
+    fn the_bound_chord_reaches_the_handler_without_the_palette() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        install(&mut app);
+        crate::keymap::install(&mut app);
+        app.finish();
+
+        press_bound_keystroke(
+            &mut app,
+            &CommandId::declared::<ToggleScreenSpacePanelsEvent>(),
+        );
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ScreenSpacePanelsEnabled>().0,
+            ScreenSpacePanelsVisibility::Hidden
+        );
     }
 }
