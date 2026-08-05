@@ -109,14 +109,11 @@ cascade_attribute!(
 cascade_attribute!(
     /// HDR text coverage-bias cascade attribute.
     ///
-    /// `0.0` leaves analytic glyph coverage unchanged. Positive values make
-    /// fractional glyph-edge pixels more opaque, which can compensate for dark
-    /// text looking too thin when an HDR camera renders into a float target.
-    /// Negative values make fractional edges thinner. Use this for text that
-    /// degrades under HDR, especially dark text on light backgrounds; avoid
-    /// applying it broadly to light text on dark backgrounds unless that scene
-    /// has been tuned, because the same compensation can make those glyphs look
-    /// heavier.
+    /// Analytic text automatically gains a bounded coverage adjustment as its
+    /// projected em shrinks. `0.0` leaves that adjustment unchanged. Positive
+    /// values make fractional glyph-edge pixels more opaque beyond it, which
+    /// can compensate for dark text looking too thin when an HDR camera renders
+    /// into a float target. Negative values make fractional edges thinner.
     HdrTextCoverageBias(f32),
     default = 0.0
 );
@@ -125,8 +122,8 @@ const HDR_TEXT_COVERAGE_BIAS_MIN: f32 = -4.0;
 const HDR_TEXT_COVERAGE_BIAS_MAX: f32 = 4.0;
 
 impl HdrTextCoverageBias {
-    /// No HDR coverage compensation; the shader uses analytic text coverage
-    /// unchanged.
+    /// No authored HDR compensation; the shader keeps its automatic
+    /// screen-size adjustment.
     pub(crate) const NO_BIAS: Self = Self(0.0);
 
     /// Value sent to `PathRenderRecord::text_coverage_bias`.
@@ -141,7 +138,7 @@ impl HdrTextCoverageBias {
                 .clamp(HDR_TEXT_COVERAGE_BIAS_MIN, HDR_TEXT_COVERAGE_BIAS_MAX)
         } else {
             warn_once!(
-                "HdrTextCoverageBias value {} is not finite; rendering text without HDR coverage compensation",
+                "HdrTextCoverageBias value {} is not finite; rendering text with automatic coverage adjustment only",
                 self.0
             );
             0.0

@@ -1080,6 +1080,7 @@ fn build_panel_line_group(
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
         text_coverage_bias: 0.0,
+        text_em_height: 0.0,
     };
     let instance = path_quad_record(&path);
     Some(BuiltPanelShapePrimitive {
@@ -1528,6 +1529,7 @@ fn padded_line_runs(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Path
             oit_depth_offset:   0.0,
             aa_flags:           0,
             text_coverage_bias: 0.0,
+            text_em_height:     0.0,
         },
     );
     padded
@@ -2296,7 +2298,10 @@ mod tests {
         assert_eq!(material_oit_offset.to_bits(), 0.0_f32.to_bits());
         assert_eq!(
             records,
-            vec![(0.0, 0.0), (0.0, 0.0)],
+            vec![
+                (0.0, crate::render::constants::OIT_DEPTH_STEP),
+                (0.0, crate::render::constants::OIT_DEPTH_STEP),
+            ],
             "per-record offsets stay in the run table"
         );
     }
@@ -2991,6 +2996,7 @@ mod tests {
                 oit_depth_offset:   0.0,
                 aa_flags:           AntiAlias::Both.aa_flags(),
                 text_coverage_bias: 0.0,
+                text_em_height:     0.0,
             },
         }
     }

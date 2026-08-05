@@ -43,6 +43,7 @@ struct PathRenderRecord {
     oit_depth_offset: f32,
     aa_flags: u32,
     text_coverage_bias: f32,
+    text_em_height: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathQuadRecord>;

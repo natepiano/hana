@@ -201,10 +201,15 @@ pub(crate) struct PathRenderRecord {
     /// `AA_FLAG_SUPERSAMPLE` | `AA_FLAG_BAND`). Per-record so an element-level
     /// AA override never splits a batch or material.
     pub aa_flags:           u32,
-    /// Signed coverage transfer for text paths. `0.0` leaves coverage
-    /// unchanged; positive values make fractional edge pixels more opaque, and
-    /// negative values make them thinner. Ignored by line and panel-shape paths.
+    /// Signed coverage transfer for text paths. `0.0` leaves coverage at its
+    /// automatic screen-size adjustment; positive values make fractional edge
+    /// pixels more opaque, and negative values make them thinner. Ignored by
+    /// line and panel-shape paths.
     pub text_coverage_bias: f32,
+    /// One em along the run's local Y axis. The fragment shader projects this
+    /// length into device pixels to adjust small text coverage automatically.
+    /// `0.0` disables that adjustment for non-text path runs.
+    pub text_em_height:     f32,
 }
 
 // GPU-layout assertions against the std430 sizes the shaders index by — the
@@ -652,6 +657,7 @@ mod tests {
             oit_depth_offset:   -seed,
             aa_flags:           3,
             text_coverage_bias: seed * 0.25,
+            text_em_height:     seed * 4.0,
         }
     }
 

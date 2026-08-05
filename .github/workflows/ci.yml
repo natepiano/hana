@@ -185,14 +185,49 @@ jobs:
           WINIT_UNIX_BACKEND: x11
           RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
-      - name: Run slow rendering diagnostics
+  rendering_diagnostic:
+    name: Rendering Diagnostic
+    runs-on: ubuntu-latest
+    env:
+      WGPU_BACKEND: gl
+      WINIT_UNIX_BACKEND: x11
+      RUSTFLAGS: -C link-arg=-fuse-ld=mold
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Install mold linker
+        uses: rui314/setup-mold@v1
+
+      - name: Install and cache Linux dependencies
+        uses: natepiano/cache-apt-pkgs-action@1a93bf1cfca3126459c9aea5af90d717f9ea216f
+        with:
+          packages: libudev-dev libasound2-dev pkg-config clang libwayland-dev libxkbcommon-dev
+          version: 1.0
+
+      - name: Cache rendering diagnostic dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rendering-diagnostic
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Run rendering diagnostic
         run: >-
           cargo nextest run --all-features -p hana_diegetic --lib
           --run-ignored only center_dilation_bounds_corner_wing
-        env:
-          WGPU_BACKEND: gl
-          WINIT_UNIX_BACKEND: x11
-          RUSTFLAGS: -C link-arg=-fuse-ld=mold
 
   trybuild:
     name: ${{ matrix.name }}

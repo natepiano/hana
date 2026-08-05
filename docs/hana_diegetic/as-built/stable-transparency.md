@@ -69,10 +69,11 @@ SDF/text/shape ordering, because material `depth_bias` advances once per
   (floored at `OIT_MIN_DEPTH`), then `oit_draw(...)` + `discard` instead of returning the
   color. The analytic block must not disturb the winding/coverage functions
   (`n`, `lane_n`, `lanes_n`).
-- **`oit_depth_offset` threading** — computed in `src/render/draw_order.rs` (from
-  `DrawOrderIndex`, text-anchored) and threaded into draw commands / materials through
+- **`oit_depth_offset` threading** — computed in `src/render/draw_order.rs` as
+  `(DrawOrderIndex + 1) * OIT_DEPTH_STEP` and threaded into draw commands / materials through
   `panel_geometry.rs`, `panel_text/*`, `panel_shapes/*`, `analytic_paths/*`, and
-  `image_batch.rs`.
+  `image_batch.rs`. The positive one-step base prevents Bevy's opaque-depth
+  comparison from rejecting coplanar translucent panel fragments.
 - **fairy_dust** — `src/transparency.rs` `install(app)` ensures `DiegeticUiPlugin` and
   adds the `Add<FairyDustOrbitCam>` observer that inserts `StableTransparency`; the
   `.with_stable_transparency()` method lives on `SprinkleBuilder<WithOrbitCam>`

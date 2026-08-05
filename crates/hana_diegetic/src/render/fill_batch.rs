@@ -3766,7 +3766,7 @@ mod tests {
     }
 
     #[test]
-    fn text_toggle_updates_sdf_oit_depth_offset_without_replacing_batch_entity() {
+    fn text_toggle_keeps_positive_sdf_oit_depth_without_replacing_batch_entity() {
         let mut app = sdf_pipeline_app();
         let panel = spawn_sdf_panel(
             &mut app,
@@ -3781,7 +3781,7 @@ mod tests {
         assert_eq!(records_before.len(), 1);
         assert_eq!(
             records_before[0].oit_depth_offset.to_bits(),
-            (-crate::render::constants::OIT_DEPTH_STEP).to_bits()
+            crate::render::constants::OIT_DEPTH_STEP.to_bits()
         );
 
         assert!(
@@ -3798,7 +3798,7 @@ mod tests {
         assert_eq!(records_after.len(), 1);
         assert_eq!(
             records_after[0].oit_depth_offset.to_bits(),
-            0.0_f32.to_bits()
+            crate::render::constants::OIT_DEPTH_STEP.to_bits()
         );
     }
 
