@@ -29,7 +29,7 @@ pub enum CommandKeystroke<'keymap> {
 /// always reports the bindings currently routing input. A command bound in more
 /// than one place reports its global binding; a command bound only inside
 /// conditions reports the binding from the condition the registry registered
-/// first, because [`MergedKeymap::bindings`](super::MergedKeymap::bindings)
+/// first, because `MergedKeymap::bindings`
 /// sorts the condition handles before walking them. Two keymaps built from the
 /// same sources therefore report the same keystroke, rather than whichever
 /// condition the `conditions` map happened to hash ahead of the other.

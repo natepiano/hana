@@ -131,7 +131,7 @@ pub enum ActiveConditionState {
 
 /// A condition's compact registry identity.
 ///
-/// The value is meaningful only to the [`ConditionRegistry`] that issued it.
+/// The value is meaningful only to the `ConditionRegistry` that issued it.
 /// Handles order by the sequence the registry issued them in, which is what
 /// gives readers of a condition-keyed map a deterministic iteration order.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -150,8 +150,8 @@ impl ConditionHandle {
 }
 
 impl Default for ConditionHandle {
-    /// Produces an index [`ConditionRegistry`] can never issue, so a reconstructed handle fails
-    /// [`Self::is_registry_issued`] instead of naming the first registered condition.
+    /// Produces an index `ConditionRegistry` can never issue, so a reconstructed handle fails
+    /// `is_registry_issued` instead of naming the first registered condition.
     fn default() -> Self { Self(usize::MAX) }
 }
 

@@ -128,7 +128,7 @@ fn title_bar() -> TitleBar {
 
 /// The palette's open chord renders per platform, matching how `secondary-p` in
 /// the shipped keymap resolves.
-fn palette_control() -> &'static str {
+const fn palette_control() -> &'static str {
     if cfg!(target_os = "macos") {
         "Cmd+P Palette"
     } else {
