@@ -57,18 +57,19 @@ the phase's stale "raw material only, not dispatchable" banner was corrected.
 
 Backup of the pre-edit doc: `/private/tmp/claude/v1.md.pre-pin-decision`.
 
-## The one thing the user must do before Phase 25 is dispatched
+## Phase 25 merge prerequisite
 
-**Merge hana `main`'s `hana_diegetic` into
-`/Users/natemccoy/rust/bevy_hana_rubric/crates/hana_diegetic`.** The user said
-they would do this. Phase 25 cannot start until it has landed, and the check is
-one command:
+**Completed 2026-08-05:** local `main` was merged into `feature/rubric` as
+`6a9293d5`, bringing its `hana_diegetic` history into
+`/Users/natemccoy/rust/bevy_hana_rubric/crates/hana_diegetic`. Before Phase 25
+starts, confirm both the branch ancestry and the required Phase 23b API:
 
 ```
+git -C /Users/natemccoy/rust/bevy_hana_rubric merge-base --is-ancestor main feature/rubric
 rg -l ImeReplacePanelTree /Users/natemccoy/rust/bevy_hana_rubric/crates/hana_diegetic/src
 ```
 
-If that finds nothing, the merge has not happened — stop and say so.
+If either command fails, stop and report it.
 
 ## Exact next step on resume
 
