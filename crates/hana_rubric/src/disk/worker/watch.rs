@@ -419,7 +419,9 @@ mod tests {
     use crate::disk::paths::ENVIRONMENT_LOCK;
     use crate::disk::paths::TestDirectory;
     use crate::disk::paths::XdgConfigHome;
+    use crate::disk::worker::channels::DiskDelivery;
     use crate::disk::worker::channels::DiskWorkerChannels;
+    use crate::disk::worker::channels::contents_match;
     use crate::disk::worker::runtime;
     use crate::disk::worker::runtime::WorkerTimings;
 
@@ -489,10 +491,12 @@ mod tests {
 
         while Instant::now() < deadline {
             if let Some(message) = worker.take_message()
-                && message.snapshot.as_ref().is_some_and(|snapshot| {
-                    snapshot.source_path == path
-                        && snapshot.contents.as_deref() == expected_contents
-                })
+                && matches!(
+                    &message.delivery,
+                    DiskDelivery::Snapshot(snapshot)
+                        if snapshot.source_path == path
+                            && contents_match(&snapshot.contents, expected_contents)
+                )
             {
                 return Ok(());
             }

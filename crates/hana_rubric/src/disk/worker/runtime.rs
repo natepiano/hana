@@ -19,6 +19,7 @@ use notify::RecommendedWatcher;
 
 use super::channels;
 use super::channels::CoalescingSlot;
+use super::channels::DiskDelivery;
 use super::channels::DiskSnapshot;
 use super::channels::DiskWorkerChannels;
 use super::channels::DiskWorkerMessage;
@@ -34,6 +35,7 @@ use crate::disk::constants::DEBOUNCE_INTERVAL;
 use crate::disk::constants::POLL_INTERVAL;
 use crate::disk::constants::RETRY_INTERVAL;
 use crate::disk::paths::KeymapPaths;
+use crate::keymap::UserKeymapContents;
 
 pub(super) const USER_KEYMAP_STUB: &[u8] = br#"{
   "$schema": "./keymap.schema.json",
@@ -350,7 +352,7 @@ impl DiskWorker {
         self.reported_read_error = None;
 
         if changed {
-            self.publish_snapshot(paths, Some(contents));
+            self.publish_snapshot(paths, UserKeymapContents::Read(contents));
         }
     }
 
@@ -376,12 +378,12 @@ impl DiskWorker {
         self.observed_keymap = ObservedKeymap::Missing;
         self.missing_retry_at = None;
         self.reported_read_error = None;
-        self.publish_snapshot(paths, None);
+        self.publish_snapshot(paths, UserKeymapContents::Absent);
     }
 
-    fn publish_snapshot(&self, paths: &KeymapPaths, contents: Option<Arc<[u8]>>) {
+    fn publish_snapshot(&self, paths: &KeymapPaths, contents: UserKeymapContents) {
         self.slot.publish(DiskWorkerMessage {
-            snapshot:              Some(DiskSnapshot {
+            delivery:              DiskDelivery::Snapshot(DiskSnapshot {
                 source_path: paths.user_keymap().to_path_buf(),
                 contents,
             }),
@@ -396,7 +398,7 @@ impl DiskWorker {
         }
 
         self.slot.publish(DiskWorkerMessage {
-            snapshot: None,
+            delivery: DiskDelivery::DiagnosticsOnly,
             diagnostics,
             discarded_diagnostics: 0,
         });
@@ -438,9 +440,11 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
+    use super::DiskDelivery;
     use super::DiskWorkerChannels;
     use super::DiskWorkerMessage;
     use super::USER_KEYMAP_STUB;
+    use super::UserKeymapContents;
     use super::WatchMode;
     use super::WorkerTimings;
     use super::start_disk_worker_with;
@@ -449,6 +453,7 @@ mod tests {
     use crate::disk::paths::ENVIRONMENT_LOCK;
     use crate::disk::paths::TestDirectory;
     use crate::disk::paths::XdgConfigHome;
+    use crate::disk::worker::channels::contents_match;
 
     const DEFAULT_KEYMAP: &[u8] = b"{\"bindings\": []}";
     const DEBOUNCE_INTERVAL: Duration = Duration::from_millis(100);
@@ -589,10 +594,9 @@ mod tests {
         path: &Path,
         expected_contents: Option<&[u8]>,
     ) -> Result<(), String> {
-        let snapshot = message
-            .snapshot
-            .as_ref()
-            .ok_or_else(|| String::from("disk worker message has no snapshot"))?;
+        let DiskDelivery::Snapshot(snapshot) = &message.delivery else {
+            return Err(String::from("disk worker message has no snapshot"));
+        };
 
         if snapshot.source_path != path {
             return Err(format!(
@@ -602,7 +606,7 @@ mod tests {
             ));
         }
 
-        if snapshot.contents.as_deref() != expected_contents {
+        if !contents_match(&snapshot.contents, expected_contents) {
             return Err(String::from(
                 "disk worker snapshot contents differed from the file",
             ));
@@ -637,10 +641,11 @@ mod tests {
 
         while Instant::now() < deadline {
             if let Some(message) = worker.take_message()
-                && message
-                    .snapshot
-                    .as_ref()
-                    .is_some_and(|snapshot| snapshot.contents.is_none())
+                && matches!(
+                    &message.delivery,
+                    DiskDelivery::Snapshot(snapshot)
+                        if matches!(snapshot.contents, UserKeymapContents::Absent)
+                )
             {
                 return Err(String::from(
                     "disk worker published confirmed deletion before the retry grace expired",

@@ -18,6 +18,7 @@ use super::key_edge::PhysicalKeyRole;
 use super::key_edge::PrimaryTriggerOwnership;
 use crate::ActiveCondition;
 use crate::ActiveConditionState;
+use crate::DeferredMatch;
 use crate::MatchOutcome;
 use crate::Modifiers;
 use crate::SequenceMatcher;
@@ -385,10 +386,10 @@ fn route_match_outcome(
             ));
         },
         MatchOutcome::Reprocess {
-            deferred,
+            deferred_match,
             keystroke,
         } => {
-            if let Some(command_handle) = deferred {
+            if let DeferredMatch::Fire(command_handle) = deferred_match {
                 routed_commands.push(routed_command(
                     compiled_keymap,
                     command_handle,
@@ -617,6 +618,7 @@ mod tests {
     use crate::keymap::CommandHandle;
     use crate::keymap::CompiledKeymap;
     use crate::keymap::Generation;
+    use crate::keymap::KeyboardOwner;
     use crate::keymap::KeystrokeRouting;
     use crate::keymap::MergedKeymap;
     use crate::keymap::merged::UserKeymap;
@@ -851,7 +853,7 @@ mod tests {
         );
 
         app.world_mut()
-            .insert_resource(KeystrokeRouting::text_entry([]));
+            .insert_resource(KeystrokeRouting::text_entry(query_field(), []));
         route_input(app.world_mut());
         release(&mut app, KeyCode::KeyG);
         app.world_mut()
@@ -877,6 +879,203 @@ mod tests {
     }
 
     #[test]
+    fn a_held_command_goes_false_at_the_handover_to_a_text_field() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::KeyG);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry(query_field(), []));
+        route_input(app.world_mut());
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    /// The other direction of the same handover: an exempt hold-to-act command
+    /// is the one held input a text field can leave active, so handing the
+    /// keyboard back is where it goes false.
+    #[test]
+    fn a_held_command_goes_false_at_the_handover_back_to_the_keymap() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry(
+                query_field(),
+                [CommandId::declared::<RuntimeHeld>()],
+            ));
+        route_input(app.world_mut());
+
+        press(&mut app, KeyCode::KeyG);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::EveryBinding);
+        route_input(app.world_mut());
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_pending_sequence_is_cancelled_at_the_handover_to_a_text_field() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g h", RuntimeTwoStroke::ID)]),
+            FIRST_GENERATION,
+        )?;
+
+        press(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyG);
+        assert_eq!(app.world().resource::<DispatchCounts>().two_stroke, 0);
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry(
+                query_field(),
+                [CommandId::declared::<RuntimeTwoStroke>()],
+            ));
+        route_input(app.world_mut());
+        press(&mut app, KeyCode::KeyH);
+        release(&mut app, KeyCode::KeyH);
+
+        assert_eq!(app.world().resource::<DispatchCounts>().two_stroke, 0);
+        Ok(())
+    }
+
+    /// The other direction of the same handover: an exempt multi-stroke command
+    /// can leave a sequence pending while the field owns the keyboard, and
+    /// handing the keyboard back cancels it.
+    #[test]
+    fn a_pending_sequence_is_cancelled_at_the_handover_back_to_the_keymap() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("g h", RuntimeTwoStroke::ID)]),
+            FIRST_GENERATION,
+        )?;
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry(
+                query_field(),
+                [CommandId::declared::<RuntimeTwoStroke>()],
+            ));
+        route_input(app.world_mut());
+
+        press(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::KeyG);
+        assert!(app.world().resource::<CompiledKeymap>().global.is_pending());
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::EveryBinding);
+        route_input(app.world_mut());
+        press(&mut app, KeyCode::KeyH);
+        release(&mut app, KeyCode::KeyH);
+
+        assert!(!app.world().resource::<CompiledKeymap>().global.is_pending());
+        assert_eq!(app.world().resource::<DispatchCounts>().two_stroke, 0);
+        Ok(())
+    }
+
+    /// The other direction of the same handover. The inhibition is asserted on
+    /// [`KeymapRuntime`] directly because a text field suppresses the
+    /// bare-modifier held bindings outright, so nothing downstream of it can
+    /// tell an inhibited key from a suppressed one.
+    #[test]
+    fn a_key_down_at_the_handover_to_a_text_field_is_inhibited() -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("ctrl", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+
+        press(&mut app, KeyCode::ControlLeft);
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry(query_field(), []));
+        route_input(app.world_mut());
+
+        assert!(
+            app.world()
+                .resource::<KeymapRuntime>()
+                .is_inhibited(KeyCode::ControlLeft)
+        );
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(false))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_key_down_at_the_handover_back_to_the_keymap_stays_inhibited_until_released()
+    -> Result<(), String> {
+        let mut app = runtime_app();
+        insert_compiled(
+            &mut app,
+            bindings(&[("ctrl", RuntimeHeld::ID)]),
+            FIRST_GENERATION,
+        )?;
+        let custom_input = held_custom_input(&app)?;
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::text_entry(query_field(), []));
+        route_input(app.world_mut());
+
+        press(&mut app, KeyCode::ControlLeft);
+        assert_ne!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        app.world_mut()
+            .insert_resource(KeystrokeRouting::EveryBinding);
+        route_input(app.world_mut());
+        route_input(app.world_mut());
+        assert_ne!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+
+        release(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::ControlLeft);
+
+        assert_eq!(
+            app.world().resource::<CustomInputs>().get(&custom_input),
+            Some(&ActionValue::Bool(true))
+        );
+        Ok(())
+    }
+
+    #[test]
     fn text_entry_routes_the_commands_it_exempts_and_no_others() -> Result<(), String> {
         let mut app = runtime_app();
         insert_compiled(
@@ -885,9 +1084,10 @@ mod tests {
             FIRST_GENERATION,
         )?;
         app.world_mut()
-            .insert_resource(KeystrokeRouting::text_entry([CommandId::declared::<
-                RuntimeOneShot,
-            >()]));
+            .insert_resource(KeystrokeRouting::text_entry(
+                query_field(),
+                [CommandId::declared::<RuntimeOneShot>()],
+            ));
         route_input(app.world_mut());
 
         press(&mut app, KeyCode::KeyG);
@@ -1761,6 +1961,11 @@ mod tests {
         ActiveCondition::from_reflect(&reflected_active_condition)
             .ok_or_else(|| String::from("ActiveCondition did not rebuild through reflection"))
     }
+
+    /// The text field the handover tests hand the keyboard to.
+    struct QueryField;
+
+    fn query_field() -> KeyboardOwner { KeyboardOwner::of::<QueryField>() }
 
     fn runtime_app() -> App {
         let mut app = App::new();

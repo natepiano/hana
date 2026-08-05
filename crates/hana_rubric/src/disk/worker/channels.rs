@@ -20,19 +20,28 @@ use crate::DiagnosticKind;
 use crate::DiagnosticOrigin;
 use crate::DiagnosticSeverity;
 use crate::disk::constants::MAX_RETAINED_DIAGNOSTICS;
+use crate::keymap::UserKeymapContents;
 
 /// A complete user-keymap state produced by the disk worker.
 pub(crate) struct DiskSnapshot {
     /// User-keymap path associated with this state.
     pub(crate) source_path: PathBuf,
-    /// Current user-keymap bytes, or `None` after confirmed deletion.
-    pub(crate) contents:    Option<Arc<[u8]>>,
+    /// Current user-keymap bytes, or their confirmed absence.
+    pub(crate) contents:    UserKeymapContents,
+}
+
+/// What one disk-worker delivery carries beyond its diagnostics.
+pub(crate) enum DiskDelivery {
+    /// The worker read a complete user-keymap state, which supersedes the live keymap.
+    Snapshot(DiskSnapshot),
+    /// The worker observed no new user-keymap state, so the delivery reports diagnostics alone.
+    DiagnosticsOnly,
 }
 
 /// One coalesced disk-worker delivery to the application thread.
 pub(crate) struct DiskWorkerMessage {
-    /// Latest complete user-keymap state, when the worker successfully read it.
-    pub(crate) snapshot:              Option<DiskSnapshot>,
+    /// Latest complete user-keymap state, when the worker read one.
+    pub(crate) delivery:              DiskDelivery,
     /// Disk and companion diagnostics accumulated before this delivery.
     pub(crate) diagnostics:           Vec<Diagnostic>,
     pub(super) discarded_diagnostics: usize,
@@ -161,8 +170,8 @@ impl CoalescingSlot {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(previous) = message_slot.take() {
-            if message.snapshot.is_none() {
-                message.snapshot = previous.snapshot;
+            if matches!(message.delivery, DiskDelivery::DiagnosticsOnly) {
+                message.delivery = previous.delivery;
             }
 
             message.diagnostics.splice(0..0, previous.diagnostics);
@@ -244,6 +253,20 @@ fn discarded_diagnostics_diagnostic(discarded_diagnostics: usize) -> Diagnostic 
     )
 }
 
+/// Whether a delivered snapshot carries the bytes a test expects, where `None` expects the
+/// confirmed absence of the user keymap file.
+#[cfg(test)]
+pub(super) fn contents_match(
+    contents: &UserKeymapContents,
+    expected_contents: Option<&[u8]>,
+) -> bool {
+    match (contents, expected_contents) {
+        (UserKeymapContents::Read(contents), Some(expected)) => contents.as_ref() == expected,
+        (UserKeymapContents::Absent, None) => true,
+        (UserKeymapContents::Read(_) | UserKeymapContents::Absent, _) => false,
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -253,8 +276,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::CoalescingSlot;
+    use super::DiskDelivery;
     use super::DiskSnapshot;
     use super::DiskWorkerMessage;
+    use super::UserKeymapContents;
     use super::disk_diagnostic;
     use crate::DiagnosticOrigin;
     use crate::disk::KeymapPathAvailability;
@@ -306,7 +331,7 @@ mod tests {
         );
         for index in 0..diagnostic_count {
             slot.publish(DiskWorkerMessage {
-                snapshot:              None,
+                delivery:              DiskDelivery::DiagnosticsOnly,
                 diagnostics:           vec![disk_diagnostic(
                     DiagnosticOrigin::KeymapFile(paths.user_keymap().to_path_buf()),
                     &format!("distinct disk diagnostic {index}"),
@@ -391,9 +416,11 @@ mod tests {
 
         for index in 0..SNAPSHOT_BURST_COUNT {
             slot.publish(DiskWorkerMessage {
-                snapshot:              Some(DiskSnapshot {
+                delivery:              DiskDelivery::Snapshot(DiskSnapshot {
                     source_path: paths.user_keymap().to_path_buf(),
-                    contents:    Some(Arc::from(index.to_string().into_bytes())),
+                    contents:    UserKeymapContents::Read(Arc::from(
+                        index.to_string().into_bytes(),
+                    )),
                 }),
                 diagnostics:           Vec::new(),
                 discarded_diagnostics: 0,
@@ -403,12 +430,16 @@ mod tests {
         let message = slot
             .take()
             .ok_or_else(|| String::from("coalescing slot has no newest snapshot"))?;
-        let snapshot = message
-            .snapshot
-            .ok_or_else(|| String::from("coalescing slot has no snapshot"))?;
+        let DiskDelivery::Snapshot(snapshot) = message.delivery else {
+            return Err(String::from("coalescing slot has no snapshot"));
+        };
         let newest_snapshot = SNAPSHOT_BURST_COUNT.saturating_sub(1).to_string();
         if snapshot.source_path != paths.user_keymap()
-            || snapshot.contents.as_deref() != Some(newest_snapshot.as_bytes())
+            || !matches!(
+                &snapshot.contents,
+                UserKeymapContents::Read(contents)
+                    if contents.as_ref() == newest_snapshot.as_bytes()
+            )
         {
             return Err(String::from(
                 "coalescing slot did not retain the newest snapshot",

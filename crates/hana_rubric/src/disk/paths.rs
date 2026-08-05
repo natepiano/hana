@@ -23,6 +23,20 @@ use super::constants::SCHEMA_FILE_NAME;
 use super::constants::USER_KEYMAP_FILE_NAME;
 use super::constants::XDG_CONFIG_HOME;
 
+/// Where the keymap plugin keeps the user's own keymap document.
+///
+/// [`KeymapConfigurationDirectory::Unconfigured`] is the state
+/// [`KeymapPathFailure::AppNameNotConfigured`] reports: an application that named no directory
+/// runs from its embedded defaults and writes nothing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum KeymapConfigurationDirectory {
+    /// Read and write the user's keymap under this application name in the platform
+    /// configuration directory.
+    ForApplication(String),
+    /// Run from the embedded defaults alone, touching no configuration directory.
+    Unconfigured,
+}
+
 /// Whether an application's keymap configuration directory resolved.
 ///
 /// The plugin inserts this resource on both outcomes, so a reader never has to tell "this
@@ -33,6 +47,17 @@ pub enum KeymapPathAvailability {
     Resolved(KeymapPaths),
     /// No configuration directory resolved, so no keymap file can be read or written.
     Unavailable(KeymapPathFailure),
+}
+
+impl From<&KeymapConfigurationDirectory> for KeymapPathAvailability {
+    fn from(keymap_configuration_directory: &KeymapConfigurationDirectory) -> Self {
+        match keymap_configuration_directory {
+            KeymapConfigurationDirectory::ForApplication(app_name) => Self::for_app_name(app_name),
+            KeymapConfigurationDirectory::Unconfigured => {
+                Self::Unavailable(KeymapPathFailure::AppNameNotConfigured)
+            },
+        }
+    }
 }
 
 impl KeymapPathAvailability {
@@ -81,7 +106,8 @@ impl KeymapPathAvailability {
 /// Why an application's keymap configuration directory did not resolve.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
 pub enum KeymapPathFailure {
-    /// The keymap plugin was built without an application name to name a directory after.
+    /// The keymap plugin was built [`KeymapConfigurationDirectory::Unconfigured`], with no
+    /// application name to name a directory after.
     AppNameNotConfigured,
     /// The configured application name is not one ordinary path component.
     AppNameNotOnePathComponent,

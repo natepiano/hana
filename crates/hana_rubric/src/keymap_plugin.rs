@@ -28,14 +28,13 @@ use crate::condition::StateContextPlugin;
 use crate::derived_context::DerivedContextPlugin;
 use crate::disk;
 use crate::disk::DiskWorkerChannels;
-use crate::disk::DiskWorkerMessage;
+use crate::disk::KeymapConfigurationDirectory;
 use crate::disk::KeymapPathAvailability;
 use crate::disk::KeymapPathFailure;
 use crate::keymap;
 use crate::keymap::KeymapRuntime;
 use crate::keymap::PendingReload;
 use crate::keymap::ReloadRequest;
-use crate::keymap::UserKeymapContents;
 
 /// Registers the application's keymap context enum.
 ///
@@ -43,9 +42,9 @@ use crate::keymap::UserKeymapContents;
 /// choose a context source with [`Self::for_context`], [`Self::for_state_context`], or
 /// [`Self::for_derived_context`].
 pub struct KeymapPlugin {
-    app_name:             Option<String>,
-    defaults:             DefaultKeymapSource,
-    protected_keystrokes: Vec<Keystroke>,
+    configuration_directory: KeymapConfigurationDirectory,
+    defaults:                DefaultKeymapSource,
+    protected_keystrokes:    Vec<Keystroke>,
 }
 
 impl KeymapPlugin {
@@ -53,16 +52,17 @@ impl KeymapPlugin {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            app_name:             None,
-            defaults:             DefaultKeymapSource::NotSupplied,
-            protected_keystrokes: Vec::new(),
+            configuration_directory: KeymapConfigurationDirectory::Unconfigured,
+            defaults:                DefaultKeymapSource::NotSupplied,
+            protected_keystrokes:    Vec::new(),
         }
     }
 
     /// Sets the application name used to resolve the keymap configuration directory.
     #[must_use]
     pub fn with_app_name(mut self, app_name: &str) -> Self {
-        self.app_name = Some(app_name.to_owned());
+        self.configuration_directory =
+            KeymapConfigurationDirectory::ForApplication(app_name.to_owned());
         self
     }
 
@@ -174,14 +174,16 @@ impl KeymapPlugin {
             .cloned()
         else {
             app.insert_resource(KeymapAssemblyFinished);
-            insert_keymap_path_availability(app, None);
+            insert_keymap_path_availability(app, &KeymapConfigurationDirectory::Unconfigured);
             record_unconfigured_keymap_plugin(app);
             return;
         };
 
         app.insert_resource(KeymapAssemblyFinished);
-        let keymap_path_availability =
-            insert_keymap_path_availability(app, keymap_plugin_configuration.app_name.as_deref());
+        let keymap_path_availability = insert_keymap_path_availability(
+            app,
+            &keymap_plugin_configuration.configuration_directory,
+        );
         let DefaultKeymapSource::Embedded(defaults) = keymap_plugin_configuration.defaults else {
             record_missing_default_keymap(app);
             return;
@@ -260,8 +262,10 @@ impl KeymapPlugin {
     }
 
     const fn has_configuration(&self) -> bool {
-        self.app_name.is_some()
-            || matches!(self.defaults, DefaultKeymapSource::Embedded(_))
+        matches!(
+            self.configuration_directory,
+            KeymapConfigurationDirectory::ForApplication(_)
+        ) || matches!(self.defaults, DefaultKeymapSource::Embedded(_))
             || !self.protected_keystrokes.is_empty()
     }
 }
@@ -287,17 +291,17 @@ pub enum DefaultKeymapSource {
 
 #[derive(Clone, Eq, PartialEq, Resource)]
 struct KeymapPluginConfiguration {
-    app_name:             Option<String>,
-    defaults:             DefaultKeymapSource,
-    protected_keystrokes: Vec<Keystroke>,
+    configuration_directory: KeymapConfigurationDirectory,
+    defaults:                DefaultKeymapSource,
+    protected_keystrokes:    Vec<Keystroke>,
 }
 
 impl From<&KeymapPlugin> for KeymapPluginConfiguration {
     fn from(keymap_plugin: &KeymapPlugin) -> Self {
         Self {
-            app_name:             keymap_plugin.app_name.clone(),
-            defaults:             keymap_plugin.defaults,
-            protected_keystrokes: keymap_plugin.protected_keystrokes.clone(),
+            configuration_directory: keymap_plugin.configuration_directory.clone(),
+            defaults:                keymap_plugin.defaults,
+            protected_keystrokes:    keymap_plugin.protected_keystrokes.clone(),
         }
     }
 }
@@ -323,28 +327,13 @@ fn collect_disk_reload(
     let Some(keymap_disk_worker) = keymap_disk_worker else {
         return;
     };
-    let Some(DiskWorkerMessage {
-        snapshot,
-        diagnostics,
-        ..
-    }) = disk::take_worker_message(&keymap_disk_worker.disk_worker_channels)
+    let Some(disk_worker_message) =
+        disk::take_worker_message(&keymap_disk_worker.disk_worker_channels)
     else {
         return;
     };
 
-    let request = match snapshot {
-        None => ReloadRequest::DiskDiagnostics(diagnostics),
-        Some(snapshot) => ReloadRequest::UserSnapshot {
-            source_path: snapshot.source_path,
-            contents: snapshot
-                .contents
-                .map_or(UserKeymapContents::Absent, |contents| {
-                    UserKeymapContents::Read(contents.as_ref().to_vec())
-                }),
-            diagnostics,
-        },
-    };
-    pending_reload.replace(request);
+    pending_reload.replace(ReloadRequest::from(disk_worker_message));
 }
 
 fn record_startup_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
@@ -367,12 +356,9 @@ fn record_startup_diagnostics(app: &mut App, diagnostics: &[Diagnostic]) {
 /// directory from an assembly that has not run.
 fn insert_keymap_path_availability(
     app: &mut App,
-    app_name: Option<&str>,
+    keymap_configuration_directory: &KeymapConfigurationDirectory,
 ) -> KeymapPathAvailability {
-    let keymap_path_availability = app_name.map_or(
-        KeymapPathAvailability::Unavailable(KeymapPathFailure::AppNameNotConfigured),
-        KeymapPathAvailability::for_app_name,
-    );
+    let keymap_path_availability = KeymapPathAvailability::from(keymap_configuration_directory);
     app.world_mut()
         .insert_resource(keymap_path_availability.clone());
 
@@ -489,6 +475,7 @@ pub enum KeymapSystems {
 )]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -528,6 +515,7 @@ mod tests {
     use crate::ReflectKeymapCommand;
     use crate::condition::ConditionRegistry;
     use crate::disk::ENVIRONMENT_LOCK;
+    use crate::disk::KeymapConfigurationDirectory;
     use crate::disk::KeymapPathAvailability;
     use crate::disk::KeymapPathFailure;
     use crate::disk::TestDirectory;
@@ -789,9 +777,8 @@ mod tests {
         assert_eq!(
             app.world()
                 .resource::<KeymapPluginConfiguration>()
-                .app_name
-                .as_deref(),
-            Some(TEST_APP_NAME)
+                .configuration_directory,
+            KeymapConfigurationDirectory::ForApplication(TEST_APP_NAME.to_owned())
         );
     }
 
@@ -846,9 +833,9 @@ mod tests {
             .resource_mut::<PendingReload>()
             .replace(ReloadRequest::UserSnapshot {
                 source_path: PathBuf::from(USER_KEYMAP_FIXTURE),
-                contents:    UserKeymapContents::Read(
-                    br#"{ "bindings": [{ "bindings": { "g": "plugin::dispatch" } }] }"#.to_vec(),
-                ),
+                contents:    UserKeymapContents::Read(Arc::from(
+                    *br#"{ "bindings": [{ "bindings": { "g": "plugin::dispatch" } }] }"#,
+                )),
                 diagnostics: Vec::new(),
             });
         keymap::commit_reload(app.world_mut());
@@ -946,17 +933,16 @@ mod tests {
             .resource_mut::<PendingReload>()
             .replace(ReloadRequest::UserSnapshot {
                 source_path: PathBuf::from(USER_KEYMAP_FIXTURE),
-                contents:    UserKeymapContents::Read(
-                    br#"{
+                contents:    UserKeymapContents::Read(Arc::from(
+                    *br#"{
                         "bindings": [{
                             "bindings": {
                                 "ctrl-g": "plugin::dispatch",
                                 "ctrl-h": "plugin::dispatch"
                             }
                         }]
-                    }"#
-                    .to_vec(),
-                ),
+                    }"#,
+                )),
                 diagnostics: Vec::new(),
             });
         keymap::commit_reload(app.world_mut());
@@ -1378,6 +1364,44 @@ mod tests {
         assert!(reported_line.contains("missing::command"));
         assert!(!app.world().contains_resource::<CompiledKeymap>());
         assert!(!app.world().contains_resource::<KeymapDiskWorker>());
+
+        drop(app);
+        drop(xdg_config_home);
+        drop(temporary_directory);
+        drop(environment_lock);
+    }
+
+    /// The defaults document reaches the merge as
+    /// [`DiagnosticOrigin::EmbeddedDefaults`], not as a
+    /// [`DiagnosticOrigin::KeymapFile`] standing in for it, which is what
+    /// Fairy Dust's failure rows map back to `KeymapPaths::default_keymap()`.
+    #[test]
+    fn a_defaults_document_diagnostic_is_labelled_embedded_defaults() {
+        let environment_lock = ENVIRONMENT_LOCK
+            .lock()
+            .expect("environment lock is available");
+        let temporary_directory =
+            TestDirectory::new("embedded-defaults-origin").expect("temporary directory exists");
+        let xdg_config_home = XdgConfigHome::set(temporary_directory.path());
+        let mut app = App::new();
+        register_empty_registry(&mut app);
+        app.add_plugins(
+            KeymapPlugin::new()
+                .with_app_name(TEST_APP_NAME)
+                .with_defaults(r#"{ "bindings": [{ "bindings": { "g": "missing::command" } }] }"#),
+        );
+        assert_isolated_paths(&temporary_directory);
+        app.finish();
+
+        let diagnostic = app
+            .world()
+            .resource::<KeymapLoadFailures>()
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.command_id == "missing::command")
+            .expect("unresolvable shipped default is diagnosed");
+
+        assert_eq!(diagnostic.origin, DiagnosticOrigin::EmbeddedDefaults);
 
         drop(app);
         drop(xdg_config_home);

@@ -13,6 +13,7 @@ mod worker;
 pub(crate) use constants::MAX_RETAINED_DIAGNOSTICS;
 #[cfg(test)]
 pub(crate) use paths::ENVIRONMENT_LOCK;
+pub use paths::KeymapConfigurationDirectory;
 pub use paths::KeymapPathAvailability;
 pub use paths::KeymapPathFailure;
 pub use paths::KeymapPaths;
@@ -20,11 +21,7 @@ pub use paths::KeymapPaths;
 pub(crate) use paths::TestDirectory;
 #[cfg(test)]
 pub(crate) use paths::XdgConfigHome;
-#[expect(
-    unused_imports,
-    reason = "plugin assembly receives disk snapshots after the reload transaction is added"
-)]
-pub(crate) use worker::DiskSnapshot;
+pub(crate) use worker::DiskDelivery;
 pub(crate) use worker::DiskWorkerChannels;
 pub(crate) use worker::DiskWorkerMessage;
 pub(crate) use worker::start_disk_worker;

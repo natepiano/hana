@@ -134,6 +134,7 @@ fn companion_files_cover_every_registered_command_and_condition() -> Result<(), 
         .map_err(|error| format!("published schema is not JSON: {error}"))?;
 
     assert_default_keymap(&default_source)?;
+    assert_shipped_defaults_validate(&schema)?;
     assert_schema_command_descriptions(&schema)?;
     assert_schema_condition_descriptions(&schema)?;
 
@@ -164,6 +165,39 @@ fn assert_default_keymap(default_source: &str) -> Result<(), String> {
             "published default header does not describe `{context_name}`"
         );
     }
+
+    Ok(())
+}
+
+/// Runs the shipped `examples/keymap_demo.jsonc` through the draft-seven
+/// validator against the schema this crate just published to disk, so the
+/// document a reader is handed as the starting point cannot be one their editor
+/// then marks as invalid.
+fn assert_shipped_defaults_validate(schema: &Value) -> Result<(), String> {
+    let schema = serde_json::to_value(schema)
+        .map_err(|error| format!("published schema is not representable as JSON: {error}"))?;
+    let validator = jsonschema::draft7::new(&schema)
+        .map_err(|error| format!("published schema is not a draft-seven schema: {error}"))?;
+    let shipped_defaults = serde_json_lenient::from_str::<serde_json::Value>(include_str!(
+        "../examples/keymap_demo.jsonc"
+    ))
+    .map_err(|error| format!("shipped keymap demo is not JSONC: {error}"))?;
+
+    let rejections = validator
+        .iter_errors(&shipped_defaults)
+        .map(|validation_error| {
+            format!(
+                "{} at `{}`",
+                validation_error,
+                validation_error.instance_path()
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        rejections.is_empty(),
+        "the published schema rejects the shipped `examples/keymap_demo.jsonc`: {rejections:?}"
+    );
 
     Ok(())
 }

@@ -15,6 +15,7 @@ use bitflags::bitflags;
 pub use sequence::EmptyKeystrokeSequenceError;
 pub use sequence::KeystrokeSequence;
 pub use sequence::KeystrokeSequenceParseError;
+pub use sequence_matcher::DeferredMatch;
 pub use sequence_matcher::MatchOutcome;
 pub use sequence_matcher::SequenceMatcher;
 pub use sequence_matcher::TimeoutOutcome;

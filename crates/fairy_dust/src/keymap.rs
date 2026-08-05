@@ -16,6 +16,7 @@
 
 use bevy::prelude::App;
 use bevy::prelude::Resource;
+use hana_rubric::KeymapConfigurationDirectory;
 use hana_rubric::KeymapPlugin;
 use hana_rubric::Keystroke;
 
@@ -35,16 +36,6 @@ pub struct CommandPaletteKeymap {
     defaults:                &'static str,
     configuration_directory: KeymapConfigurationDirectory,
     protected_keystrokes:    Vec<Keystroke>,
-}
-
-/// Where the keymap keeps the user's own document.
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum KeymapConfigurationDirectory {
-    /// Read and write the user's keymap under this application name.
-    ForApplication(&'static str),
-    /// Run from the embedded defaults alone, touching no configuration
-    /// directory.
-    Unconfigured,
 }
 
 impl CommandPaletteKeymap {
@@ -72,8 +63,9 @@ impl CommandPaletteKeymap {
     /// as a failure row, because a keymap the user cannot edit is a real
     /// limitation rather than a normal state.
     #[must_use]
-    pub const fn for_application(mut self, app_name: &'static str) -> Self {
-        self.configuration_directory = KeymapConfigurationDirectory::ForApplication(app_name);
+    pub fn for_application(mut self, app_name: &str) -> Self {
+        self.configuration_directory =
+            KeymapConfigurationDirectory::ForApplication(app_name.to_owned());
         self
     }
 
@@ -92,7 +84,7 @@ impl CommandPaletteKeymap {
 
     fn keymap_plugin(&self) -> KeymapPlugin {
         let keymap_plugin = KeymapPlugin::new().with_defaults(self.defaults);
-        let mut keymap_plugin = match self.configuration_directory {
+        let mut keymap_plugin = match &self.configuration_directory {
             KeymapConfigurationDirectory::ForApplication(app_name) => {
                 keymap_plugin.with_app_name(app_name)
             },
@@ -132,12 +124,26 @@ pub(crate) fn configure(app: &mut App, keymap: CommandPaletteKeymap) {
     app.insert_resource(ChosenKeymap(keymap));
 }
 
-/// The keymap recorded so far, or `None` while no builder call has named one.
+/// Whether a builder call has named the keymap Fairy Dust's `KeymapPlugin` is
+/// built from.
 #[cfg(test)]
-pub(crate) fn chosen(app: &App) -> Option<CommandPaletteKeymap> {
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum KeymapChoice {
+    /// A builder call recorded this document.
+    Named(CommandPaletteKeymap),
+    /// No builder call named one, so `run` installs Fairy Dust's shipped
+    /// defaults.
+    Unnamed,
+}
+
+/// The keymap recorded so far.
+#[cfg(test)]
+pub(crate) fn chosen(app: &App) -> KeymapChoice {
     app.world()
         .get_resource::<ChosenKeymap>()
-        .map(|chosen_keymap| chosen_keymap.0.clone())
+        .map_or(KeymapChoice::Unnamed, |chosen_keymap| {
+            KeymapChoice::Named(chosen_keymap.0.clone())
+        })
 }
 
 /// Adds the one `KeymapPlugin` this app gets, built from the recorded keymap or

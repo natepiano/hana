@@ -779,6 +779,7 @@ mod tests {
     use crate::builder::StudioLightingBuilder;
     use crate::builder::TitleBarBuilder;
     use crate::keymap;
+    use crate::keymap::KeymapChoice;
 
     const CUSTOM_ASSET_ROOT: &str = "custom-assets";
     const OTHER_KEYMAP: &str = r#"{ "bindings": [] }"#;
@@ -899,7 +900,7 @@ mod tests {
 
         assert_eq!(
             keymap::chosen(&builder.app),
-            Some(CommandPaletteKeymap::default())
+            KeymapChoice::Named(CommandPaletteKeymap::default())
         );
     }
 

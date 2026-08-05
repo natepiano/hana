@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::str;
 use std::str::Utf8Error;
+use std::sync::Arc;
 
 use bevy::ecs::world::World;
 use bevy::prelude::Resource;
@@ -20,6 +21,8 @@ use crate::DiagnosticSeverity;
 use crate::KeymapLoadFailures;
 use crate::Keystroke;
 use crate::condition::ConditionRegistry;
+use crate::disk::DiskDelivery;
+use crate::disk::DiskWorkerMessage;
 use crate::disk::MAX_RETAINED_DIAGNOSTICS;
 
 /// Sources shared by every keymap replacement transaction.
@@ -63,8 +66,12 @@ impl PendingReload {
 }
 
 /// Whether the disk worker read bytes for the user keymap file.
+///
+/// The bytes are shared rather than owned so that a snapshot the coalescing slot
+/// supersedes before `take` costs a refcount bump instead of a copy of the whole
+/// file.
 pub(crate) enum UserKeymapContents {
-    Read(Vec<u8>),
+    Read(Arc<[u8]>),
     Absent,
 }
 
@@ -77,6 +84,19 @@ pub(crate) enum ReloadRequest {
         contents:    UserKeymapContents,
         diagnostics: Vec<Diagnostic>,
     },
+}
+
+impl From<DiskWorkerMessage> for ReloadRequest {
+    fn from(disk_worker_message: DiskWorkerMessage) -> Self {
+        match disk_worker_message.delivery {
+            DiskDelivery::DiagnosticsOnly => Self::DiskDiagnostics(disk_worker_message.diagnostics),
+            DiskDelivery::Snapshot(disk_snapshot) => Self::UserSnapshot {
+                source_path: disk_snapshot.source_path,
+                contents:    disk_snapshot.contents,
+                diagnostics: disk_worker_message.diagnostics,
+            },
+        }
+    }
 }
 
 /// Commits the startup defaults synchronously before the disk worker starts.
@@ -202,12 +222,20 @@ fn utf8_diagnostic(source_path: PathBuf, error: Utf8Error) -> Diagnostic {
     }
 }
 
+/// Replaces the diagnostics a merge re-derives with the ones this merge
+/// produced, leaving the transport diagnostics `record_transport_diagnostics`
+/// recorded in place.
+///
+/// Every [`is_reload_diagnostic`] kind is re-derived from the same two documents
+/// on each commit, at every severity, so all of them are purged before the new
+/// batch lands — retaining any of them would report one authoring mistake once
+/// per commit.
 fn record_load_diagnostics(world: &mut World, diagnostics: Vec<Diagnostic>) {
     log_diagnostics(&diagnostics);
     let mut keymap_load_failures = world.resource_mut::<KeymapLoadFailures>();
-    keymap_load_failures.diagnostics.retain(|diagnostic| {
-        diagnostic.severity != DiagnosticSeverity::Failure || !is_reload_diagnostic(diagnostic)
-    });
+    keymap_load_failures
+        .diagnostics
+        .retain(|diagnostic| !is_reload_diagnostic(diagnostic));
     keymap_load_failures.diagnostics.extend(diagnostics);
     retain_recent_diagnostics(&mut keymap_load_failures.diagnostics);
 }
@@ -219,6 +247,16 @@ fn record_transport_diagnostics(world: &mut World, diagnostics: Vec<Diagnostic>)
     retain_recent_diagnostics(&mut keymap_load_failures.diagnostics);
 }
 
+/// Whether `MergedKeymap::from_sources` re-derives this kind from the defaults
+/// and user documents on every commit.
+///
+/// The kinds left out are recorded once and never re-derived: `Disk` and
+/// `Companion` come from the disk worker's transport,
+/// `MissingDefaultKeymap` and `UnconfiguredKeymapPlugin` from
+/// `KeymapPlugin::build`, and `DuplicateCommandId`, `MissingCommandTitle`,
+/// `MissingCommandDescription`, `InvalidCommandId` and
+/// `CommandEventNotReflected` from `CommandRegistry::build`. Purging those would
+/// drop a report no later merge produces again.
 const fn is_reload_diagnostic(diagnostic: &Diagnostic) -> bool {
     matches!(
         diagnostic.kind,
@@ -226,6 +264,10 @@ const fn is_reload_diagnostic(diagnostic: &Diagnostic) -> bool {
             | DiagnosticKind::Keystroke
             | DiagnosticKind::Command
             | DiagnosticKind::Context
+            | DiagnosticKind::ReservedKeystroke
+            | DiagnosticKind::BareModifierRequiresHeldCommand
+            | DiagnosticKind::UnremappableCommand
+            | DiagnosticKind::HeldCommandInSequence
     )
 }
 
@@ -257,6 +299,7 @@ enum CommitOutcome {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -283,6 +326,7 @@ mod tests {
     use crate::Capability;
     use crate::CommandId;
     use crate::CommandRegistry;
+    use crate::DiagnosticKind;
     use crate::DiagnosticOrigin;
     use crate::HeldCommandLookupOutcome;
     use crate::HoldPhase;
@@ -385,7 +429,7 @@ mod tests {
             .resource_mut::<PendingReload>()
             .replace(ReloadRequest::UserSnapshot {
                 source_path: PathBuf::from(USER_KEYMAP_FIXTURE),
-                contents:    UserKeymapContents::Read(contents.to_vec()),
+                contents:    UserKeymapContents::Read(Arc::from(contents)),
                 diagnostics: Vec::new(),
             });
     }
@@ -440,6 +484,75 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear_just_released(key);
+    }
+
+    /// One authoring mistake in the defaults document is one row, however many
+    /// times the keymap commits: the defaults are re-merged on every commit, so
+    /// a diagnostic retained across commits would be reported once per commit.
+    #[test]
+    fn an_advisory_from_the_defaults_document_survives_two_commits_as_one_row() -> Result<(), String>
+    {
+        const DEFAULTS_WITH_UNRECOGNIZED_MEMBER: &str =
+            r#"{ "bindings": [{ "contxt": "always", "bindings": { "g": "reload::first" } }] }"#;
+
+        let mut app = transaction_app(DEFAULTS_WITH_UNRECOGNIZED_MEMBER)?;
+        assert!(commit_defaults(app.world_mut()));
+        let after_first_commit = app
+            .world()
+            .resource::<KeymapLoadFailures>()
+            .diagnostics
+            .len();
+
+        queue_user_snapshot(&mut app, br#"{ "bindings": [] }"#);
+        commit_reload(app.world_mut());
+
+        assert_eq!(after_first_commit, 1);
+        assert_eq!(
+            app.world()
+                .resource::<KeymapLoadFailures>()
+                .diagnostics
+                .len(),
+            after_first_commit
+        );
+        Ok(())
+    }
+
+    /// The held-prefix conflict is re-derived by `reject_held_prefixes` on every
+    /// merge, the same way a syntax advisory is, so it is one row across commits
+    /// too — the purge covers every kind the merge produces, not just the
+    /// parse-time ones.
+    #[test]
+    fn a_held_prefix_conflict_in_the_defaults_document_survives_two_commits_as_one_row()
+    -> Result<(), String> {
+        const DEFAULTS_WITH_HELD_PREFIX_CONFLICT: &str = r#"{
+            "bindings": [{ "bindings": {
+                "a": "reload::held",
+                "a b": "reload::first"
+            } }]
+        }"#;
+
+        let mut app = transaction_app(DEFAULTS_WITH_HELD_PREFIX_CONFLICT)?;
+        assert!(!commit_defaults(app.world_mut()));
+        let after_first_commit = app
+            .world()
+            .resource::<KeymapLoadFailures>()
+            .diagnostics
+            .len();
+
+        queue_user_snapshot(&mut app, br#"{ "bindings": [] }"#);
+        commit_reload(app.world_mut());
+
+        assert_eq!(after_first_commit, 1);
+        assert_eq!(
+            app.world()
+                .resource::<KeymapLoadFailures>()
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| { diagnostic.kind == DiagnosticKind::HeldCommandInSequence })
+                .count(),
+            1
+        );
+        Ok(())
     }
 
     #[test]

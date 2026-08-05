@@ -27,23 +27,34 @@ use crate::condition::ConditionRegistry;
 
 pub(super) const RECOGNIZED_BLOCK_MEMBERS: [&str; 2] = ["bindings", "context"];
 
+/// The scope a keymap block's bindings take effect in.
+///
+/// [`BindingScope::Global`] is declared first so the derived [`Ord`] sorts every global binding
+/// ahead of every conditioned one, which is what makes [`MergedKeymap::bindings`] report a
+/// command's global keystroke when the same command is also bound inside a condition.
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum BindingScope {
+    Global,
+    Condition(ConditionHandle),
+}
+
 /// The exact valid edits that remain after defaults and user keymaps are layered.
 #[derive(Default)]
 pub(crate) struct ResolvedEdits {
-    entries: HashMap<Option<ConditionHandle>, HashMap<KeystrokeSequence, LayeredEdit>>,
+    entries: HashMap<BindingScope, HashMap<KeystrokeSequence, LayeredEdit>>,
 }
 
 impl ResolvedEdits {
     fn apply(
         &mut self,
-        condition_handle: Option<ConditionHandle>,
+        binding_scope: BindingScope,
         keystroke_sequence: KeystrokeSequence,
         source_layer: BindingSourceLayer,
         resolved_edit: ResolvedEdit,
     ) {
         match self
             .entries
-            .entry(condition_handle)
+            .entry(binding_scope)
             .or_default()
             .entry(keystroke_sequence)
         {
@@ -60,11 +71,11 @@ impl ResolvedEdits {
     /// collides with several longer sequences is recorded once per collision.
     fn reject(
         &mut self,
-        condition_handle: Option<ConditionHandle>,
+        binding_scope: BindingScope,
         keystroke_sequence: &KeystrokeSequence,
         source_layer: BindingSourceLayer,
     ) {
-        let Some(edits) = self.entries.get_mut(&condition_handle) else {
+        let Some(edits) = self.entries.get_mut(&binding_scope) else {
             return;
         };
         let Entry::Occupied(mut occupied) = edits.entry(keystroke_sequence.clone()) else {
@@ -79,13 +90,15 @@ impl ResolvedEdits {
         }
     }
 
-    fn global(&self) -> Option<&HashMap<KeystrokeSequence, LayeredEdit>> { self.entries.get(&None) }
+    fn global(&self) -> Option<&HashMap<KeystrokeSequence, LayeredEdit>> {
+        self.entries.get(&BindingScope::Global)
+    }
 
     fn for_condition(
         &self,
         condition_handle: ConditionHandle,
     ) -> Option<&HashMap<KeystrokeSequence, LayeredEdit>> {
-        self.entries.get(&Some(condition_handle))
+        self.entries.get(&BindingScope::Condition(condition_handle))
     }
 }
 
@@ -194,14 +207,14 @@ struct ResolvedBinding {
 struct ScopedBinding {
     keystroke_sequence: KeystrokeSequence,
     binding:            ResolvedBinding,
-    origin:             Option<ConditionHandle>,
+    binding_scope:      BindingScope,
 }
 
 /// One held-prefix collision participant to drop, named down to the layer that authored it so
 /// the layer beneath survives.
 struct RejectedBinding {
     keystroke_sequence: KeystrokeSequence,
-    origin:             Option<ConditionHandle>,
+    binding_scope:      BindingScope,
     source_layer:       BindingSourceLayer,
 }
 
@@ -209,7 +222,7 @@ impl From<&ScopedBinding> for RejectedBinding {
     fn from(scoped_binding: &ScopedBinding) -> Self {
         Self {
             keystroke_sequence: scoped_binding.keystroke_sequence.clone(),
-            origin:             scoped_binding.origin,
+            binding_scope:      scoped_binding.binding_scope,
             source_layer:       scoped_binding.binding.source_layer,
         }
     }
@@ -222,9 +235,30 @@ enum BindingSourceLayer {
     User,
 }
 
+/// Whether the two participants in a held-prefix collision were authored by the same keymap layer.
+///
+/// A valid hold takes precedence over a longer sequence from the *other* layer, whichever layer the
+/// hold is in, so only the sequence is rejected. A collision inside one layer rejects every
+/// participant, because neither edit can be read as overriding the other.
+enum HeldPrefixConflict {
+    AcrossLayers,
+    WithinOneLayer,
+}
+
+impl HeldPrefixConflict {
+    const fn between(held: BindingSourceLayer, other: BindingSourceLayer) -> Self {
+        match (held, other) {
+            (BindingSourceLayer::ShippedDefault, BindingSourceLayer::User)
+            | (BindingSourceLayer::User, BindingSourceLayer::ShippedDefault) => Self::AcrossLayers,
+            (BindingSourceLayer::ShippedDefault, BindingSourceLayer::ShippedDefault)
+            | (BindingSourceLayer::User, BindingSourceLayer::User) => Self::WithinOneLayer,
+        }
+    }
+}
+
+/// Which scope a keymap block's `context` member resolved to, or that it named no usable one.
 enum ContextResolution {
-    Global,
-    Condition(ConditionHandle),
+    Resolved(BindingScope),
     Invalid,
 }
 
@@ -238,6 +272,15 @@ pub(crate) enum UserKeymap {
         origin:   DiagnosticOrigin,
         contents: String,
     },
+    DefaultsOnly,
+}
+
+/// The parsed user keymap layered over the parsed defaults, or its absence.
+///
+/// The document form of [`UserKeymap`], named the same way because it carries the same two states
+/// one parse later.
+pub(crate) enum UserKeymapDocument<'document> {
+    Layered(&'document KeymapDocument),
     DefaultsOnly,
 }
 
@@ -282,9 +325,13 @@ impl MergedKeymap {
             },
             UserKeymap::DefaultsOnly => None,
         };
+        let user_keymap_document = user.as_ref().map_or(
+            UserKeymapDocument::DefaultsOnly,
+            UserKeymapDocument::Layered,
+        );
         let (merged_keymap, merge_diagnostics) = Self::from_documents(
             &defaults,
-            user.as_ref(),
+            user_keymap_document,
             command_registry,
             condition_registry,
             protected_keystrokes,
@@ -298,7 +345,7 @@ impl MergedKeymap {
     #[must_use]
     pub(crate) fn from_documents(
         defaults: &KeymapDocument,
-        user: Option<&KeymapDocument>,
+        user_keymap_document: UserKeymapDocument<'_>,
         command_registry: &CommandRegistry,
         condition_registry: &ConditionRegistry,
         protected_keystrokes: &[Keystroke],
@@ -315,7 +362,7 @@ impl MergedKeymap {
             condition_registry,
             protected_keystrokes,
         );
-        if let Some(user) = user {
+        if let UserKeymapDocument::Layered(user) = user_keymap_document {
             Self::apply_document(
                 user,
                 BindingSourceLayer::User,
@@ -381,15 +428,14 @@ impl MergedKeymap {
                 }
             }));
 
-            let condition_handle = match Self::resolve_context(
+            let binding_scope = match Self::resolve_context(
                 block.context.as_ref(),
                 block.context_source.as_ref(),
                 document,
                 condition_registry,
                 diagnostics,
             ) {
-                ContextResolution::Global => None,
-                ContextResolution::Condition(condition_handle) => Some(condition_handle),
+                ContextResolution::Resolved(binding_scope) => binding_scope,
                 ContextResolution::Invalid => continue,
             };
 
@@ -408,7 +454,7 @@ impl MergedKeymap {
                 };
 
                 resolved_edits.apply(
-                    condition_handle,
+                    binding_scope,
                     binding.keystroke_sequence.clone(),
                     source_layer,
                     resolved_edit,
@@ -425,7 +471,7 @@ impl MergedKeymap {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> ContextResolution {
         match (context, context_source) {
-            (None, None) => ContextResolution::Global,
+            (None, None) => ContextResolution::Resolved(BindingScope::Global),
             (None, Some(context_source)) => {
                 diagnostics.push(Diagnostic {
                     origin: document.diagnostic_origin.clone(),
@@ -450,7 +496,7 @@ impl MergedKeymap {
                 if let ConditionLookup::Registered { handle, .. } =
                     condition_registry.lookup(condition_name.as_str())
                 {
-                    ContextResolution::Condition(handle)
+                    ContextResolution::Resolved(BindingScope::Condition(handle))
                 } else {
                     let names = condition_registry
                         .iter()
@@ -635,7 +681,7 @@ impl MergedKeymap {
         condition_registry: &ConditionRegistry,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        let global_bindings = Self::scoped_bindings(resolved_edits.global(), None);
+        let global_bindings = Self::scoped_bindings(resolved_edits.global(), BindingScope::Global);
         let mut rejected_bindings = Vec::new();
         Self::collect_held_prefix_rejections(
             &global_bindings,
@@ -664,7 +710,7 @@ impl MergedKeymap {
                         bindings.push(ScopedBinding {
                             keystroke_sequence: keystroke_sequence.clone(),
                             binding:            binding.clone(),
-                            origin:             Some(condition_handle),
+                            binding_scope:      BindingScope::Condition(condition_handle),
                         });
                     }
                 }
@@ -681,7 +727,7 @@ impl MergedKeymap {
 
         for rejected_binding in rejected_bindings {
             resolved_edits.reject(
-                rejected_binding.origin,
+                rejected_binding.binding_scope,
                 &rejected_binding.keystroke_sequence,
                 rejected_binding.source_layer,
             );
@@ -690,7 +736,7 @@ impl MergedKeymap {
 
     fn scoped_bindings(
         edits: Option<&HashMap<KeystrokeSequence, LayeredEdit>>,
-        origin: Option<ConditionHandle>,
+        binding_scope: BindingScope,
     ) -> Vec<ScopedBinding> {
         edits.map_or_else(Vec::new, |edits| {
             edits
@@ -700,7 +746,7 @@ impl MergedKeymap {
                         ResolvedEdit::Bind(binding) => Some(ScopedBinding {
                             keystroke_sequence: keystroke_sequence.clone(),
                             binding: binding.clone(),
-                            origin,
+                            binding_scope,
                         }),
                         ResolvedEdit::Tombstone => None,
                     },
@@ -727,8 +773,8 @@ impl MergedKeymap {
 
             for other_binding in bindings {
                 if (is_condition_scope
-                    && held_binding.origin.is_none()
-                    && other_binding.origin.is_none())
+                    && held_binding.binding_scope == BindingScope::Global
+                    && other_binding.binding_scope == BindingScope::Global)
                     || other_binding.keystroke_sequence.len() <= 1
                     || other_binding.keystroke_sequence.first()
                         != held_binding.keystroke_sequence.first()
@@ -736,24 +782,27 @@ impl MergedKeymap {
                     continue;
                 }
 
-                if held_binding.binding.source_layer == BindingSourceLayer::ShippedDefault
-                    && other_binding.binding.source_layer == BindingSourceLayer::User
-                {
-                    diagnostics.push(other_binding.binding.source.diagnostic(
+                match HeldPrefixConflict::between(
+                    held_binding.binding.source_layer,
+                    other_binding.binding.source_layer,
+                ) {
+                    HeldPrefixConflict::AcrossLayers => {
+                        diagnostics.push(other_binding.binding.source.diagnostic(
                         &other_binding.binding.diagnostic_origin,
                         other_binding.binding.command_id.to_string(),
                         DiagnosticKind::HeldCommandInSequence,
                         DiagnosticSeverity::Failure,
                         format!(
-                            "Multi-stroke binding `{}` in `{}` shares its prefix with shipped hold-to-act binding `{}` in `{}`.",
+                            "Multi-stroke binding `{}` in `{}` shares its prefix with hold-to-act binding `{}` in `{}`.",
                             other_binding.binding.command_id,
                             other_binding.binding.diagnostic_origin,
                             held_binding.binding.command_id,
                             held_binding.binding.diagnostic_origin,
                         ),
                     ));
-                } else {
-                    diagnostics.push(held_binding.binding.source.diagnostic(
+                    },
+                    HeldPrefixConflict::WithinOneLayer => {
+                        diagnostics.push(held_binding.binding.source.diagnostic(
                         &held_binding.binding.diagnostic_origin,
                         held_binding.binding.command_id.to_string(),
                         DiagnosticKind::HeldCommandInSequence,
@@ -766,7 +815,8 @@ impl MergedKeymap {
                             other_binding.binding.diagnostic_origin,
                         ),
                     ));
-                    rejected_bindings.push(RejectedBinding::from(held_binding));
+                        rejected_bindings.push(RejectedBinding::from(held_binding));
+                    },
                 }
                 rejected_bindings.push(RejectedBinding::from(other_binding));
             }
@@ -872,14 +922,20 @@ impl MergedKeymap {
     /// reports the one registered first rather than whichever the condition map
     /// happened to hash ahead of the other.
     pub(super) fn bindings(&self) -> impl Iterator<Item = (&KeystrokeSequence, &CommandId)> {
-        let mut condition_handles = self.conditions.keys().copied().collect::<Vec<_>>();
-        condition_handles.sort_unstable();
+        let mut binding_scopes = std::iter::once(BindingScope::Global)
+            .chain(self.conditions.keys().copied().map(BindingScope::Condition))
+            .collect::<Vec<_>>();
+        binding_scopes.sort_unstable();
 
-        self.global
-            .iter()
-            .chain(condition_handles.into_iter().flat_map(|condition_handle| {
-                self.conditions.get(&condition_handle).into_iter().flatten()
-            }))
+        binding_scopes
+            .into_iter()
+            .flat_map(|binding_scope| match binding_scope {
+                BindingScope::Global => self.global.as_slice(),
+                BindingScope::Condition(condition_handle) => self
+                    .conditions
+                    .get(&condition_handle)
+                    .map_or(&[][..], Vec::as_slice),
+            })
             .map(|(keystroke_sequence, command_id)| (keystroke_sequence, command_id))
     }
 
@@ -932,6 +988,7 @@ fn bounded_levenshtein(left: &str, right: &str, maximum_distance: usize) -> Opti
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::str::FromStr;
     use std::time::Duration;
     use std::time::Instant;
 
@@ -948,12 +1005,15 @@ mod tests {
     use super::MergedKeymap;
     use super::UserKeymap;
     use crate::Capability;
+    use crate::CommandId;
+    use crate::CommandKeystroke;
     use crate::CommandRegistry;
     use crate::Diagnostic;
     use crate::DiagnosticKind;
     use crate::DiagnosticOrigin;
     use crate::DiagnosticSeverity;
     use crate::HoldPhase;
+    use crate::KeymapBindings;
     use crate::KeymapCommand;
     use crate::Keystroke;
     use crate::KeystrokeSequence;
@@ -1219,6 +1279,31 @@ mod tests {
         assert_eq!(
             first_reported_home_keystroke(&condition_registry)?,
             first_reported_home_keystroke(&condition_registry)?
+        );
+        Ok(())
+    }
+
+    /// [`BindingScope::Global`] sorting ahead of [`BindingScope::Condition`] is what makes
+    /// [`KeymapBindings`] report the global keystroke; reversing the two variants' declaration
+    /// order reverses the derived [`Ord`] and fails this assertion.
+    #[test]
+    fn a_command_bound_globally_and_under_a_condition_reports_its_global_keystroke()
+    -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [
+                { "bindings": { "space": "camera::home" }},
+                { "context": "dimension_lock", "bindings": { "enter": "camera::home" }}
+            ]
+        }"#;
+        let (merged_keymap, _, _, _) = merged_keymap(defaults, None, &[])?;
+        let keymap_bindings = KeymapBindings::from_bindings(merged_keymap.bindings());
+        let command_id = CommandId::from_str(CameraHome::ID)
+            .map_err(|error| format!("invalid test command id: {error}"))?;
+        let global_keystroke = keystroke_sequence("space")?;
+
+        assert_eq!(
+            keymap_bindings.keystroke(&command_id),
+            CommandKeystroke::BoundTo(&global_keystroke)
         );
         Ok(())
     }
@@ -1639,6 +1724,65 @@ mod tests {
         assert!(diagnostic.message.contains("camera::reset"));
         assert!(diagnostic.message.contains(DEFAULTS_PATH));
         assert!(diagnostic.message.contains(USER_PATH));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "f")?,
+            Some("camera::hold")
+        );
+        assert_eq!(command_for_sequence(merged_keymap.global(), "f g")?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn user_hold_displaces_a_shipped_sequence_sharing_its_prefix() -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": { "f g": "camera::reset" }
+            }]
+        }"#;
+        let user = r#"{
+            "bindings": [{
+                "bindings": { "f": "camera::hold" }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind == DiagnosticKind::HeldCommandInSequence)
+            .ok_or_else(|| String::from("shipped held-prefix diagnostic is missing"))?;
+
+        assert_eq!(diagnostic.origin, defaults_keymap_file());
+        assert_eq!(diagnostic.command_id, "camera::reset");
+        assert!(diagnostic.message.contains("camera::hold"));
+        assert!(diagnostic.message.contains("camera::reset"));
+        assert!(diagnostic.message.contains(DEFAULTS_PATH));
+        assert!(diagnostic.message.contains(USER_PATH));
+        assert_eq!(
+            command_for_sequence(merged_keymap.global(), "f")?,
+            Some("camera::hold")
+        );
+        assert_eq!(command_for_sequence(merged_keymap.global(), "f g")?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn user_tombstone_removes_a_shipped_sequence_before_a_user_hold_conflicts_with_it()
+    -> Result<(), String> {
+        let defaults = r#"{
+            "bindings": [{
+                "bindings": { "f g": "camera::reset" }
+            }]
+        }"#;
+        let user = r#"{
+            "bindings": [{
+                "bindings": {
+                    "f g": null,
+                    "f": "camera::hold"
+                }
+            }]
+        }"#;
+        let (merged_keymap, diagnostics, _, _) = merged_keymap(defaults, Some(user), &[])?;
+
+        assert!(diagnostics.is_empty());
         assert_eq!(
             command_for_sequence(merged_keymap.global(), "f")?,
             Some("camera::hold")

@@ -186,44 +186,123 @@ fn assert_no_reserved_collisions(
     command_registry: Option<Res<CommandRegistry>>,
     keymap_bindings: Option<Res<KeymapBindings>>,
 ) {
-    for registration in &registrations.0 {
-        let collision = reserved
-            .0
+    let live_keymap =
+        LiveKeymap::from_resources(command_registry.as_deref(), keymap_bindings.as_deref());
+
+    let collisions: Vec<String> = registrations
+        .0
+        .iter()
+        .filter_map(|registration| {
+            let shortcut_key_claim = reserved
+                .0
+                .iter()
+                .find(|reserved| reserved.key == registration.key)
+                .map_or_else(
+                    || live_keymap.bare_key_claim(registration.key),
+                    |reserved| ShortcutKeyClaim::ClaimedBy(reserved.label.to_owned()),
+                );
+
+            match shortcut_key_claim {
+                ShortcutKeyClaim::Unclaimed => None,
+                ShortcutKeyClaim::ClaimedBy(claimant) => Some(format!(
+                    "{:?} collides with the reserved `{claimant}` binding",
+                    registration.key
+                )),
+            }
+        })
+        .collect();
+
+    // `panic!` is denied workspace-wide; `assert!` is the allowed hard-fail.
+    assert!(
+        collisions.is_empty(),
+        "fairy_dust example shortcut key {}; use the matching Fairy Dust capability or pick a \
+         different key",
+        collisions.join("; "),
+    );
+}
+
+/// Whether the live keymap's bindings can be searched for a bare-key collision.
+///
+/// The two unsearchable states are different situations and only one of them is
+/// normal: an application that installs no [`KeymapPlugin`](hana_rubric::KeymapPlugin)
+/// binds nothing at all, while an application whose defaults failed to commit
+/// has bindings it cannot report, because `hana_rubric` inserts
+/// [`KeymapBindings`] only when a generation commits.
+enum LiveKeymap<'world> {
+    /// A keymap generation committed, so its bindings answer the collision
+    /// question.
+    Committed {
+        command_registry: &'world CommandRegistry,
+        keymap_bindings:  &'world KeymapBindings,
+    },
+    /// No keymap plugin is installed, so no document binds the key.
+    NoKeymapPlugin,
+    /// The keymap plugin is installed but committed no generation, so no
+    /// bindings exist to collide with yet.
+    DefaultsNotCommitted,
+}
+
+impl<'world> LiveKeymap<'world> {
+    const fn from_resources(
+        command_registry: Option<&'world CommandRegistry>,
+        keymap_bindings: Option<&'world KeymapBindings>,
+    ) -> Self {
+        match (command_registry, keymap_bindings) {
+            (Some(command_registry), Some(keymap_bindings)) => Self::Committed {
+                command_registry,
+                keymap_bindings,
+            },
+            (Some(_), None) => Self::DefaultsNotCommitted,
+            (None, _) => Self::NoKeymapPlugin,
+        }
+    }
+
+    /// The command the live keymap runs from `key` alone.
+    ///
+    /// Only a one-keystroke, modifier-free binding can double-fire with an
+    /// example shortcut: [`run_shortcuts`] stands down while any modifier is
+    /// held.
+    ///
+    /// Both unsearchable states answer `Unclaimed`, because neither can name a
+    /// binding, but only [`LiveKeymap::NoKeymapPlugin`] is a run in which
+    /// nothing was skipped. [`LiveKeymap::DefaultsNotCommitted`] means bindings
+    /// exist and this check could not read them, so it says which key went
+    /// unchecked.
+    fn bare_key_claim(&self, key: KeyCode) -> ShortcutKeyClaim {
+        let (command_registry, keymap_bindings) = match self {
+            Self::Committed {
+                command_registry,
+                keymap_bindings,
+            } => (command_registry, keymap_bindings),
+            Self::NoKeymapPlugin => return ShortcutKeyClaim::Unclaimed,
+            Self::DefaultsNotCommitted => {
+                warn!(
+                    "fairy_dust: example shortcut key {key:?} was not checked against the keymap \
+                     because no keymap generation committed; a document binding it bare would \
+                     double-fire"
+                );
+                return ShortcutKeyClaim::Unclaimed;
+            },
+        };
+
+        command_registry
             .iter()
-            .find(|reserved| reserved.key == registration.key)
-            .map(|reserved| reserved.label.to_owned())
-            .or_else(|| {
-                bound_command_on_bare_key(
-                    command_registry.as_deref(),
-                    keymap_bindings.as_deref(),
-                    registration.key,
-                )
-            });
-        // `panic!` is denied workspace-wide; `assert!` is the allowed hard-fail.
-        assert!(
-            collision.is_none(),
-            "fairy_dust example shortcut key {:?} collides with the reserved `{}` binding; \
-             use the matching Fairy Dust capability or pick a different key",
-            registration.key,
-            collision.unwrap_or_default(),
-        );
+            .find(|command_info| {
+                keystroke_on_bare_key(keymap_bindings.keystroke(command_info.id), key)
+            })
+            .map_or(ShortcutKeyClaim::Unclaimed, |command_info| {
+                ShortcutKeyClaim::ClaimedBy(command_info.id.to_string())
+            })
     }
 }
 
-/// The command the live keymap runs from `key` alone, if any.
-///
-/// Only a one-keystroke, modifier-free binding can double-fire with an example
-/// shortcut: [`run_shortcuts`] stands down while any modifier is held.
-fn bound_command_on_bare_key(
-    command_registry: Option<&CommandRegistry>,
-    keymap_bindings: Option<&KeymapBindings>,
-    key: KeyCode,
-) -> Option<String> {
-    let (command_registry, keymap_bindings) = (command_registry?, keymap_bindings?);
-    command_registry
-        .iter()
-        .find(|command_info| keystroke_on_bare_key(keymap_bindings.keystroke(command_info.id), key))
-        .map(|command_info| command_info.id.to_string())
+/// Whether something other than the example shortcut already fires from a key
+/// pressed alone.
+enum ShortcutKeyClaim {
+    /// A reserved capability key or a live keymap binding fires from it.
+    ClaimedBy(String),
+    /// Nothing else fires from it.
+    Unclaimed,
 }
 
 fn keystroke_on_bare_key(command_keystroke: CommandKeystroke<'_>, key: KeyCode) -> bool {

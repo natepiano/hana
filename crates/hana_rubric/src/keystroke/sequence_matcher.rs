@@ -27,16 +27,26 @@ pub enum MatchOutcome<T> {
     Pending,
     /// A pending prefix did not match this keystroke.
     ///
-    /// Fire `deferred` when it is present, then pass `keystroke` to
+    /// Resolve `deferred_match`, then pass `keystroke` to
     /// [`SequenceMatcher::match_keystroke`] once more from the root.
     Reprocess {
-        /// The completed prefix that must fire before reprocessing.
-        deferred:  Option<T>,
+        /// The completed prefix, if any, that must fire before reprocessing.
+        deferred_match: DeferredMatch<T>,
         /// The completed keystroke to match again from the root.
-        keystroke: Keystroke,
+        keystroke:      Keystroke,
     },
     /// No prefix matched and no pending sequence existed.
     NoMatch,
+}
+
+/// Whether a completed sequence is waiting to fire ahead of a reprocessed keystroke.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeferredMatch<T> {
+    /// The completed sequence's value, which fires before the keystroke is matched again.
+    Fire(T),
+    /// The prefix that was pending never completed a sequence, so nothing fires ahead of the
+    /// keystroke.
+    NothingToFire,
 }
 
 /// What a pending prefix was doing when [`SequenceMatcher::resolve_timeout`] examined it.
@@ -75,7 +85,7 @@ impl PrefixNodeId {
 
 struct PendingSequence<T> {
     prefix:         PrefixNodeId,
-    deferred:       Option<T>,
+    deferred_match: DeferredMatch<T>,
     last_stroke_at: Instant,
 }
 
@@ -114,13 +124,15 @@ impl<T: Copy> SequenceMatcher<T> {
             return TimeoutOutcome::AwaitingKeystroke;
         }
 
-        self.pending
+        match self
+            .pending
             .take()
-            .and_then(|pending_sequence| pending_sequence.deferred)
-            .map_or(
-                TimeoutOutcome::DiscardedPartialPrefix,
-                TimeoutOutcome::Resolved,
-            )
+            .map_or(DeferredMatch::NothingToFire, |pending_sequence| {
+                pending_sequence.deferred_match
+            }) {
+            DeferredMatch::Fire(value) => TimeoutOutcome::Resolved(value),
+            DeferredMatch::NothingToFire => TimeoutOutcome::DiscardedPartialPrefix,
+        }
     }
 
     fn insert(&mut self, sequence: KeystrokeSequence, value: T) {
@@ -166,9 +178,9 @@ impl<T: Copy> SequenceMatcher<T> {
         now: Instant,
         timeout: Duration,
     ) -> MatchOutcome<T> {
-        if let TimeoutOutcome::Resolved(deferred) = self.resolve_timeout(now, timeout) {
+        if let TimeoutOutcome::Resolved(value) = self.resolve_timeout(now, timeout) {
             return MatchOutcome::Reprocess {
-                deferred: Some(deferred),
+                deferred_match: DeferredMatch::Fire(value),
                 keystroke,
             };
         }
@@ -181,11 +193,13 @@ impl<T: Copy> SequenceMatcher<T> {
             });
         let carried = pending_sequence
             .as_ref()
-            .and_then(|pending_sequence| pending_sequence.deferred);
+            .map_or(DeferredMatch::NothingToFire, |pending_sequence| {
+                pending_sequence.deferred_match
+            });
         let Some(matched_prefix) = self.matched_node(prefix, keystroke) else {
             return pending_sequence.map_or(MatchOutcome::NoMatch, |pending_sequence| {
                 MatchOutcome::Reprocess {
-                    deferred: pending_sequence.deferred,
+                    deferred_match: pending_sequence.deferred_match,
                     keystroke,
                 }
             });
@@ -197,7 +211,7 @@ impl<T: Copy> SequenceMatcher<T> {
     fn outcome_for_prefix(
         &mut self,
         prefix: PrefixNodeId,
-        carried: Option<T>,
+        carried: DeferredMatch<T>,
         now: Instant,
     ) -> MatchOutcome<T> {
         let prefix_node = &self.prefix_index[prefix.0];
@@ -208,7 +222,7 @@ impl<T: Copy> SequenceMatcher<T> {
             (Some(value), false) => {
                 self.pending = Some(PendingSequence {
                     prefix,
-                    deferred: Some(value),
+                    deferred_match: DeferredMatch::Fire(value),
                     last_stroke_at: now,
                 });
                 MatchOutcome::Deferred(value)
@@ -216,7 +230,7 @@ impl<T: Copy> SequenceMatcher<T> {
             (None, false) => {
                 self.pending = Some(PendingSequence {
                     prefix,
-                    deferred: carried,
+                    deferred_match: carried,
                     last_stroke_at: now,
                 });
                 MatchOutcome::Pending
@@ -233,6 +247,7 @@ mod tests {
 
     use bevy::input::keyboard::KeyCode;
 
+    use super::DeferredMatch;
     use super::Keystroke;
     use super::KeystrokeSequence;
     use super::MatchOutcome;
@@ -303,8 +318,8 @@ mod tests {
         assert_eq!(
             sequence_matcher.match_keystroke(h, now, TIMEOUT),
             MatchOutcome::Reprocess {
-                deferred:  Some(1),
-                keystroke: h,
+                deferred_match: DeferredMatch::Fire(1),
+                keystroke:      h,
             }
         );
         assert_eq!(
@@ -434,8 +449,8 @@ mod tests {
         assert_eq!(
             sequence_matcher.match_keystroke(h, now, TIMEOUT),
             MatchOutcome::Reprocess {
-                deferred:  Some(1),
-                keystroke: h,
+                deferred_match: DeferredMatch::Fire(1),
+                keystroke:      h,
             }
         );
 

@@ -38,6 +38,7 @@ use bevy::prelude::Window;
 use bevy::prelude::With;
 use bevy::prelude::World;
 use bevy::prelude::error;
+use bevy::prelude::warn;
 use bevy::window::PrimaryWindow;
 use bevy_enhanced_input::prelude::EnhancedInputPlugin;
 use bevy_enhanced_input::prelude::InputAction;
@@ -64,6 +65,9 @@ use hana_diegetic::Sizing;
 use hana_rubric::CommandId;
 use hana_rubric::CommandInvocationOutcome;
 use hana_rubric::CommandRegistry;
+use hana_rubric::KeyboardClaim;
+use hana_rubric::KeyboardOwner;
+use hana_rubric::KeyboardRelease;
 use hana_rubric::KeymapBindings;
 use hana_rubric::KeymapLoadFailures;
 use hana_rubric::KeymapPathAvailability;
@@ -152,14 +156,30 @@ fn hand_keyboard_to_query_field(
     };
 
     match (query_field_owns_the_keyboard, keystroke_routing.as_ref()) {
-        (true, KeystrokeRouting::EveryBinding) => {
-            *keystroke_routing =
-                KeystrokeRouting::text_entry([CommandId::declared::<OpenCommandPaletteEvent>()]);
+        (true, KeystrokeRouting::EveryBinding { .. }) => {
+            let keyboard_claim = keystroke_routing.take_for_text_entry(
+                KeyboardOwner::of::<CommandPalettePlugin>(),
+                [CommandId::declared::<OpenCommandPaletteEvent>()],
+            );
+            if keyboard_claim == KeyboardClaim::HeldByAnother {
+                warn!(
+                    "fairy_dust: the command palette query field opened while another party holds \
+                     the keyboard; its keystrokes still route as commands"
+                );
+            }
         },
         (false, KeystrokeRouting::TextEntry { .. }) => {
-            *keystroke_routing = KeystrokeRouting::EveryBinding;
+            let keyboard_release =
+                keystroke_routing.release(KeyboardOwner::of::<CommandPalettePlugin>());
+            if keyboard_release == KeyboardRelease::HeldByAnother {
+                warn!(
+                    "fairy_dust: the command palette query field closed while another party holds \
+                     the keyboard; that party's text entry is still in force"
+                );
+            }
         },
-        (true, KeystrokeRouting::TextEntry { .. }) | (false, KeystrokeRouting::EveryBinding) => {},
+        (true, KeystrokeRouting::TextEntry { .. })
+        | (false, KeystrokeRouting::EveryBinding { .. }) => {},
     }
 }
 
