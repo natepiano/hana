@@ -49,8 +49,8 @@ dirs = "6.0"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 hana_conduit = { path = "crates/hana_conduit" }
 image = { version = "0.25", default-features = false }
-notify = "8"
 nonmax = "0.5"
+notify = "8"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
 rand = "0.10.2"
 serde = { version = "1.0", features = ["derive"] }
